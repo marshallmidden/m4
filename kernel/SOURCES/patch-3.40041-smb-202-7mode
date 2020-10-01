@@ -1,0 +1,926 @@
+diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' '--exclude=objtool' '--exclude=cpupower' a/Makefile b/Makefile
+--- a/Makefile	2019-09-15 16:19:32.000000000 -0500
++++ b/Makefile	2020-03-27 16:21:19.857805408 -0500
+@@ -1,12 +1,12 @@
+ # SPDX-License-Identifier: GPL-2.0
+ VERSION = 5
+ PATCHLEVEL = 3
+ SUBLEVEL = 0
+-EXTRAVERSION =
++EXTRAVERSION = -2020.01.31.lightspeed.x86_64
+ NAME = Bobtail Squid
+ 
+ # *DOCUMENTATION*
+ # To see a list of typical targets execute "make help"
+ # More info can be located in ./README
+ # Comments in this file are targeted only to the developer, do not
+ # expect to learn how to build the kernel reading this file.
+diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' '--exclude=objtool' '--exclude=cpupower' a/fs/cifs/cifsglob.h b/fs/cifs/cifsglob.h
+--- a/fs/cifs/cifsglob.h	2020-04-01 14:51:48.324495574 -0500
++++ b/fs/cifs/cifsglob.h	2020-04-01 08:57:21.329911296 -0500
+@@ -80,15 +80,15 @@
+ 
+ /* echo interval in seconds */
+ #define SMB_ECHO_INTERVAL_MIN 1
+ #define SMB_ECHO_INTERVAL_MAX 600
+ #define SMB_ECHO_INTERVAL_DEFAULT 60
+ 
+ /* maximum number of PDUs in one compound */
+-#define MAX_COMPOUND 5
++#define MAX_COMPOUND 8
+ 
+ /*
+  * Default number of credits to keep available for SMB3.
+  * This value is chosen somewhat arbitrarily. The Windows client
+  * defaults to 128 credits, the Windows server allows clients up to
+  * 512 credits (or 8K for later versions), and the NetApp server
+  * does not limit clients at all.  Choose a high enough default value
+diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' '--exclude=objtool' '--exclude=cpupower' a/fs/cifs/smb2inode.c b/fs/cifs/smb2inode.c
+--- a/fs/cifs/smb2inode.c	2019-09-15 16:19:32.000000000 -0500
++++ b/fs/cifs/smb2inode.c	2020-04-01 09:13:12.678057332 -0500
+@@ -420,14 +420,487 @@ smb2_query_path_info(const unsigned int
+ 
+ 	move_smb2_info_to_cifs(data, smb2_data);
+ out:
+ 	kfree(smb2_data);
+ 	return rc;
+ }
+ 
++
++/* ****************************** */
++/* ****************************** */
++
++
++static int
++smb202_compound_op(const unsigned int xid, struct cifs_tcon *tcon,
++		 struct cifs_sb_info *cifs_sb, const char *full_path,
++		 __u32 desired_access, __u32 create_disposition,
++		 __u32 create_options, void *ptr, int command)
++{
++	int rc;
++	__le16 *utf16_path = NULL;
++	__u8 oplock = SMB2_OPLOCK_LEVEL_NONE;
++	struct cifs_open_parms oparms;
++	struct cifs_fid fid;
++	struct cifs_ses *ses = tcon->ses;
++
++#define NREQ 8
++	int nc = 0;
++
++	int num_rqst = 0;
++	struct smb_rqst rqst[NREQ];
++	int resp_buftype[NREQ];
++	struct kvec rsp_iov[NREQ];
++	struct kvec qi_iov[NREQ];
++
++	struct kvec open_iov[SMB2_CREATE_IOV_SIZE];
++	struct kvec si_iov[SMB2_SET_INFO_IOV_SIZE];
++	struct kvec close_iov[1];
++	int flags = 0;
++	__u8 delete_pending[8] = {1, 0, 0, 0, 0, 0, 0, 0};
++	unsigned int size[2];
++	void *data[2];
++	struct smb2_file_rename_info rename_info;
++	struct smb2_file_link_info link_info;
++	int len;
++
++	if (smb3_encryption_required(tcon))
++		flags |= CIFS_TRANSFORM_REQ;
++
++	memset(rqst, 0, sizeof(rqst));
++	memset(rsp_iov, 0, sizeof(rsp_iov));
++	for(nc = 0; nc < NREQ; nc++)
++		resp_buftype[nc] = CIFS_NO_BUFFER;
++
++	/* Open */
++	utf16_path = cifs_convert_path_to_utf16(full_path, cifs_sb);
++	if (!utf16_path)
++		return -ENOMEM;
++
++/* 202 */
++
++	oparms.tcon = tcon;
++	oparms.desired_access = desired_access;
++	oparms.disposition = create_disposition;
++	oparms.create_options = create_options;
++	if (backup_cred(cifs_sb))
++		oparms.create_options |= CREATE_OPEN_BACKUP_INTENT;
++	oparms.fid = &fid;
++	oparms.reconnect = false;
++
++	memset(&open_iov, 0, sizeof(open_iov));
++	rqst[num_rqst].rq_iov = open_iov;
++	rqst[num_rqst].rq_nvec = SMB2_CREATE_IOV_SIZE;
++	rc = SMB2_open_init(tcon, &rqst[num_rqst], &oplock, &oparms,
++			    utf16_path);
++	kfree(utf16_path);
++	if (rc)
++		goto finished;
++
++	smb2_set_next_command(tcon, &rqst[num_rqst++]);
++
++/* 202 */
++	/* Operation */
++	switch (command) {
++	case SMB2_OP_QUERY_INFO:
++
++		memset(&qi_iov, 0, sizeof(qi_iov));
++
++
++        /* INFO */
++
++#define _X(_w1, _w2)                                                                                                                                    		\
++		if (num_rqst >= NREQ) { cifs_dbg(FYI, "TOO MANY %d\n", num_rqst); rc = -96; goto finished; }                                                       	\
++		rqst[num_rqst].rq_iov = qi_iov+num_rqst;														\
++		rqst[num_rqst].rq_nvec = 1;																\
++		if ((rc = SMB2_query_info_init(tcon, &rqst[num_rqst], COMPOUND_FID, COMPOUND_FID, _w1,        SMB2_O_INFO_FILE, 0, sizeof(struct _w2), 0, NULL)))     	\
++			goto finished;                                                                                                                         		\
++		smb2_set_next_command(tcon, &rqst[num_rqst]);														\
++		smb2_set_related(&rqst[num_rqst++]);															
++
++		_X( FILE_BASIC_INFORMATION,     smb2_file_basic_info );
++		_X( FILE_STANDARD_INFORMATION,  smb2_file_standard_info );
++		_X( FILE_INTERNAL_INFORMATION,  smb2_file_internal_info );
++		_X( FILE_EA_INFORMATION,        smb2_file_ea_info );
++		_X( FILE_ACCESS_INFORMATION,    smb2_file_access_info );
++		_X( FILE_MODE_INFORMATION,      smb2_file_mode_info );
++
++#undef _X
++
++	        if (num_rqst != NREQ-1) { cifs_dbg(FYI, "MISMATCH %d\n", nc); rc = -96; goto finished; }
++
++		trace_smb3_query_info_compound_enter(xid, ses->Suid, tcon->tid, full_path);
++		break;
++
++	case SMB2_OP_DELETE:
++		trace_smb3_delete_enter(xid, ses->Suid, tcon->tid, full_path);
++		break;
++	case SMB2_OP_MKDIR:
++		/*
++		 * Directories are created through parameters in the
++		 * SMB2_open() call.
++		 */
++		trace_smb3_mkdir_enter(xid, ses->Suid, tcon->tid, full_path);
++		break;
++/* 202 */
++	case SMB2_OP_RMDIR:
++		memset(&si_iov, 0, sizeof(si_iov));
++		rqst[num_rqst].rq_iov = si_iov;
++		rqst[num_rqst].rq_nvec = 1;
++
++		size[0] = 1; /* sizeof __u8 See MS-FSCC section 2.4.11 */
++		data[0] = &delete_pending[0];
++
++		rc = SMB2_set_info_init(tcon, &rqst[num_rqst], COMPOUND_FID,
++					COMPOUND_FID, current->tgid,
++					FILE_DISPOSITION_INFORMATION,
++					SMB2_O_INFO_FILE, 0, data, size);
++		if (rc)
++			goto finished;
++		smb2_set_next_command(tcon, &rqst[num_rqst]);
++		smb2_set_related(&rqst[num_rqst++]);
++		trace_smb3_rmdir_enter(xid, ses->Suid, tcon->tid, full_path);
++		break;
++/* 202 */
++	case SMB2_OP_SET_EOF:
++		memset(&si_iov, 0, sizeof(si_iov));
++		rqst[num_rqst].rq_iov = si_iov;
++		rqst[num_rqst].rq_nvec = 1;
++
++		size[0] = 8; /* sizeof __le64 */
++		data[0] = ptr;
++
++		rc = SMB2_set_info_init(tcon, &rqst[num_rqst], COMPOUND_FID,
++					COMPOUND_FID, current->tgid,
++					FILE_END_OF_FILE_INFORMATION,
++					SMB2_O_INFO_FILE, 0, data, size);
++		if (rc)
++			goto finished;
++		smb2_set_next_command(tcon, &rqst[num_rqst]);
++		smb2_set_related(&rqst[num_rqst++]);
++		trace_smb3_set_eof_enter(xid, ses->Suid, tcon->tid, full_path);
++		break;
++	case SMB2_OP_SET_INFO:
++		memset(&si_iov, 0, sizeof(si_iov));
++		rqst[num_rqst].rq_iov = si_iov;
++		rqst[num_rqst].rq_nvec = 1;
++
++
++		size[0] = sizeof(FILE_BASIC_INFO);
++		data[0] = ptr;
++
++		rc = SMB2_set_info_init(tcon, &rqst[num_rqst], COMPOUND_FID,
++					COMPOUND_FID, current->tgid,
++					FILE_BASIC_INFORMATION,
++					SMB2_O_INFO_FILE, 0, data, size);
++		if (rc)
++			goto finished;
++		smb2_set_next_command(tcon, &rqst[num_rqst]);
++		smb2_set_related(&rqst[num_rqst++]);
++		trace_smb3_set_info_compound_enter(xid, ses->Suid, tcon->tid,
++						   full_path);
++		break;
++/* 202 */
++	case SMB2_OP_RENAME:
++		memset(&si_iov, 0, sizeof(si_iov));
++		rqst[num_rqst].rq_iov = si_iov;
++		rqst[num_rqst].rq_nvec = 2;
++
++		len = (2 * UniStrnlen((wchar_t *)ptr, PATH_MAX));
++
++		rename_info.ReplaceIfExists = 1;
++		rename_info.RootDirectory = 0;
++		rename_info.FileNameLength = cpu_to_le32(len);
++
++		size[0] = sizeof(struct smb2_file_rename_info);
++		data[0] = &rename_info;
++
++		size[1] = len + 2 /* null */;
++		data[1] = (__le16 *)ptr;
++
++		rc = SMB2_set_info_init(tcon, &rqst[num_rqst], COMPOUND_FID,
++					COMPOUND_FID, current->tgid,
++					FILE_RENAME_INFORMATION,
++					SMB2_O_INFO_FILE, 0, data, size);
++		if (rc)
++			goto finished;
++		smb2_set_next_command(tcon, &rqst[num_rqst]);
++		smb2_set_related(&rqst[num_rqst++]);
++		trace_smb3_rename_enter(xid, ses->Suid, tcon->tid, full_path);
++		break;
++/* 202 */
++	case SMB2_OP_HARDLINK:
++		memset(&si_iov, 0, sizeof(si_iov));
++		rqst[num_rqst].rq_iov = si_iov;
++		rqst[num_rqst].rq_nvec = 2;
++
++		len = (2 * UniStrnlen((wchar_t *)ptr, PATH_MAX));
++
++		link_info.ReplaceIfExists = 0;
++		link_info.RootDirectory = 0;
++		link_info.FileNameLength = cpu_to_le32(len);
++
++		size[0] = sizeof(struct smb2_file_link_info);
++		data[0] = &link_info;
++
++		size[1] = len + 2 /* null */;
++		data[1] = (__le16 *)ptr;
++
++		rc = SMB2_set_info_init(tcon, &rqst[num_rqst], COMPOUND_FID,
++					COMPOUND_FID, current->tgid,
++					FILE_LINK_INFORMATION,
++					SMB2_O_INFO_FILE, 0, data, size);
++		if (rc)
++			goto finished;
++		smb2_set_next_command(tcon, &rqst[num_rqst]);
++		smb2_set_related(&rqst[num_rqst++]);
++		trace_smb3_hardlink_enter(xid, ses->Suid, tcon->tid, full_path);
++		break;
++	default:
++		cifs_dbg(VFS, "Invalid command\n");
++		rc = -EINVAL;
++	}
++	if (rc)
++		goto finished;
++
++/* 202 */
++	/* Close */
++	memset(&close_iov, 0, sizeof(close_iov));
++	rqst[num_rqst].rq_iov = close_iov;
++	rqst[num_rqst].rq_nvec = 1;
++	rc = SMB2_close_init(tcon, &rqst[num_rqst], COMPOUND_FID, COMPOUND_FID);
++	smb2_set_related(&rqst[num_rqst++]);
++	if (rc)
++		goto finished;
++
++	rc = compound_send_recv(xid, ses, flags, num_rqst, rqst, resp_buftype, rsp_iov);
++
++ finished:
++	SMB2_open_free(&rqst[0]);
++	switch (command) {
++/* 202 */
++	case SMB2_OP_QUERY_INFO:
++		if (rc == 0) {
++
++#define _X(_what)                                                                                                               		\
++		if (!rc) {                                                                                                              	\
++			struct kvec *iov;                                                                                               	\
++			struct smb2_query_info_rsp *rsp;                                                                                	\
++			struct _what *dat = NULL;                                                                                              	\
++																		\
++			iov = rsp_iov + nc;                                                                                             	\
++			if (++nc > num_rqst ) { cifs_dbg(FYI, "TOO MANY on decode %d\n", nc); rc = -96; }                			\
++			if (rc == 0) {														\
++				rsp = (struct smb2_query_info_rsp *)iov->iov_base;                                                              \
++																		\
++				if (le32_to_cpu(rsp->OutputBufferLength) < sizeof(struct _what ) ) {                                            \
++					cifs_dbg(FYI, "BUFFER too small, %d, %d\n", rsp->OutputBufferLength, (int)sizeof(struct _what));        \
++					rc = -96;                                                                                               \
++				}                                                                                                               \
++			}															\
++			if (rc == 0) {														\
++				unsigned int off = le16_to_cpu(rsp->OutputBufferOffset);                                                         \
++				if ((rc = smb2_validate_iov( off, sizeof(struct _what), iov, sizeof(struct _what)) )) {                         \
++					cifs_dbg(FYI, "BUFFER validate error, %d\n", rc);                                                       \
++				}                                                                                                               \
++				else														\
++					dat = (struct _what *)(off + (char*)iov->iov_base);							\
++			}
++
++#define _Y(_f)  if (dat) ((struct smb2_file_all_info *)ptr)->_f = dat->_f;
++#define _Z() }
++
++        		nc = 1;
++
++			_X( smb2_file_basic_info )
++			_Y( CreationTime )
++			_Y( LastAccessTime )
++			_Y( LastWriteTime )
++			_Y( ChangeTime )
++			_Y( Attributes )
++			_Z( )
++
++			_X( smb2_file_standard_info )
++			_Y( AllocationSize )
++			_Y( EndOfFile )
++			_Y( NumberOfLinks )
++			_Y( DeletePending )
++			_Y( Directory )
++			_Z( )
++
++			_X( smb2_file_internal_info )
++			_Y( IndexNumber )
++			_Z( )
++	
++			_X( smb2_file_ea_info )
++			_Y( EASize )
++			_Z( )
++	
++			_X( smb2_file_access_info )
++			_Y( AccessFlags )
++			_Z( )
++
++			_X( smb2_file_mode_info )
++			_Y( Mode )
++			_Z( )
++
++#undef _X
++#undef _Y
++#undef _Z
++
++			if (nc != num_rqst-1) { cifs_dbg(FYI, "decode MISMATCH %d\n", nc); rc = -96; }
++		}
++
++		for(nc = 1; nc < 6; nc++)
++			if (rqst[nc].rq_iov)
++				SMB2_query_info_free(&rqst[nc]);
++		if (rqst[nc].rq_iov)
++			SMB2_close_free(&rqst[nc]);
++		if (rc)
++			trace_smb3_query_info_compound_err(xid,  ses->Suid,
++						tcon->tid, rc);
++		else
++			trace_smb3_query_info_compound_done(xid, ses->Suid,
++						tcon->tid);
++		break;
++/* 202 */
++	case SMB2_OP_DELETE:
++		if (rc)
++			trace_smb3_delete_err(xid,  ses->Suid, tcon->tid, rc);
++		else
++			trace_smb3_delete_done(xid, ses->Suid, tcon->tid);
++		if (rqst[1].rq_iov)
++			SMB2_close_free(&rqst[1]);
++		break;
++	case SMB2_OP_MKDIR:
++		if (rc)
++			trace_smb3_mkdir_err(xid,  ses->Suid, tcon->tid, rc);
++		else
++			trace_smb3_mkdir_done(xid, ses->Suid, tcon->tid);
++		if (rqst[1].rq_iov)
++			SMB2_close_free(&rqst[1]);
++		break;
++	case SMB2_OP_HARDLINK:
++		if (rc)
++			trace_smb3_hardlink_err(xid,  ses->Suid, tcon->tid, rc);
++		else
++			trace_smb3_hardlink_done(xid, ses->Suid, tcon->tid);
++		free_set_inf_compound(rqst);
++		break;
++	case SMB2_OP_RENAME:
++		if (rc)
++			trace_smb3_rename_err(xid,  ses->Suid, tcon->tid, rc);
++		else
++			trace_smb3_rename_done(xid, ses->Suid, tcon->tid);
++		free_set_inf_compound(rqst);
++		break;
++/* 202 */
++	case SMB2_OP_RMDIR:
++		if (rc)
++			trace_smb3_rmdir_err(xid,  ses->Suid, tcon->tid, rc);
++		else
++			trace_smb3_rmdir_done(xid, ses->Suid, tcon->tid);
++		free_set_inf_compound(rqst);
++		break;
++	case SMB2_OP_SET_EOF:
++		if (rc)
++			trace_smb3_set_eof_err(xid,  ses->Suid, tcon->tid, rc);
++		else
++			trace_smb3_set_eof_done(xid, ses->Suid, tcon->tid);
++		free_set_inf_compound(rqst);
++		break;
++	case SMB2_OP_SET_INFO:
++		if (rc)
++			trace_smb3_set_info_compound_err(xid,  ses->Suid,
++						tcon->tid, rc);
++		else
++			trace_smb3_set_info_compound_done(xid, ses->Suid,
++						tcon->tid);
++		free_set_inf_compound(rqst);
++		break;
++	}
++
++	for(nc=0; nc < num_rqst; nc++)
++		free_rsp_buf(resp_buftype[nc], rsp_iov[nc].iov_base);
++	return rc;
++}
++
++#undef NREQ
++
++
++int
++smb202_query_path_info(const unsigned int xid, struct cifs_tcon *tcon,
++		     struct cifs_sb_info *cifs_sb, const char *full_path,
++		     FILE_ALL_INFO *data, bool *adjust_tz, bool *symlink)
++{
++	int rc;
++	struct smb2_file_all_info *smb2_data;
++	__u32 create_options = 0;
++	struct cifs_fid fid;
++	bool no_cached_open = tcon->nohandlecache;
++
++	*adjust_tz = false;
++	*symlink = false;
++
++	smb2_data = kzalloc(sizeof(struct smb2_file_all_info) + PATH_MAX * 2,
++			    GFP_KERNEL);
++	if (smb2_data == NULL)
++		return -ENOMEM;
++
++	/* If it is a root and its handle is cached then use it */
++	if (!strlen(full_path) && !no_cached_open) {
++
++		rc = open_shroot_202(xid, tcon, &fid);
++
++		if (rc)
++			goto out;
++
++		if (tcon->crfid.file_all_info_is_valid) {
++			move_smb2_info_to_cifs(data, &tcon->crfid.file_all_info);
++		} else {
++			rc = SMB2_query_info(xid, tcon, fid.persistent_fid, fid.volatile_fid, smb2_data);
++
++			if (!rc)
++				move_smb2_info_to_cifs(data, smb2_data);
++		}
++		close_shroot(&tcon->crfid);
++		goto out;
++	}
++
++	if (backup_cred(cifs_sb))
++		create_options |= CREATE_OPEN_BACKUP_INTENT;
++
++	rc = smb202_compound_op(xid, tcon, cifs_sb, full_path,
++			      FILE_READ_ATTRIBUTES, FILE_OPEN, create_options,
++			      smb2_data, SMB2_OP_QUERY_INFO);
++
++	if (rc == -EOPNOTSUPP) {
++		*symlink = true;
++		create_options |= OPEN_REPARSE_POINT;
++
++		/* Failed on a symbolic link - query a reparse point info */
++		rc = smb202_compound_op(xid, tcon, cifs_sb, full_path,
++				      FILE_READ_ATTRIBUTES, FILE_OPEN,
++				      create_options, smb2_data,
++				      SMB2_OP_QUERY_INFO);
++	}
++	if (rc)
++		goto out;
++
++	move_smb2_info_to_cifs(data, smb2_data);
++out:
++	kfree(smb2_data);
++	return rc;
++}
++
++
++/* ****************************** */
++/* ****************************** */
++
++
++
+ int
+ smb2_mkdir(const unsigned int xid, struct cifs_tcon *tcon, const char *name,
+ 	   struct cifs_sb_info *cifs_sb)
+ {
+ 	return smb2_compound_op(xid, tcon, cifs_sb, name,
+ 				FILE_WRITE_ATTRIBUTES, FILE_CREATE,
+ 				CREATE_NOT_FILE, NULL, SMB2_OP_MKDIR);
+diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' '--exclude=objtool' '--exclude=cpupower' a/fs/cifs/smb2ops.c b/fs/cifs/smb2ops.c
+--- a/fs/cifs/smb2ops.c	2019-09-15 16:19:32.000000000 -0500
++++ b/fs/cifs/smb2ops.c	2020-04-01 09:20:52.874161674 -0500
+@@ -779,14 +779,259 @@ oshr_free:
+ 	SMB2_open_free(&rqst[0]);
+ 	SMB2_query_info_free(&rqst[1]);
+ 	free_rsp_buf(resp_buftype[0], rsp_iov[0].iov_base);
+ 	free_rsp_buf(resp_buftype[1], rsp_iov[1].iov_base);
+ 	return rc;
+ }
+ 
++
++int open_shroot_202(unsigned int xid, struct cifs_tcon *tcon, struct cifs_fid *pfid)
++{
++	struct cifs_ses *ses = tcon->ses;
++	struct TCP_Server_Info *server = ses->server;
++	struct cifs_open_parms oparms;
++	struct smb2_create_rsp *o_rsp = NULL;
++#define NCHAINED 7
++	int resp_buftype[NCHAINED];
++	struct smb_rqst rqst[NCHAINED];
++	struct kvec rsp_iov[NCHAINED];
++	struct kvec qi_iov[NCHAINED];
++	struct kvec open_iov[SMB2_CREATE_IOV_SIZE];
++	int rc, flags = 0;
++	__le16 utf16_path = 0; /* Null - since an open of top of share */
++	u8 oplock = SMB2_OPLOCK_LEVEL_II;
++	int nc = 0;
++
++	mutex_lock(&tcon->crfid.fid_mutex);
++
++	if (tcon->crfid.is_valid) {
++		cifs_dbg(FYI, "found a cached root file handle\n");
++		memcpy(pfid, tcon->crfid.fid, sizeof(struct cifs_fid));
++		kref_get(&tcon->crfid.refcount);
++		mutex_unlock(&tcon->crfid.fid_mutex);
++		return 0;
++	}
++
++	if (smb3_encryption_required(tcon))
++		flags |= CIFS_TRANSFORM_REQ;
++
++	for(nc=0; nc < NCHAINED; nc++) resp_buftype[nc] = CIFS_NO_BUFFER;
++	memset(rqst, 0, sizeof(rqst));
++	memset(rsp_iov, 0, sizeof(rsp_iov));
++	memset(qi_iov, 0, sizeof(qi_iov));
++
++
++	/* Open */
++	memset(&open_iov, 0, sizeof(open_iov));
++	rqst[0].rq_iov = open_iov;
++	rqst[0].rq_nvec = SMB2_CREATE_IOV_SIZE;
++
++	oparms.tcon = tcon;
++	oparms.create_options = 0;
++	oparms.desired_access = FILE_READ_ATTRIBUTES;
++	oparms.disposition = FILE_OPEN;
++	oparms.fid = pfid;
++	oparms.reconnect = false;
++
++	rc = SMB2_open_init(tcon, &rqst[0], &oplock, &oparms, &utf16_path);
++	if (rc)
++		goto oshr_exit;
++	smb2_set_next_command(tcon, &rqst[0]);
++
++
++	/* INFO */
++
++	for(nc=1; nc < NCHAINED; nc++) {
++		rqst[nc].rq_iov = qi_iov+nc;
++		rqst[nc].rq_nvec = 1;
++	}
++
++	nc = 0;
++
++#define _X(_w1, _w2) 																	\
++	if (++nc >= NCHAINED) { cifs_dbg(FYI, "TOO MANY %d\n", nc); rc = -96; goto oshr_exit; }								\
++	if ((rc = SMB2_query_info_init(tcon, &rqst[nc], COMPOUND_FID, COMPOUND_FID, _w1,	SMB2_O_INFO_FILE, 0, sizeof(struct _w2), 0, NULL)))	\
++		goto oshr_exit;																\
++	smb2_set_related(&rqst[nc]);
++
++	_X( FILE_BASIC_INFORMATION,	smb2_file_basic_info );		smb2_set_next_command(tcon, &rqst[nc]);
++	_X( FILE_STANDARD_INFORMATION,	smb2_file_standard_info );	smb2_set_next_command(tcon, &rqst[nc]);
++	_X( FILE_INTERNAL_INFORMATION,	smb2_file_internal_info );	smb2_set_next_command(tcon, &rqst[nc]);
++	_X( FILE_EA_INFORMATION,	smb2_file_ea_info );		smb2_set_next_command(tcon, &rqst[nc]);
++	_X( FILE_ACCESS_INFORMATION,	smb2_file_access_info );	smb2_set_next_command(tcon, &rqst[nc]);
++	_X( FILE_MODE_INFORMATION,	smb2_file_mode_info );
++
++#undef _X
++
++	if (++nc != NCHAINED) { cifs_dbg(FYI, "MISMATCH %d\n", nc); rc = -96; goto oshr_exit; }
++
++	/*
++	 * We do not hold the lock for the open because in case
++	 * SMB2_open needs to reconnect, it will end up calling
++	 * cifs_mark_open_files_invalid() which takes the lock again
++	 * thus causing a deadlock
++	 */
++
++	mutex_unlock(&tcon->crfid.fid_mutex);
++	rc = compound_send_recv(xid, ses, flags, nc, rqst, resp_buftype, rsp_iov);
++	mutex_lock(&tcon->crfid.fid_mutex);
++
++	/*
++	 * Now we need to check again as the cached root might have
++	 * been successfully re-opened from a concurrent process
++	 */
++
++	if (tcon->crfid.is_valid) {
++		/* work was already done */
++
++		/* stash fids for close() later */
++		struct cifs_fid fid = {
++			.persistent_fid = pfid->persistent_fid,
++			.volatile_fid = pfid->volatile_fid,
++		};
++
++		/*
++		 * caller expects this func to set pfid to a valid
++		 * cached root, so we copy the existing one and get a
++		 * reference.
++		 */
++		memcpy(pfid, tcon->crfid.fid, sizeof(*pfid));
++		kref_get(&tcon->crfid.refcount);
++
++		mutex_unlock(&tcon->crfid.fid_mutex);
++
++		if (rc == 0) {
++			/* close extra handle outside of crit sec */
++			SMB2_close(xid, tcon, fid.persistent_fid, fid.volatile_fid);
++		}
++		goto oshr_free;
++	}
++
++	/* Cached root is still invalid, continue normaly */
++
++	if (rc)
++		goto oshr_exit;
++
++	o_rsp = (struct smb2_create_rsp *)rsp_iov[0].iov_base;
++	oparms.fid->persistent_fid = o_rsp->PersistentFileId;
++	oparms.fid->volatile_fid = o_rsp->VolatileFileId;
++#ifdef CONFIG_CIFS_DEBUG2
++	oparms.fid->mid = le64_to_cpu(o_rsp->sync_hdr.MessageId);
++#endif /* CIFS_DEBUG2 */
++
++	memcpy(tcon->crfid.fid, pfid, sizeof(struct cifs_fid));
++	tcon->crfid.tcon = tcon;
++	tcon->crfid.is_valid = true;
++	kref_init(&tcon->crfid.refcount);
++
++
++	/* BB TBD check to see if oplock level check can be removed below */
++
++	if (o_rsp->OplockLevel == SMB2_OPLOCK_LEVEL_LEASE) {
++		kref_get(&tcon->crfid.refcount);
++		smb2_parse_contexts(server, o_rsp,
++				&oparms.fid->epoch,
++				oparms.fid->lease_key, &oplock, NULL);
++	}
++#if 0
++	else {
++		goto oshr_exit;
++	}
++#endif
++
++	memset((char *)&tcon->crfid.file_all_info, 0, sizeof(tcon->crfid.file_all_info));
++
++	nc = 1;
++
++#define _X(_what)														\
++	{															\
++		struct kvec *iov;												\
++		struct smb2_query_info_rsp *rsp;										\
++		unsigned int off;												\
++		struct _what *dat;												\
++																\
++		iov = rsp_iov + nc;												\
++		if (++nc > NCHAINED) { cifs_dbg(FYI, "TOO MANY on decode %d\n", nc); rc = -96; goto oshr_exit; }		\
++		rsp = (struct smb2_query_info_rsp *)iov->iov_base;								\
++																\
++		if (le32_to_cpu(rsp->OutputBufferLength) < sizeof(struct _what ) ) {						\
++			cifs_dbg(FYI, "BUFFER too small, %d, %d\n", rsp->OutputBufferLength, (int)sizeof(struct _what));	\
++			rc = -96;												\
++			goto oshr_exit;												\
++		}														\
++																\
++		off = le16_to_cpu(rsp->OutputBufferOffset);									\
++																\
++		if ((rc = smb2_validate_iov( off, sizeof(struct _what), iov, sizeof(struct _what)) )) {				\
++			cifs_dbg(FYI, "BUFFER validate error, %d\n", rc);							\
++			goto oshr_exit;												\
++		}														\
++		dat = (struct _what *)(off + (char*)iov->iov_base);
++
++#define _Y(_f)	tcon->crfid.file_all_info._f = dat->_f;
++#define _Z() }
++
++	_X( smb2_file_basic_info )
++	_Y( CreationTime )
++	_Y( LastAccessTime )
++	_Y( LastWriteTime )
++	_Y( ChangeTime )
++	_Y( Attributes )
++	_Z( )
++
++	_X( smb2_file_standard_info )
++	_Y( AllocationSize )
++	_Y( EndOfFile )
++	_Y( NumberOfLinks )
++	_Y( DeletePending )
++	_Y( Directory )
++	_Z( )
++
++	_X( smb2_file_internal_info )
++	_Y( IndexNumber )
++	_Z( )
++
++	_X( smb2_file_ea_info )
++	_Y( EASize )
++	_Z( )
++
++	_X( smb2_file_access_info )
++	_Y( AccessFlags )
++	_Z( )
++
++	_X( smb2_file_mode_info )
++	_Y( Mode )
++	_Z( )
++
++	if (nc != NCHAINED) { cifs_dbg(FYI, "decode MISMATCH %d\n", nc); rc = -96; goto oshr_exit; }
++
++	tcon->crfid.file_all_info_is_valid = 1;
++
++#undef _X
++#undef _Y
++#undef _Z
++
++oshr_exit:
++	mutex_unlock(&tcon->crfid.fid_mutex);
++
++oshr_free:
++	SMB2_open_free(&rqst[0]);
++	free_rsp_buf(resp_buftype[0], rsp_iov[0].iov_base);
++
++	for(nc=1; nc < NCHAINED; nc++) {
++		SMB2_query_info_free(&rqst[nc]);
++		free_rsp_buf(resp_buftype[nc], rsp_iov[nc].iov_base);
++	}
++
++	if (rc) cifs_dbg(FYI, "INODE RETURNING %d\n", rc);
++
++	return rc;
++}
++
++
+ static void
+ smb3_qfs_tcon(const unsigned int xid, struct cifs_tcon *tcon)
+ {
+ 	int rc;
+ 	__le16 srch_path = 0; /* Null - open root of share */
+ 	u8 oplock = SMB2_OPLOCK_LEVEL_NONE;
+ 	struct cifs_open_parms oparms;
+@@ -4349,15 +4594,15 @@ struct smb_version_operations smb20_oper
+ 	.logoff = SMB2_logoff,
+ 	.tree_connect = SMB2_tcon,
+ 	.tree_disconnect = SMB2_tdis,
+ 	.qfs_tcon = smb2_qfs_tcon,
+ 	.is_path_accessible = smb2_is_path_accessible,
+ 	.can_echo = smb2_can_echo,
+ 	.echo = SMB2_echo,
+-	.query_path_info = smb2_query_path_info,
++	.query_path_info = smb202_query_path_info,
+ 	.get_srv_inum = smb2_get_srv_inum,
+ 	.query_file_info = smb2_query_file_info,
+ 	.set_path_size = smb2_set_path_size,
+ 	.set_file_size = smb2_set_file_size,
+ 	.set_file_info = smb2_set_file_info,
+ 	.set_compression = smb2_set_compression,
+ 	.mkdir = smb2_mkdir,
+diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' '--exclude=objtool' '--exclude=cpupower' a/fs/cifs/smb2pdu.h b/fs/cifs/smb2pdu.h
+--- a/fs/cifs/smb2pdu.h	2019-09-15 16:19:32.000000000 -0500
++++ b/fs/cifs/smb2pdu.h	2020-04-01 08:57:21.013911912 -0500
+@@ -1501,18 +1501,48 @@ struct smb3_fs_vol_info {
+ #define FILE_SFIO_RESERVE_INFORMATION	44
+ #define FILE_SFIO_VOLUME_INFORMATION	45
+ #define FILE_HARD_LINK_INFORMATION	46
+ #define FILE_NORMALIZED_NAME_INFORMATION 48
+ #define FILEID_GLOBAL_TX_DIRECTORY_INFORMATION 50
+ #define FILE_STANDARD_LINK_INFORMATION	54
+ 
++
++struct smb2_file_basic_info { /* data block encoding of response to level 4 */
++	__le64 CreationTime;	/* Beginning of FILE_BASIC_INFO equivalent */
++	__le64 LastAccessTime;
++	__le64 LastWriteTime;
++	__le64 ChangeTime;
++	__le32 Attributes;
++	__u32  Pad1;		/* End of FILE_BASIC_INFO_INFO equivalent */
++} __packed; /* LEVEL 4 Query */
++
++struct smb2_file_standard_info { /* data block encoding of response to level 5 */
++	__le64 AllocationSize;	/* Beginning of FILE_STANDARD_INFO equivalent */
++	__le64 EndOfFile;	/* size ie offset to first free byte in file */
++	__le32 NumberOfLinks;	/* hard links */
++	__u8   DeletePending;
++	__u8   Directory;
++	__u16  Pad2;		/* End of FILE_STANDARD_INFO equivalent */
++} __packed; /* LEVEL 5 Query */
++
++
+ struct smb2_file_internal_info {
+ 	__le64 IndexNumber;
+ } __packed; /* level 6 Query */
+ 
++
++struct smb2_file_ea_info { /* data block encoding of response to level 7 */
++	__le32 EASize;
++} __packed; /* LEVEL 7 Query */
++
++struct smb2_file_access_info { /* data block encoding of response to level 8 */
++	__le32 AccessFlags;
++} __packed; /* LEVEL 8 Query */
++
++
+ struct smb2_file_rename_info { /* encoding of request for level 10 */
+ 	__u8   ReplaceIfExists; /* 1 = replace existing target with new */
+ 				/* 0 = fail if target already exists */
+ 	__u8   Reserved[7];
+ 	__u64  RootDirectory;  /* MBZ for network operations (why says spec?) */
+ 	__le32 FileNameLength;
+ 	char   FileName[0];     /* New name to be assigned */
+@@ -1531,14 +1561,20 @@ struct smb2_file_full_ea_info { /* encod
+ 	__le32 next_entry_offset;
+ 	__u8   flags;
+ 	__u8   ea_name_length;
+ 	__le16 ea_value_length;
+ 	char   ea_data[0]; /* \0 terminated name plus value */
+ } __packed; /* level 15 Set */
+ 
++
++struct smb2_file_mode_info { /* data block encoding of response to level 16 */
++	__le32 Mode;
++} __packed; /* LEVEL 16 Query */
++
++
+ /*
+  * This level 18, although with struct with same name is different from cifs
+  * level 0x107. Level 0x107 has an extra u64 between AccessFlags and
+  * CurrentByteOffset.
+  */
+ struct smb2_file_all_info { /* data block encoding of response to level 18 */
+ 	__le64 CreationTime;	/* Beginning of FILE_BASIC_INFO equivalent */
+diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' '--exclude=objtool' '--exclude=cpupower' a/fs/cifs/smb2proto.h b/fs/cifs/smb2proto.h
+--- a/fs/cifs/smb2proto.h	2019-09-15 16:19:32.000000000 -0500
++++ b/fs/cifs/smb2proto.h	2020-04-01 08:57:20.769912388 -0500
+@@ -64,21 +64,31 @@ extern bool smb2_is_valid_oplock_break(c
+ extern struct cifs_ses *smb2_find_smb_ses(struct TCP_Server_Info *server,
+ 					  __u64 ses_id);
+ extern int smb3_handle_read_data(struct TCP_Server_Info *server,
+ 				 struct mid_q_entry *mid);
+ 
+ extern int open_shroot(unsigned int xid, struct cifs_tcon *tcon,
+ 			struct cifs_fid *pfid);
++
++extern int open_shroot_202(unsigned int xid, struct cifs_tcon *tcon,
++			struct cifs_fid *pfid);
++
+ extern void close_shroot(struct cached_fid *cfid);
+ extern void move_smb2_info_to_cifs(FILE_ALL_INFO *dst,
+ 				   struct smb2_file_all_info *src);
+ extern int smb2_query_path_info(const unsigned int xid, struct cifs_tcon *tcon,
+ 				struct cifs_sb_info *cifs_sb,
+ 				const char *full_path, FILE_ALL_INFO *data,
+ 				bool *adjust_tz, bool *symlink);
++
++extern int smb202_query_path_info(const unsigned int xid, struct cifs_tcon *tcon,
++				struct cifs_sb_info *cifs_sb,
++				const char *full_path, FILE_ALL_INFO *data,
++				bool *adjust_tz, bool *symlink);
++
+ extern int smb2_set_path_size(const unsigned int xid, struct cifs_tcon *tcon,
+ 			      const char *full_path, __u64 size,
+ 			      struct cifs_sb_info *cifs_sb, bool set_alloc);
+ extern int smb2_set_file_info(struct inode *inode, const char *full_path,
+ 			      FILE_BASIC_INFO *buf, const unsigned int xid);
+ extern int smb311_posix_mkdir(const unsigned int xid, struct inode *inode,
+ 			       umode_t mode, struct cifs_tcon *tcon,
+diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' '--exclude=objtool' '--exclude=cpupower' a/ldconfig-kernel.conf b/ldconfig-kernel.conf
+--- a/ldconfig-kernel.conf	1969-12-31 18:00:00.000000000 -0600
++++ b/ldconfig-kernel.conf	2020-03-27 16:24:48.022405038 -0500
+@@ -0,0 +1 @@
++# Placeholder file, no vDSO hwcap entries used in this kernel.
+Binary files a/rheldup3.x509 and b/rheldup3.x509 differ
+Binary files a/rhelkpatch1.x509 and b/rhelkpatch1.x509 differ
+Binary files a/tools/power/x86/turbostat/turbostat and b/tools/power/x86/turbostat/turbostat differ
+Binary files a/tools/power/x86/x86_energy_perf_policy/x86_energy_perf_policy and b/tools/power/x86/x86_energy_perf_policy/x86_energy_perf_policy differ
+Binary files a/tools/thermal/tmon/tmon and b/tools/thermal/tmon/tmon differ

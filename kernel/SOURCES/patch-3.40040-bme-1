@@ -1,0 +1,4626 @@
+diff -Nrp -U 7 --strip-trailing-cr a/drivers/target/Makefile b/drivers/target/Makefile
+--- a/drivers/target/Makefile	2019-10-24 14:16:26.664087066 -0500
++++ b/drivers/target/Makefile	2019-10-24 14:44:38.295838615 -0500
+@@ -10,14 +10,15 @@ target_core_mod-y		:= target_core_config
+ 				   target_core_tmr.o \
+ 				   target_core_tpg.o \
+ 				   target_core_transport.o \
+ 				   target_core_sbc.o \
+ 				   target_core_spc.o \
+ 				   target_core_ua.o \
+ 				   target_core_rd.o \
++				   target_core_bme.o \
+ 				   target_core_stat.o \
+ 				   target_core_xcopy.o
+ 
+ obj-$(CONFIG_TARGET_CORE)	+= target_core_mod.o
+ 
+ # Subsystem modules
+ obj-$(CONFIG_TCM_IBLOCK)	+= target_core_iblock.o
+diff -Nrp -U 7 --strip-trailing-cr a/drivers/target/target_core_bme.c b/drivers/target/target_core_bme.c
+--- a/drivers/target/target_core_bme.c	1969-12-31 18:00:00.000000000 -0600
++++ b/drivers/target/target_core_bme.c	2019-10-24 14:44:38.296838611 -0500
+@@ -0,0 +1,3100 @@
++/*******************************************************************************
++ * Filename: target_core_bme.c
++ *
++ * This file contains support for Block Migration Engine offload with generic
++ * TCM backends.
++ *
++ * Copyright (c) 2019-2021 Parsec Labs, All rights reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ ******************************************************************************/
++
++#include <linux/slab.h>
++#include <linux/spinlock.h>
++#include <linux/list.h>
++#include <linux/blkdev.h>
++#include <linux/configfs.h>
++#include <linux/parser.h>
++#include <scsi/scsi_proto.h>
++#include <asm/unaligned.h>
++#include <linux/delay.h>
++#include <linux/kthread.h>
++#include <net/genetlink.h>
++
++#include <target/target_core_base.h>
++#include <target/target_core_fabric.h>
++#include <target/target_core_backend.h>
++#include <target/target_core_bme.h>
++
++#include "target_core_alua.h"
++#include "target_core_internal.h"
++
++/*
++ * Extern definitions
++ */
++extern struct kmem_cache *bme_map_cache;
++extern struct kmem_cache *bme_cmd_cache;
++
++static struct bme_config   g_bme_gp;
++struct se_portal_group     bme_tpg;
++static struct se_session   bme_sess;
++static struct se_node_acl  bme_nacl;
++
++/*
++ * Internal Functions
++ */
++static int bme_send_scn(struct bme_map *map);
++
++static struct bme_map *to_bme_map(struct config_item *item)
++{
++	return container_of(item, struct bme_map, item);
++}
++
++static struct bme_qos *to_bme_qos(struct config_item *item)
++{
++	return container_of(to_config_group(item), struct bme_qos, group);
++}
++
++static struct bme_core_map_ops *to_map_ops(const struct target_core_fabric_ops *tfo)
++{
++	return container_of(tfo, struct bme_core_map_ops, tfo);
++}
++
++static inline void __set_error(struct bme_map *map, sense_reason_t rc)
++{
++	spin_lock(&map->lock);
++	map->error = rc;
++	map->err_lba = map->src_lba + map->processed;
++	map->status = MAP_S_ERROR;
++	map->map_flags |= BMF_COMPLETE;
++	map->run_time += get_jiffies_64() - map->start_time;
++	spin_unlock(&map->lock);
++	bme_send_scn(map);
++	queue_delayed_work(map->src_dev->se_bme.wq, &map->work, 0);
++}
++
++static inline void __update_active(struct se_device *dev, bool bSet)
++{
++	struct bme_qos *qos = (struct bme_qos *)dev->se_bme.qos;
++	switch(dev->se_bme.priority)
++	{
++		case BME_P_NORMAL:
++			if (bSet)
++				atomic_inc(&qos->ncount);
++			else if (atomic_read(&qos->ncount))
++				atomic_dec(&qos->ncount);
++		break;
++		case BME_P_MEDIUM:
++			if (bSet)
++				atomic_inc(&qos->mcount);
++			else if (atomic_read(&qos->mcount))
++				atomic_dec(&qos->mcount);
++		break;
++		case BME_P_HIGH:
++			if (bSet)
++				atomic_inc(&qos->hcount);
++			else if (atomic_read(&qos->hcount))
++				atomic_dec(&qos->hcount);
++		break;
++		case BME_P_CRITICAL:
++			if (bSet)
++				atomic_inc(&qos->ccount);
++			else if (atomic_read(&qos->ccount))
++				atomic_dec(&qos->ccount);
++		break;
++	}
++}
++
++static inline u32 __get_credits(struct se_device *dev, u32 nolb)
++{
++	u32 credits = nolb;
++	struct bme_qos *qos = (struct bme_qos *)dev->se_bme.qos;
++
++	if(atomic_read(&qos->ratelimit) == 0)
++		return credits;
++	if (atomic_read(&qos->n_credits) >= nolb)
++		atomic_sub(nolb, &qos->n_credits);
++	else if ((dev->se_bme.priority > BME_P_NORMAL) && 
++		(atomic_read(&qos->m_credits) >= nolb))
++		atomic_sub(nolb, &qos->m_credits);
++	else if ((dev->se_bme.priority > BME_P_MEDIUM) && 
++		(atomic_read(&qos->h_credits) >= nolb))
++		atomic_sub(nolb, &qos->h_credits);
++	else if ((dev->se_bme.priority > BME_P_HIGH) && 
++		(atomic_read(&qos->c_credits) >= nolb))
++		atomic_sub(nolb, &qos->c_credits);
++	else
++		credits = 0;
++	return credits;
++}
++
++struct find_dev_info {
++	char *uuid;
++	struct se_device *found_dev;
++};
++
++static int __find_dev_iter(struct se_device *sdev, void *data)
++{
++	struct find_dev_info *info = data;
++
++	pr_debug("BME: __find_dev_iter uuid=%s sdev_id=%s\n",
++		info->uuid, sdev->t10_wwn.unit_serial);
++	if( memcmp(info->uuid, sdev->t10_wwn.unit_serial, strlen(info->uuid)))
++		return 0;
++	info->found_dev = sdev;
++	return 1;
++}
++
++#if 0
++static inline int __get_iocredits(struct se_device *dev, u32 nolb)
++{
++	u64 credits = (u64)atomic_read(&dev->se_bme.credits);
++
++	if (credits < (u64)nolb)
++		return 0;
++	atomic_set(&dev->se_bme.credits, (credits - nolb));
++	return 1;
++}
++#endif
++
++struct se_device *__get_device(unsigned char *uuid)
++{
++	struct find_dev_info info;
++
++	memset(&info, 0, sizeof(info));
++	info.uuid = uuid;
++
++	if(target_for_each_device(__find_dev_iter, &info))
++	    return info.found_dev;
++	return NULL;
++}
++
++static inline bool __raw_compare(void *buf1, void *buf2, unsigned int len)
++{
++	return (memcmp(buf1, buf2, len) ? false : true);
++}
++
++struct bme_vmap {
++	struct scatterlist *sg;
++	unsigned int       nents;
++	void		   *vmap;
++};
++
++void *__map_data(struct bme_vmap *bv)
++{
++	struct scatterlist *sg = bv->sg;
++	struct page **pages;
++	int i;
++
++	if (!bv->nents)
++		return NULL;
++
++	if (bv->nents == 1)
++		return kmap(sg_page(sg)) + sg->offset;
++	pages = kmalloc_array(bv->nents, sizeof(*pages), GFP_KERNEL);
++	if (!pages)
++		return NULL;
++
++	for_each_sg(bv->sg, sg, bv->nents, i) {
++		pages[i] = sg_page(sg);
++	}
++
++	bv->vmap = vmap(pages, bv->nents,  VM_MAP, PAGE_KERNEL);
++	kfree(pages);
++	if (!bv->vmap)
++		return NULL;
++	return bv->vmap + bv->sg[0].offset;
++}
++
++void __unmap_data(struct bme_vmap *bv)
++{
++	if(!bv->nents)
++		return;
++	if(bv->nents == 1)
++		kunmap(sg_page(bv->sg));
++	else if (bv->vmap)
++		vunmap(bv->vmap);
++	bv->vmap = NULL;
++}
++
++static inline struct se_cmd *__get_cmd(struct bme_map *map, u64 lba, u32 nolb, int data_direction, bool source)
++{
++	sense_reason_t rc;
++	unsigned char cdb[16];
++	struct se_cmd *cmd = NULL;
++	struct bme_cmd *bcmd = NULL;
++	struct se_device *dev = (source) ?  map->src_dev : map->dst_dev;
++	u32 length = (nolb * dev->dev_attrib.block_size);
++
++	if((bcmd = kmem_cache_zalloc(bme_cmd_cache, GFP_KERNEL)) == NULL) {
++		pr_err("[BME-%s:%d]:[%s-%lld -> %s-%lld] \n",
++			__func__, __LINE__,
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba);
++		goto out;
++	}
++	if (config_item_get_unless_zero(&map->item) == NULL) {
++		pr_err("[BME-%s:%d]:[%s-%lld -> %s-%lld] Failed\n",
++			__func__, __LINE__,
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba);
++		kmem_cache_free(bme_cmd_cache, bcmd);
++		return NULL;
++	}
++	bcmd->map =  map;
++	bcmd->link_cmd = NULL;
++
++	cmd = &bcmd->se_cmd;
++	memset(&cdb[0], 0, 16);
++	cdb[0] = (data_direction == DMA_FROM_DEVICE) ? READ_16 : WRITE_16;
++	put_unaligned_be64(lba, &cdb[2]);
++	put_unaligned_be32(nolb, &cdb[10]);
++	cmd->t_task_lba = lba;
++	cmd->t_task_nolb = nolb;
++	transport_init_se_cmd(cmd, map->src_dev->se_bme.tpg->se_tpg_tfo,
++				map->src_dev->se_bme.sess, length,
++				data_direction, 0, &bcmd->sense_buffer[0]);
++	cmd->se_lun = (source) ? &map->src_lun : &map->dst_lun;
++	cmd->se_dev = dev;
++	cmd->se_cmd_flags |= SCF_SE_LUN_CMD;
++	cmd->tag = 0;
++	rc = target_setup_cmd_from_cdb(cmd, cdb);
++	if (rc < 0) {
++		pr_err("[BME-%s:%d]:[%s-%lld -> %s-%lld] lba=%lld, nolb=%d\n",
++			__func__, __LINE__,
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			lba, nolb);
++		transport_generic_free_cmd(cmd, 0);
++		cmd = NULL;
++		goto out;
++	}
++out :
++#if 0
++	pr_debug("%p [BME-%s:%d] Exit:[%s-%lld -> %s-%lld] lba=%lld, nolb=%d\n",cmd,
++		__func__, __LINE__,
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		lba, nolb);
++#endif
++	return (cmd);
++}
++
++void __update_rxstats(struct se_cmd *cmd)
++{
++	struct bme_cmd *bcmd = container_of(cmd, struct bme_cmd, se_cmd);
++	struct bme_qos *qos = (struct bme_qos *)cmd->se_dev->se_bme.qos;
++
++	spin_lock(&cmd->se_dev->se_bme.bme_lock);
++	atomic_add(cmd->t_task_nolb, &qos->rx_blocks);
++	atomic_long_add(jiffies_to_usecs(get_jiffies_64() - bcmd->issue_timestamp), &qos->rx_resp_time);
++	atomic_inc(&qos->rx_count);
++	spin_unlock(&cmd->se_dev->se_bme.bme_lock);
++}
++
++void __update_txstats(struct se_cmd *cmd)
++{
++	struct bme_cmd *bcmd = container_of(cmd, struct bme_cmd, se_cmd);
++	struct bme_qos *qos = (struct bme_qos *)cmd->se_dev->se_bme.qos;
++
++	spin_lock(&cmd->se_dev->se_bme.bme_lock);
++	atomic_add(cmd->t_task_nolb, &qos->tx_blocks);
++	atomic_long_add(jiffies_to_usecs(get_jiffies_64() - bcmd->issue_timestamp), &qos->tx_resp_time);
++	atomic_inc(&qos->tx_count);
++	spin_unlock(&cmd->se_dev->se_bme.bme_lock);
++}
++
++/*
++** Given a SCSI cmd, checks for overlaping lba range 
++** active migration IO in flight. 
++*/
++static inline struct bme_map *__get_lba_map(struct se_device *sdev, u64 lba, u32 nolb)
++{
++	struct config_item *item;
++	struct bme_map *map = NULL;
++
++	if (list_empty(&sdev->dev_bme_group.cg_children))
++		goto out;
++	spin_lock(&sdev->se_bme.bme_lock);
++	list_for_each_entry(item, &(sdev->dev_bme_group.cg_children), ci_entry) {
++		map = to_bme_map(item);
++		if (!(map->map_flags & BMF_CONFIGURED))
++			continue;
++		if (((map->src_lba < lba) && ((map->src_lba + map->nolb) > lba)) || 
++			((map->src_lba >= lba) && (map->src_lba < lba + nolb)))
++			goto out;
++	}
++	map = NULL;
++out:
++	spin_unlock(&sdev->se_bme.bme_lock);
++	return (map);
++}
++
++static inline int __check_config(struct bme_map *map)
++{
++	struct config_item *item;
++	struct bme_map *tmap = NULL;
++
++	if (!(map->map_flags & BMF_CONFIGURED)) {
++		pr_err("[BME-%s:%d - %s]: source = %s not configured!\n", __func__, __LINE__,
++			config_item_name(&map->item), map->src_dev->t10_wwn.unit_serial);
++		return -EPERM;
++	}
++	list_for_each_entry(item, &(map->src_dev->dev_bme_group.cg_children), ci_entry) {
++		tmap = to_bme_map(item);
++		if (tmap == map)
++			continue;
++		if (((map->src_lba < tmap->src_lba) &&
++			((map->src_lba + map->nolb) > tmap->src_lba)) || 
++			((map->src_lba >= tmap->src_lba) &&
++			(map->src_lba < tmap->src_lba + tmap->nolb)) ||
++			((map->dst_dev == tmap->dst_dev) &&
++			(((map->dst_lba < tmap->dst_lba) &&
++			((map->dst_lba + map->nolb) > tmap->dst_lba)) || 
++			((map->dst_lba >= tmap->dst_lba) &&
++			(map->dst_lba < tmap->dst_lba + tmap->nolb))))) {
++			pr_err("[BME-%s:%d]: maps overlap "
++				"%s: (%lld) [%s : %lld]->[%s : %lld] <=> "
++				"%s: (%lld) [%s : %lld]->[%s : %lld] !\n",
++				__func__, __LINE__,
++				config_item_name(&map->item),
++				map->nolb,
++				map->src_dev->t10_wwn.unit_serial,
++				map->src_lba,
++				map->dst_dev->t10_wwn.unit_serial,
++				map->dst_lba,
++				config_item_name(&tmap->item),
++				tmap->nolb,
++				tmap->src_dev->t10_wwn.unit_serial,
++				tmap->src_lba,
++				tmap->dst_dev->t10_wwn.unit_serial,
++				tmap->dst_lba);
++			return -EPERM;
++		}
++	}
++	return 0;
++}
++
++/*
++** Host IO mirror ops
++*/
++struct io_entry {
++	struct list_head	io_list;
++	struct bme_map		*map;
++	unsigned long long	lba;
++	unsigned int		nolb;
++};
++
++/*
++ * Offset in 512B sectors
++ * nolb in 512 B sectors
++ */
++static inline struct se_cmd *__build_read_cmd(struct bme_map *map, u64 offset, u32 nolb, bool source)
++{
++	struct se_device *dev = (source) ? map->src_dev : map->dst_dev;
++	u64 sda = (source) ? map->src_lba : map->dst_lba;
++	unsigned char cdb[16];
++	struct se_cmd *cmd = NULL;
++	struct bme_cmd *bcmd = NULL;
++	sense_reason_t rc = TCM_NO_SENSE;
++	u64 cmd_lba = target_to_device_block(dev, (sda + offset));
++	u32 cmd_nolb = target_to_device_block(dev, nolb);
++	u32 length = (nolb * dev->dev_attrib.block_size);
++
++	if((bcmd = kmem_cache_zalloc(bme_cmd_cache, GFP_KERNEL)) == NULL) {
++		pr_err("[BME-%s:%d]:[%s-%lld -> %s-%lld] lba=%lld, nolb=%d\n",
++			__func__, __LINE__,
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			cmd_lba, cmd_nolb);
++		return NULL;
++	}
++	if (config_item_get_unless_zero(&map->item) == NULL) {
++		pr_err("[BME-%s:%d]:[%s-%lld -> %s-%lld] lba=%lld, nolb=%d\n",
++			__func__, __LINE__,
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			cmd_lba, cmd_nolb);
++		kmem_cache_free(bme_cmd_cache, bcmd);
++		return NULL;
++	}
++	bcmd->map =  map;
++	bcmd->link_cmd = NULL;
++
++	cmd = &bcmd->se_cmd;
++	memset(&cdb[0], 0, 16);
++	cdb[0] = READ_16;
++	put_unaligned_be64(cmd_lba, &cdb[2]);
++	put_unaligned_be32(cmd_nolb, &cdb[10]);
++	cmd->t_task_lba = cmd_lba;
++	cmd->t_task_nolb = cmd_nolb;
++	transport_init_se_cmd(cmd, map->src_dev->se_bme.tpg->se_tpg_tfo,
++				map->src_dev->se_bme.sess, length,
++				DMA_FROM_DEVICE, 0, &bcmd->sense_buffer[0]);
++	cmd->se_lun = (source) ? &map->src_lun : &map->dst_lun;
++	cmd->se_dev = dev;
++	cmd->se_cmd_flags |= SCF_SE_LUN_CMD;
++	cmd->tag = 0;
++	rc = target_setup_cmd_from_cdb(cmd, cdb);
++	if (rc < 0) {
++		pr_err("[BME-%s:%d]:[%s-%lld -> %s-%lld] lba=%lld, nolb=%d\n",
++			__func__, __LINE__,
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			cmd_lba, cmd_nolb);
++		transport_generic_free_cmd(cmd, 0);
++		return NULL;
++	}
++	return (cmd);
++}
++
++/*
++ * Offset in 512B sectors
++ * nolb in 512 B sectors
++ */
++static inline struct se_cmd *__build_write_cmd(struct bme_map *map, struct se_cmd *cmd, u64 offset, u32 nolb)
++{
++	int rval = 0;
++	struct bme_vmap sv;
++	void *buf = NULL;
++	off_t skip_len = 0;
++	unsigned char cdb[16];
++	struct se_cmd *wcmd = NULL;
++	struct bme_cmd *wbcmd = NULL;
++	u32 length = (nolb * 512);
++	u64 lba = map->src_lba + offset;
++	u64 cmd_lba = target_to_linux_sector(map->src_dev, cmd->t_task_lba);
++	u64 wcmd_lba = target_to_device_block(map->dst_dev, map->dst_lba + offset);
++	u32 wcmd_nolb = target_to_device_block(map->src_dev, nolb);
++
++#if 0
++	pr_debug("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		cmd->t_task_lba, cmd->t_task_nolb);
++nl_recvmsgs
++#endif
++	if((wbcmd = kmem_cache_zalloc(bme_cmd_cache, GFP_KERNEL)) == NULL) {
++		pr_err("[BME-%s:%d]:[%s-%lld -> %s-%lld] lba=%lld, nolb=%d\n",
++			__func__, __LINE__,
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			wcmd_lba, wcmd_nolb);
++		return NULL;
++	}
++	if (config_item_get_unless_zero(&map->item) == NULL) {
++		pr_err("[BME-%s:%d]:[%s-%lld -> %s-%lld] lba=%lld, nolb=%d\n",
++			__func__, __LINE__,
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			wcmd_lba, wcmd_nolb);
++		kmem_cache_free(bme_cmd_cache, wbcmd);
++		return NULL;
++	}
++	wbcmd->map =  map;
++	wbcmd->link_cmd = NULL;
++
++	wcmd = &wbcmd->se_cmd;
++	memset(&cdb[0], 0, 16);
++	cdb[0] = WRITE_16;
++	put_unaligned_be64(wcmd_lba, &cdb[2]);
++	put_unaligned_be32(wcmd_nolb, &cdb[10]);
++	wcmd->t_task_lba = wcmd_lba;
++	wcmd->t_task_nolb = wcmd_nolb;
++	transport_init_se_cmd(wcmd, map->src_dev->se_bme.tpg->se_tpg_tfo,
++				map->src_dev->se_bme.sess, length,
++				DMA_TO_DEVICE, 0, &wbcmd->sense_buffer[0]);
++	wcmd->se_lun = &map->dst_lun;
++	wcmd->se_dev = map->dst_dev;
++	wcmd->se_cmd_flags |= SCF_SE_LUN_CMD;
++	wcmd->tag = 0;
++	if ( target_setup_cmd_from_cdb(wcmd, cdb) < 0) {
++		pr_err("[BME-%s:%d]:[%s-%lld -> %s-%lld] lba=%lld, nolb=%d\n",
++			__func__, __LINE__,
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			wcmd_lba, wcmd_nolb);
++		transport_generic_free_cmd(cmd, 0);
++		return NULL;
++	}
++	sv.sg = cmd->t_data_sg;
++	sv.nents = cmd->t_data_nents;
++	sv.vmap = NULL;
++	buf = __map_data(&sv);
++	if (buf == NULL) {
++		pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			cmd->t_task_lba, cmd->t_task_nolb);
++		goto err;
++	}
++	if (cmd_lba < lba)
++		skip_len = (off_t)((lba - cmd_lba) << SECTOR_SHIFT);
++	rval = target_alloc_sgl(&wcmd->t_data_sg, &wcmd->t_data_nents, wcmd->data_length, false, false);
++	if (rval < 0) {
++		pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			wcmd->t_task_lba, wcmd->t_task_nolb);
++		goto err;
++	}
++	rval = sg_copy_from_buffer(wcmd->t_data_sg, wcmd->t_data_nents, buf+skip_len, wcmd->data_length);
++	if (rval != wcmd->data_length) {
++		pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d len=%d rval=%d\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			wcmd->t_task_lba, wcmd->t_task_nolb, wcmd->data_length, rval);
++		goto err;
++	}
++	wcmd->se_cmd_flags |= SCF_PASSTHROUGH_SG_TO_MEM_NOALLOC;
++	goto out;
++err:
++	if(wcmd) {
++		transport_generic_free_cmd(wcmd, 0);
++		wcmd = NULL;
++	}
++	pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		wcmd_lba, wcmd_nolb);
++out:
++	__unmap_data(&sv);
++	return (wcmd);
++}
++
++static sense_reason_t __read_src_n_dst(struct bme_map *map, int(*cb)(struct se_cmd *, sense_reason_t))
++{
++	u64 offset;
++	u32 nolb;
++	struct se_cmd *scmd = NULL, *dcmd = NULL;
++	struct bme_cmd *sbcmd = NULL, *dbcmd = NULL;
++	sense_reason_t rc = TCM_NO_SENSE;
++
++	spin_lock(&map->lock);
++	nolb = min_t(u32, (map->nolb - map->processed), map->src_dev->se_bme.max_io_blocks);
++	offset = map->processed;
++	spin_unlock(&map->lock);
++
++	if (nolb == 0) {
++		spin_lock(&map->lock);
++		map->run_time += get_jiffies_64() - map->start_time;
++		map->map_flags |= BMF_COMPLETE;
++		spin_unlock(&map->lock);
++		pr_info("[BME-%s:%d]: map=%s Complete src[%s : %lld] "
++			"dst [%s : %lld] nolb=%lld status=%d\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			map->nolb, map->status);
++		bme_send_scn(map);
++		return TCM_NO_SENSE;
++	}
++	// TBD - get credits...
++	if ((scmd = __build_read_cmd(map, offset, nolb, true)) == NULL) {
++		pr_err("[BME-%s:%d]:[%s-%lld -> %s-%lld] offset=%lld, nolb=%d\n",
++			__func__, __LINE__,
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			offset, nolb);
++		rc = TCM_OUT_OF_RESOURCES;
++		goto out;
++	}
++	if ((dcmd = __build_read_cmd(map, offset, nolb, false)) == NULL) {
++		pr_err("[BME-%s:%d]:[%s-%lld -> %s-%lld] offset=%lld, nolb=%d\n",
++			__func__, __LINE__,
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			offset, nolb);
++		transport_generic_free_cmd(scmd, 0);
++		rc = TCM_OUT_OF_RESOURCES;
++		goto out;
++	}
++	if (kref_get_unless_zero(&scmd->bme_kref)) {
++		sbcmd = container_of(scmd, struct bme_cmd, se_cmd);
++		sbcmd->cb = cb;
++		sbcmd->issue_timestamp = get_jiffies_64();
++		if ((rc = transport_generic_new_cmd(scmd)) != 0) {
++			sbcmd->cb = NULL;
++			transport_generic_free_cmd(scmd, 0);
++			transport_generic_free_cmd(dcmd, 0);
++			goto out;
++		}
++
++		dbcmd = container_of(dcmd, struct bme_cmd, se_cmd);
++		dbcmd->cb = cb;
++		dbcmd->link_cmd = scmd;
++		if ((rc = transport_generic_new_cmd(dcmd)) != 0) {
++			target_complete_cmd(scmd, TCM_NO_SENSE);
++			transport_generic_free_cmd(dcmd, 0);
++			goto out;
++		}
++		dbcmd->issue_timestamp = get_jiffies_64();
++		spin_lock(&map->lock);
++		map->curr_len = nolb << SECTOR_SHIFT;
++		spin_unlock(&map->lock);
++	}
++	else {
++		pr_err("[BME-%s:%d]:[%s-%lld -> %s-%lld] offset=%lld, nolb=%d\n",
++			__func__, __LINE__,
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			offset, nolb);
++		rc = TCM_OUT_OF_RESOURCES;
++	}
++out:
++#if 0
++	pr_debug("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] offset=%llu nolb=%d rc=%d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		offset, nolb, rc);
++#endif
++	switch(rc) {
++		case TCM_NO_SENSE:
++			break;
++		case TCM_OUT_OF_RESOURCES:
++			// retry
++			queue_delayed_work(map->src_dev->se_bme.wq, &map->work, usecs_to_jiffies(5));
++			break;
++		default:
++			__set_error(map, rc);
++			break;
++	}
++	return (rc);
++}
++
++int _cbMirrorIO(struct se_cmd *cmd, sense_reason_t reason)
++{
++	struct bme_cmd *bcmd = container_of(cmd, struct bme_cmd, se_cmd);
++	struct bme_map *map = bcmd->map;
++	sense_reason_t rc = TCM_NO_SENSE;
++
++#if 1
++	pr_debug("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d status=%d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		cmd->t_task_lba, cmd->t_task_nolb, cmd->scsi_status);
++#endif
++	if (cmd->scsi_status) {
++		pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d status=%d\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			cmd->t_task_lba, cmd->t_task_nolb, cmd->scsi_status);
++		rc = TCM_COPY_TARGET_DEVICE_NOT_REACHABLE;
++	}
++	else
++		rc = reason;
++	if (bcmd->link_cmd)
++		target_complete_cmd(bcmd->link_cmd, TCM_NO_SENSE);
++	bcmd->link_cmd = NULL;
++	cmd->se_cmd_flags &= ~SCF_PASSTHROUGH_SG_TO_MEM_NOALLOC;
++	if(rc) {
++		__set_error(map, rc);
++	}
++	return 0;
++}
++
++#if 1
++static inline int _opMirrorIO(struct bme_map *map, struct se_cmd *cmd, u64 lba, u32 nolb)
++{
++	struct se_cmd *mcmd = NULL;
++	struct bme_cmd *mbcmd = NULL;
++
++	if ((map->status != MAP_S_ACTIVE) && (map->status != MAP_S_STANDBY))
++		return (0);
++	pr_debug("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		lba, nolb);
++	if ((mcmd = __build_write_cmd(map, cmd, lba, nolb)) == NULL) {
++		pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			lba, nolb);
++		goto err;
++	}
++	mbcmd = container_of(mcmd, struct bme_cmd, se_cmd);
++	if (kref_get_unless_zero(&cmd->bme_kref)) {
++		mbcmd->link_cmd = cmd;
++		mbcmd->cb = _cbMirrorIO;
++		mbcmd->issue_timestamp = get_jiffies_64();
++		if (transport_generic_new_cmd(mcmd) != 0) {
++			target_complete_cmd(cmd, TCM_NO_SENSE);
++			goto err;
++		}
++		return 0;
++	}
++err:
++	__set_error(map, TCM_COPY_TARGET_DEVICE_NOT_REACHABLE);
++	if(mcmd) {
++		mcmd->se_cmd_flags &= ~SCF_PASSTHROUGH_SG_TO_MEM_NOALLOC;
++		transport_generic_free_cmd(mcmd, 0);
++	}
++	return 0;
++}
++#else
++static inline int _opMirrorIO(struct bme_map *map, struct se_cmd *cmd, u64 lba, u32 nolb)
++{
++	int rval = 0;
++	unsigned char *buf = NULL;
++	struct se_cmd *mcmd = NULL;
++	struct bme_cmd *mbcmd = NULL;
++	u64 cmd_lba;
++	u32 length = (nolb * map->dst_dev->dev_attrib.block_size);
++
++	pr_debug("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		cmd->t_task_lba, cmd->t_task_nolb);
++	if ((mcmd = __get_cmd(map, lba, nolb, DMA_TO_DEVICE,false)) == NULL) {
++		pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			cmd->t_task_lba, cmd->t_task_nolb);
++		goto err;
++	}
++	mbcmd = container_of(mcmd, struct bme_cmd, se_cmd);
++	if ((buf = kmalloc(mcmd->data_length, GFP_KERNEL)) == NULL) {
++		pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			cmd->t_task_lba, cmd->t_task_nolb);
++		goto err;
++	}
++	cmd_lba = target_to_linux_sector(map->src_dev, cmd->t_task_lba);
++	if (cmd_lba < lba) {
++		off_t skip_len = (off_t)((lba - cmd_lba) << SECTOR_SHIFT);
++		rval = sg_pcopy_to_buffer(cmd->t_data_sg,
++					cmd->t_data_nents,
++					buf, 
++					mcmd->data_length,
++					skip_len);
++	}
++	else 
++		rval = sg_copy_to_buffer(cmd->t_data_sg, cmd->t_data_nents, buf, length);
++	if (rval != length) {
++		pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d len=%d rval=%d\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			cmd->t_task_lba, cmd->t_task_nolb, length, rval);
++		goto err;
++	}
++	rval = target_alloc_sgl(&mcmd->t_data_sg, &mcmd->t_data_nents, mcmd->data_length, false, false);
++	if (rval < 0) {
++		pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			cmd->t_task_lba, cmd->t_task_nolb);
++		goto err;
++	}
++	rval = sg_copy_from_buffer(mcmd->t_data_sg, mcmd->t_data_nents, buf, length);
++	if (rval != length) {
++		pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d len=%d rval=%d\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			cmd->t_task_lba, cmd->t_task_nolb, length, rval);
++		goto err;
++	}
++	if (kref_get_unless_zero(&cmd->bme_kref)) {
++		mcmd->se_cmd_flags |= SCF_PASSTHROUGH_SG_TO_MEM_NOALLOC;
++		mbcmd->link_cmd = cmd;
++		mbcmd->cb = _cbMirrorIO;
++		if ((rval = transport_generic_new_cmd(mcmd)) != 0) {
++			target_complete_cmd(cmd, TCM_NO_SENSE);
++			goto err;
++		}
++		mbcmd->issue_timestamp = get_jiffies_64();
++		goto out;
++	}
++err:
++	if(mcmd)
++		transport_generic_free_cmd(mcmd, 0);
++	pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		cmd->t_task_lba, cmd->t_task_nolb);
++out:
++	if (buf)
++		kfree(buf);
++	return (0);
++}
++#endif
++
++static sense_reason_t _procInlineIO(struct se_cmd *cmd)
++{
++	int status;
++	u32 nolb, copy_nolb;
++	u64 sda, eda, lba, copy_lba;
++	struct config_item *item;
++	struct bme_map *map = NULL;
++	struct list_head io_entry_list;
++	struct se_device *dev = cmd->se_dev;
++	unsigned char *cdb = cmd->t_task_cdb;
++	struct io_entry *ioe = NULL, *tmp_ioe;
++
++	if (list_empty(&(dev->dev_bme_group.cg_children)))
++		return TCM_NO_SENSE;
++	if ((dev->se_bme.state == BME_S_INACTIVE) || (dev->se_bme.state == BME_S_SUSPENDED))
++		return TCM_NO_SENSE;
++
++	switch (cdb[0]) {
++		case TEST_UNIT_READY:
++		case INQUIRY:
++		case LOG_SELECT:
++		case LOG_SENSE:
++		case MODE_SELECT:
++		case MODE_SENSE:
++		case REPORT_LUNS:
++		case RECEIVE_DIAGNOSTIC:
++		case SEND_DIAGNOSTIC:
++		case READ_CAPACITY:
++		case MAINTENANCE_IN:
++		case MAINTENANCE_OUT:
++		case REQUEST_SENSE:
++		case PERSISTENT_RESERVE_IN:
++		case PERSISTENT_RESERVE_OUT:
++		case READ_BUFFER:
++		case WRITE_BUFFER:
++			return TCM_NO_SENSE;
++		case WRITE_VERIFY:
++		case WRITE_VERIFY_16:
++		{
++			#if 0 // TBD
++			if (dev->dev_attrib.zstate == ZIZO_S_SWITCHED) {
++				cmd->scsi_asc = 0x04;
++				cmd->scsi_ascq = ASCQ_04H_ALUA_TG_PT_STANDBY;
++				return TCM_CHECK_CONDITION_NOT_READY;
++			}
++			#endif
++			return TCM_NO_SENSE;
++		}
++		case WRITE_6:
++		case WRITE_10:
++		case WRITE_12:
++		case WRITE_16:
++		{
++			#if 0 // TBD
++			if (dev->dev_attrib.zstate == ZIZO_S_SWITCHED) {
++				cmd->scsi_asc = 0x04;
++				cmd->scsi_ascq = ASCQ_04H_ALUA_TG_PT_STANDBY;
++				return TCM_CHECK_CONDITION_NOT_READY;
++			}
++			#endif
++			break;
++		}
++		default:
++		{
++			#if 0 // TBD
++			if (dev->dev_attrib.zstate == ZIZO_S_SWITCHED) {
++				cmd->scsi_asc = 0x04;
++				cmd->scsi_ascq = ASCQ_04H_ALUA_TG_PT_STANDBY;
++				return TCM_CHECK_CONDITION_NOT_READY;
++			}
++			#endif
++			return TCM_NO_SENSE;
++		}
++	}
++
++	status = TCM_NO_SENSE;
++	if (cmd->t_task_nolb == 0)
++		cmd->t_task_nolb = target_to_device_block(dev, (cmd->data_length >> SECTOR_SHIFT));
++	nolb = target_to_linux_sector(dev, cmd->t_task_nolb);
++	lba = target_to_linux_sector(dev, cmd->t_task_lba);
++	INIT_LIST_HEAD(&io_entry_list);
++	pr_debug("[BME-%s:%d]:lba=%lld, nolb=%d \n", __func__, __LINE__, lba, nolb);
++
++	spin_lock(&dev->se_bme.bme_lock);
++	list_for_each_entry(item, &(dev->dev_bme_group.cg_children), ci_entry) {
++		map = to_bme_map(item);
++		if ((map->status != MAP_S_ACTIVE) && (map->status != MAP_S_STANDBY))
++			continue;
++		if (((map->src_lba < lba) && ((map->src_lba + map->nolb) > lba)) || 
++			((map->src_lba >= lba) && (map->src_lba < lba + nolb))) {
++			spin_lock(&map->lock);
++			sda = map->src_lba + map->processed;
++			eda = sda + (map->curr_len >> SECTOR_SHIFT);
++			spin_unlock(&map->lock);
++			if (((lba < sda) && (lba + nolb >= eda)) ||
++				((lba >= sda) && (lba < eda))) {
++				pr_info("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld]"
++					"lba=%lld, nolb=%d sda=%lld eda=%lld\n",
++					 __func__, __LINE__, config_item_name(&map->item),
++					map->src_dev->t10_wwn.unit_serial, map->src_lba,
++					map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++					lba, nolb, sda, eda);
++				status = TCM_LUN_BUSY;
++				goto out;
++			}
++			if (lba >= eda)
++				continue;
++			// fall thru...
++			sda = map->src_lba;
++			eda = map->src_lba + map->nolb;
++#if 1
++			pr_debug("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld]"
++				"lba=%lld, nolb=%d sda=%lld eda=%lld\n",
++				 __func__, __LINE__, config_item_name(&map->item),
++				map->src_dev->t10_wwn.unit_serial, map->src_lba,
++				map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++				lba, nolb, sda, eda);
++#endif
++			copy_lba =  (lba <= sda) ? sda : lba;
++			copy_nolb = (lba < copy_lba) ? nolb - (copy_lba - lba) : nolb;
++			copy_nolb = min_t(u32, nolb, (eda - copy_lba));
++			ioe = kzalloc(sizeof(struct io_entry), GFP_KERNEL);
++			if (!ioe) {
++				pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld]"
++					"lba=%lld, nolb=%d sda=%lld eda=%lld\n",
++					 __func__, __LINE__, config_item_name(&map->item),
++					map->src_dev->t10_wwn.unit_serial, map->src_lba,
++					map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++					lba, nolb, sda, eda);
++				status = TCM_OUT_OF_RESOURCES;
++				goto out;
++			}
++			INIT_LIST_HEAD(&ioe->io_list);
++			ioe->map = map;
++			ioe->lba = copy_lba;
++			ioe->nolb = copy_nolb;
++			list_add_tail(&ioe->io_list, &io_entry_list);
++		}
++	}
++out:
++	spin_unlock(&dev->se_bme.bme_lock);
++	if (!list_empty(&io_entry_list)) {
++		list_for_each_entry_safe(ioe, tmp_ioe, &io_entry_list, io_list) {
++			if (status == TCM_NO_SENSE)
++				_opMirrorIO(ioe->map, cmd, ioe->lba, ioe->nolb);
++			list_del(&ioe->io_list);
++			kfree(ioe);
++		}
++	}
++	return ((status == TCM_LUN_BUSY) ? status : TCM_NO_SENSE);
++}
++
++/*
++ * BME Copy ops
++ */
++
++static int _cbCopyDstWrite(struct se_cmd *cmd, sense_reason_t reason)
++{
++	struct bme_cmd *bcmd = container_of(cmd, struct bme_cmd, se_cmd);
++	struct bme_map *map = bcmd->map;
++	sense_reason_t rc = TCM_NO_SENSE;
++	u64 lba = target_to_linux_sector(map->dst_dev, cmd->t_task_lba);
++	u32 nolb = target_to_linux_sector(map->dst_dev, cmd->t_task_nolb);
++
++	if (cmd->scsi_status) {
++		pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d status=%d\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			lba, nolb, cmd->scsi_status);
++		rc = TCM_COPY_TARGET_DEVICE_NOT_REACHABLE;
++	}
++	else
++		rc = reason;
++#if 0
++	pr_debug("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d status=%d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		lba, nolb, rc);
++#endif
++	switch(rc) {
++		case TCM_NO_SENSE:
++			__update_txstats(cmd);
++			spin_lock(&map->lock);
++			map->processed += target_to_linux_sector(map->dst_dev, cmd->t_task_nolb);
++			map->moved = map->processed;
++			map->curr_len = 0;
++			if(map->nolb == map->processed) {
++				map->run_time += get_jiffies_64() - map->start_time;
++				map->map_flags |= BMF_COMPLETE;
++				pr_info("[BME-%s:%d]: map=%s Complete src[%s : %lld] "
++					"dst [%s : %lld] nolb=%lld status=%d\n",
++					 __func__, __LINE__, config_item_name(&map->item),
++					map->src_dev->t10_wwn.unit_serial, map->src_lba,
++					map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++					map->nolb, map->status);
++				bme_send_scn(map);
++			}
++			spin_unlock(&map->lock);
++			queue_delayed_work(map->src_dev->se_bme.wq, &map->work, 0);
++			break;
++		case TCM_OUT_OF_RESOURCES:
++			// retry
++			queue_delayed_work(map->src_dev->se_bme.wq, &map->work, usecs_to_jiffies(5));
++			break;
++		default:
++			pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d rc=%d\n",
++				 __func__, __LINE__, config_item_name(&map->item),
++				map->src_dev->t10_wwn.unit_serial, map->src_lba,
++				map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++				lba, nolb, rc);
++			__set_error(map, rc);
++			break;
++	}
++	cmd->se_cmd_flags &= ~SCF_PASSTHROUGH_SG_TO_MEM_NOALLOC;
++	return 0;
++}
++
++static int _cbCopySrcRead(struct se_cmd *cmd, sense_reason_t reason)
++{
++	struct bme_cmd *bcmd = container_of(cmd, struct bme_cmd, se_cmd);
++	struct bme_map *map = bcmd->map;
++	struct se_cmd *wcmd = NULL;
++	struct bme_cmd *wbcmd = NULL;
++	sense_reason_t rc = TCM_NO_SENSE;
++	u64 offset = target_to_linux_sector(map->src_dev, cmd->t_task_lba) - map->src_lba;
++	u32 nolb = target_to_linux_sector(map->src_dev, cmd->t_task_nolb);
++
++	if (cmd->scsi_status) {
++		pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] offset=%llu nolb=%d status=%d\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			offset, nolb, cmd->scsi_status);
++		rc = TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
++		goto out;
++	}
++	else if (reason != TCM_NO_SENSE) {
++		rc = reason;
++		goto out;
++	}
++	__update_rxstats(cmd);
++	/*
++	** Extract info from read cmd and issue WRITE to destination
++	*/
++	if ((wcmd = __build_write_cmd(map, cmd, offset, nolb)) == NULL) {
++		pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] "
++			"offset=%llu nolb=%d write cmd setup failed\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			offset, nolb);
++		rc = TCM_OUT_OF_RESOURCES;
++		goto out;
++	}
++	wbcmd = container_of(wcmd, struct bme_cmd, se_cmd);
++	wbcmd->cb = _cbCopyDstWrite;
++	if (__get_credits(map->dst_dev, nolb) == nolb) {
++		if ((rc = transport_generic_new_cmd(wcmd)) == 0) {
++			wbcmd->issue_timestamp = get_jiffies_64();
++			goto out;
++		}
++	}
++	else
++		rc = TCM_OUT_OF_RESOURCES;
++	pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] "
++			"offset=%llu nolb=%d write cmd issue failed %d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		offset, nolb, rc);
++	wcmd->se_cmd_flags &= ~SCF_PASSTHROUGH_SG_TO_MEM_NOALLOC;
++	transport_generic_free_cmd(wcmd, 0);
++out:
++#if 0
++	pr_debug("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] offset=%llu nolb=%d status=%d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		offset, nolb, rc);
++#endif
++	switch(rc) {
++		case TCM_NO_SENSE:
++			break;
++		case TCM_OUT_OF_RESOURCES:
++			// retry
++			queue_delayed_work(map->src_dev->se_bme.wq, &map->work, usecs_to_jiffies(5));
++			break;
++		default:
++			__set_error(map, rc);
++			break;
++	}
++	cmd->se_cmd_flags &= ~SCF_PASSTHROUGH_SG_TO_MEM_NOALLOC;
++	return 0;
++}
++
++static sense_reason_t _opCopySrcRead(struct bme_map *map)
++{
++	u64 offset;
++	u32 nolb;
++	struct se_cmd *cmd = NULL;
++	struct bme_cmd *bcmd = NULL;
++	sense_reason_t rc = TCM_NO_SENSE;
++
++	spin_lock(&map->lock);
++	nolb = min_t(u32, (map->nolb - map->processed), map->src_dev->se_bme.max_io_blocks);
++	offset = map->processed;
++	spin_unlock(&map->lock);
++
++	if (nolb == 0) {
++		spin_lock(&map->lock);
++		map->run_time += get_jiffies_64() - map->start_time;
++		map->map_flags |= BMF_COMPLETE;
++		spin_unlock(&map->lock);
++		pr_info("[BME-%s:%d]: map=%s Complete src[%s : %lld] "
++			"dst [%s : %lld] nolb=%lld status=%d\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			map->nolb, map->status);
++		bme_send_scn(map);
++		return 0;
++	}
++	// TBD - get credits...
++	if ((cmd = __build_read_cmd(map, offset, nolb, true)) == NULL) {
++		pr_err("[BME-%s:%d]:[%s-%lld -> %s-%lld] offset=%lld, nolb=%d\n",
++			__func__, __LINE__,
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			offset, nolb);
++		rc = TCM_OUT_OF_RESOURCES;
++		goto err;
++	}
++#if 0
++	pr_debug("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] offset=%llu nolb=%d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		offset, nolb);
++#endif
++	bcmd = container_of(cmd, struct bme_cmd, se_cmd);
++	bcmd->cb = _cbCopySrcRead;
++	bcmd->issue_timestamp = get_jiffies_64();
++	if (__get_credits(map->src_dev, nolb) == nolb) {
++		if ((rc = transport_generic_new_cmd(cmd)) == 0) {
++			spin_lock(&map->lock);
++			map->curr_len = nolb << SECTOR_SHIFT;
++			spin_unlock(&map->lock);
++			return (rc);
++		}
++	}
++	else
++		rc = TCM_OUT_OF_RESOURCES;
++	pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] "
++		"offfset=%llu nolb=%d issue_cmd FAILED with %d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		offset, nolb, rc);
++	transport_generic_free_cmd(cmd, 0);
++err:
++	pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] offset=%llu nolb=%d rc=%d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		offset, nolb, rc);
++	return (rc);
++}
++
++/*
++ * BME Verify ops
++ */
++
++void _wrkVerifyCompare(struct work_struct *work)
++{
++	struct bme_vmap sv, dv;
++	void *src = NULL, *dst = NULL;
++	sense_reason_t rc = TCM_NO_SENSE;
++	struct bme_cmd *bcmd = container_of(work, struct bme_cmd, work.work);
++	struct bme_map *map = bcmd->map;
++	struct se_cmd *cmd = &bcmd->se_cmd;
++	unsigned int compare_len = cmd->data_length;
++
++#if 0
++	pr_debug("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d status=%d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		cmd->t_task_lba, cmd->t_task_nolb, cmd->scsi_status);
++#endif
++	sv.sg = cmd->t_data_sg;
++	sv.nents = cmd->t_data_nents;
++	sv.vmap = NULL;
++	dv.sg = cmd->t_bidi_data_sg;
++	dv.nents = cmd->t_bidi_data_nents;
++	dv.vmap = NULL;
++
++	src = __map_data(&sv);
++	dst = __map_data(&dv);
++
++	if (!src || !dst)
++		rc = TCM_OUT_OF_RESOURCES;
++	else if (!__raw_compare(src, dst, compare_len))
++		rc = TCM_MISCOMPARE_VERIFY;
++	__unmap_data(&sv);
++	__unmap_data(&dv);
++
++	switch(rc) {
++		case TCM_NO_SENSE:
++			spin_lock(&map->lock);
++			map->processed += target_to_linux_sector(map->dst_dev, cmd->t_task_nolb);
++			map->curr_len = 0;
++			spin_unlock(&map->lock);
++			queue_delayed_work(map->src_dev->se_bme.wq, &map->work, 0);
++			break;
++		default:
++			pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d rc=%d\n",
++				 __func__, __LINE__, config_item_name(&map->item),
++				map->src_dev->t10_wwn.unit_serial, map->src_lba,
++				map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++				cmd->t_task_lba, cmd->t_task_nolb, rc);
++			__set_error(map, rc);
++			break;
++	}
++	cmd->se_cmd_flags &= ~SCF_PASSTHROUGH_SG_TO_MEM_NOALLOC;
++	transport_generic_free_cmd(cmd, 0);
++	return;
++}
++
++static int _cbVerifyRead(struct se_cmd *cmd, sense_reason_t reason)
++{
++	struct bme_cmd *bcmd = container_of(cmd, struct bme_cmd, se_cmd);
++	struct bme_map *map = bcmd->map;
++	u64 lba;
++	u32 nolb;
++	struct bme_core_map_ops *mops = NULL;
++	sense_reason_t rc = TCM_NO_SENSE;
++
++	if (cmd->scsi_status) {
++		pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d status=%d\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			lba, nolb, cmd->scsi_status);
++		rc = (bcmd->link_cmd) ? TCM_COPY_TARGET_DEVICE_NOT_REACHABLE : TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
++	}
++	else
++		rc = reason;
++	switch(rc) {
++		case TCM_OUT_OF_RESOURCES:
++			// retry
++			queue_delayed_work(map->src_dev->se_bme.wq, &map->work, usecs_to_jiffies(5));
++			break;
++		case TCM_NO_SENSE:
++		{
++			__update_rxstats(cmd);
++			if (bcmd->link_cmd) {
++				 // Dst read
++#if 0
++				pr_debug("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d status=%d\n",
++					 __func__, __LINE__, config_item_name(&map->item),
++					map->src_dev->t10_wwn.unit_serial, map->src_lba,
++					map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++					cmd->t_task_lba, cmd->t_task_nolb, cmd->scsi_status);
++#endif
++				bcmd->link_cmd->t_bidi_data_nents = cmd->t_data_nents;
++				bcmd->link_cmd->t_bidi_data_sg = cmd->t_data_sg;
++				cmd->t_data_nents = 0;
++				cmd->t_data_sg = NULL;
++				break;
++			}
++			// source read
++			if (cmd->t_bidi_data_sg != NULL) {
++				mops = to_map_ops(cmd->se_tfo);
++				if (mops->compare) {
++					if ((rc = target_get_sess_cmd(cmd, true)) != 0) {
++						pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] "
++							"lba=%llu nolb=%d get_sess_cmd failed with %d\n",
++							 __func__, __LINE__, config_item_name(&map->item),
++							map->src_dev->t10_wwn.unit_serial, map->src_lba,
++							map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++							lba, nolb, rc);
++						__set_error(map, TCM_ERROR);
++						break;
++					} 
++					INIT_DELAYED_WORK(&bcmd->work, mops->compare);
++					queue_delayed_work(map->src_dev->se_bme.wq, &bcmd->work, 0);
++				}
++				break;
++			}
++			// Something happened to the linked dst read.
++			pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d dst data missing\n",
++				 __func__, __LINE__, config_item_name(&map->item),
++				map->src_dev->t10_wwn.unit_serial, map->src_lba,
++				map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++				lba, nolb);
++			rc = TCM_COPY_TARGET_DEVICE_NOT_REACHABLE;
++			// fall thru
++		}
++		default:
++			pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d rc=%d\n",
++				 __func__, __LINE__, config_item_name(&map->item),
++				map->src_dev->t10_wwn.unit_serial, map->src_lba,
++				map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++				lba, nolb, rc);
++			__set_error(map, rc);
++			break;
++	}
++	if (bcmd->link_cmd) {
++		struct se_cmd *lcmd = bcmd->link_cmd;
++		bcmd->link_cmd = NULL;
++		target_complete_cmd(lcmd, TCM_NO_SENSE);
++	}
++	return 0;
++}
++
++static sense_reason_t _opVerifyRead(struct bme_map *map)
++{
++	return  __read_src_n_dst(map, _cbVerifyRead);
++}
++
++/*
++ * BME Sync ops
++ */
++
++static int _cbSyncRead(struct se_cmd *cmd, sense_reason_t reason)
++{
++	struct bme_cmd *bcmd = container_of(cmd, struct bme_cmd, se_cmd);
++	struct bme_map *map = bcmd->map;
++	u64 lba;
++	u32 nolb;
++	struct bme_core_map_ops *mops = NULL;
++	sense_reason_t rc = TCM_NO_SENSE;
++
++	if (cmd->scsi_status) {
++		pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d status=%d\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			lba, nolb, cmd->scsi_status);
++		rc = (bcmd->link_cmd) ? TCM_COPY_TARGET_DEVICE_NOT_REACHABLE : TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
++	}
++	else
++		rc = reason;
++	switch(rc) {
++		case TCM_OUT_OF_RESOURCES:
++			// retry
++			queue_delayed_work(map->src_dev->se_bme.wq, &map->work, usecs_to_jiffies(5));
++			break;
++		case TCM_NO_SENSE:
++		{
++			__update_rxstats(cmd);
++			if (bcmd->link_cmd) {
++				 // Dst read
++#if 0
++				pr_debug("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d status=%d\n",
++					 __func__, __LINE__, config_item_name(&map->item),
++					map->src_dev->t10_wwn.unit_serial, map->src_lba,
++					map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++					cmd->t_task_lba, cmd->t_task_nolb, cmd->scsi_status);
++#endif
++				bcmd->link_cmd->t_bidi_data_nents = cmd->t_data_nents;
++				bcmd->link_cmd->t_bidi_data_sg = cmd->t_data_sg;
++				cmd->t_data_nents = 0;
++				cmd->t_data_sg = NULL;
++				break;
++			}
++			// source read
++			if (cmd->t_bidi_data_sg != NULL) {
++				mops = to_map_ops(cmd->se_tfo);
++				if (mops->compare) {
++					if ((rc = target_get_sess_cmd(cmd, true)) != 0) {
++						pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] "
++							"lba=%llu nolb=%d get_sess_cmd failed with %d\n",
++							 __func__, __LINE__, config_item_name(&map->item),
++							map->src_dev->t10_wwn.unit_serial, map->src_lba,
++							map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++							lba, nolb, rc);
++						__set_error(map, TCM_ERROR);
++						break;
++					} 
++					INIT_DELAYED_WORK(&bcmd->work, mops->compare);
++					queue_delayed_work(map->src_dev->se_bme.wq, &bcmd->work, 0);
++				}
++				break;
++			}
++			// Something happened to the linked dst read.
++			pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d dst data missing\n",
++				 __func__, __LINE__, config_item_name(&map->item),
++				map->src_dev->t10_wwn.unit_serial, map->src_lba,
++				map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++				lba, nolb);
++			rc = TCM_COPY_TARGET_DEVICE_NOT_REACHABLE;
++			// fall thru
++		}
++		default:
++			pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d rc=%d\n",
++				 __func__, __LINE__, config_item_name(&map->item),
++				map->src_dev->t10_wwn.unit_serial, map->src_lba,
++				map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++				lba, nolb, rc);
++			__set_error(map, rc);
++			break;
++	}
++	if (bcmd->link_cmd) {
++		struct se_cmd *lcmd = bcmd->link_cmd;
++		bcmd->link_cmd = NULL;
++		target_complete_cmd(lcmd, TCM_NO_SENSE);
++	}
++	return 0;
++}
++
++static sense_reason_t _opSyncRead(struct bme_map *map)
++{
++	return  __read_src_n_dst(map, _cbSyncRead);
++}
++
++static int _cbSyncWrite(struct se_cmd *cmd, sense_reason_t reason)
++{
++	struct bme_cmd *bcmd = container_of(cmd, struct bme_cmd, se_cmd);
++	struct bme_map *map = bcmd->map;
++	sense_reason_t rc = TCM_NO_SENSE;
++	u32 nolb = target_to_linux_sector(map->dst_dev, cmd->t_task_nolb);
++	u64 lba = target_to_linux_sector(map->dst_dev, cmd->t_task_lba);
++
++	if (cmd->scsi_status) {
++		pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d status=%d\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			lba, nolb, cmd->scsi_status);
++		rc = TCM_COPY_TARGET_DEVICE_NOT_REACHABLE;
++	}
++	else
++		rc = reason;
++	switch(rc) {
++		case TCM_NO_SENSE:
++		{
++			__update_txstats(cmd);
++			spin_lock(&map->lock);
++			map->moved += nolb;
++			spin_unlock(&map->lock);
++			if (!bcmd->link_cmd) {
++				spin_lock(&map->lock);
++				map->processed += (map->curr_len >> SECTOR_SHIFT);
++				map->curr_len = 0;
++				spin_unlock(&map->lock);
++				queue_delayed_work(map->src_dev->se_bme.wq, &map->work, 0);
++			}
++			break;
++		}
++		default:
++			pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d rc=%d\n",
++				 __func__, __LINE__, config_item_name(&map->item),
++				map->src_dev->t10_wwn.unit_serial, map->src_lba,
++				map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++				lba, nolb, rc);
++			__set_error(map, rc);
++			break;
++	}
++	if (bcmd->link_cmd) {
++		struct se_cmd *lcmd = bcmd->link_cmd;
++		bcmd->link_cmd = NULL;
++		target_complete_cmd(lcmd, TCM_NO_SENSE);
++	}
++	return 0;
++}
++
++void _wrkSyncCompare(struct work_struct *work)
++{
++	struct bme_cmd *bcmd = container_of(work, struct bme_cmd, work.work);
++	struct bme_map *map = bcmd->map;
++	struct se_cmd *cmd = &bcmd->se_cmd;
++	struct se_cmd *first_wcmd = NULL, *wcmd = NULL;
++	struct bme_cmd *wbcmd = NULL;
++	sense_reason_t rc = TCM_NO_SENSE;
++	unsigned int len, offset = 0, compare_len = cmd->data_length;
++	struct bme_vmap sv, dv;
++	void *src = NULL, *dst = NULL;
++	u32 nolb = target_to_linux_sector(map->src_dev, cmd->t_task_nolb);
++	u64 lba = target_to_linux_sector(map->src_dev, cmd->t_task_lba);
++
++#if 0
++	pr_debug("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d status=%d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		cmd->t_task_lba, cmd->t_task_nolb, cmd->scsi_status);
++#endif
++	sv.sg = cmd->t_data_sg;
++	sv.nents = cmd->t_data_nents;
++	sv.vmap = NULL;
++	dv.sg = cmd->t_bidi_data_sg;
++	dv.nents = cmd->t_bidi_data_nents;
++	dv.vmap = NULL;
++
++	src = __map_data(&sv);
++	dst = __map_data(&dv);
++
++	if (!src || !dst) {
++		rc = TCM_OUT_OF_RESOURCES;
++		goto out;
++	}
++	for (len = 0, compare_len = cmd->data_length; compare_len != 0; compare_len -= len, offset += len) {
++		// get len here...
++		len = compare_len;	// TBD
++		if (!__raw_compare(src+offset, dst+offset, len)) {
++			wcmd = __build_write_cmd(map, cmd, lba + (offset >> SECTOR_SHIFT), len >> SECTOR_SHIFT);
++			if (!wcmd) {
++				pr_err("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%lld, nolb=%d\n",
++					 __func__, __LINE__, config_item_name(&map->item),
++					map->src_dev->t10_wwn.unit_serial, map->src_lba,
++					map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++					lba, nolb);
++				rc = TCM_OUT_OF_RESOURCES;
++				goto err;
++			}
++			wcmd->se_cmd_flags |= SCF_PASSTHROUGH_SG_TO_MEM_NOALLOC;
++			wbcmd = container_of(wcmd, struct bme_cmd, se_cmd);
++			wbcmd->cb = _cbSyncWrite;
++			wbcmd->issue_timestamp = get_jiffies_64();
++			if (!first_wcmd) {
++				first_wcmd = wcmd;
++				continue;
++			}
++			if (kref_get_unless_zero(&first_wcmd->bme_kref)) {
++				wbcmd->link_cmd = first_wcmd;
++				if ((rc = transport_generic_new_cmd(wcmd)) != 0) {
++					wcmd->se_cmd_flags &= ~SCF_PASSTHROUGH_SG_TO_MEM_NOALLOC;
++					transport_generic_free_cmd(wcmd, 0);
++					goto err;
++				}
++			}
++		}
++	}
++	if (first_wcmd) {
++		if ((rc = transport_generic_new_cmd(first_wcmd)) != 0) {
++			goto err;
++		}
++	}
++	else {
++		// Nothing to sync... 
++		spin_lock(&map->lock);
++		map->processed += nolb;
++		map->curr_len = 0;
++		spin_unlock(&map->lock);
++		queue_delayed_work(map->src_dev->se_bme.wq, &map->work, 0);
++	}
++	goto out;
++err:
++	__set_error(map, rc);	
++	if (first_wcmd)
++		target_complete_cmd(first_wcmd, TCM_NO_SENSE);
++out:
++	__unmap_data(&sv);
++	__unmap_data(&dv);
++	cmd->se_cmd_flags &= ~SCF_PASSTHROUGH_SG_TO_MEM_NOALLOC;
++	transport_generic_free_cmd(cmd, 0);
++	return;
++}
++
++/*
++** bme tfo functions
++*/
++
++static int bme_get_cmd_state(struct se_cmd *cmd)
++{
++#if 0
++	struct bme_cmd *bcmd = container_of(cmd, struct bme_cmd, se_cmd);
++	struct bme_map *map = bcmd->map;
++
++	pr_debug("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d status=%d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		cmd->t_task_lba, cmd->t_task_nolb, cmd->scsi_status);
++#endif
++        return (cmd->t_state);
++}
++
++static void bme_release_cmd(struct se_cmd *cmd)
++{
++	struct bme_cmd *bcmd = container_of(cmd, struct bme_cmd, se_cmd);
++	struct bme_map *map = bcmd->map;
++
++#if 0
++	pr_debug("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d tstate=0x%x\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		cmd->t_task_lba, cmd->t_task_nolb, cmd->transport_state);
++#endif
++	if(map)
++		config_item_put(&map->item);
++	kmem_cache_free(bme_cmd_cache, bcmd);
++}
++
++static int bme_check_stop_free(struct se_cmd *cmd)
++{
++#if 0
++	struct bme_cmd *bcmd = container_of(cmd, struct bme_cmd, se_cmd);
++	struct bme_map *map = bcmd->map;
++
++	pr_debug("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d status=%d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		cmd->t_task_lba, cmd->t_task_nolb, cmd->scsi_status);
++#endif
++	transport_generic_free_cmd(cmd, 0);
++	return 1;
++}
++
++static int bme_write_pending(struct se_cmd *cmd)
++{
++#if 0
++	struct bme_cmd *bcmd = container_of(cmd, struct bme_cmd, se_cmd);
++	struct bme_map *map = bcmd->map;
++
++	pr_debug("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d status=%d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		cmd->t_task_lba, cmd->t_task_nolb, cmd->scsi_status);
++#endif
++	target_execute_cmd(cmd);
++	return 0;
++}
++
++static int bme_queue_data_in(struct se_cmd *cmd)
++{
++	struct bme_cmd *bcmd = container_of(cmd, struct bme_cmd, se_cmd);
++	struct bme_map *map = bcmd->map;
++
++#if 0
++	pr_debug("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d status=%d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		cmd->t_task_lba, cmd->t_task_nolb, cmd->scsi_status);
++#endif
++
++	if (bcmd->cb)
++		return (bcmd->cb(cmd, map->error));
++	return 0;
++}
++
++static int bme_queue_status(struct se_cmd *cmd)
++{
++	struct bme_cmd *bcmd = container_of(cmd, struct bme_cmd, se_cmd);
++	struct bme_map *map = bcmd->map;
++
++#if 0
++	pr_debug("[BME-%s:%d]: map=%s src[%s : %lld] dst [%s : %lld] lba=%llu nolb=%d status=%d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		cmd->t_task_lba, cmd->t_task_nolb, cmd->scsi_status);
++#endif
++
++	if (bcmd->cb)
++		return (bcmd->cb(cmd, map->error));
++	return 0;
++}
++
++static const struct bme_core_map_ops default_tfo = {
++	.tfo = {
++		.fabric_name		= "bme-default",
++		.get_cmd_state		= bme_get_cmd_state,
++		.release_cmd		= bme_release_cmd,
++		.check_stop_free	= bme_check_stop_free,
++		.write_pending		= bme_write_pending,
++		.queue_data_in		= bme_queue_data_in,
++		.queue_status		= bme_queue_status,
++	},
++};
++
++static const struct bme_core_map_ops copy_tfo = {
++	.tfo = {
++		.fabric_name		= "bme-copy",
++		.get_cmd_state		= bme_get_cmd_state,
++		.release_cmd		= bme_release_cmd,
++		.check_stop_free	= bme_check_stop_free,
++		.write_pending		= bme_write_pending,
++		.queue_data_in		= bme_queue_data_in,
++		.queue_status		= bme_queue_status,
++	},
++	.op				= _opCopySrcRead,
++};
++
++static const struct bme_core_map_ops verify_tfo = {
++	.tfo = {
++		.fabric_name		= "bme-verify",
++		.get_cmd_state		= bme_get_cmd_state,
++		.release_cmd		= bme_release_cmd,
++		.check_stop_free	= bme_check_stop_free,
++		.write_pending		= bme_write_pending,
++		.queue_data_in		= bme_queue_data_in,
++		.queue_status		= bme_queue_status,
++	},
++	.op				= _opVerifyRead,
++	.compare			= _wrkVerifyCompare,
++};
++
++static const struct bme_core_map_ops sync_tfo = {
++	.tfo = {
++		.fabric_name		= "bme-sync",
++		.get_cmd_state		= bme_get_cmd_state,
++		.release_cmd		= bme_release_cmd,
++		.check_stop_free	= bme_check_stop_free,
++		.write_pending		= bme_write_pending,
++		.queue_data_in		= bme_queue_data_in,
++		.queue_status		= bme_queue_status,
++	},
++	.op				= _opSyncRead,
++	.compare			= _wrkSyncCompare,
++};
++
++static void __wrk_mapproc(struct work_struct *work)
++{
++	sense_reason_t rc = TCM_NO_SENSE;
++	struct config_item *item;
++	struct bme_core_map_ops *mops = NULL;
++	struct bme_map *tmap, *map = container_of(work, struct bme_map, work.work);
++	struct se_device *dev = map->src_dev;
++
++	switch (map->status) {
++		case MAP_S_ACTIVE:
++		{
++			mops = to_map_ops(map->src_dev->se_bme.tpg->se_tpg_tfo);
++			if (mops->op)
++				rc = mops->op(map);
++			else
++				return;
++			switch(rc) {
++				case TCM_NO_SENSE:
++				{
++					bool error = false;
++					if (map->map_flags & BMF_COMPLETE) {
++						list_for_each_entry(item, &(dev->dev_bme_group.cg_children), ci_entry) {
++							tmap = to_bme_map(item);
++							if (!(tmap->map_flags & BMF_ENABLE))
++								continue;
++							if (!(tmap->map_flags & BMF_COMPLETE))
++								return;
++							if (tmap->status == MAP_S_ERROR)
++								error = true;
++						}
++						spin_lock(&dev->se_bme.bme_lock);
++						dev->se_bme.run_time += get_jiffies_64() - dev->se_bme.start_time;
++						dev->se_bme.state = (error) ? BME_S_SUSPENDED : BME_S_COMPLETE;
++						spin_unlock(&dev->se_bme.bme_lock);
++						__update_active(dev, false);
++						pr_info("[BME-%s:%d - %s]:Complete\n", __func__, __LINE__,
++							 map->src_dev->t10_wwn.unit_serial);
++					}
++					return;
++				}
++				case TCM_OUT_OF_RESOURCES:
++					// Retry later 
++					queue_delayed_work(map->src_dev->se_bme.wq, &map->work, usecs_to_jiffies(5));
++					return;
++				default:
++				{
++					spin_lock(&map->lock);
++					map->error = rc;
++					map->err_lba = map->src_lba + map->processed;
++					map->status = MAP_S_ERROR;
++					spin_unlock(&map->lock);
++					bme_send_scn(map);
++				}
++			}
++			// Fall thru...
++		}
++		case MAP_S_ERROR:
++		{
++			if (dev->se_bme.state == BME_S_SUSPENDED)
++				break;
++			if (!(dev->dev_flags & DF_BME_SUSPEND_ON_ERROR))
++				break;
++			list_for_each_entry(item, &(dev->dev_bme_group.cg_children), ci_entry) {
++				tmap = to_bme_map(item);
++				if (tmap->status != MAP_S_ERROR) {
++					spin_lock(&map->lock);
++					tmap->error = TCM_ERROR;
++					tmap->map_flags |= BMF_COMPLETE;
++					tmap->err_lba = tmap->src_lba + tmap->processed;
++					tmap->status = MAP_S_SUSPEND;
++					tmap->run_time += get_jiffies_64() - tmap->start_time;
++					spin_unlock(&map->lock);
++					bme_send_scn(tmap);
++				}
++			}
++			spin_lock(&dev->se_bme.bme_lock);
++			dev->se_bme.run_time += get_jiffies_64() - dev->se_bme.start_time;
++			dev->se_bme.state = BME_S_SUSPENDED;
++			spin_unlock(&dev->se_bme.bme_lock);
++			__update_active(dev, false);
++			pr_warn("[BME-%s:%d - %s]:Suspended\n", __func__, __LINE__,
++					 map->src_dev->t10_wwn.unit_serial);
++			break;
++		}
++		case MAP_S_SUSPEND:
++		case MAP_S_STANDBY:
++		case MAP_S_DISABLE:
++		case MAP_S_IDLE:
++		default:
++			break;
++	}
++}
++
++/*
++ * Map Configfs
++ */
++
++enum { Opt_map_dst, Opt_map_slba, Opt_map_dlba, Opt_map_nolb, Opt_map_err};
++
++static match_table_t map_tokens = {
++	{Opt_map_dst, "dst=%s"},
++	{Opt_map_slba, "slba=%s"},
++	{Opt_map_dlba, "dlba=%s"},
++	{Opt_map_nolb, "nolb=%s"},
++	{Opt_map_err, NULL}
++};
++
++static ssize_t bme_map_control_store(struct config_item *item,
++		const char *page, size_t count)
++{
++	int ret = 0, token;
++	char *orig, *ptr, *opts;
++	substring_t args[MAX_OPT_ARGS];
++	u64 s_sects, d_sects=0, slba, dlba, nolb;
++	unsigned char *dst=NULL;
++	struct se_device *ddev = NULL;
++	struct bme_map *tmap = NULL, *map = to_bme_map(item);
++
++	if(map->map_flags & BMF_CONFIGURED) {
++		pr_err("[BME-%s:%d - %s]: Operation not permitted, map already configured!\n",
++			__func__, __LINE__, map->src_dev->t10_wwn.unit_serial);
++		return -EINVAL;
++	}
++	s_sects = target_to_linux_sector(map->src_dev, (map->src_dev->transport->get_blocks(map->src_dev) + 1));
++	slba = map->src_lba;
++	dlba = map->dst_lba;
++	nolb = map->nolb;
++
++	opts = kstrdup(page, GFP_KERNEL);
++	if (!opts)
++		return -ENOMEM;
++
++	orig = opts;
++	while ((ptr = strsep(&opts, ",\n")) != NULL) {
++		if (!*ptr)
++			continue;
++
++		token = match_token(ptr, map_tokens, args);
++		switch (token) {
++		case Opt_map_dst:
++			dst = match_strdup(args);
++			if (!dst) {
++				ret = -ENOMEM;
++				goto out;
++			}
++			break;
++		case Opt_map_slba:
++			ret = kstrtou64(args->from, 0, &slba);
++			if (ret < 0) {
++				pr_err("kstrtoull() failed for srclba=\n");
++				goto out;
++			}
++			break;
++		case Opt_map_dlba:
++			ret = kstrtou64(args->from, 0, &dlba);
++			if (ret < 0) {
++				pr_err("kstrtoull() failed for dstlba=\n");
++				goto out;
++			}
++			break;
++		case Opt_map_nolb:
++			ret = kstrtou64(args->from, 0, &nolb);
++			if (ret < 0) {
++				pr_err("kstrtoull() failed for nolb\n");
++				goto out;
++			}
++			break;
++		default:
++			break;
++		}
++	}
++	if ((dst == NULL) || (nolb == 0)) {
++		pr_err("[BME-%s:%d - %s]: invalid config!\n",
++			__func__, __LINE__, map->src_dev->t10_wwn.unit_serial);
++		ret = -EINVAL;
++		goto out;
++	}
++	if ((ddev = __get_device(dst)) == NULL) {
++		pr_err("[BME-%s:%d - %s]: destination device uuid =  %s not found!\n",
++		__func__, __LINE__, map->src_dev->t10_wwn.unit_serial, dst);
++		ret = -ENODEV;
++		goto out;
++	}
++	/*
++	** check if an overlapping map exists
++	*/
++	if((tmap =__get_lba_map(map->src_dev, slba, nolb)) != NULL) {
++		pr_err("[BME-%s:%d]: map [%s-%llu -> %s-%llu] blocks=%llu Exists\n",
++			__func__, __LINE__,
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			map->nolb);
++		ret = -EEXIST;
++		goto out;
++	}
++	// Should we prevent source and destination from being the same? - TBD
++	d_sects = target_to_linux_sector(ddev, (ddev->transport->get_blocks(ddev) + 1));
++	if (((slba + nolb) > s_sects) || ((dlba + nolb) > d_sects)) {
++		pr_err("[BME-%s:%d - %s]: slba = %llu dlba = %llu nolb = %llu out of range!\n",
++			__func__, __LINE__, map->src_dev->t10_wwn.unit_serial, slba, dlba, nolb);
++		ret = -EINVAL;
++		goto out;
++	}
++	if (config_item_get_unless_zero(&ddev->dev_group.cg_item) == NULL) {
++		pr_err("[BME-%s:%d - %s]: slba = %llu dlba = %llu nolb = %llu failed to latch on destination device!\n",
++			__func__, __LINE__, map->src_dev->t10_wwn.unit_serial, slba, dlba, nolb);
++		ret = -EINVAL;
++		goto out;
++	}
++	pr_info("[BME-%s:%d - %s]: slba = %llu dlba = %llu nolb = %llu\n",
++			__func__, __LINE__, map->src_dev->t10_wwn.unit_serial, slba, dlba, nolb);
++	map->dst_dev = ddev;
++	map->src_lba = slba;
++	map->dst_lba = dlba;
++	map->nolb = nolb;
++	map->map_flags |= (BMF_HAS_DST_DEVICE | BMF_HAS_SRC_LBA | BMF_HAS_DST_LBA | BMF_HAS_NOLB | BMF_CONFIGURED);
++out:
++	if (dst)
++		kfree(dst);
++	kfree(orig);
++	return (!ret) ? count : ret;
++}
++
++static ssize_t bme_map_configured_show(struct config_item *item, char *page)
++{
++	struct bme_map *map = to_bme_map(item);
++
++	return snprintf(page, PAGE_SIZE, "%d\n", (map->map_flags & BMF_CONFIGURED) ? 1 : 0);
++}
++
++static ssize_t bme_map_enable_show(struct config_item *item, char *page)
++{
++	struct bme_map *map = to_bme_map(item);
++
++	return snprintf(page, PAGE_SIZE, "%d\n", (map->map_flags & BMF_ENABLE) ? 1 : 0);
++}
++
++static ssize_t bme_map_source_device_uuid_show(struct config_item *item, char *page)
++{
++	struct bme_map *map = to_bme_map(item);
++
++	return sprintf(page, "%s\n", map->src_dev->t10_wwn.unit_serial);
++}
++
++static ssize_t bme_map_source_device_lba_show(struct config_item *item, char *page)
++{
++	struct bme_map *map = to_bme_map(item);
++
++	return sprintf(page, "%llu\n", map->src_lba);
++}
++
++static ssize_t bme_map_destination_device_uuid_show(struct config_item *item, char *page)
++{
++	struct bme_map *map = to_bme_map(item);
++
++	if (!(map->map_flags & BMF_HAS_DST_DEVICE)) {
++		pr_info("[BME-%s:%d - %s]:Destination device not comfigured yet\n",
++			__func__, __LINE__, map->src_dev->t10_wwn.unit_serial);
++		return 0;
++	}
++	return sprintf(page, "%s\n", map->dst_dev->t10_wwn.unit_serial);
++}
++
++static ssize_t bme_map_destination_device_lba_show(struct config_item *item, char *page)
++{
++	struct bme_map *map = to_bme_map(item);
++
++	return sprintf(page, "%llu\n", map->dst_lba);
++}
++
++static ssize_t bme_map_total_blocks_show(struct config_item *item, char *page)
++{
++	struct bme_map *map = to_bme_map(item);
++
++	return sprintf(page, "%llu\n", map->nolb);
++}
++
++static ssize_t bme_map_processed_blocks_show(struct config_item *item, char *page)
++{
++	struct bme_map *map = to_bme_map(item);
++
++	return sprintf(page, "%llu\n", map->processed);
++}
++
++static ssize_t bme_map_moved_blocks_show(struct config_item *item, char *page)
++{
++	struct bme_map *map = to_bme_map(item);
++
++	return sprintf(page, "%llu\n", map->moved);
++}
++
++static ssize_t bme_map_error_show(struct config_item *item, char *page)
++{
++	struct bme_map *map = to_bme_map(item);
++
++	return snprintf(page, PAGE_SIZE, "%d\n", map->error);
++}
++
++static ssize_t bme_map_info_show(struct config_item *item, char *page)
++{
++	u64 rtime = 0ULL;
++	ssize_t rval = 0;
++	struct bme_map *map = to_bme_map(item);
++
++	spin_lock(&map->lock);
++	if (map->status > MAP_S_IDLE) {
++		if (map->map_flags & BMF_COMPLETE) 
++			rtime =  map->run_time;
++		else
++			rtime = (map->run_time + (get_jiffies_64() - map->start_time));
++	}
++	if (map->dst_dev) {
++		rval = snprintf(page, PAGE_SIZE, "%s,%u,%x,%s,%llu,%s,%llu,%llu,%llu,%llu,%llu\n",
++			config_item_name(item),
++			map->status, map->map_flags,
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			map->nolb, map->processed, map->moved,rtime);
++	} else {
++		rval = snprintf(page, PAGE_SIZE, "%s,%u,%x,%s,%llu,,,%llu,%llu,%llu,%llu\n",
++			config_item_name(item),
++			map->status, map->map_flags,
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->nolb, map->processed, map->moved, rtime);
++	}
++	spin_unlock(&map->lock);
++	return (rval);
++}
++
++static ssize_t bme_map_status_show(struct config_item *item, char *page)
++{
++	struct bme_map *map = to_bme_map(item);
++
++	return sprintf(page, "%d\n", map->status);
++}
++
++static ssize_t bme_map_enable_store(struct config_item *item,
++		const char *page, size_t count)
++{
++	struct bme_map *map = to_bme_map(item);
++	char *ptr;
++
++	ptr = strstr(page, "1");
++	if (!ptr) {
++		pr_err("For dev_enable ops, only valid value"
++				" is \"1\"\n");
++		return -EINVAL;
++	}
++	if (!(map->map_flags & BMF_CONFIGURED)) {
++		pr_err("[BME-%s:%d - %s]: invalid op - map not configed yet!\n",
++			__func__, __LINE__, map->src_dev->t10_wwn.unit_serial);
++		return -EINVAL;
++	}
++	if (__check_config(map))
++		return -EINVAL;
++	spin_lock(&map->lock);
++	map->map_flags |= BMF_ENABLE;
++	map->status = MAP_S_IDLE;
++	spin_unlock(&map->lock);
++	bme_send_scn(map);
++	pr_info("[BME-%s:%d]: map=%s Idle src[%s : %lld] dst [%s : %lld] nolb=%lld status=%d\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		map->nolb,map->status);
++	return count;
++}
++
++CONFIGFS_ATTR_WO(bme_map_, control);
++CONFIGFS_ATTR(bme_map_, enable);
++CONFIGFS_ATTR_RO(bme_map_, configured);
++CONFIGFS_ATTR_RO(bme_map_, source_device_uuid);
++CONFIGFS_ATTR_RO(bme_map_, destination_device_uuid);
++CONFIGFS_ATTR_RO(bme_map_, source_device_lba);
++CONFIGFS_ATTR_RO(bme_map_, destination_device_lba);
++CONFIGFS_ATTR_RO(bme_map_, total_blocks);
++CONFIGFS_ATTR_RO(bme_map_, moved_blocks);
++CONFIGFS_ATTR_RO(bme_map_, processed_blocks);
++CONFIGFS_ATTR_RO(bme_map_, error);
++CONFIGFS_ATTR_RO(bme_map_, info);
++CONFIGFS_ATTR_RO(bme_map_, status);
++
++
++static struct configfs_attribute *bme_map_attrs[] = {
++	&bme_map_attr_control,
++	&bme_map_attr_enable,
++	&bme_map_attr_configured,
++	&bme_map_attr_source_device_uuid,
++	&bme_map_attr_source_device_lba,
++	&bme_map_attr_destination_device_uuid,
++	&bme_map_attr_destination_device_lba,
++	&bme_map_attr_total_blocks,
++	&bme_map_attr_processed_blocks,
++	&bme_map_attr_moved_blocks,
++	&bme_map_attr_error,
++	&bme_map_attr_info,
++	&bme_map_attr_status,
++	NULL,
++};
++
++static void core_bme_releasemap(struct config_item *item)
++{
++	struct bme_map *map = to_bme_map(item);
++	pr_info("[BME-%s:%d]: item = %p map = %p dev: %s\n",
++			__func__, __LINE__, item, map, map->src_dev->t10_wwn.unit_serial);
++
++	if (map->map_flags | BMF_HAS_DST_DEVICE)
++		config_item_put(&map->dst_dev->dev_group.cg_item);
++	kmem_cache_free(bme_map_cache, map);
++}
++
++
++static struct configfs_item_operations bme_map_item_ops = {
++	.release		= core_bme_releasemap,
++};
++
++static const struct config_item_type bme_map_cit = {
++	.ct_item_ops	= &bme_map_item_ops,
++	.ct_attrs	= bme_map_attrs,
++	.ct_owner	= THIS_MODULE,
++};
++
++struct config_item *core_bme_createmap(struct config_group *group, const char *name)
++{
++	struct bme_map *map = NULL;
++	struct se_device *dev =  container_of(group, struct se_device, dev_bme_group);
++
++	pr_info("[BME-%s:%d]: group = %p name = %s device = %s\n",
++			__func__, __LINE__,group, name, dev->t10_wwn.unit_serial);
++
++	if ((map = kmem_cache_zalloc(bme_map_cache, GFP_KERNEL)) == NULL) {
++		pr_err("[BME-%s:%d]:Unable to allocate bme_map memory\n", __func__, __LINE__);
++		return ERR_PTR(-ENOMEM);
++	}
++	/*
++	 *  Initialize map variables
++	 */
++	map->src_dev = dev;
++	map->src_lba = 0;
++	map->dst_dev = NULL;
++	map->dst_lba = 0;
++	map->nolb = 0;
++	map->moved = 0;
++	map->processed = 0;
++	map->curr_len = 0;
++	map->run_time = 0;
++	map->map_flags = 0;
++	map->error = 0;
++	map->status = MAP_S_DISABLE;
++	spin_lock_init(&map->lock);
++
++	/*
++	** initialize source LUN
++	*/
++        map->src_lun.unpacked_lun = 0;
++        atomic_set(&map->src_lun.lun_acl_count, 0);
++        INIT_LIST_HEAD(&map->src_lun.lun_deve_list);
++        INIT_LIST_HEAD(&map->src_lun.lun_dev_link);
++        atomic_set(&map->src_lun.lun_tg_pt_secondary_offline, 0);
++        spin_lock_init(&map->src_lun.lun_deve_lock);
++        mutex_init(&map->src_lun.lun_tg_pt_md_mutex);
++        INIT_LIST_HEAD(&map->src_lun.lun_tg_pt_gp_link);
++        spin_lock_init(&map->src_lun.lun_tg_pt_gp_lock);
++        map->src_lun.lun_tpg = &bme_tpg;
++	/*
++	** initialize destination LUN
++	*/
++        map->dst_lun.unpacked_lun = 0;
++        atomic_set(&map->dst_lun.lun_acl_count, 0);
++        INIT_LIST_HEAD(&map->dst_lun.lun_deve_list);
++        INIT_LIST_HEAD(&map->dst_lun.lun_dev_link);
++        atomic_set(&map->dst_lun.lun_tg_pt_secondary_offline, 0);
++        spin_lock_init(&map->dst_lun.lun_deve_lock);
++        mutex_init(&map->dst_lun.lun_tg_pt_md_mutex);
++        INIT_LIST_HEAD(&map->dst_lun.lun_tg_pt_gp_link);
++        spin_lock_init(&map->dst_lun.lun_tg_pt_gp_lock);
++        map->dst_lun.lun_tpg = &bme_tpg;
++	config_item_init_type_name(&map->item, name, &bme_map_cit);
++	/*
++	** Add map to the source device - always.
++	*/
++
++	INIT_DELAYED_WORK(&map->work, __wrk_mapproc);
++	bme_send_scn(map);
++
++	return &map->item;
++}
++
++static int __stop_map(struct bme_map *map);
++void core_bme_destroymap(struct config_group *group, struct config_item *item)
++{
++	struct bme_map *map = to_bme_map(item);
++	pr_info("[BME-%s:%d]: group = %p item = %p map = %p dev= %s\n",
++			__func__, __LINE__,group, item, map, map->src_dev->t10_wwn.unit_serial);
++	__stop_map(map);
++	spin_lock(&map->lock);
++	map->map_flags = 0x0;
++	map->status = MAP_S_DISABLE;
++	spin_unlock(&map->lock);
++	bme_send_scn(map);
++	config_item_put(item);
++}
++
++ssize_t core_bme_info(struct se_device *dev, char *page)
++{
++	u64 rtime = 0ULL;
++        ssize_t rval = 0;
++
++	spin_lock(&dev->se_bme.bme_lock);
++	switch(dev->se_bme.state) {
++		case BME_S_ACTIVE:
++		case BME_S_PAUSED:
++			rtime = (dev->se_bme.run_time + (get_jiffies_64() - dev->se_bme.start_time));
++		break;
++		case BME_S_SUSPENDED:
++		case BME_S_COMPLETE:
++			rtime = dev->se_bme.run_time;
++		break;
++		case BME_S_INACTIVE:
++		default:
++			break;
++	}
++	rval = snprintf(page, PAGE_SIZE, "%s,%x,%u,%u,%u,%u,%u,%llu\n",
++		dev->t10_wwn.unit_serial, dev->se_bme.bme_flags, 
++		dev->se_bme.state, dev->se_bme.mode, dev->se_bme.priority, 
++		dev->se_bme.min_io_blocks, dev->se_bme.max_io_blocks,rtime);
++	spin_unlock(&dev->se_bme.bme_lock);
++	return (rval);
++}
++
++int core_bme_setupdev(struct se_device *dev)
++{
++	int ret;
++
++	if (dev->se_hba->hba_flags & HBA_FLAGS_INTERNAL_USE)
++		return 0;
++	memset(&dev->se_bme, 0, sizeof(struct se_dev_bme));
++        dev->se_bme.wq = alloc_workqueue("bme_wq", WQ_MEM_RECLAIM, 0);
++        if (!dev->se_bme.wq)
++                return -ENOMEM;
++	memset(&bme_tpg, 0, sizeof(struct se_portal_group));
++	INIT_LIST_HEAD(&bme_tpg.se_tpg_node);
++	INIT_LIST_HEAD(&bme_tpg.acl_node_list);
++	INIT_LIST_HEAD(&bme_tpg.tpg_sess_list);
++	bme_tpg.se_tpg_tfo = &default_tfo.tfo;
++	memset(&bme_nacl, 0, sizeof(struct se_node_acl));
++	INIT_LIST_HEAD(&bme_nacl.acl_list);
++	INIT_LIST_HEAD(&bme_nacl.acl_sess_list);
++	memset(&bme_sess, 0, sizeof(struct se_session));
++	ret = transport_init_session(&bme_sess);
++	if (ret < 0) {
++		pr_err("BME: core_bme_setup session init failed %d!!!\n",ret);
++		return ret;
++	}
++	bme_nacl.se_tpg = &bme_tpg;
++	bme_nacl.nacl_sess = &bme_sess;
++	bme_sess.se_tpg = &bme_tpg;
++        dev->se_bme.sess = &bme_sess;
++        dev->se_bme.nacl = &bme_nacl;
++        dev->se_bme.tpg = &bme_tpg;
++	dev->se_bme.state = BME_S_INACTIVE;
++	dev->se_bme.min_io_blocks = (dev->dev_attrib.block_size >> SECTOR_SHIFT);
++	dev->se_bme.max_io_blocks = 1024;
++	dev->se_bme.inline_io_proc = _procInlineIO; // TBD
++	spin_lock_init(&dev->se_bme.bme_lock);
++	dev->se_bme.inline_io_proc = NULL;
++	config_group_get(&g_bme_gp.df_qos.group);
++	dev->se_bme.qos = (void *)&g_bme_gp.df_qos;
++	pr_info("[BME-%s:%d - %s]:Inactive\n", __func__, __LINE__,
++					 dev->t10_wwn.unit_serial);
++	return 0;
++}
++
++void core_bme_destroydev(struct se_device *dev)
++{
++	if (dev->se_hba->hba_flags & HBA_FLAGS_INTERNAL_USE)
++		return;
++        if(dev->se_bme.wq != NULL) {
++                flush_workqueue(dev->se_bme.wq);
++                destroy_workqueue(dev->se_bme.wq);
++		dev->se_bme.wq = NULL;
++        }
++	if(dev->se_bme.qos)
++		config_group_put(&((struct bme_qos *)dev->se_bme.qos)->group);
++}
++
++/*
++ * BME control
++ */
++
++static int __start_map(struct bme_map  *map)
++{
++	if (map->status > MAP_S_IDLE) {
++		pr_info("[BME-%s:%d]: map (%s) is already active - "
++			"src[%s : %lld] dst [%s : %lld] nolb=%llu status=%u\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			map->nolb, map->status);
++		return (0);
++	}
++	if (!(map->map_flags & BMF_ENABLE)) {
++		pr_info("[BME-%s:%d]: map (%s) is disabled - "
++			"src[%s : %lld] dst [%s : %lld] nolb=%llu flags=0x%x\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			map->nolb, map->map_flags);
++		return (0);
++	}
++	spin_lock(&map->lock);
++	map->processed = 0;
++	map->moved = 0;
++	map->curr_len = 0;
++	map->retries = 0;
++	map->error = TCM_NO_SENSE;
++	map->err_lba = 0ULL;
++	map->start_time = get_jiffies_64();
++	map->run_time = 0ULL;
++	map->status = MAP_S_ACTIVE;
++	spin_unlock(&map->lock);
++	bme_send_scn(map);
++	queue_delayed_work(map->src_dev->se_bme.wq, &map->work, 0);
++	pr_info("[BME-%s:%d]: map (%s) Active\n"
++			"src[%s : %lld] dst [%s : %lld] nolb=%llu status=%u\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			map->nolb, map->status);
++	return (1);
++}
++
++static int __start_bme(struct se_device *dev, struct bme_map *map, enum bme_op op)
++{
++	int rval = 0;
++	u8 state;
++	int activate = 0;
++	struct config_item *item;
++
++	list_for_each_entry(item, &(dev->dev_bme_group.cg_children), ci_entry) {
++		rval =  __check_config(to_bme_map(item));
++		if (rval)
++			goto out;
++	}
++	spin_lock(&dev->se_bme.bme_lock);
++	dev->se_bme.start_time = get_jiffies_64();
++	dev->se_bme.run_time = 0ULL;
++	state = dev->se_bme.state;
++	dev->se_bme.state = BME_S_ACTIVE;
++	spin_unlock(&dev->se_bme.bme_lock);
++	switch(op) {
++		case BME_OP_COPY:
++			spin_lock(&dev->se_bme.bme_lock);
++			dev->se_bme.tpg->se_tpg_tfo = &copy_tfo.tfo;
++			spin_unlock(&dev->se_bme.bme_lock);
++		break;
++		case BME_OP_SYNC:
++			spin_lock(&dev->se_bme.bme_lock);
++			dev->se_bme.tpg->se_tpg_tfo = &sync_tfo.tfo;
++			spin_unlock(&dev->se_bme.bme_lock);
++		break;
++		case BME_OP_VERIFY:
++			spin_lock(&dev->se_bme.bme_lock);
++			dev->se_bme.tpg->se_tpg_tfo = &verify_tfo.tfo;
++			spin_unlock(&dev->se_bme.bme_lock);
++		break;
++		default:
++			rval = -EINVAL;
++			goto out;
++	}
++	if (map) {
++		if (__start_map(map) > 0)
++			activate = 1;
++	} else {
++		list_for_each_entry(item, &(dev->dev_bme_group.cg_children), ci_entry) {
++			if (__start_map(to_bme_map(item)) > 0)
++				activate = 1;
++		}
++	}
++	if (activate) {
++		pr_info("[BME-%s:%d - %s]: Active!\n", __func__, __LINE__,
++			dev->t10_wwn.unit_serial);
++		__update_active(dev, true);
++	}
++	else {
++		// restore old state
++		spin_lock(&dev->se_bme.bme_lock);
++		dev->se_bme.state = state;
++		spin_unlock(&dev->se_bme.bme_lock);
++		pr_info("[BME-%s:%d - %s]: Nothing to start!\n", __func__, __LINE__,
++			dev->t10_wwn.unit_serial);
++		rval = -ENOEXEC;
++	}
++out:
++	return (rval);
++}
++
++static int bme_copy(struct se_device *dev, struct bme_map *map, u8 mode)
++{
++	int rval = 0;
++
++	switch(dev->se_bme.state) {
++		case BME_S_INACTIVE:
++		{
++			switch(mode) {
++				case BME_M_SIMPLE:
++				{
++					rval = __start_bme(dev, map, BME_OP_COPY);
++					break;
++				}
++				case BME_M_ZIZO:
++				case BME_M_SS:
++				default:
++				{
++					pr_err("[BME-%s:%d]: uuid = %s  mode (%u) not supported!\n",
++						__func__, __LINE__, dev->t10_wwn.unit_serial, mode);
++					rval = -EINVAL;
++					goto out;
++				}
++			}
++			break;
++		}
++		case BME_S_ACTIVE:
++		case BME_S_PAUSED:
++		case BME_S_SUSPENDED:
++		case BME_S_COMPLETE:
++		default:
++			pr_err("[BME-%s:%d]: uuid = %s  copy not permited in bme state (%u)!\n",
++				__func__, __LINE__, dev->t10_wwn.unit_serial, dev->se_bme.state);
++			rval = -EINVAL;
++			goto out;
++	}
++out:
++	return ((rval > 0) ? 0 : rval);
++}
++
++static int bme_verify(struct se_device *dev, struct bme_map *map)
++{
++	int rval = 0;
++
++	switch(dev->se_bme.state) {
++		case BME_S_INACTIVE:
++		{
++			rval = __start_bme(dev, map, BME_OP_VERIFY);
++			break;
++		}
++		case BME_S_ACTIVE:
++		case BME_S_PAUSED:
++		case BME_S_SUSPENDED:
++		case BME_S_COMPLETE:
++		default:
++			pr_err("[BME-%s:%d]: uuid = %s  verify not permited in bme state (%u)!\n",
++				__func__, __LINE__, dev->t10_wwn.unit_serial, dev->se_bme.state);
++			rval = -EINVAL;
++			goto out;
++	}
++out:
++	return ((rval > 0) ? 0 : rval);
++}
++
++static int bme_sync(struct se_device *dev, struct bme_map *map)
++{
++	int rval = 0;
++
++	switch(dev->se_bme.state) {
++		case BME_S_INACTIVE:
++		{
++			rval = __start_bme(dev, map, BME_OP_SYNC);
++			break;
++		}
++		case BME_S_ACTIVE:
++		case BME_S_PAUSED:
++		case BME_S_SUSPENDED:
++		case BME_S_COMPLETE:
++		default:
++			pr_err("[BME-%s:%d]: uuid = %s  verify not permited in bme state (%u)!\n",
++				__func__, __LINE__, dev->t10_wwn.unit_serial, dev->se_bme.state);
++			rval = -EINVAL;
++			goto out;
++	}
++out:
++	return ((rval > 0) ? 0 : rval);
++}
++
++
++static int __pause_map(struct bme_map *map)
++{
++	if (map->status != MAP_S_ACTIVE) {
++		pr_info("[BME-%s:%d]: map (%s) not active - cannot pause\n"
++			"src[%s : %lld] dst [%s : %lld] nolb=%llu status=%u\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			map->nolb, map->status);
++		return (0);
++	}
++	spin_lock(&map->lock);
++	map->status = MAP_S_STANDBY;
++	map->run_time += get_jiffies_64() - map->start_time;
++	spin_unlock(&map->lock);
++	bme_send_scn(map);
++	pr_info("[BME-%s:%d]:map (%s) Standby - src[%s : %lld] dst [%s : %lld] nolb=%llu status=%u\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		map->nolb, map->status);
++	return 0;
++}
++
++static int bme_pause(struct se_device *dev, struct bme_map *map)
++{
++	struct config_item *item;
++
++	if (dev->se_bme.state != BME_S_ACTIVE) {
++		pr_err("[BME-%s:%d - %s]: pause not permitted in current device state (%u)!\n",
++			__func__, __LINE__, dev->t10_wwn.unit_serial, dev->se_bme.state);
++		return -EINVAL;
++	}
++	if (map)
++		return (__pause_map(map));
++	if (list_empty(&dev->dev_bme_group.cg_children)) {
++		pr_info("[BME-%s:%d - %s]: no maps to pause!\n",
++			__func__, __LINE__, dev->t10_wwn.unit_serial);
++		return 0;
++	}
++	list_for_each_entry(item, &(dev->dev_bme_group.cg_children), ci_entry) {
++		__pause_map(to_bme_map(item));
++	}
++	spin_lock(&dev->se_bme.bme_lock);
++	dev->se_bme.state = BME_S_PAUSED;
++	dev->se_bme.run_time += get_jiffies_64() - dev->se_bme.start_time;
++	spin_unlock(&dev->se_bme.bme_lock);
++	pr_info("[BME-%s:%d - %s]: Paused!\n",
++		__func__, __LINE__, dev->t10_wwn.unit_serial);
++	__update_active(dev, false);
++	return 0;
++}
++
++static int __resume_map(struct bme_map *map)
++{
++	if (map->status != MAP_S_STANDBY) {
++		pr_info("[BME-%s:%d]: map (%s) not paused - cannot resume\n"
++			"src[%s : %lld] dst [%s : %lld] nolb=%llu status=%u\n",
++			 __func__, __LINE__, config_item_name(&map->item),
++			map->src_dev->t10_wwn.unit_serial, map->src_lba,
++			map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++			map->nolb, map->status);
++		return (0);
++	}
++	spin_lock(&map->lock);
++	map->status = MAP_S_ACTIVE;
++	map->start_time = get_jiffies_64();
++	spin_unlock(&map->lock);
++	bme_send_scn(map);
++	pr_info("[BME-%s:%d]:map (%s) Active - src[%s : %lld] dst [%s : %lld] nolb=%llu status=%u\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		map->nolb, map->status);
++	queue_delayed_work(map->src_dev->se_bme.wq, &map->work, 0);
++	return 0;
++}
++
++static int bme_resume(struct se_device *dev, struct bme_map *map)
++{
++	struct config_item *item;
++
++	if (map && (dev->se_bme.state == BME_S_ACTIVE))
++		return (__resume_map(map));
++	if (list_empty(&dev->dev_bme_group.cg_children)) {
++		pr_info("[BME-%s:%d - %s]: no maps to resume!\n",
++			__func__, __LINE__, dev->t10_wwn.unit_serial);
++		return 0;
++	}
++	if (dev->se_bme.state != BME_S_PAUSED) {
++		pr_err("[BME-%s:%d - %s]: resume not permitted in current device state (%u)!\n",
++			__func__, __LINE__, dev->t10_wwn.unit_serial, dev->se_bme.state);
++		return -EINVAL;
++	}
++	list_for_each_entry(item, &(dev->dev_bme_group.cg_children), ci_entry) {
++		__resume_map(to_bme_map(item));
++	}
++	pr_info("[BME-%s:%d - %s]: Active!\n",
++		__func__, __LINE__, dev->t10_wwn.unit_serial);
++	spin_lock(&dev->se_bme.bme_lock);
++	dev->se_bme.state = BME_S_ACTIVE;
++	dev->se_bme.start_time = get_jiffies_64();
++	spin_unlock(&dev->se_bme.bme_lock);
++	__update_active(dev, true);
++	return 0;
++}
++
++static int __stop_map(struct bme_map *map)
++{
++	if ((map->status == MAP_S_DISABLE) || (map->status == MAP_S_IDLE)) {
++		pr_info("[BME-%s:%d]: map (%s) is already stopped\n",
++			 __func__, __LINE__, config_item_name(&map->item));
++		return (0);
++	}
++	spin_lock(&map->lock);
++	map->status = MAP_S_IDLE;
++	map->map_flags &= ~BMF_COMPLETE;
++	spin_unlock(&map->lock);
++	bme_send_scn(map);
++	pr_info("[BME-%s:%d]:map (%s) Idle - src[%s : %lld] dst [%s : %lld] nolb=%llu status=%u\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		map->nolb, map->status);
++	return 0;
++}
++
++static int bme_stop(struct se_device *dev, struct bme_map *map)
++{
++	struct config_item *item;
++
++	if (map && (dev->se_bme.state != BME_S_INACTIVE))
++		return (__stop_map(map));
++	if (list_empty(&dev->dev_bme_group.cg_children)) {
++		pr_info("[BME-%s:%d - %s]: no maps to resume!\n",
++			__func__, __LINE__, dev->t10_wwn.unit_serial);
++		return 0;
++	}
++	if (dev->se_bme.state == BME_S_INACTIVE) {
++		pr_info("[BME-%s:%d - %s]: already in stopped state (%u)!\n",
++			__func__, __LINE__, dev->t10_wwn.unit_serial, dev->se_bme.state);
++		return 0;
++	}
++	list_for_each_entry(item, &(dev->dev_bme_group.cg_children), ci_entry) {
++		__stop_map(to_bme_map(item));
++	}
++	pr_info("[BME-%s:%d - %s]: Inactive!\n",
++		__func__, __LINE__, dev->t10_wwn.unit_serial);
++	spin_lock(&dev->se_bme.bme_lock);
++	dev->se_bme.state = BME_S_INACTIVE;
++	spin_unlock(&dev->se_bme.bme_lock);
++	__update_active(dev, false);
++	return 0;
++}
++
++int core_bme_control_proc(struct se_device *dev, u8 op, u8 mode, char *name)
++{
++	int rval = 0;
++	struct bme_map *map = NULL;
++	
++	if (name != NULL) {
++		struct config_item *item;
++		list_for_each_entry(item, &(dev->dev_bme_group.cg_children), ci_entry) {
++			if (!strcmp(config_item_name(item), name)) {
++				map = to_bme_map(item);
++				break;
++			}
++		}
++		if (map == NULL) {
++			pr_err("[BME:%s:%d [%s - %s]]: map not found!!!\n",
++				__func__, __LINE__, name, dev->t10_wwn.unit_serial);
++			return -EINVAL;}
++	}
++	if ((op == BME_OP_NOP) || (op >= BME_OP_MAX) ||
++		(mode >= BME_M_MAX)) {
++		pr_err("[BME-%s:%d - %s]: invalid parameter!\n",
++			__func__, __LINE__, dev->t10_wwn.unit_serial);
++		return -EINVAL;
++	}
++	switch(op) {
++		case BME_OP_COPY:
++			rval = bme_copy(dev,map,mode);
++		break;
++		case BME_OP_STOP:
++			rval = bme_stop(dev,map);
++		break;
++		case BME_OP_PAUSE:
++			rval = bme_pause(dev,map);
++		break;
++		case BME_OP_RESUME:
++			rval = bme_resume(dev,map);
++		break;
++		case BME_OP_VERIFY:
++			rval = bme_verify(dev,map);
++		break;
++		case BME_OP_SYNC:
++			rval = bme_sync(dev,map);
++		break;
++		case BME_OP_DRYRUN:
++		case BME_OP_RESET:
++		case BME_OP_CHECKCFG:
++		case BME_OP_NOP:
++		default:
++			if (map)
++				pr_info("[BME-%s:%s]: op = %d mode = %d\n",
++					dev->t10_wwn.unit_serial, config_item_name(&map->item), op, mode);
++			else
++				pr_info("[BME-%s:-]: op = %d mode = %d\n", dev->t10_wwn.unit_serial, op, mode);
++			break;
++	}
++	return (rval);
++}
++
++/*
++ * Netlink functionality
++ */
++
++enum bme_genl_ev {
++	BME_EV_UNSPEC,
++	BME_EV_SCN,
++	__BME_EV_MAX,
++};
++#define BME_EV_MAX (__BME_EV_MAX - 1)
++
++enum bme_genl_attr {
++	BME_ATTR_UNSPEC,
++	BME_ATTR_MAPID,
++	BME_ATTR_STATUS,
++	__BME_ATTR_MAX,
++};
++#define BME_ATTR_MAX (__BME_ATTR_MAX - 1)
++
++enum bme_multicast_groups {
++	BME_MCGRP_CONFIG,
++};
++
++static const struct genl_multicast_group bme_mcgrps[] = {
++	[BME_MCGRP_CONFIG] = { .name = "config", },
++};
++
++static struct nla_policy bme_attr_policy[BME_ATTR_MAX+1] = {
++	[BME_ATTR_MAPID]	= { .type = NLA_STRING },
++	[BME_ATTR_STATUS] 	= { .type = NLA_U8 },
++};
++
++#if 0
++static const struct genl_ops bme_genl_ops[] = {
++	{
++		.cmd	= BME_CMD_GET_MAP_CONFIG,
++		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
++		.flags	= GENL_ADMIN_PERM,
++		.doit	= bme_genl_set_features,
++	},
++	{
++		.cmd	= BME_CMD_GET_MAP_INFO,
++		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
++		.flags	= GENL_ADMIN_PERM,
++		.doit	= bme_genl_add_dev_done,
++	},
++};
++#endif
++
++/* BME generic netlink family */
++static struct genl_family bme_genl_family __ro_after_init = {
++	.module = THIS_MODULE,
++	.hdrsize = 0,
++	.name = "BME-USER",
++	.version = 2,
++	.maxattr = BME_ATTR_MAX,
++	.policy = bme_attr_policy,
++	.mcgrps = bme_mcgrps,
++	.n_mcgrps = ARRAY_SIZE(bme_mcgrps),
++	// .netnsok = true,
++	// .ops = bme_genl_ops,
++	// .n_ops = ARRAY_SIZE(bme_genl_ops),
++};
++
++static int bme_send_scn(struct bme_map *map)
++{
++	struct sk_buff *skb;
++	void *msg_header;
++	int ret = -ENOMEM;
++
++	pr_info("[BME-%s:%d]:map (%s) Idle - src[%s : %lld] dst [%s : %lld] nolb=%llu status=%u\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		map->nolb, map->status);
++	skb = genlmsg_new(NLMSG_GOODSIZE, GFP_KERNEL);
++	if (!skb)
++		return ret;
++
++	msg_header = genlmsg_put(skb, 0, 0, &bme_genl_family, 0, BME_EV_SCN);
++	if (!msg_header)
++		goto free_skb;
++
++	ret = nla_put_string(skb, BME_ATTR_MAPID, config_item_name(&map->item));
++	if (ret < 0)
++		goto free_skb;
++
++	ret = nla_put_u8(skb, BME_ATTR_STATUS, map->status);
++	if (ret < 0)
++		goto free_skb;
++
++	genlmsg_end(skb, msg_header);
++	ret = genlmsg_multicast_allns(&bme_genl_family, skb, 0,
++				      BME_MCGRP_CONFIG, GFP_KERNEL);
++	return ret;
++
++free_skb:
++	pr_err("[BME-%s:%d]:map (%s) Idle - src[%s : %lld] dst [%s : %lld] nolb=%llu status=%u\n",
++		 __func__, __LINE__, config_item_name(&map->item),
++		map->src_dev->t10_wwn.unit_serial, map->src_lba,
++		map->dst_dev->t10_wwn.unit_serial, map->dst_lba,
++		map->nolb, map->status);
++	nlmsg_free(skb);
++	return ret;
++}
++
++/*
++ * QOS (Throttle) config
++ */
++
++static inline void __update_stats(struct bme_qos *qos)
++{
++	u32 rx_count 		= (u32)atomic_xchg(&qos->rx_count, 0);
++	u32 tx_count 		= (u32)atomic_xchg(&qos->tx_count, 0);
++	u64 rx_resp_total 	= (u64)atomic_long_xchg(&qos->rx_resp_time, 0);
++	u64 tx_resp_total 	= (u64)atomic_long_xchg(&qos->tx_resp_time, 0);
++	u32 rx_blocks_total 	= (u64)atomic_xchg(&qos->rx_blocks, 0);
++	u32 tx_blocks_total 	= (u64)atomic_xchg(&qos->tx_blocks, 0);
++	u64 rx_resp_avg;
++	u64 tx_resp_avg;
++	if (rx_count && rx_resp_total)
++		rx_resp_avg = (u64)div_u64(rx_resp_total, rx_count);
++	if (tx_count && tx_resp_total)
++		tx_resp_avg = (u64)div_u64(tx_resp_total, tx_count);
++	/*
++	** reset io counters and update rates
++	*/
++	spin_lock(&qos->lock);
++	qos->rx_rate = rx_blocks_total;
++	qos->tx_rate = tx_blocks_total;
++	qos->rx_resp_avg = rx_resp_avg;
++	qos->tx_resp_avg = tx_resp_avg;
++	spin_unlock(&qos->lock);
++}
++
++static inline void __update_credits(struct bme_qos *qos)
++{
++	int credits=0, normal=0,medium=0, high=0,critical=0;
++	u32 rate = atomic_read(&qos->ratelimit);
++
++	if (rate != 0) {
++		credits = rate/4;
++		credits += ((credits * 4) == rate) ? 0 : 1;
++		if (atomic_read(&qos->ccount)) {
++			critical = credits;
++			high = credits;
++			medium = credits;
++			normal = credits;
++		}
++		else if (atomic_read(&qos->ccount)) {
++			high = credits;
++			medium = credits;
++			normal = credits + credits;
++		}
++		else if (atomic_read(&qos->ccount)) {
++			medium = credits;
++			normal = credits + credits + credits;
++		}
++		else
++			normal = credits + credits + credits + credits;
++		atomic_set(&qos->c_credits, critical);
++		atomic_set(&qos->h_credits, high);
++		atomic_set(&qos->m_credits, medium);
++		atomic_set(&qos->n_credits, normal);
++	}
++}
++
++static void __wrk_qos(struct work_struct *work)
++{
++	struct bme_qos *qos = container_of(work, struct bme_qos, work.work);
++	__update_stats(qos);
++	__update_credits(qos);
++	queue_delayed_work(g_bme_gp.wq, &qos->work, msecs_to_jiffies(1000));
++}
++
++static ssize_t bme_qos_stats_show(struct config_item *item, char *page)
++{
++	ssize_t rval = 0;
++	struct bme_qos *qos = to_bme_qos(item);
++
++	spin_lock(&qos->lock);
++	rval = snprintf(page, PAGE_SIZE, "%d,%d,%lld,%lld\n",
++		qos->rx_rate, qos->tx_rate, qos->rx_resp_avg, qos->tx_resp_avg);
++	spin_unlock(&qos->lock);
++	return (rval);
++}
++
++static ssize_t bme_qos_rate_show(struct config_item *item, char *page)
++{
++	struct bme_qos *qos = to_bme_qos(item);
++	u32 rate = atomic_read(&qos->ratelimit);
++
++	return snprintf(page, PAGE_SIZE, "%llu\n",(u64)(rate << SECTOR_SHIFT));
++}
++
++static ssize_t bme_qos_rate_store(struct config_item *item,
++		const char *page, size_t count)
++{
++	int ret = 0;
++	u32 rate;
++	u64 tmp_ll;
++	struct bme_qos *qos = to_bme_qos(item);
++
++	if (count > 0) {
++		ret = kstrtou64(page, 0, &tmp_ll);
++		if (ret < 0) {
++			pr_err("kstrtoull() failed for qos rate\n");
++			return 0;
++		}
++		rate = (u32)(tmp_ll >> SECTOR_SHIFT);
++		spin_lock(&qos->lock);
++		atomic_set(&qos->ratelimit, rate);
++		spin_unlock(&qos->lock);
++		pr_info("set qos rate = %lld (%u blocks)\n", tmp_ll, rate);
++	}
++	return count;
++}
++
++
++CONFIGFS_ATTR_RO(bme_qos_, stats);
++CONFIGFS_ATTR(bme_qos_, rate);
++
++static struct configfs_attribute *bme_qos_attrs[] = {
++	&bme_qos_attr_stats,
++	&bme_qos_attr_rate,
++	NULL,
++};
++
++static void core_bme_releaseqos(struct config_item *item)
++{
++	struct bme_qos *qos = to_bme_qos(item);
++	kfree(qos);
++	config_item_put(&g_bme_gp.qos_group.cg_item);
++}
++
++static struct configfs_item_operations bme_qos_item_ops = {
++	.release		= core_bme_releaseqos,
++};
++
++static const struct config_item_type bme_qos_cit = {
++	.ct_item_ops	= &bme_qos_item_ops,
++	.ct_attrs	= bme_qos_attrs,
++	.ct_owner	= THIS_MODULE,
++};
++
++static struct config_item *__qos_init(struct config_group *group, const char *name, struct bme_qos *qos)
++{
++	/*
++	 *  Initialize qos variables
++	 */
++	spin_lock_init(&qos->lock);
++	qos->rx_rate		= 0;
++	qos->tx_rate		= 0;
++	qos->rx_resp_avg	= 0ULL;
++	qos->tx_resp_avg	= 0ULL;
++        atomic_set(&qos->ratelimit, (1024 * 32));	// 16MBps
++        atomic_set(&qos->ncount, 0);
++        atomic_set(&qos->mcount, 0);
++        atomic_set(&qos->hcount, 0);
++        atomic_set(&qos->ccount, 0);
++        atomic_set(&qos->n_credits, 0);
++        atomic_set(&qos->m_credits, 0);
++        atomic_set(&qos->h_credits, 0);
++        atomic_set(&qos->c_credits, 0);
++	atomic_set(&qos->rx_count, 0);
++	atomic_set(&qos->tx_count, 0);
++	atomic_set(&qos->rx_blocks, 0);
++	atomic_set(&qos->tx_blocks, 0);
++	atomic_long_set(&qos->rx_resp_time, 0);
++	atomic_long_set(&qos->tx_resp_time, 0);
++	config_group_init_type_name(&qos->group, name, &bme_qos_cit);
++	configfs_add_default_group(&qos->group, &g_bme_gp.qos_group);
++	INIT_DELAYED_WORK(&qos->work, __wrk_qos);
++	queue_delayed_work(g_bme_gp.wq, &qos->work, msecs_to_jiffies(1000));
++	return (&qos->group.cg_item);
++}
++
++struct config_item *core_bme_createqos(struct config_group *group, const char *name)
++{
++	struct bme_qos *qos = NULL;
++
++	pr_info("[BME-%s:%d]: group = %p name = %s\n", __func__, __LINE__,group, name);
++
++	if((qos = kzalloc(sizeof(struct bme_qos), GFP_KERNEL)) == NULL) {
++		pr_err("[BME-%s:%d]:Unable to allocate bme_qos memory\n", __func__, __LINE__);
++		return ERR_PTR(-ENOMEM);
++	}
++	return (__qos_init(group, name, qos));
++}
++
++void core_bme_destroyqos(struct config_group *group, struct config_item *item)
++{
++	pr_info("[BME-%s:%d]: group = %p item = %p name = %s \n",
++			__func__, __LINE__,group, item, config_item_name(item));
++	// TBD _ if not deleting default item - change all the corresponding dev qos to default
++	// and send scn to bmed to update it's data
++	config_item_put(item);
++}
++
++static struct configfs_group_operations qos_gp_ops = {
++	.make_item	= &core_bme_createqos,
++	.drop_item	= &core_bme_destroyqos,
++};
++
++static const struct config_item_type bme_core_qos_cit = {
++	.ct_item_ops	= NULL,
++	.ct_group_ops	= &qos_gp_ops,
++	.ct_owner	= THIS_MODULE,
++};
++
++int bme_init(struct config_group *hba_cg)
++{
++	int ret;
++
++	memset (&g_bme_gp, 0, sizeof(struct bme_config));
++        g_bme_gp.wq = alloc_workqueue("bme_qos_wq", WQ_MEM_RECLAIM, 0);
++        if (!g_bme_gp.wq)
++                return -ENOMEM;
++	config_group_init_type_name(&g_bme_gp.qos_group, "qos", &bme_core_qos_cit);
++	configfs_add_default_group(&g_bme_gp.qos_group, hba_cg);
++	__qos_init(&g_bme_gp.qos_group, "default_gp", &g_bme_gp.df_qos);
++	ret = genl_register_family(&bme_genl_family);
++	pr_info("[BME-%s:%d ]: ret = %d\n", __func__, __LINE__, ret);
++	return 0;
++}
++
++void bme_shutdown(void)
++{
++	genl_unregister_family(&bme_genl_family);
++        if(g_bme_gp.wq != NULL) {
++                flush_workqueue(g_bme_gp.wq);
++                destroy_workqueue(g_bme_gp.wq);
++		g_bme_gp.wq = NULL;
++        }
++	pr_info("[BME-%s:%d ]: ", __func__, __LINE__);
++}
+diff -Nrp -U 7 --strip-trailing-cr a/drivers/target/target_core_configfs.c b/drivers/target/target_core_configfs.c
+--- a/drivers/target/target_core_configfs.c	2019-10-24 14:16:26.665087062 -0500
++++ b/drivers/target/target_core_configfs.c	2019-10-24 14:44:38.297838608 -0500
+@@ -24,18 +24,20 @@
+ #include <linux/delay.h>
+ #include <linux/unistd.h>
+ #include <linux/string.h>
+ #include <linux/parser.h>
+ #include <linux/syscalls.h>
+ #include <linux/configfs.h>
+ #include <linux/spinlock.h>
++#include <linux/blkdev.h>
+ 
+ #include <target/target_core_base.h>
+ #include <target/target_core_backend.h>
+ #include <target/target_core_fabric.h>
++#include <target/target_core_bme.h>
+ 
+ #include "target_core_internal.h"
+ #include "target_core_alua.h"
+ #include "target_core_pr.h"
+ #include "target_core_rd.h"
+ #include "target_core_xcopy.h"
+ 
+@@ -543,14 +545,89 @@ DEF_CONFIGFS_ATTRIB_SHOW(queue_depth);
+ DEF_CONFIGFS_ATTRIB_SHOW(max_unmap_lba_count);
+ DEF_CONFIGFS_ATTRIB_SHOW(max_unmap_block_desc_count);
+ DEF_CONFIGFS_ATTRIB_SHOW(unmap_granularity);
+ DEF_CONFIGFS_ATTRIB_SHOW(unmap_granularity_alignment);
+ DEF_CONFIGFS_ATTRIB_SHOW(unmap_zeroes_data);
+ DEF_CONFIGFS_ATTRIB_SHOW(max_write_same_len);
+ 
++static ssize_t __target_wwn_vpd_unit_serial_store(struct se_device *dev,
++		const char *page, size_t count)
++{
++	unsigned char buf[INQUIRY_VPD_SERIAL_LEN];
++
++	/*
++	 * If Linux/SCSI subsystem_api_t plugin got a VPD Unit Serial
++	 * from the struct scsi_device level firmware, do not allow
++	 * VPD Unit Serial to be emulated.
++	 *
++	 * Note this struct scsi_device could also be emulating VPD
++	 * information from its drivers/scsi LLD.  But for now we assume
++	 * it is doing 'the right thing' wrt a world wide unique
++	 * VPD Unit Serial Number that OS dependent multipath can depend on.
++	 */
++	if (dev->dev_flags & DF_FIRMWARE_VPD_UNIT_SERIAL) {
++		pr_err("Underlying SCSI device firmware provided VPD"
++			" Unit Serial, ignoring request\n");
++		return -EOPNOTSUPP;
++	}
++
++	if (strlen(page) >= INQUIRY_VPD_SERIAL_LEN) {
++		pr_err("Emulated VPD Unit Serial exceeds"
++		" INQUIRY_VPD_SERIAL_LEN: %d\n", INQUIRY_VPD_SERIAL_LEN);
++		return -EOVERFLOW;
++	}
++	/*
++	 * Check to see if any active $FABRIC_MOD exports exist.  If they
++	 * do exist, fail here as changing this information on the fly
++	 * (underneath the initiator side OS dependent multipath code)
++	 * could cause negative effects.
++	 */
++	if (dev->export_count) {
++		pr_err("Unable to set VPD Unit Serial while"
++			" active %d $FABRIC_MOD exports exist\n",
++			dev->export_count);
++		return -EINVAL;
++	}
++
++	/*
++	 * This currently assumes ASCII encoding for emulated VPD Unit Serial.
++	 *
++	 * Also, strip any newline added from the userspace
++	 * echo $UUID > $TARGET/$HBA/$STORAGE_OBJECT/wwn/vpd_unit_serial
++	 */
++	memset(buf, 0, INQUIRY_VPD_SERIAL_LEN);
++	snprintf(buf, INQUIRY_VPD_SERIAL_LEN, "%s", page);
++	snprintf(dev->t10_wwn.unit_serial, INQUIRY_VPD_SERIAL_LEN,
++			"%s", strstrip(buf));
++	return count;
++}
++
++static ssize_t uuid_show(struct config_item *item, char *page)
++{
++        struct se_device *dev = to_attrib(item)->da_dev;
++
++	return sprintf(page, "%s\n", dev->t10_wwn.unit_serial);
++}
++
++static ssize_t uuid_store(struct config_item *item,
++		const char *page, size_t count)
++{
++	struct se_dev_attrib *da = to_attrib(item);
++	struct se_device *dev = da->da_dev;
++	int rval = __target_wwn_vpd_unit_serial_store(dev,page,count);
++	if (rval == count) {
++		dev->dev_flags |= DF_UUID_VPD_UNIT_SERIAL;
++		dev->dev_flags &= ~DF_EMULATED_VPD_UNIT_SERIAL;
++		pr_debug("Target_Core_ConfigFS: Set UUID VPD Unit Serial:"
++				" %s\n", dev->t10_wwn.unit_serial);
++	}
++	return rval;
++}
++
++
+ #define DEF_CONFIGFS_ATTRIB_STORE_U32(_name)				\
+ static ssize_t _name##_store(struct config_item *item, const char *page,\
+ 		size_t count)						\
+ {									\
+ 	struct se_dev_attrib *da = to_attrib(item);			\
+ 	u32 val;							\
+ 	int ret;							\
+@@ -1140,14 +1217,15 @@ CONFIGFS_ATTR_RO(, hw_queue_depth);
+ CONFIGFS_ATTR(, queue_depth);
+ CONFIGFS_ATTR(, max_unmap_lba_count);
+ CONFIGFS_ATTR(, max_unmap_block_desc_count);
+ CONFIGFS_ATTR(, unmap_granularity);
+ CONFIGFS_ATTR(, unmap_granularity_alignment);
+ CONFIGFS_ATTR(, unmap_zeroes_data);
+ CONFIGFS_ATTR(, max_write_same_len);
++CONFIGFS_ATTR(, uuid);
+ CONFIGFS_ATTR_RO(, alua_support);
+ CONFIGFS_ATTR_RO(, pgr_support);
+ 
+ /*
+  * dev_attrib attributes for devices using the target core SBC/SPC
+  * interpreter.  Any backend using spc_parse_cdb should be using
+  * these.
+@@ -1183,14 +1261,15 @@ struct configfs_attribute *sbc_attrib_at
+ 	&attr_max_unmap_block_desc_count,
+ 	&attr_unmap_granularity,
+ 	&attr_unmap_granularity_alignment,
+ 	&attr_unmap_zeroes_data,
+ 	&attr_max_write_same_len,
+ 	&attr_alua_support,
+ 	&attr_pgr_support,
++	&attr_uuid,
+ 	NULL,
+ };
+ EXPORT_SYMBOL(sbc_attrib_attrs);
+ 
+ /*
+  * Minimal dev_attrib attributes for devices passing through CDBs.
+  * In this case we only provide a few read-only attributes for
+@@ -1424,16 +1503,26 @@ static ssize_t target_wwn_vpd_unit_seria
+ }
+ 
+ static ssize_t target_wwn_vpd_unit_serial_store(struct config_item *item,
+ 		const char *page, size_t count)
+ {
+ 	struct t10_wwn *t10_wwn = to_t10_wwn(item);
+ 	struct se_device *dev = t10_wwn->t10_dev;
+-	unsigned char buf[INQUIRY_VPD_SERIAL_LEN];
++#if 1
++	int rval = __target_wwn_vpd_unit_serial_store(dev,page,count);
++	if (rval == count) {
++		dev->dev_flags |= DF_EMULATED_VPD_UNIT_SERIAL;
+ 
++		pr_debug("Target_Core_ConfigFS: Set emulated VPD Unit Serial:"
++				" %s\n", dev->t10_wwn.unit_serial);
++	}
++	return rval;
++#else
++
++	unsigned char buf[INQUIRY_VPD_SERIAL_LEN];
+ 	/*
+ 	 * If Linux/SCSI subsystem_api_t plugin got a VPD Unit Serial
+ 	 * from the struct scsi_device level firmware, do not allow
+ 	 * VPD Unit Serial to be emulated.
+ 	 *
+ 	 * Note this struct scsi_device could also be emulating VPD
+ 	 * information from its drivers/scsi LLD.  But for now we assume
+@@ -1476,14 +1565,15 @@ static ssize_t target_wwn_vpd_unit_seria
+ 			"%s", strstrip(buf));
+ 	dev->dev_flags |= DF_EMULATED_VPD_UNIT_SERIAL;
+ 
+ 	pr_debug("Target_Core_ConfigFS: Set emulated VPD Unit Serial:"
+ 			" %s\n", dev->t10_wwn.unit_serial);
+ 
+ 	return count;
++#endif
+ }
+ 
+ /*
+  * VPD page 0x83 Protocol Identifier
+  */
+ static ssize_t target_wwn_vpd_protocol_identifier_show(struct config_item *item,
+ 		char *page)
+@@ -2049,14 +2139,249 @@ static struct configfs_attribute *target
+ 	NULL,
+ };
+ 
+ TB_CIT_SETUP(dev_pr, NULL, NULL, target_core_dev_pr_attrs);
+ 
+ /*  End functions for struct config_item_type tb_dev_pr_cit */
+ 
++/*  Start functions for struct config_item_type tb_dev_bme_cit */
++
++static struct se_device *bme_to_dev(struct config_item *item)
++{
++	return container_of(to_config_group(item), struct se_device, dev_bme_group);
++}
++
++enum { Opt_bme_op, Opt_bme_mode, Opt_bme_name, Opt_bme_dry, Opt_bme_cfgchk, Opt_bme_err};
++
++static match_table_t bme_tokens = {
++	{Opt_bme_op, "op=%d"},
++	{Opt_bme_name, "name=%s"},
++	{Opt_bme_mode, "mode=%d"},
++	{Opt_bme_err, NULL}
++};
++
++static ssize_t target_bme_control_store(struct config_item *item, const char *page, size_t count)
++{
++	int ret = 0, token;
++	unsigned char *name=NULL;
++	char *orig, *ptr, *opts;
++	substring_t args[MAX_OPT_ARGS];
++	u8 op=0, mode=0;
++	struct se_device *dev = bme_to_dev(item);
++
++	opts = kstrdup(page, GFP_KERNEL);
++	if (!opts)
++		return -ENOMEM;
++
++	orig = opts;
++	while ((ptr = strsep(&opts, ",\n")) != NULL) {
++		if (!*ptr)
++			continue;
++
++		token = match_token(ptr, bme_tokens, args);
++		switch (token) {
++		case Opt_bme_op:
++			ret = kstrtou8(args->from, 0, &op);
++			if (ret < 0) {
++				pr_err("kstrtoint() failed for op\n");
++				goto out;
++			}
++			// pr_debug("[BME-%s:%d ]: op=%d\n", __func__, __LINE__, op);
++			break;
++		case Opt_bme_mode:
++			ret = kstrtou8(args->from, 0, &mode);
++			if (ret < 0) {
++				pr_err("kstrtoint() failed for mode\n");
++				goto out;
++			}
++			// pr_debug("[BME-%s:%d]: op=%d\n", __func__, __LINE__, mode);
++			break;
++		case Opt_bme_name:
++			name = match_strdup(args);
++			if (!name) {
++				ret = -ENOMEM;
++				goto out;
++			}
++			// pr_debug("[BME-%s:%d]: name =  %s\n", __func__, __LINE__, name);
++			break;
++		default:
++			break;
++		}
++	}
++	ret = core_bme_control_proc(dev,op,mode,name);
++out:
++	if (name)
++		kfree(name);
++	kfree(orig);
++	return (!ret) ? count : ret;
++}
++
++static ssize_t target_bme_state_show(struct config_item *item, char *page)
++{
++	struct se_device *dev = bme_to_dev(item);
++
++	return sprintf(page, "%d\n", dev->se_bme.state);
++}
++
++static ssize_t target_bme_priority_show(struct config_item *item, char *page)
++{
++	struct se_device *dev = bme_to_dev(item);
++
++	return sprintf(page, "%d\n", dev->se_bme.priority);
++}
++
++static ssize_t target_bme_max_iobs_show(struct config_item *item, char *page)
++{
++	struct se_device *dev = bme_to_dev(item);
++	u64 bs = (dev->se_bme.max_io_blocks << SECTOR_SHIFT);
++
++	return snprintf(page, PAGE_SIZE, "%llu\n",bs);
++}
++
++static ssize_t target_bme_min_iobs_show(struct config_item *item, char *page)
++{
++	struct se_device *dev = bme_to_dev(item);
++	u64 bs = (dev->se_bme.min_io_blocks << SECTOR_SHIFT);
++
++	return snprintf(page, PAGE_SIZE, "%llu\n",bs);
++}
++
++static ssize_t target_bme_info_show(struct config_item *item, char *page)
++{
++	struct se_device *dev = bme_to_dev(item);
++	return core_bme_info(dev, page);
++}
++
++#if 0
++static ssize_t target_bme_throttle_show(struct config_item *item, char *page)
++{
++	struct se_device *dev = bme_to_dev(item);
++	return snprintf(page, PAGE_SIZE, "%u\n", atomic_read(&dev->se_bme.throttle));
++}
++#endif
++
++static ssize_t target_bme_stop_on_completion_show(struct config_item *item, char *page)
++{
++	struct se_device *dev = bme_to_dev(item);
++	return snprintf(page, PAGE_SIZE, "%d\n", (dev->dev_flags & DF_BME_STOP_ON_COMPLETE) ? 1 : 0);
++}
++
++static ssize_t target_bme_suspend_on_error_show(struct config_item *item, char *page)
++{
++	struct se_device *dev = bme_to_dev(item);
++	return snprintf(page, PAGE_SIZE, "%d\n", (dev->dev_flags & DF_BME_SUSPEND_ON_ERROR) ? 1 : 0);
++}
++
++#if 0
++static ssize_t target_bme_throttle_store(struct config_item *item,
++		const char *page, size_t count)
++{
++	int ret = 0;
++	u64 tmp_ll;
++	struct se_device *dev = bme_to_dev(item);
++	u32 rate, bs = dev->se_bme.max_io_blocks;
++
++	if (count > 0) {
++		ret = kstrtou64(page, 0, &tmp_ll);
++		if (ret < 0) {
++			pr_err("kstrtoull() failed for throttle\n");
++			return 0;
++		}
++		rate = (u32)(tmp_ll >> SECTOR_SHIFT);
++		pr_info("set throttle=%lld (%u blocks)\n", tmp_ll, rate);
++		if (rate != 0) {
++			if ( rate < bs) {
++				pr_err("throttle (%u) MUST be greater than io_blocksize (%u)\n", rate,bs);
++				return 0;
++			}
++		}
++		atomic_set(&dev->se_bme.throttle, rate);
++	}
++	return count;
++}
++#endif
++
++static ssize_t target_bme_stop_on_completion_store(struct config_item *item,
++		const char *page, size_t count)
++{
++	bool flag;
++	struct se_device *dev = bme_to_dev(item);
++
++	if ( strtobool(page, &flag) < 0) {
++		pr_err("For dev_enable ops, only valid value"
++				" is \"1\"\n");
++		return -EINVAL;
++	}
++	if (flag) {
++		pr_info("[BME-%s:%d - %s]: Stop on Complete SET\n",
++			__func__, __LINE__, dev->t10_wwn.unit_serial);
++		dev->dev_flags |= DF_BME_STOP_ON_COMPLETE;
++	}
++	else {
++		pr_info("[BME-%s:%d - %s]: Stop on Complete CLEARED\n",
++			__func__, __LINE__, dev->t10_wwn.unit_serial);
++		dev->dev_flags &= ~DF_BME_STOP_ON_COMPLETE;
++	}
++	return count;
++}
++
++static ssize_t target_bme_suspend_on_error_store(struct config_item *item,
++		const char *page, size_t count)
++{
++	bool flag;
++	struct se_device *dev = bme_to_dev(item);
++
++	if ( strtobool(page, &flag) < 0) {
++		pr_err("For dev_enable ops, only valid value"
++				" is \"1\"\n");
++		return -EINVAL;
++	}
++	if (flag) {
++		pr_info("[BME-%s:%d - %s]: Suspend on Error SET\n",
++			__func__, __LINE__, dev->t10_wwn.unit_serial);
++		dev->dev_flags |= DF_BME_SUSPEND_ON_ERROR;
++	}
++	else {
++		pr_info("[BME-%s:%d - %s]: Suspend on Error CLEARED\n",
++			__func__, __LINE__, dev->t10_wwn.unit_serial);
++		dev->dev_flags &= ~DF_BME_SUSPEND_ON_ERROR;
++	}
++	return count;
++}
++
++CONFIGFS_ATTR_RO(target_bme_, state);
++CONFIGFS_ATTR_RO(target_bme_, priority);
++CONFIGFS_ATTR_RO(target_bme_, max_iobs);
++CONFIGFS_ATTR_RO(target_bme_, min_iobs);
++CONFIGFS_ATTR_RO(target_bme_, info);
++// CONFIGFS_ATTR(target_bme_, throttle);
++CONFIGFS_ATTR(target_bme_, stop_on_completion);
++CONFIGFS_ATTR(target_bme_, suspend_on_error);
++CONFIGFS_ATTR_WO(target_bme_, control);
++
++static struct configfs_attribute *target_core_bme_attrs[] = {
++	&target_bme_attr_state,
++	&target_bme_attr_priority,
++	&target_bme_attr_max_iobs,
++	&target_bme_attr_min_iobs,
++	&target_bme_attr_info,
++	// &target_bme_attr_throttle,
++	&target_bme_attr_stop_on_completion,
++	&target_bme_attr_suspend_on_error,
++	&target_bme_attr_control,
++	NULL,
++};
++
++static struct configfs_group_operations target_core_bme_gp_ops = {
++	.make_item		= &core_bme_createmap,
++	.drop_item		= &core_bme_destroymap,
++};
++
++TB_CIT_SETUP(dev_bme, NULL, &target_core_bme_gp_ops,target_core_bme_attrs);
++/*  End functions for struct config_item_type tb_dev_bme_cit */
+ /*  Start functions for struct config_item_type tb_dev_cit */
+ 
+ static inline struct se_device *to_device(struct config_item *item)
+ {
+ 	return container_of(to_config_group(item), struct se_device, dev_group);
+ }
+ 
+@@ -3165,14 +3490,18 @@ static struct config_group *target_core_
+ 			&tb->tb_dev_action_cit);
+ 	configfs_add_default_group(&dev->dev_action_group, &dev->dev_group);
+ 
+ 	config_group_init_type_name(&dev->dev_attrib.da_group, "attrib",
+ 			&tb->tb_dev_attrib_cit);
+ 	configfs_add_default_group(&dev->dev_attrib.da_group, &dev->dev_group);
+ 
++	config_group_init_type_name(&dev->dev_bme_group, "bme",
++			&tb->tb_dev_bme_cit);
++	configfs_add_default_group(&dev->dev_bme_group, &dev->dev_group);
++
+ 	config_group_init_type_name(&dev->dev_pr_group, "pr",
+ 			&tb->tb_dev_pr_cit);
+ 	configfs_add_default_group(&dev->dev_pr_group, &dev->dev_group);
+ 
+ 	config_group_init_type_name(&dev->t10_wwn.t10_wwn_group, "wwn",
+ 			&tb->tb_dev_wwn_cit);
+ 	configfs_add_default_group(&dev->t10_wwn.t10_wwn_group,
+@@ -3423,14 +3752,15 @@ static const struct config_item_type tar
+ /* Stop functions for struct config_item_type target_core_hba_cit */
+ 
+ void target_setup_backend_cits(struct target_backend *tb)
+ {
+ 	target_core_setup_dev_cit(tb);
+ 	target_core_setup_dev_action_cit(tb);
+ 	target_core_setup_dev_attrib_cit(tb);
++	target_core_setup_dev_bme_cit(tb);
+ 	target_core_setup_dev_pr_cit(tb);
+ 	target_core_setup_dev_wwn_cit(tb);
+ 	target_core_setup_dev_alua_tg_pt_gps_cit(tb);
+ 	target_core_setup_dev_stat_cit(tb);
+ }
+ 
+ static void target_init_dbroot(void)
+@@ -3474,14 +3804,17 @@ static int __init target_core_init_confi
+ 	 * Create $CONFIGFS/target/core default group for HBA <-> Storage Object
+ 	 * and ALUA Logical Unit Group and Target Port Group infrastructure.
+ 	 */
+ 	config_group_init_type_name(&target_core_hbagroup, "core",
+ 			&target_core_cit);
+ 	configfs_add_default_group(&target_core_hbagroup, &subsys->su_group);
+ 
++	/* Add /sys/kernel/config/target/core/bme */
++	// configfs_add_default_group(bme_cfggp_create(), &target_core_hbagroup);
++
+ 	/*
+ 	 * Create ALUA infrastructure under /sys/kernel/config/target/core/alua/
+ 	 */
+ 	config_group_init_type_name(&alua_group, "alua", &target_core_alua_cit);
+ 	configfs_add_default_group(&alua_group, &target_core_hbagroup);
+ 
+ 	/*
+@@ -3503,26 +3836,30 @@ static int __init target_core_init_confi
+ 
+ 	config_group_init_type_name(&lu_gp->lu_gp_group, "default_lu_gp",
+ 				&target_core_alua_lu_gp_cit);
+ 	configfs_add_default_group(&lu_gp->lu_gp_group, &alua_lu_gps_group);
+ 
+ 	default_lu_gp = lu_gp;
+ 
++	if (bme_init(&target_core_hbagroup) < 0)
++		goto out;
++
+ 	/*
+ 	 * Register the target_core_mod subsystem with configfs.
+ 	 */
+ 	ret = configfs_register_subsystem(subsys);
+ 	if (ret < 0) {
+ 		pr_err("Error %d while registering subsystem %s\n",
+ 			ret, subsys->su_group.cg_item.ci_namebuf);
+ 		goto out_global;
+ 	}
+ 	pr_debug("TARGET_CORE[0]: Initialized ConfigFS Fabric"
+ 		" Infrastructure: "TARGET_CORE_VERSION" on %s/%s"
+ 		" on "UTS_RELEASE"\n", utsname()->sysname, utsname()->machine);
++
+ 	/*
+ 	 * Register built-in RAMDISK subsystem logic for virtual LUN 0
+ 	 */
+ 	ret = rd_module_init();
+ 	if (ret < 0)
+ 		goto out;
+ 
+@@ -3549,14 +3886,15 @@ out_global:
+ 	}
+ 	release_se_kmem_caches();
+ 	return ret;
+ }
+ 
+ static void __exit target_core_exit_configfs(void)
+ {
++	// bme_cfggp_destroy();
+ 	configfs_remove_default_groups(&alua_lu_gps_group);
+ 	configfs_remove_default_groups(&alua_group);
+ 	configfs_remove_default_groups(&target_core_hbagroup);
+ 
+ 	/*
+ 	 * We expect subsys->su_group.default_groups to be released
+ 	 * by configfs subsystem provider logic..
+@@ -3568,14 +3906,15 @@ static void __exit target_core_exit_conf
+ 
+ 	pr_debug("TARGET_CORE[0]: Released ConfigFS Fabric"
+ 			" Infrastructure\n");
+ 
+ 	core_dev_release_virtual_lun0();
+ 	rd_module_exit();
+ 	target_xcopy_release_pt();
++	bme_shutdown();
+ 	release_se_kmem_caches();
+ }
+ 
+ MODULE_DESCRIPTION("Target_Core_Mod/ConfigFS");
+ MODULE_AUTHOR("nab@Linux-iSCSI.org");
+ MODULE_LICENSE("GPL");
+ 
+diff -Nrp -U 7 --strip-trailing-cr a/drivers/target/target_core_device.c b/drivers/target/target_core_device.c
+--- a/drivers/target/target_core_device.c	2019-10-24 14:16:26.665087062 -0500
++++ b/drivers/target/target_core_device.c	2019-10-24 14:44:38.297838608 -0500
+@@ -849,14 +849,33 @@ sector_t target_to_linux_sector(struct s
+ 		return lb << 1;
+ 	default:
+ 		return lb;
+ 	}
+ }
+ EXPORT_SYMBOL(target_to_linux_sector);
+ 
++/*
++ * Convert from the unconditionally used by the Linux block layer 512 byte
++ * units to blocksize advertised to the initiator.
++ */
++sector_t target_to_device_block(struct se_device *dev, sector_t lb)
++{
++	switch (dev->dev_attrib.block_size) {
++	case 4096:
++		return lb >> 3;
++	case 2048:
++		return lb >> 2;
++	case 1024:
++		return lb >> 1;
++	default:
++		return lb;
++	}
++}
++EXPORT_SYMBOL(target_to_device_block);
++
+ struct devices_idr_iter {
+ 	struct config_item *prev_item;
+ 	int (*fn)(struct se_device *dev, void *data);
+ 	void *data;
+ };
+ 
+ static int target_devices_idr_iter(int id, void *p, void *data)
+@@ -905,14 +924,16 @@ int target_for_each_device(int (*fn)(str
+ 
+ 	mutex_lock(&device_mutex);
+ 	ret = idr_for_each(&devices_idr, target_devices_idr_iter, &iter);
+ 	mutex_unlock(&device_mutex);
+ 	config_item_put(iter.prev_item);
+ 	return ret;
+ }
++extern int core_bme_setupdev(struct se_device *);
++extern void core_bme_destroydev(struct se_device *);
+ 
+ int target_configure_device(struct se_device *dev)
+ {
+ 	struct se_hba *hba = dev->se_hba;
+ 	int ret, id;
+ 
+ 	if (target_dev_configured(dev)) {
+@@ -956,14 +977,17 @@ int target_configure_device(struct se_de
+ 	dev->dev_attrib.optimal_sectors = dev->dev_attrib.hw_max_sectors;
+ 
+ 	dev->creation_time = get_jiffies_64();
+ 
+ 	ret = core_setup_alua(dev);
+ 	if (ret)
+ 		goto out_destroy_device;
++	ret = core_bme_setupdev(dev);
++	if (ret)
++		goto out_destroy_device;
+ 
+ 	/*
+ 	 * Setup work_queue for QUEUE_FULL
+ 	 */
+ 	INIT_WORK(&dev->qf_work_queue, target_qf_do_work);
+ 
+ 	scsi_dump_inquiry(dev);
+@@ -1006,14 +1030,15 @@ void target_free_device(struct se_device
+ 	}
+ 
+ 	core_alua_free_lu_gp_mem(dev);
+ 	core_alua_set_lba_map(dev, NULL, 0, 0);
+ 	core_scsi3_free_all_registrations(dev);
+ 	se_release_vpd_for_dev(dev);
+ 
++	core_bme_destroydev(dev);
+ 	if (dev->transport->free_prot)
+ 		dev->transport->free_prot(dev);
+ 
+ 	dev->transport->free_device(dev);
+ }
+ 
+ int core_dev_setup_virtual_lun0(void)
+diff -Nrp -U 7 --strip-trailing-cr a/drivers/target/target_core_internal.h b/drivers/target/target_core_internal.h
+--- a/drivers/target/target_core_internal.h	2019-10-24 14:16:26.665087062 -0500
++++ b/drivers/target/target_core_internal.h	2019-10-24 14:44:38.298838604 -0500
+@@ -14,14 +14,15 @@ struct target_backend {
+ 	struct list_head list;
+ 
+ 	const struct target_backend_ops *ops;
+ 
+ 	struct config_item_type tb_dev_cit;
+ 	struct config_item_type tb_dev_attrib_cit;
+ 	struct config_item_type tb_dev_action_cit;
++	struct config_item_type tb_dev_bme_cit;
+ 	struct config_item_type tb_dev_pr_cit;
+ 	struct config_item_type tb_dev_wwn_cit;
+ 	struct config_item_type tb_dev_alua_tg_pt_gps_cit;
+ 	struct config_item_type tb_dev_stat_cit;
+ };
+ 
+ struct target_fabric_configfs {
+@@ -147,15 +148,15 @@ int	transport_dump_vpd_assoc(struct t10_
+ int	transport_dump_vpd_ident_type(struct t10_vpd *, unsigned char *, int);
+ int	transport_dump_vpd_ident(struct t10_vpd *, unsigned char *, int);
+ void	transport_clear_lun_ref(struct se_lun *);
+ sense_reason_t	target_cmd_size_check(struct se_cmd *cmd, unsigned int size);
+ void	target_qf_do_work(struct work_struct *work);
+ bool	target_check_wce(struct se_device *dev);
+ bool	target_check_fua(struct se_device *dev);
+-void	__target_execute_cmd(struct se_cmd *, bool);
++sense_reason_t	__target_execute_cmd(struct se_cmd *, bool);
+ 
+ /* target_core_stat.c */
+ void	target_stat_setup_dev_default_groups(struct se_device *);
+ void	target_stat_setup_port_default_groups(struct se_lun *);
+ void	target_stat_setup_mappedlun_default_groups(struct se_lun_acl *);
+ 
+ /* target_core_xcopy.c */
+diff -Nrp -U 7 --strip-trailing-cr a/drivers/target/target_core_pr.h b/drivers/target/target_core_pr.h
+--- a/drivers/target/target_core_pr.h	2019-10-24 14:16:26.666087059 -0500
++++ b/drivers/target/target_core_pr.h	2019-10-24 14:44:38.298838604 -0500
+@@ -48,15 +48,16 @@
+ 
+ #define PR_APTPL_MAX_IPORT_LEN			256
+ #define PR_APTPL_MAX_TPORT_LEN			256
+ 
+ /*
+  *  Function defined in target_core_spc.c
+  */
+-void spc_parse_naa_6h_vendor_specific(struct se_device *, unsigned char *);
++// void spc_parse_naa_6h_vendor_specific(struct se_device *, unsigned char *);
++void spc_parse_naa_6h_vendor_specific(struct se_device *, int, unsigned char *, int , bool);
+ 
+ extern struct kmem_cache *t10_pr_reg_cache;
+ 
+ extern void core_pr_dump_initiator_port(struct t10_pr_registration *,
+ 			char *, u32);
+ extern void target_release_reservation(struct se_device *dev);
+ extern sense_reason_t target_scsi2_reservation_release(struct se_cmd *);
+diff -Nrp -U 7 --strip-trailing-cr a/drivers/target/target_core_spc.c b/drivers/target/target_core_spc.c
+--- a/drivers/target/target_core_spc.c	2019-10-24 14:16:26.666087059 -0500
++++ b/drivers/target/target_core_spc.c	2019-10-24 14:44:38.298838604 -0500
+@@ -125,30 +125,29 @@ spc_emulate_evpd_80(struct se_cmd *cmd,
+ 		len = sprintf(&buf[4], "%s", dev->t10_wwn.unit_serial);
+ 		len++; /* Extra Byte for NULL Terminator */
+ 		buf[3] = len;
+ 	}
+ 	return 0;
+ }
+ 
+-void spc_parse_naa_6h_vendor_specific(struct se_device *dev,
+-				      unsigned char *buf)
++void spc_parse_naa_6h_vendor_specific(struct se_device *dev, int offset, unsigned char *buf, int count, bool next)
+ {
+-	unsigned char *p = &dev->t10_wwn.unit_serial[0];
++	unsigned char *p = &dev->t10_wwn.unit_serial[offset];
+ 	int cnt;
+-	bool next = true;
++	// bool next = true;
+ 
+ 	/*
+ 	 * Generate up to 36 bits of VENDOR SPECIFIC IDENTIFIER starting on
+ 	 * byte 3 bit 3-0 for NAA IEEE Registered Extended DESIGNATOR field
+ 	 * format, followed by 64 bits of VENDOR SPECIFIC IDENTIFIER EXTENSION
+ 	 * to complete the payload.  These are based from VPD=0x80 PRODUCT SERIAL
+ 	 * NUMBER set via vpd_unit_serial in target_core_configfs.c to ensure
+ 	 * per device uniqeness.
+ 	 */
+-	for (cnt = 0; *p && cnt < 13; p++) {
++	for (cnt = 0; *p && cnt < count; p++) {
+ 		int val = hex_to_bin(*p);
+ 
+ 		if (val < 0)
+ 			continue;
+ 
+ 		if (next) {
+ 			next = false;
+@@ -183,48 +182,66 @@ spc_emulate_evpd_83(struct se_cmd *cmd,
+ 	 * NAA IEEE Registered Extended Assigned designator format, see
+ 	 * spc4r17 section 7.7.3.6.5
+ 	 *
+ 	 * We depend upon a target_core_mod/ConfigFS provided
+ 	 * /sys/kernel/config/target/core/$HBA/$DEV/wwn/vpd_unit_serial
+ 	 * value in order to return the NAA id.
+ 	 */
+-	if (!(dev->dev_flags & DF_EMULATED_VPD_UNIT_SERIAL))
+-		goto check_t10_vend_desc;
++	if (dev->dev_flags & DF_UUID_VPD_UNIT_SERIAL) {
++		/* CODE SET == Binary */
++		buf[off++] = 0x1;
+ 
+-	/* CODE SET == Binary */
+-	buf[off++] = 0x1;
++		/* Set ASSOCIATION == addressed logical unit: 0)b */
++		buf[off] = 0x00;
+ 
+-	/* Set ASSOCIATION == addressed logical unit: 0)b */
+-	buf[off] = 0x00;
++		/* Identifier/Designator type == extract from serial number */
++		buf[off++] |= hex_to_bin(dev->t10_wwn.unit_serial[0]);
++		off++;
+ 
+-	/* Identifier/Designator type == NAA identifier */
+-	buf[off++] |= 0x3;
+-	off++;
++		/* Identifier/Designator length */
++		buf[off++] = 0x10;
+ 
+-	/* Identifier/Designator length */
+-	buf[off++] = 0x10;
++		spc_parse_naa_6h_vendor_specific(dev, 1, &buf[off], 16, false);
++	}
++	else if (dev->dev_flags & DF_EMULATED_VPD_UNIT_SERIAL) {
+ 
+-	/*
+-	 * Start NAA IEEE Registered Extended Identifier/Designator
+-	 */
+-	buf[off++] = (0x6 << 4);
++		/* CODE SET == Binary */
++		buf[off++] = 0x1;
+ 
+-	/*
+-	 * Use OpenFabrics IEEE Company ID: 00 14 05
+-	 */
+-	buf[off++] = 0x01;
+-	buf[off++] = 0x40;
+-	buf[off] = (0x5 << 4);
++		/* Set ASSOCIATION == addressed logical unit: 0)b */
++		buf[off] = 0x00;
+ 
+-	/*
+-	 * Return ConfigFS Unit Serial Number information for
+-	 * VENDOR_SPECIFIC_IDENTIFIER and
+-	 * VENDOR_SPECIFIC_IDENTIFIER_EXTENTION
+-	 */
+-	spc_parse_naa_6h_vendor_specific(dev, &buf[off]);
++		/* Identifier/Designator type == NAA identifier */
++		buf[off++] |= 0x3;
++		off++;
++
++		/* Identifier/Designator length */
++		buf[off++] = 0x10;
++
++		/*
++		 * Start NAA IEEE Registered Extended Identifier/Designator
++		 */
++		buf[off++] = (0x6 << 4);
++
++		/*
++		 * Use OpenFabrics IEEE Company ID: 00 14 05
++		 */
++		buf[off++] = 0x01;
++		buf[off++] = 0x40;
++		buf[off] = (0x5 << 4);
++
++		/*
++		 * Return ConfigFS Unit Serial Number information for
++		 * VENDOR_SPECIFIC_IDENTIFIER and
++		 * VENDOR_SPECIFIC_IDENTIFIER_EXTENTION
++		 */
++		spc_parse_naa_6h_vendor_specific(dev, 0, &buf[off], 13, true);
++	}
++	else
++		goto check_t10_vend_desc;
+ 
+ 	len = 20;
+ 	off = (len + 4);
+ 
+ check_t10_vend_desc:
+ 	/*
+ 	 * T10 Vendor Identifier Page, see spc4r17 section 7.7.3.4
+diff -Nrp -U 7 --strip-trailing-cr a/drivers/target/target_core_transport.c b/drivers/target/target_core_transport.c
+--- a/drivers/target/target_core_transport.c	2019-10-24 14:16:26.666087059 -0500
++++ b/drivers/target/target_core_transport.c	2019-10-24 14:44:38.299838600 -0500
+@@ -27,14 +27,15 @@
+ #include <net/tcp.h>
+ #include <scsi/scsi_proto.h>
+ #include <scsi/scsi_common.h>
+ 
+ #include <target/target_core_base.h>
+ #include <target/target_core_backend.h>
+ #include <target/target_core_fabric.h>
++#include <target/target_core_bme.h>
+ 
+ #include "target_core_internal.h"
+ #include "target_core_alua.h"
+ #include "target_core_pr.h"
+ #include "target_core_ua.h"
+ 
+ #define CREATE_TRACE_POINTS
+@@ -45,14 +46,16 @@ static struct kmem_cache *se_sess_cache;
+ struct kmem_cache *se_ua_cache;
+ struct kmem_cache *t10_pr_reg_cache;
+ struct kmem_cache *t10_alua_lu_gp_cache;
+ struct kmem_cache *t10_alua_lu_gp_mem_cache;
+ struct kmem_cache *t10_alua_tg_pt_gp_cache;
+ struct kmem_cache *t10_alua_lba_map_cache;
+ struct kmem_cache *t10_alua_lba_map_mem_cache;
++struct kmem_cache *bme_map_cache;
++struct kmem_cache *bme_cmd_cache;
+ 
+ static void transport_complete_task_attr(struct se_cmd *cmd);
+ static void translate_sense_reason(struct se_cmd *cmd, sense_reason_t reason);
+ static void transport_handle_queue_full(struct se_cmd *cmd,
+ 		struct se_device *dev, int err, bool write_pending);
+ static void target_complete_ok_work(struct work_struct *work);
+ 
+@@ -119,22 +122,42 @@ int init_se_kmem_caches(void)
+ 			sizeof(struct t10_alua_lba_map_member),
+ 			__alignof__(struct t10_alua_lba_map_member), 0, NULL);
+ 	if (!t10_alua_lba_map_mem_cache) {
+ 		pr_err("kmem_cache_create() for t10_alua_lba_map_mem_"
+ 				"cache failed\n");
+ 		goto out_free_lba_map_cache;
+ 	}
++	bme_map_cache = kmem_cache_create(
++			"bme_map_cache",
++			sizeof(struct bme_map),
++			__alignof__(struct bme_map), 0, NULL);
++	if (!bme_map_cache) {
++		pr_err("kmem_cache_create() for bme_map_cache failed\n");
++		goto out_free_lba_map_mem_cache;
++	}
++	bme_cmd_cache = kmem_cache_create(
++			"bme_cmd_cache",
++			sizeof(struct bme_cmd),
++			__alignof__(struct bme_cmd), 0, NULL);
++	if (!bme_cmd_cache) {
++		pr_err("kmem_cache_create() for bme_cmd_cache failed\n");
++		goto out_free_bme_map_cache;
++	}
+ 
+ 	target_completion_wq = alloc_workqueue("target_completion",
+ 					       WQ_MEM_RECLAIM, 0);
+ 	if (!target_completion_wq)
+-		goto out_free_lba_map_mem_cache;
++		goto out_free_bme_cmd_cache;
+ 
+ 	return 0;
+ 
++out_free_bme_cmd_cache:
++	kmem_cache_destroy(bme_cmd_cache);
++out_free_bme_map_cache:
++	kmem_cache_destroy(bme_map_cache);
+ out_free_lba_map_mem_cache:
+ 	kmem_cache_destroy(t10_alua_lba_map_mem_cache);
+ out_free_lba_map_cache:
+ 	kmem_cache_destroy(t10_alua_lba_map_cache);
+ out_free_tg_pt_gp_cache:
+ 	kmem_cache_destroy(t10_alua_tg_pt_gp_cache);
+ out_free_lu_gp_mem_cache:
+@@ -158,14 +181,16 @@ void release_se_kmem_caches(void)
+ 	kmem_cache_destroy(se_ua_cache);
+ 	kmem_cache_destroy(t10_pr_reg_cache);
+ 	kmem_cache_destroy(t10_alua_lu_gp_cache);
+ 	kmem_cache_destroy(t10_alua_lu_gp_mem_cache);
+ 	kmem_cache_destroy(t10_alua_tg_pt_gp_cache);
+ 	kmem_cache_destroy(t10_alua_lba_map_cache);
+ 	kmem_cache_destroy(t10_alua_lba_map_mem_cache);
++	kmem_cache_destroy(bme_cmd_cache);
++	kmem_cache_destroy(bme_map_cache);
+ }
+ 
+ /* This code ensures unique mib indexes are handed out. */
+ static DEFINE_SPINLOCK(scsi_mib_index_lock);
+ static u32 scsi_mib_index[SCSI_INDEX_TYPE_MAX];
+ 
+ /*
+@@ -795,24 +820,23 @@ static bool target_cmd_interrupted(struc
+ 		return true;
+ 	}
+ 
+ 	return false;
+ }
+ 
+ /* May be called from interrupt context so must not sleep. */
+-void target_complete_cmd(struct se_cmd *cmd, u8 scsi_status)
++static void __target_complete_cmd(struct kref *kref)
+ {
+ 	int success;
+ 	unsigned long flags;
++	struct se_cmd *cmd = container_of(kref, struct se_cmd, bme_kref);
+ 
+ 	if (target_cmd_interrupted(cmd))
+ 		return;
+ 
+-	cmd->scsi_status = scsi_status;
+-
+ 	spin_lock_irqsave(&cmd->t_state_lock, flags);
+ 	switch (cmd->scsi_status) {
+ 	case SAM_STAT_CHECK_CONDITION:
+ 		if (cmd->se_cmd_flags & SCF_TRANSPORT_TASK_SENSE)
+ 			success = 1;
+ 		else
+ 			success = 0;
+@@ -829,14 +853,21 @@ void target_complete_cmd(struct se_cmd *
+ 	INIT_WORK(&cmd->work, success ? target_complete_ok_work :
+ 		  target_complete_failure_work);
+ 	if (cmd->se_cmd_flags & SCF_USE_CPUID)
+ 		queue_work_on(cmd->cpuid, target_completion_wq, &cmd->work);
+ 	else
+ 		queue_work(target_completion_wq, &cmd->work);
+ }
++
++/* May be called from interrupt context so must not sleep. */
++void target_complete_cmd(struct se_cmd *cmd, u8 scsi_status)
++{
++	cmd->scsi_status = scsi_status;
++	kref_put(&cmd->bme_kref, __target_complete_cmd);
++}
+ EXPORT_SYMBOL(target_complete_cmd);
+ 
+ void target_complete_cmd_with_length(struct se_cmd *cmd, u8 scsi_status, int length)
+ {
+ 	if ((scsi_status == SAM_STAT_GOOD ||
+ 	     cmd->se_cmd_flags & SCF_TREAT_READ_AS_NORMAL) &&
+ 	    length < cmd->data_length) {
+@@ -1326,14 +1357,15 @@ void transport_init_se_cmd(
+ 	INIT_LIST_HEAD(&cmd->state_list);
+ 	init_completion(&cmd->t_transport_stop_comp);
+ 	cmd->free_compl = NULL;
+ 	cmd->abrt_compl = NULL;
+ 	spin_lock_init(&cmd->t_state_lock);
+ 	INIT_WORK(&cmd->work, NULL);
+ 	kref_init(&cmd->cmd_kref);
++	kref_init(&cmd->bme_kref);
+ 
+ 	cmd->se_tfo = tfo;
+ 	cmd->se_sess = se_sess;
+ 	cmd->data_length = data_length;
+ 	cmd->data_direction = data_direction;
+ 	cmd->sam_task_attr = task_attr;
+ 	cmd->sense_buffer = sense_buffer;
+@@ -1879,15 +1911,17 @@ queue_status:
+ 	if (!ret)
+ 		goto check_stop;
+ queue_full:
+ 	transport_handle_queue_full(cmd, cmd->se_dev, ret, false);
+ }
+ EXPORT_SYMBOL(transport_generic_request_failure);
+ 
+-void __target_execute_cmd(struct se_cmd *cmd, bool do_checks)
++// extern sense_reason_t bme_process_io(struct se_cmd *cmd);
++
++sense_reason_t __target_execute_cmd(struct se_cmd *cmd, bool do_checks)
+ {
+ 	sense_reason_t ret;
+ 
+ 	if (!cmd->execute_cmd) {
+ 		ret = TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
+ 		goto err;
+ 	}
+@@ -1907,25 +1941,51 @@ void __target_execute_cmd(struct se_cmd
+ 			goto err;
+ 
+ 		ret = target_check_reservation(cmd);
+ 		if (ret) {
+ 			cmd->scsi_status = SAM_STAT_RESERVATION_CONFLICT;
+ 			goto err;
+ 		}
++		// pr_debug("__target_execure_cmd: inline_io_proc=%p\n",cmd->se_dev->se_bme.inline_io_proc);
++		if (cmd->se_dev->se_bme.inline_io_proc) {
++			ret = cmd->se_dev->se_bme.inline_io_proc(cmd);
++			if (ret ==  TCM_LUN_BUSY) {
++				spin_lock(&cmd->se_dev->delayed_cmd_lock);
++				list_add_tail(&cmd->se_delayed_node, &cmd->se_dev->delayed_cmd_list);
++				spin_unlock(&cmd->se_dev->delayed_cmd_lock);
++				spin_lock_irq(&cmd->t_state_lock);
++				cmd->transport_state &= ~CMD_T_SENT;
++				spin_unlock_irq(&cmd->t_state_lock);
++				return (ret);
++			}    
++		}
+ 	}
+ 
+ 	ret = cmd->execute_cmd(cmd);
++#if 1
+ 	if (!ret)
++		return (ret);
++#else
++	if (!ret) {
++		if ((cmd->se_cmd_flags & SCF_SCSI_DATA_CDB) &&
++			(cmd->data_direction == DMA_TO_DEVICE)) {
++			ret = bme_process_io(cmd);
++			if (ret)
++				goto err;
++		}
+ 		return;
++	}
++#endif
+ err:
+ 	spin_lock_irq(&cmd->t_state_lock);
+ 	cmd->transport_state &= ~CMD_T_SENT;
+ 	spin_unlock_irq(&cmd->t_state_lock);
+ 
+ 	transport_generic_request_failure(cmd, ret);
++	return (ret);
+ }
+ 
+ static int target_write_prot_action(struct se_cmd *cmd)
+ {
+ 	u32 sectors;
+ 	/*
+ 	 * Perform WRITE_INSERT of PI using software emulation when backend
+@@ -2042,31 +2102,35 @@ EXPORT_SYMBOL(target_execute_cmd);
+ 
+ /*
+  * Process all commands up to the last received ORDERED task attribute which
+  * requires another blocking boundary
+  */
+ static void target_restart_delayed_cmds(struct se_device *dev)
+ {
++	sense_reason_t ret;
++
+ 	for (;;) {
+ 		struct se_cmd *cmd;
+ 
+ 		spin_lock(&dev->delayed_cmd_lock);
+ 		if (list_empty(&dev->delayed_cmd_list)) {
+ 			spin_unlock(&dev->delayed_cmd_lock);
+ 			break;
+ 		}
+ 
+ 		cmd = list_entry(dev->delayed_cmd_list.next,
+ 				 struct se_cmd, se_delayed_node);
+ 		list_del(&cmd->se_delayed_node);
+ 		spin_unlock(&dev->delayed_cmd_lock);
+ 
+-		cmd->transport_state |= CMD_T_SENT;
++		ret = __target_execute_cmd(cmd, true);
++		if (ret == TCM_LUN_BUSY)
++			break;
+ 
+-		__target_execute_cmd(cmd, true);
++		cmd->transport_state |= CMD_T_SENT;
+ 
+ 		if (cmd->sam_task_attr == TCM_ORDERED_TAG)
+ 			break;
+ 	}
+ }
+ 
+ /*
+diff -Nrp -U 7 --strip-trailing-cr a/drivers/target/target_core_user.c b/drivers/target/target_core_user.c
+--- a/drivers/target/target_core_user.c	2019-10-24 14:16:26.667087055 -0500
++++ b/drivers/target/target_core_user.c	2019-10-24 14:44:38.299838600 -0500
+@@ -103,19 +103,19 @@ struct tcmu_nl_cmd {
+ 	struct list_head nl_list;
+ 	struct tcmu_dev *udev;
+ 	int cmd;
+ 	int status;
+ };
+ 
+ struct tcmu_dev {
++	struct se_device se_dev;
++
+ 	struct list_head node;
+ 	struct kref kref;
+ 
+-	struct se_device se_dev;
+-
+ 	char *name;
+ 	struct se_hba *hba;
+ 
+ #define TCMU_DEV_BIT_OPEN 0
+ #define TCMU_DEV_BIT_BROKEN 1
+ #define TCMU_DEV_BIT_BLOCKED 2
+ 	unsigned long flags;
+diff -Nrp -U 7 --strip-trailing-cr a/drivers/target/target_core_xcopy.c b/drivers/target/target_core_xcopy.c
+--- a/drivers/target/target_core_xcopy.c	2019-10-24 14:16:26.667087055 -0500
++++ b/drivers/target/target_core_xcopy.c	2019-10-24 14:44:38.299838600 -0500
+@@ -38,15 +38,15 @@ static int target_xcopy_gen_naa_ieee(str
+ 	int off = 0;
+ 
+ 	buf[off++] = (0x6 << 4);
+ 	buf[off++] = 0x01;
+ 	buf[off++] = 0x40;
+ 	buf[off] = (0x5 << 4);
+ 
+-	spc_parse_naa_6h_vendor_specific(dev, &buf[off]);
++	spc_parse_naa_6h_vendor_specific(dev, 0, &buf[off], 13, true);
+ 	return 0;
+ }
+ 
+ struct xcopy_dev_search_info {
+ 	const unsigned char *dev_wwn;
+ 	struct se_device *found_dev;
+ };
+diff -Nrp -U 7 --strip-trailing-cr a/include/target/target_core_backend.h b/include/target/target_core_backend.h
+--- a/include/target/target_core_backend.h	2019-10-24 14:16:26.667087055 -0500
++++ b/include/target/target_core_backend.h	2019-10-24 14:44:38.299838600 -0500
+@@ -104,14 +104,15 @@ sense_reason_t	transport_generic_map_mem
+ 
+ bool	target_lun_is_rdonly(struct se_cmd *);
+ sense_reason_t passthrough_parse_cdb(struct se_cmd *cmd,
+ 	sense_reason_t (*exec_cmd)(struct se_cmd *cmd));
+ 
+ bool target_sense_desc_format(struct se_device *dev);
+ sector_t target_to_linux_sector(struct se_device *dev, sector_t lb);
++sector_t target_to_device_block(struct se_device *dev, sector_t lb);
+ bool target_configure_unmap_from_queue(struct se_dev_attrib *attrib,
+ 				       struct request_queue *q);
+ 
+ static inline bool target_dev_configured(struct se_device *se_dev)
+ {
+ 	return !!(se_dev->dev_flags & DF_CONFIGURED);
+ }
+diff -Nrp -U 7 --strip-trailing-cr a/include/target/target_core_base.h b/include/target/target_core_base.h
+--- a/include/target/target_core_base.h	2019-10-24 14:16:26.668087051 -0500
++++ b/include/target/target_core_base.h	2019-10-24 14:44:38.299838600 -0500
+@@ -144,14 +144,15 @@ enum se_cmd_flags_table {
+ 	SCF_PASSTHROUGH_SG_TO_MEM_NOALLOC = 0x00020000,
+ 	SCF_COMPARE_AND_WRITE		= 0x00080000,
+ 	SCF_PASSTHROUGH_PROT_SG_TO_MEM_NOALLOC = 0x00200000,
+ 	SCF_ACK_KREF			= 0x00400000,
+ 	SCF_USE_CPUID			= 0x00800000,
+ 	SCF_TASK_ATTR_SET		= 0x01000000,
+ 	SCF_TREAT_READ_AS_NORMAL	= 0x02000000,
++	SCF_BME_MAP_UPDATE      	= 0x04000000,
+ };
+ 
+ /*
+  * Used by transport_send_check_condition_and_sense()
+  * to signal which ASC/ASCQ sense payload should be built.
+  */
+ typedef unsigned __bitwise sense_reason_t;
+@@ -185,14 +186,15 @@ enum tcm_sense_reason_table {
+ 	TCM_COPY_TARGET_DEVICE_NOT_REACHABLE	= R(0x18),
+ 	TCM_TOO_MANY_TARGET_DESCS		= R(0x19),
+ 	TCM_UNSUPPORTED_TARGET_DESC_TYPE_CODE	= R(0x1a),
+ 	TCM_TOO_MANY_SEGMENT_DESCS		= R(0x1b),
+ 	TCM_UNSUPPORTED_SEGMENT_DESC_TYPE_CODE	= R(0x1c),
+ 	TCM_INSUFFICIENT_REGISTRATION_RESOURCES	= R(0x1d),
+ 	TCM_LUN_BUSY				= R(0x1e),
++	TCM_ERROR   				= R(0x1f),
+ #undef R
+ };
+ 
+ enum target_sc_flags_table {
+ 	TARGET_SCF_BIDI_OP		= 0x01,
+ 	TARGET_SCF_ACK_KREF		= 0x02,
+ 	TARGET_SCF_UNKNOWN_SIZE		= 0x04,
+@@ -498,16 +500,18 @@ struct se_cmd {
+ #define CMD_T_ABORTED		(1 << 0)
+ #define CMD_T_ACTIVE		(1 << 1)
+ #define CMD_T_COMPLETE		(1 << 2)
+ #define CMD_T_SENT		(1 << 4)
+ #define CMD_T_STOP		(1 << 5)
+ #define CMD_T_TAS		(1 << 10)
+ #define CMD_T_FABRIC_STOP	(1 << 11)
++#define CMD_T_BME_STOP   	(1 << 12)
+ 	spinlock_t		t_state_lock;
+ 	struct kref		cmd_kref;
++	struct kref		bme_kref;
+ 	struct completion	t_transport_stop_comp;
+ 
+ 	struct work_struct	work;
+ 
+ 	struct scatterlist	*t_data_sg;
+ 	struct scatterlist	*t_data_sg_orig;
+ 	unsigned int		t_data_nents;
+@@ -751,26 +755,51 @@ struct se_lun {
+ struct se_dev_stat_grps {
+ 	struct config_group stat_group;
+ 	struct config_group scsi_dev_group;
+ 	struct config_group scsi_tgt_dev_group;
+ 	struct config_group scsi_lu_group;
+ };
+ 
++struct se_portal_group;
++
++struct se_dev_bme {
++	spinlock_t		bme_lock;
++	u32			bme_flags;
++	u8			state;
++	u8			mode;
++	u8			mstate;
++	u8			priority;
++	u64			start_time;
++	u64			run_time;
++	u32			max_io_blocks;
++	u32			min_io_blocks;
++	void 			*qos;
++	struct se_portal_group  *tpg;
++	struct se_session       *sess;
++	struct se_node_acl      *nacl;
++	struct workqueue_struct *wq;
++	sense_reason_t (*inline_io_proc)(struct se_cmd *);
++};
++
+ struct se_device {
+ 	/* RELATIVE TARGET PORT IDENTIFER Counter */
+ 	u16			dev_rpti_counter;
+ 	/* Used for SAM Task Attribute ordering */
+ 	u32			dev_cur_ordered_id;
+ 	u32			dev_flags;
+ #define DF_CONFIGURED				0x00000001
+ #define DF_FIRMWARE_VPD_UNIT_SERIAL		0x00000002
+ #define DF_EMULATED_VPD_UNIT_SERIAL		0x00000004
+-#define DF_USING_UDEV_PATH			0x00000008
+-#define DF_USING_ALIAS				0x00000010
+-#define DF_READ_ONLY				0x00000020
++#define DF_UUID_VPD_UNIT_SERIAL			0x00000008
++#define DF_USING_UDEV_PATH			0x00000010
++#define DF_USING_ALIAS				0x00000020
++#define DF_READ_ONLY				0x00000040
++#define DF_BME_DEVICE 				0x00000080
++#define DF_BME_STOP_ON_COMPLETE			0x00000100
++#define DF_BME_SUSPEND_ON_ERROR			0x00000200
+ 	/* Physical device queue depth */
+ 	u32			queue_depth;
+ 	/* Used for SPC-2 reservations enforce of ISIDs */
+ 	u64			dev_res_bin_isid;
+ 	/* Pointer to transport specific device structure */
+ 	u32			dev_index;
+ 	u64			creation_time;
+@@ -815,22 +844,24 @@ struct se_device {
+ 	struct t10_alua		t10_alua;
+ 	/* T10 SPC-2 + SPC-3 Reservations */
+ 	struct t10_reservation	t10_pr;
+ 	struct se_dev_attrib	dev_attrib;
+ 	struct config_group	dev_action_group;
+ 	struct config_group	dev_group;
+ 	struct config_group	dev_pr_group;
++	struct config_group	dev_bme_group;
+ 	struct se_dev_stat_grps dev_stat_grps;
+ #define SE_DEV_ALIAS_LEN 512		/* must be less than PAGE_SIZE */
+ 	unsigned char		dev_alias[SE_DEV_ALIAS_LEN];
+ #define SE_UDEV_PATH_LEN 512		/* must be less than PAGE_SIZE */
+ 	unsigned char		udev_path[SE_UDEV_PATH_LEN];
+ 	/* Pointer to template of function pointers for transport */
+ 	const struct target_backend_ops *transport;
+ 	struct se_lun		xcopy_lun;
++	struct se_dev_bme       se_bme;
+ 	/* Protection Information */
+ 	int			prot_length;
+ 	/* For se_lun->lun_se_dev RCU read-side critical access */
+ 	u32			hba_index;
+ 	struct rcu_head		rcu_head;
+ };
+ 
+diff -Nrp -U 7 --strip-trailing-cr a/include/target/target_core_bme.h b/include/target/target_core_bme.h
+--- a/include/target/target_core_bme.h	1969-12-31 18:00:00.000000000 -0600
++++ b/include/target/target_core_bme.h	2019-10-24 14:44:38.300838597 -0500
+@@ -0,0 +1,197 @@
++#ifndef TARGET_CORE_BME_H
++#define TARGET_CORE_BME_H
++
++#include <linux/string.h>
++#include <linux/atomic.h>
++#include <linux/slab.h>
++#include <linux/kref.h>
++#include <target/target_core_base.h>
++#include <target/target_core_fabric.h>
++
++/*
++ * BME DEV defines
++ */
++#define DBF_LIVE_DATA     	0x00000001
++#define DBF_SS_DATA      	0x00000002
++#define DBF_ZIZO         	0x00000004
++#define DBF_CHECK_CONFIG	0x00010000
++#define DBF_DRYRUN_MODE		0x00020000
++#define DBF_SYNC_MODE		0x00040000
++#define DBF_RATE_LIMIT		0x00080000
++/*
++** ZIZO SM states
++*/
++#define ZIZO_S_IDLE		0
++#define ZIZO_S_READY_TO_START	1
++#define ZIZO_S_INLINE		2
++#define ZIZO_S_PREP_TO_SWITCH	3
++#define ZIZO_S_WAIT_FOR_SWITCH	4
++#define ZIZO_S_SWITCHED		5
++#define ZIZO_S_MAX		5
++
++enum bme_priority {
++	BME_P_NORMAL=0,
++	BME_P_MEDIUM,
++	BME_P_HIGH,
++	BME_P_CRITICAL,
++	BME_P_MAX,
++};
++enum bme_zizo_state {
++        BME_Z_IDLE,
++        BME_Z_READY_TO_START,
++        BME_Z_INLINE,
++        BME_Z_PREP_TO_SWITCH,
++        BME_Z_WAIT_FOR_SWITCH,
++        BME_Z_SWITCHED,
++        BME_Z_MAX,
++};
++
++enum bme_state {
++	BME_S_INACTIVE=0,
++	BME_S_ACTIVE,
++	BME_S_PAUSED,
++	BME_S_SUSPENDED,
++	BME_S_COMPLETE,
++};
++
++enum bme_mode {
++	BME_M_NONE=0,
++	BME_M_SIMPLE,
++	BME_M_ZIZO,
++	BME_M_SS,
++	BME_M_MAX,
++};
++
++enum bme_op {
++	BME_OP_NOP=0,
++	BME_OP_CHECKCFG,
++	BME_OP_DRYRUN,
++	BME_OP_COPY,
++	BME_OP_SYNC,
++	BME_OP_VERIFY,
++	BME_OP_STOP,
++	BME_OP_PAUSE,
++	BME_OP_RESUME,
++	BME_OP_RESET,
++	BME_OP_MAX,
++};
++
++/*
++ * MAP defines
++ */
++enum map_status {
++	MAP_S_DISABLE=0,
++	MAP_S_IDLE,
++	MAP_S_ACTIVE,
++	MAP_S_STANDBY,
++	MAP_S_ERROR,
++	MAP_S_SUSPEND,
++};
++
++/* Start functions for struct config_item_type target_bme_cit */
++struct bme_qos {
++	struct config_group	group;
++	spinlock_t		lock;
++	/*
++	 * In 512 byte sized blocks
++	 */
++	u32		rx_rate;
++	u32		tx_rate;
++	u64		rx_resp_avg;
++	u64		tx_resp_avg;
++	atomic_t	ratelimit;	// limits to 4g - TBD - change to long
++	atomic_t	ncount;
++	atomic_t	mcount;
++	atomic_t	hcount;
++	atomic_t	ccount;
++	atomic_t	n_credits;
++	atomic_t	m_credits;
++	atomic_t	h_credits;
++	atomic_t	c_credits;
++	atomic_t	rx_count;
++	atomic_t	rx_blocks;
++	atomic_long_t	rx_resp_time;
++	atomic_t	tx_count;
++	atomic_t	tx_blocks;
++	atomic_long_t	tx_resp_time;
++	struct delayed_work	work;
++};
++
++struct bme_config {
++	struct config_group	qos_group;
++	struct bme_qos		df_qos;
++	struct workqueue_struct *wq;
++};
++
++#define MAX_BME_RETRIES		5
++#define MAX_ID_LEN		64
++
++struct bme_map {
++	struct config_item	 item;
++	u32			 map_flags;
++#define BMF_HAS_DST_DEVICE 		0x00000001
++#define BMF_HAS_SRC_LBA    		0x00000002
++#define BMF_HAS_DST_LBA    		0x00000004
++#define BMF_HAS_NOLB       		0x00000008
++#define BMF_CONFIGURED			0x00000010
++#define BMF_ENABLE   			0x00000020
++#define BMF_ZIZO   			0x00000040
++#define BMF_SNAPSHOT		 	0x00000080
++#define BMF_COMPLETE		 	0x00000100
++#define BMF_RETRY   		 	0x00000200
++
++	spinlock_t		 lock;
++	// struct workqueue_struct *wq;
++	u8			 retries;
++	u8			 rsvd1;
++	u16			 rsvd2;
++	struct se_lun		 src_lun;
++	struct se_device	*src_dev;
++	u64			 src_lba;
++	struct se_lun		 dst_lun;
++	struct se_device	*dst_dev;
++	u64			 dst_lba;
++	u64			 nolb;
++	u64			 moved;
++	u64			 processed;
++	u64			 curr_len;
++	u64			 start_time;
++	u64			 run_time;
++	enum map_status		 status;
++	sense_reason_t		 error;
++	u64			 err_lba;
++	u64			 err_len;
++	struct delayed_work	 work;
++	struct kref		 kref;
++	struct rcu_head		 rcu;
++} ____cacheline_aligned;
++
++struct bme_cmd {
++	struct se_cmd		 se_cmd;
++	struct delayed_work	 work;
++	struct bme_map		*map;
++	struct kref		link_kref;
++	struct se_cmd		*link_cmd;
++	u64			 issue_timestamp;
++	int (*cb)(struct se_cmd *cmd, sense_reason_t reason);
++	unsigned char 		 sense_buffer[TRANSPORT_SENSE_BUFFER];
++} ____cacheline_aligned;
++
++struct bme_core_map_ops {
++	struct target_core_fabric_ops 	tfo;
++	sense_reason_t (*op)(struct bme_map *map);
++	void (*compare)(struct work_struct *work);
++	int (*compare_comp)(struct se_cmd *cmd, sense_reason_t reason);
++};
++
++int bme_init(struct config_group *cg);
++void bme_shutdown(void);
++ssize_t core_bme_info(struct se_device *dev, char *page);
++int core_bme_control_proc(struct se_device *dev, u8 op, u8 mode, char *name);
++struct config_item *core_bme_createmap(struct config_group *group, const char *name);
++void core_bme_destroymap(struct config_group *group, struct config_item *item);
++
++// struct config_group *bme_cfggp_create(void);
++// void bme_cfggp_destroy(void);
++// void bme_update_prio(int old_prio, int new_prio);
++#endif /* TARGET_CORE_BME_H */

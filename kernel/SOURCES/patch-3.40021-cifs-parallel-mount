@@ -1,0 +1,81 @@
+diff --git a/fs/cifs/cifsglob.h b/fs/cifs/cifsglob.h
+--- a/fs/cifs/cifsglob.h	2020-01-31 18:35:29.070757324 -0600
++++ b/fs/cifs/cifsglob.h	2020-01-28 16:25:07.000000000 -0600
+@@ -648,14 +648,15 @@ inc_rfc1001_len(void *buf, int count)
+ }
+ 
+ struct TCP_Server_Info {
+ 	struct list_head tcp_ses_list;
+ 	struct list_head smb_ses_list;
+ 	int srv_count; /* reference counter */
+ 	/* 15 character server name + 0x20 16th byte indicating type = srv */
++	char *volUNC;
+ 	char server_RFC1001_name[RFC1001_NAME_LEN_WITH_NULL];
+ 	struct smb_version_operations	*ops;
+ 	struct smb_version_values	*vals;
+ 	enum statusEnum tcpStatus; /* what we think the status is */
+ 	char *hostname; /* hostname portion of UNC string */
+ 	struct socket *ssocket;
+ 	struct sockaddr_storage dstaddr;
+diff --git a/fs/cifs/cifsproto.h b/fs/cifs/cifsproto.h
+--- a/fs/cifs/cifsproto.h	2020-01-31 18:35:29.070757324 -0600
++++ b/fs/cifs/cifsproto.h	2020-01-31 12:41:29.000000000 -0600
+@@ -187,15 +187,16 @@ extern struct inode *cifs_iget(struct su
+ extern int cifs_get_inode_info(struct inode **inode, const char *full_path,
+ 			       FILE_ALL_INFO *data, struct super_block *sb,
+ 			       int xid, const struct cifs_fid *fid);
+ extern int cifs_get_inode_info_unix(struct inode **pinode,
+ 			const unsigned char *search_path,
+ 			struct super_block *sb, unsigned int xid);
+ extern int cifs_set_file_info(struct inode *inode, struct iattr *attrs,
+-			      unsigned int xid, char *full_path, __u32 dosattr);
++			      unsigned int xid, char *full_path, __u32 dosattr,
++			      __le64 creationtime);
+ extern int cifs_rename_pending_delete(const char *full_path,
+ 				      struct dentry *dentry,
+ 				      const unsigned int xid);
+ extern int cifs_acl_to_fattr(struct cifs_sb_info *cifs_sb,
+ 			      struct cifs_fattr *fattr, struct inode *inode,
+ 			      const char *path, const struct cifs_fid *pfid);
+ extern int id_mode_to_cifs_acl(struct inode *inode, const char *path, __u64,
+diff --git a/fs/cifs/connect.c b/fs/cifs/connect.c
+--- a/fs/cifs/connect.c	2020-01-31 18:35:29.071757320 -0600
++++ b/fs/cifs/connect.c	2020-01-28 16:25:07.000000000 -0600
+@@ -2560,16 +2560,20 @@ static int match_server(struct TCP_Serve
+ 	if (strcmp(vol->vals->version_string, SMB3ANY_VERSION_STRING) == 0) {
+ 		if (server->vals->protocol_id < SMB30_PROT_ID)
+ 			return 0;
+ 	} else if (strcmp(vol->vals->version_string,
+ 		   SMBDEFAULT_VERSION_STRING) == 0) {
+ 		if (server->vals->protocol_id < SMB21_PROT_ID)
+ 			return 0;
+-	} else if ((server->vals != vol->vals) || (server->ops != vol->ops))
++	} else if ((server->vals != vol->vals) || (server->ops != vol->ops)) {
+ 		return 0;
++	} else if (server->volUNC != vol->UNC ) { /* intentional POINTER test */
++		return 0;
++	}
++
+ 
+ 	if (!net_eq(cifs_net_ns(server), current->nsproxy->net_ns))
+ 		return 0;
+ 
+ 	if (!match_address(server, addr,
+ 			   (struct sockaddr *)&vol->srcaddr))
+ 		return 0;
+@@ -2670,14 +2674,15 @@ cifs_get_tcp_session(struct smb_vol *vol
+ 	if (!tcp_ses) {
+ 		rc = -ENOMEM;
+ 		goto out_err;
+ 	}
+ 
+ 	tcp_ses->ops = volume_info->ops;
+ 	tcp_ses->vals = volume_info->vals;
++	tcp_ses->volUNC = volume_info->UNC;
+ 	cifs_set_net_ns(tcp_ses, get_net(current->nsproxy->net_ns));
+ 	tcp_ses->hostname = extract_hostname(volume_info->UNC);
+ 	if (IS_ERR(tcp_ses->hostname)) {
+ 		rc = PTR_ERR(tcp_ses->hostname);
+ 		goto out_err_crypto_release;
+ 	}
+ 
