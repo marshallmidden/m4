@@ -1,0 +1,314 @@
+#!/usr/bin/perl -w
+
+# wget is not done if file already exists (source and/or patch) [touch of .unpack.*].
+# patch is only done once. [touch of .patch.*]
+#
+# configure is done each time it is run -- make distclean done first.
+# make is done each time.
+# make install is done each time.
+#
+
+my $TARSAT=$ENV{CLFSTARS};
+if (!defined($TARSAT))
+{
+    print "CLFSTARS not defined in environment -- fix'\n";
+    exit 1;
+}
+my $FILESAT=$ENV{CLFSSOURCES};
+if (!defined($FILESAT))
+{
+    print "CLFSSOURCES not defined in environment -- fix'\n";
+    exit 1;
+}
+
+my $WHERE;
+my   $FILENAME;
+my   $TARCOMMAND;
+my $DIR;
+my   $TOUCHDIR;
+my $PATCHFILE;
+my   $PATCHNAME;
+my $PATCHCOMMAND;
+my $BUILDDIR;
+my $CONFIGURECOMMAND;
+my $MAKECOMMAND;
+my $MAKEINSTALL;
+
+#-----------------------------------------------------------------------------
+sub usage($)
+{
+    my ($arg_num) = @_;
+
+    print STDERR "------------------------------------------------------------------------------\n";
+    print STDERR "Bad argument number $arg_num\n";
+    print STDERR "\n";
+    print STDERR "INSTALL.parameters usage:\n";
+    print STDERR "  ./INSTALL.parameters WHERE DIR PATCHFILE PATCHCOMMAND BUILDDIR CONFIGURECOMMAND MAKECOMMAND MAKEINSTALL\n";
+    print STDERR "  ./INSTALL.parameters \"wget -N http://download.savannah.gnu.org/releases/attr/attr-2.4.47.src.tar.gz\" \\\n";
+    print STDERR "      \"attr-2.4.47\" \\\n";
+    print STDERR "      \"wget -N http://www.linuxfromscratch.org/patches/lfs/development/bash-4.3.30-upstream_fixes-1.patch\" \\\n";
+    print STDERR "      \"patch -Np1 -i \${TARSAT}/\${PATCHNAME}\" \\\n";
+    print STDERR "      \"\" \\\n";
+    print STDERR "      \"./configure --prefix=/usr --bindir=/bin\" \\\n";
+    print STDERR "      \"make -j 20\" \\\n";
+    print STDERR "      \"make install install-dev install-lib && root chmod -v 755 /usr/lib/libattr.so && root mv -v /usr/lib/libattr.so.* /lib\"\n";
+    print STDERR "    WHERE            Where on network to get the source/tar/zip file\.n";
+    print STDERR "    DIR              Directory name after untar/unzip.\n";
+    print STDERR "    PATCHFILE        Where on network to get patch file.\n";
+    print STDERR "    PATCHCOMMAND     Patch command(s) and options (may use sed).\n";
+    print STDERR "    BUILDDIR         Directory to build in instead of DIR. (blank=DIR)\n";
+    print STDERR "    CONFIGURECOMMAND Configure command(s) and options.\n";
+    print STDERR "    MAKECOMMAND      Command(s) to \"make\" source.\n";
+    print STDERR "    MAKEINSTALL      Command(s) to \"install\" programs.\n";
+    print STDERR "  TARSAT is set at top of script to \${CLFSTARS}.\n";
+    print STDERR "  FILESAT is set at top of script to \${CLFSSOURCES}.\n";
+    print STDERR "  PATCHNAME is set to basename of the PATCHFILE.\n";
+    print STDERR "environment variable HOME and NOMAKEDISTCLEAN used.\n";
+    exit 1;
+}   # End of usage
+
+#-----------------------------------------------------------------------------
+sub get_arguments()
+{
+    # Get arguments
+    $WHERE		= $ARGV[0];	# Where on network to get the source/tar/zip file.
+    if (!defined($WHERE)) {usage(1);}
+
+    $DIR		= $ARGV[1];	# Directory name after untar.
+    if (!defined($DIR)) {usage(2);}
+
+    $PATCHFILE	        = $ARGV[2];     # Where on network to get file for patching.
+    if (!defined($PATCHFILE)) {usage(3);}
+
+    $PATCHCOMMAND       = $ARGV[3];     # Patch command(s) and options.
+    if (!defined($PATCHCOMMAND)) {usage(4);}
+
+    $BUILDDIR		= $ARGV[4];	# Build directory name (if not DIR).
+    if (!defined($DIR)) {usage(5);}
+
+    $CONFIGURECOMMAND	= $ARGV[5];	# Configure command(s) and options.
+    if (!defined($CONFIGURECOMMAND)) {usage(6);}
+
+    $MAKECOMMAND	= $ARGV[6];	# Command(s) to "make" source.
+    if (!defined($MAKECOMMAND)) {usage(7);}
+
+    $MAKEINSTALL	= $ARGV[7];	# Command(s) to "install" programs.
+    if (!defined($MAKEINSTALL)) {usage(8);}
+
+    if (defined($ARGV[8])) {usage(9);}
+    # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    # Create extra needed names/values.
+    $FILENAME = $WHERE;			# Filename to untar.
+    $FILENAME =~ s/^.*\///;
+    $FILENAME = "${TARSAT}/${FILENAME}";
+
+    # The command to unpack (tar or zip with right options).
+    my $suffix = $WHERE;
+    $TARCOMMAND = ''; 
+    if (($suffix =~ /\.tar\.gz$/) || ($suffix =~ /\.tgz$/)) {
+	$TARCOMMAND = "tar zxf ${FILENAME}";
+    } elsif (($suffix =~ /\.tar\.bz2$/) || ($suffix =~ /\.tbz2$/)) {
+	$TARCOMMAND = "tar jxf ${FILENAME}";
+    } elsif (($suffix =~ /\.tar\.xz$/) || ($suffix =~ /\.txz$/)) {
+	$TARCOMMAND = "tar Jxf ${FILENAME}";
+    } elsif (($suffix =~ /\.tar\.lzma$/) || ($suffix =~ /\.tlzma$/)) {
+	$TARCOMMAND = "tar xf ${FILENAME}";	# it can figure this out
+    } elsif ($suffix =~ /\.zip$/) {
+	$TARCOMMAND = "unzip ${FILENAME}";
+    } elsif ($suffix =~ /\.patch$/) {
+	undef($TARCOMMAND);
+	print STDERR "patch commands are not to be used with this script as the first argument.\n";
+	exit 1;
+    } else {
+	print STDERR "Unknown suffix found on (${WHERE}).\n";
+	exit 1;
+    }
+
+    $TOUCHDIR = $DIR;			# Filename to TOUCH
+    $TOUCHDIR =~ s/\/.*$//;
+
+    if ("$BUILDDIR" eq "")
+    {
+        $BUILDDIR = $DIR;
+    }
+
+    $PATCHNAME = $PATCHFILE;		# Filename to use in patch.
+    $PATCHNAME =~ s/^.*\///;
+}   # End of get_arguments
+
+#-----------------------------------------------------------------------------
+sub runcommand($)
+{
+    my ($cmd) = @_;
+
+print STDERR "Running '$cmd'\n";
+    my $output = `$cmd`;
+    my $err = $?;
+    chomp($output);
+    if ($err != 0)
+    {
+	$err = $err >> 8;
+	print STDERR "Error exit = $err\n";
+	if (defined($output) && $output ne '')
+	{
+	    print STDERR "output='$output'\n";
+	}
+	exit $err;
+    }
+}   # End of runcommand
+
+#-----------------------------------------------------------------------------
+# Untar the source directory if necessary.
+# NOTE touch after tar -- to note any tar failure.
+sub get_source_file()
+{
+    if ("$WHERE" eq "")
+    {
+	print STDERR "No source?\n";
+	return;
+    }
+    if (-e "${FILENAME}" && -d "${FILESAT}/${DIR}" && -e "${FILESAT}/.unpack.${TOUCHDIR}")
+    {
+	print STDERR "Source already exists and is unpacked\n";
+	return;
+    }
+
+    runcommand("cd ${FILESAT} && rm -rf ${DIR}");
+
+    if (! -e "${FILENAME}")
+    {
+	runcommand("cd ${TARSAT} && ${WHERE}");
+    }
+
+    # Always unpack if we got it.
+    if ("${TARCOMMAND}" =~ /^unzip/)
+    {
+	runcommand("cd ${FILESAT} && mkdir ${DIR}");
+	runcommand("cd ${FILESAT} && cd ${DIR} && ${TARCOMMAND}");
+    }
+    else
+    {
+	runcommand("cd ${FILESAT} && ${TARCOMMAND}");
+    }
+    runcommand("cd ${FILESAT} && rm -f .specialfix.${TOUCHDIR} .patch.${TOUCHDIR}");
+    runcommand("cd ${FILESAT} && touch .unpack.${TOUCHDIR}");
+}   # End of get_source_file
+
+#-----------------------------------------------------------------------------
+sub patch_source_file()
+{
+    if ("${PATCHFILE}" eq "" && "${PATCHCOMMAND}" eq "")
+    {
+	print STDERR "No patch.\n";
+	return;
+    }
+    if (-e "${TARSAT}/${PATCHNAME}" && -e "${FILESAT}/.patch.${TOUCHDIR}")
+    {
+	print STDERR "Patch already exists and is applied\n";
+	return;
+    }
+
+    if (! -e "${TARSAT}/${PATCHNAME}")
+    {
+	runcommand("cd ${FILESAT} && rm -f .patch.${TOUCHDIR}");
+	runcommand("cd ${TARSAT} && ${PATCHFILE}");
+    }
+
+    # Patch the source directory if necessary. NOTE touch after patch.
+    if ("${PATCHCOMMAND}" ne "" && ! -e "${FILESAT}/.patch.${TOUCHDIR}")
+    {
+        runcommand("cd ${FILESAT} && cd ${DIR} && ${PATCHCOMMAND}");
+        runcommand("cd ${FILESAT} && touch .patch.${TOUCHDIR}");
+    }
+}   # End of patch_source_file
+
+#-----------------------------------------------------------------------------
+# Remove the old directory that things are built into, and create an empty one.
+# ... or if in source directory, clean it up.
+sub clean_up_directory()
+{
+    if ("${DIR}" ne "${BUILDDIR}")
+    {
+	runcommand("cd ${FILESAT} && rm -rf ${BUILDDIR}");
+	runcommand("cd ${FILESAT} && mkdir ${BUILDDIR}");
+    }
+    else
+    {
+
+	if (!defined($ENV{NOMAKEDISTCLEAN}))
+	{
+	    # Don't care if this command works.
+	    runcommand("(cd ${FILESAT} && cd ${BUILDDIR} && make distclean) || true");
+	}
+    }
+}   # End of clean_up_directory
+
+#-----------------------------------------------------------------------------
+# Do the needed configuration.
+sub configure()
+{
+    # Do the configure command.
+    runcommand("cd ${FILESAT} && cd ${BUILDDIR} && ${CONFIGURECOMMAND}");
+}   # End of configure
+
+#-----------------------------------------------------------------------------
+sub make()
+{
+    # Compile
+    runcommand("cd ${FILESAT} && cd ${BUILDDIR} && ${MAKECOMMAND}");
+}   # End of make
+
+#-----------------------------------------------------------------------------
+sub makeinstall()
+{
+    # Install
+    runcommand("cd ${FILESAT} && cd ${BUILDDIR} && ${MAKEINSTALL}");
+}   # End of make
+
+#-----------------------------------------------------------------------------
+# Main program starts executing.
+get_arguments();
+#
+# Evaluate any variables in the strings.
+$WHERE =~ s/(\$\{*\w+}*)/$1/eeg;
+$FILENAME =~ s/(\$\{*\w+}*)/$1/eeg;
+$TARCOMMAND =~ s/(\$\{*\w+}*)/$1/eeg;
+$DIR =~ s/(\$\{*\w+}*)/$1/eeg;
+$PATCHFILE =~ s/(\$\{*\w+}*)/$1/eeg;
+$PATCHCOMMAND =~ s/(\$\{*\w+}*)/$1/eeg;
+$BUILDDIR =~ s/(\$\{*\w+}*)/$1/eeg;
+$MAKECOMMAND =~ s/(\$\{*\w+}*)/$1/eeg;
+$MAKEINSTALL =~ s/(\$\{*\w+}*)/$1/eeg;
+$FILESAT =~ s/(\$\{*\w+}*)/$1/eeg;
+$TARSAT =~ s/(\$\{*\w+}*)/$1/eeg;
+$PATCHNAME =~ s/(\$\{*\w+}*)/$1/eeg;
+#
+print STDERR "WHERE=${WHERE}\n\n";
+print STDERR "  FILENAME=${FILENAME}\n\n";
+print STDERR "  TARCOMMAND=${TARCOMMAND}\n\n";
+print STDERR "DIR=${DIR}\n\n";
+if (${PATCHFILE} ne '') { print STDERR "PATCHFILE=${PATCHFILE}\n\n";}
+if (${PATCHCOMMAND} ne '') { print STDERR "PATCHCOMMAND=${PATCHCOMMAND}\n\n";}
+print STDERR "BUILDDIR=${BUILDDIR}\n\n";
+if (${CONFIGURECOMMAND} ne '') { print STDERR "CONFIGURECOMMAND=${CONFIGURECOMMAND}\n\n";}
+if (${MAKECOMMAND} ne '') { print STDERR "MAKECOMMAND=${MAKECOMMAND}\n\n";}
+if (${MAKEINSTALL} ne '') { print STDERR "MAKEINSTALL=${MAKEINSTALL}\n\n";}
+print STDERR "TARSAT=${TARSAT}\n\n";
+print STDERR "FILESAT=${FILESAT}\n\n";
+if (${PATCHNAME} ne '') { print STDERR "PATCHNAME=${PATCHNAME}\n\n";}
+
+get_source_file();		# The wget.
+
+patch_source_file();		# Do wget of patch file, and apply it.
+
+clean_up_directory();		# Remove old build directory, or do make distclean.
+
+configure();			# Do the configure command.
+
+make();				# Do the command to make the installables.
+
+makeinstall();			# Do the installs.
+
+exit 0;
+#-----------------------------------------------------------------------------
+# vi: sw=4 ts=8 noexpandtab

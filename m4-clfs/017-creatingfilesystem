@@ -1,0 +1,84 @@
+#!/bin/bash -e
+. 0.clfs.set.variables
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+echo 'In vmware where you are running your linux server ...'
+echo 'Create a new disk and assign it to scsi disk 2.'
+echo 'Reboot linux, or whatever you need to do to get it recognized on linux.'
+
+echo 'Create partitions on new disk.'
+# returns kilobytes.
+if [ "${DISKSIZE}" == "" ] ; then
+  DISKSIZE=`root /sbin/sfdisk -s /dev/${DISK}`
+fi
+# get sectors
+let DISKSIZE=${DISKSIZE}*2 || true
+# Do not touch the beginning of a disk.
+let BOOTstart=0 || true
+# Leave this much at the beginning for boot.
+let BOOTsize=2048 || true
+let SWAPstart=${BOOTstart}+${BOOTsize}
+# 4g of swap.
+let SWAPsize=4*1024*1024*1024/512
+let ROOTstart=${SWAPstart}+${SWAPsize}
+let ROOTsize=${DISKSIZE}-${ROOTstart}
+
+let ROOTONLYstart=${BOOTstart}+${BOOTsize}
+let ROOTONLYsize=${DISKSIZE}-${ROOTONLYstart}
+
+root umount -l ${CLFSPARTITION} || true
+root /sbin/swapoff -v ${SWAP} || true
+
+sleep 1 ; sync; sync; sleep 1
+
+if [ "${SWAP}" \!= "" ]; then
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    echo "Create swap and everything else linux partition."
+    root /sbin/sfdisk -uS /dev/${DISK} << EOF
+# partition table of /dev/${DISK}
+unit: sectors
+
+${SWAP} : start= ${SWAPstart}, size= ${SWAPsize}, type=82
+${CLFSPARTITION} : start= ${ROOTstart}, size= ${ROOTsize}, type=83, bootable
+EOF
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+else
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    echo 'No swap partition. Create everything linux partition.'
+    root /sbin/sfdisk -L /dev/${DISK} << EOF1
+# partition table of /dev/${DISK}
+unit: sectors
+
+${CLFSPARTITION} : start= ${ROOTONLYstart}, size= ${ROOTONLYsize}, Id=83, bootable
+EOF1
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+fi
+
+root /usr/sbin/partx -u /dev/${DISK} || true
+
+root umount -l ${CLFSMOUNT} || true
+root /sbin/swapoff -v ${SWAP} || true
+
+echo 'Create file system (ext2) on disk partition.'
+root /sbin/mke2fs -F -F -t ext2 ${CLFSPARTITION}
+
+echo 'To match 000.set.variables CLFSMOUNT variable:'
+root mkdir -vp ${CLFSMOUNT}/
+
+echo 'If you created a swap partition, initialize it.'
+if [ "${SWAP}" \!= "" ]; then
+    root /sbin/mkswap ${SWAP}
+else
+    echo 'No swap partition.'
+fi
+
+echo 'Mount disk for working on it.'
+root mount -v ${CLFSPARTITION} ${CLFSMOUNT}
+
+if [ "${USER}" = "" ]; then
+    USER=m4
+fi
+echo "Change to current user for ownership."
+root chown -R ${USER} ${CLFSMOUNT}
+#=============================================================================
+exit 0
+#=============================================================================

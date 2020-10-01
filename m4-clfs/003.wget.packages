@@ -1,0 +1,97 @@
+#!/bin/bash -ex
+#=============================================================================
+source 000.set.variables
+#=============================================================================
+(cd render; rm -rf *) || true
+#=============================================================================
+cd BOOK.clfs
+#-----------------------------------------------------------------------------
+make x86_64-64-html
+make x86_64-64-nochunks
+make x86_64-64-dump
+make x86_64-64-dllist
+#-----------------------------------------------------------------------------
+lynx -dump ../render/nochunk/CLFS-x86_64-64.html > clfs-x86_64-64.txt
+#-----------------------------------------------------------------------------
+cd ../
+#=============================================================================
+# 2016-12-26
+# Chapter 2.5
+#-- root vi /etc/fstab
+root mkdir -p ${CLFSTARS} ${CLFS_NEW_ROOT} ${CLFSMOUNT} ${CLFSSOURCES}
+root chown -v m4:m4 ${CLFSTARS} ${CLFSMOUNT} ${CLFS_NEW_ROOT} ${CLFSSOURCES}
+#-----------------------------------------------------------------------------
+# Chapter 3.1
+chmod -v a+wt ${CLFSTARS}
+wget -nc -i render/download-list/x86_64-64.list -P ${CLFSTARS} || true
+#-----------------------------------------------------------------------------
+# Chapter 4.2
+rm -rf ${CLFS_NEW_ROOT}/tools
+# install -dv ${CLFS_NEW_ROOT}/tools 
+ln -sfv / ${CLFS_NEW_ROOT}/tools
+#-----------------------------------------------------------------------------
+# Chapter 4.3
+rm -rf ${CLFS_NEW_ROOT}/cross-tools
+# install -dv ${CLFS_NEW_ROOT}/cross-tools
+ln -sfv / ${CLFS_NEW_ROOT}/cross-tools
+#-----------------------------------------------------------------------------
+# Chapter 4.4
+#-- root groupadd clfs || true
+#-- root useradd -s /bin/bash -g clfs -d /home/clfs clfs || true
+#-- root mkdir -pv /home/clfs
+#-- root chown -v m4:m4 /home/clfs
+#=============================================================================
+# 2016-12-27
+#-----------------------------------------------------------------------------
+echo "Get the list of 'commands' output file -- needs manual fixing, but nice to cut and paste."
+ls -1 render/commands/${MACHINE}${VARIATION}/*/* | \
+    sort -u --field-separator=/ -n --key=5.1 >A.commands.files
+#-----------------------------------------------------------------------------
+files="`cat A.commands.files`"
+
+# If $SWAP is not defined, delete the making of the swap partition.
+if [ "$SWAP" = "" ]; then
+    del1="-e /^mkswap \/dev\/.*/d"
+    del2="-e /^\/dev\/.*  *swap  *swap  *pri=1  *0  *0/d"
+else
+    del1="-e x"
+    del2="-e x"
+fi
+# Assume no /usr partition.
+del3="-e /^mount -v \/dev\/.*\/usr/d"
+
+echo "del1=%${del1}%"
+# Automatically edit the command files for known variables.
+for file in ${files}; do
+    echo ${file}
+    sed \
+      "${del1}" "${del2}" "${del3}" \
+      -e "s;\*\*EDITME/mnt/clfsEDITME\*\*;${CLFSMOUNT};g" \
+      -e "s;cp -v \/usr\/share\/zoneinfo\/\*\*EDITME\[xxx\]EDITME\*\*;cp -v \/usr\/share\/zoneinfo\/${TIMEZONE};" \
+      -e "s;\*\*EDITME\[xxx\]EDITME\*\*;${CLFSPARTITION};g" \
+      -e "s;\*\*EDITME\[yyy\]EDITME\*\*;${SWAP};g" \
+      -e "s;\*\*EDITME\[paper_size\]EDITME\*\*;${PAPER_SIZE};g" \
+      -e "s;\*\*EDITME\[ll\]EDITME\*\*;${OUR_LANG};g" \
+      -e "s;\*\*EDITME\[CC\]EDITME\*\*;${OUR_CHARACTERISTIC};g" \
+      -e "s;\*\*EDITME\[charmap\]EDITME\*\*;${OUR_CHARMAP};g" \
+      -e "s;\*\*EDITME\[fff\]EDITME\*\*;${PARTITION_FS};g" \
+      -e "s;/path/to/sources;${CLFSSOURCES};g" \
+      -e "s;^[ 	]*$;;g" \
+      -e "s;e2fsprogs-1.42.13.tar.bz2;e2fsprogs-1.42.13.tar.xz;g" \
+      -e "s;tar xjf;tar xf;g" \
+      -e "s;ln -sv;ln -sfv;g" \
+      -e "s;^\(mount .*\)$;\1 || true;" \
+      -e "s;^\(groupadd .*\)$;\1 || true;" \
+      -e "s;^\(useradd .*\)$;\1 || true;" \
+      ${file} > ${file}.new
+    mv ${file} ${file}.orig
+    mv ${file}.new ${file}
+done
+#
+echo '------------------------------------------------------------------------------'
+echo 'Following command files need editing:'
+
+grep '\*\*EDITME.*EDITME\*\*' `cat A.commands.files`
+
+echo '------------------------------------------------------------------------------'
+#=============================================================================
