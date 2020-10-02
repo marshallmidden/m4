@@ -1,0 +1,325 @@
+#!/usr/bin/env python
+
+import sys
+import os
+import subprocess
+import argparse
+import logging
+import logging.handlers
+
+map_file=u'/etc/hsm-uuidmap.conf'
+
+try:
+    from subprocess import STDOUT, check_output, CalledProcessError
+except ImportError:  # pragma: no cover
+    # python 2.6 doesn't include check_output
+    # monkey patch it in!
+    # import subprocess
+    STDOUT = subprocess.STDOUT
+
+    def check_output(*popenargs, **kwargs):
+        if 'stdout' in kwargs:  # pragma: no cover
+            raise ValueError('stdout argument not allowed, '
+                             'it will be overridden.')
+        process = subprocess.Popen(stdout=subprocess.PIPE,
+                                   *popenargs, **kwargs)
+        output, _ = process.communicate()
+        retcode = process.poll()
+        if retcode:
+            cmd = kwargs.get("args")
+            if cmd is None:
+                cmd = popenargs[0]
+            raise subprocess.CalledProcessError(retcode, cmd,
+                                                output=output)
+        return output
+    subprocess.check_output = check_output
+
+    # overwrite CalledProcessError due to `output`
+    # keyword not being available (in 2.6)
+    class CalledProcessError(Exception):
+
+        def __init__(self, returncode, cmd, output=None):
+            self.returncode = returncode
+            self.cmd = cmd
+            self.output = output
+
+        def __str__(self):
+            return "Command '%s' returned non-zero exit status %d" % (
+                self.cmd, self.returncode)
+    subprocess.CalledProcessError = CalledProcessError
+def __getmaptable(mfile):
+	hsm_logger = logging.getLogger('hsmadm')
+	hsm_logger.debug("__getmaptable ({0})".format(mfile))
+	try:
+		f = open(mfile, 'r')
+		d = eval(f.read())
+		f.close()
+	except Exception as inst:
+		hsm_logger.info("{0}".format(inst))
+		d = {}
+		pass
+	return (d)
+
+def __stormaptable(mfile, maptable):
+	hsm_logger = logging.getLogger('hsmadm')
+	hsm_logger.debug("__stormaptable ({0})".format(mfile))
+	f = open(mfile, 'w')
+	f.write(str(maptable))
+	f.close()
+
+def f_show(mfile, uuid, scsiid):
+	hsm_logger = logging.getLogger('hsmadm')
+	hsm_logger.debug("f_show({0}, {1}, {2})".format(mfile, uuid, scsiid))
+	d = __getmaptable(mfile)
+	print (" -----------------------------------------------------------------------------------")
+	print ("| {0:32s} | {1:32s} | {2} |".format('              UUID','            SCSI ID', 'Blacklisted')) 
+	print (" -----------------------------------------------------------------------------------")
+	if uuid is not None:
+		for k,v in d.iteritems():
+			if uuid in k:
+				if v[1] == 0:
+					print ("| {0:32s} | .{:32s} | a2{:11s} |".format(k,v[0],"     No")) 
+				else:
+					print ("| {0:32s} | {1:32s} | a2{:11s} |".format(k,v[0],"     Yes")) 
+	elif scsiid is not None:
+		for k,v in d.iteritems():
+			if scsiid in v[0]:
+				if v[1] == 0:
+					print ("| {0:32s} | {1:32s} | {2:11s} |".format(k,v[0],"     No")) 
+				else:
+					print ("| {0:32s} | {1:32s} | {0:11s} |".format(k,v[0],"     Yes")) 
+	else :
+		for k,v in d.iteritems():
+			if v[1] == 0:
+				print ("| {0:32s} | {1:32s} | {2:11s} |".format(k,v[0],"     No")) 
+			else:
+				print ("| {0:32s} | {1:32s} | {2:11s} |".format(k,v[0],"     Yes")) 
+	print (" -----------------------------------------------------------------------------------")
+
+def f_del(mfile, uuid, scsiid):
+	hsm_logger = logging.getLogger('hsmadm')
+	hsm_logger.debug("f_del({0}, {1}, {2})".format(mfile, uuid, scsiid))
+	d = __getmaptable(mfile)
+	try:
+		if uuid is not None:
+			for k in d.keys():
+				if uuid in k:
+					hsm_logger.info("delete entry {0} => {1}".format(k,d[k])) 
+					del d[k]
+		elif scsiid is not None:
+			for k in d.keys():
+				if scsiid in d[k][0]:
+					hsm_logger.info("delete entry {0} => {1}".format(k,d[k])) 
+					del d[k]
+		else :
+			for k,v in d.iteritems():
+				hsm_logger.info("delete (all) entry {0} => {1}".format(k,v)) 
+			d.clear()
+		__stormaptable(mfile, d)
+	except Exception as inst:
+		hsm_logger.info("{0}".format(inst))
+		pass
+
+def f_getid(mfile, device):
+	hsm_logger = logging.getLogger('hsmadm')
+	hsm_logger.debug("f_getid({0}, {1})".format(mfile, device))
+
+	try:
+		cmd = "/lib/udev/scsi_id --whitelisted --device={0}".format(device)
+		uuid = check_output(cmd, shell=True).strip('\n')
+		uuid = uuid.lstrip('0x')
+		uuid = uuid.strip()
+		if len(uuid) == 33:
+			uuid = uuid[1:]
+		d = __getmaptable(mfile)
+		try:
+			print("{0}".format(d[uuid][0]))
+		except Exception as inst:
+			hsm_logger.info("{0}".format(inst))
+			d[uuid] = [uuid, 0]
+			__stormaptable(mfile, d)
+			print("{0}".format(d[uuid][0]))
+			pass
+	except Exception as inst:
+		hsm_logger.warn("{0}".format(inst))
+		pass
+
+def f_whitelist(mfile, uuid):
+	hsm_logger = logging.getLogger('hsmadm')
+	hsm_logger.debug("f_whitelist({0}, {1})".format(mfile, uuid))
+
+	d = __getmaptable(mfile)
+	try:
+		uuid = uuid.strip()
+		hsm_logger.info ("whitelisting entry {0} => {1}".format(uuid,d[uuid]))
+		d[uuid][1]=0
+		__stormaptable(mfile, d)
+	except Exception as inst:
+		hsm_logger.debug("{0}".format(inst))
+		hsm_logger.info ("whitelisting entry {0} => {1} failed".format(uuid,d[uuid]))
+		pass
+
+def f_blacklist(mfile, uuid):
+	hsm_logger = logging.getLogger('hsmadm')
+	hsm_logger.debug("f_blacklist({0}, {1})".format(mfile, uuid))
+
+	d = __getmaptable(mfile)
+	try:
+		uuid = uuid.strip()
+		hsm_logger.info ("blacklisting entry {0} => {1}".format(uuid,d[uuid]))
+		d[uuid][1]=-1
+		__stormaptable(mfile, d)
+	except Exception as inst:
+		hsm_logger.debug("{0}".format(inst))
+		hsm_logger.info ("blacklisting entry {0} failed".format(uuid))
+		pass
+
+def f_add(mfile, uuid, scsiid, blacklist):
+	hsm_logger = logging.getLogger('hsmadm')
+	hsm_logger.debug("f_add({0}, {1}, {2}, {3})".format(mfile, uuid, scsiid, blacklist))
+
+	d = __getmaptable(mfile)
+	try:
+		uuid = uuid.strip()
+		if len(uuid) == 33:
+			uuid = uuid[1:]
+		scsiid = scsiid.strip()
+		if len(scsiid) == 33:
+			scsiid = scsiid[1:]
+		if blacklist:
+			d[uuid]=[scsiid, -1]
+		else:
+			d[uuid]=[scsiid, 0]
+		hsm_logger.info ("add entry {0} => {1}".format(uuid,d[uuid]))
+		__stormaptable(mfile, d)
+	except Exception as inst:
+		hsm_logger.debug("{0}".format(inst))
+		hsm_logger.info ("add entry {0} => [{1}, {2}] failed".format(uuid, scsiid, blacklist))
+		pass
+
+def f_lookup(mfile, device, uuid):
+	hsm_logger = logging.getLogger('hsmadm')
+	hsm_logger.debug("f_lookup({0}, {1}, {2})".format(mfile, device, uuid))
+	d = __getmaptable(mfile)
+	uuid = uuid.strip()
+	if len(uuid) == 33:
+		uuid = uuid[1:]
+	try:
+		scsiid=d[uuid][0]
+		hsm_logger.info("f_lookup : found {0} => {1}".format(uuid, d[uuid]))
+	except Exception as inst:
+		hsm_logger.debug("{0}".format(inst))
+		scsiid=uuid
+		d[uuid] = [scsiid,0]
+		__stormaptable(mfile, d)
+		hsm_logger.info("f_lookup : new entry {0} => {1}".format(uuid, d[uuid]))
+		pass
+	scsiid_path = "/sys/bus/scsi/devices/{0}/scsi_id".format(device)
+	hsm_logger.info("f_lookup scsiid = {0}, path={1})".format(scsiid, scsiid_path))
+	cmd = "echo {0} > {1}".format(scsiid, scsiid_path)
+	subprocess.call(cmd, shell=True)
+	# check_output(cmd, shell=True)
+	# try:
+	# 	f = open(scsiid_path, 'w')
+	# 	hsm_logger.info("55 - f_lookup({0}, {1}, {2})".format(mfile, device, uuid))
+	# 	f.write(scsiid)
+	# 	hsm_logger.info("66 - f_lookup({0}, {1}, {2})".format(mfile, device, uuid))
+	# 	f.close
+	# 	hsm_logger.info("77 - f_lookup({0}, {1}, {2})".format(mfile, device, uuid))
+	# except Exception as inst:
+	# 	hsm_logger.debug("{0}".format(inst))
+	# 	hsm_logger.info("88 - f_lookup({0}, {1}, {2})".format(mfile, device, uuid))
+	# 	pass
+	# hsm_logger.info("f_lookup scsiid = {0}, path={1} exit)".format(scsiid, scsiid_path))
+	sys.exit(d[uuid][1])
+
+def main():
+	loglvl = [logging.CRITICAL, logging.ERROR, logging.WARNING, logging.INFO, logging.DEBUG]
+	defaultlvl = 4
+	hsm_logger = logging.getLogger('hsmadm')
+	handler = logging.handlers.SysLogHandler(address='/dev/log')
+	formatter = logging.Formatter('%(name)s [%(levelname)s]: %(message)s')
+	handler.setFormatter(formatter)
+	hsm_logger.addHandler(handler)
+
+	pser = argparse.ArgumentParser(prog='hsmadm')
+
+	subcmd = pser.add_subparsers(
+			dest='subcmd',
+			title='sub commands',
+			metavar='{show, add, del, blacklist, whitelist}'
+			)
+
+	show_cmd=subcmd.add_parser('show', help='show entries in the persist store')
+	show_cmd.add_argument('-f', '--file', dest='config_file', default=map_file, help='persist store config file')
+	show_cmd.add_argument('--debug', dest='dbg_level', choices=range(0,5), default=defaultlvl, type=int, help='debug level, defaults to 3 - info')
+	show_grp = show_cmd.add_mutually_exclusive_group()
+	show_grp.add_argument('-s', '--scsiid', dest='scsiid', default=None, help='scsiid to lookup persist store')
+	show_grp.add_argument('-u', '--uuid', dest='uuid', default=None, help='uuid to lookup persist store')
+
+	add_cmd=subcmd.add_parser('add', help='add new entry to thepersist store')
+	add_cmd.add_argument('-f', '--file', dest='config_file', default=map_file, help='persist store config file')
+	add_cmd.add_argument('-u', '--uuid', dest='uuid', required=True, help='uuid to add')
+	add_cmd.add_argument('-s', '--scsiid', dest='scsiid', required=True, help='scsiid to add')
+	add_cmd.add_argument('-b', '--blacklist', dest='blacklist', action='store_true', default=False, help='blacklist entry')
+	add_cmd.add_argument('--debug', dest='dbg_level', choices=range(0,5), default=defaultlvl, type=int, help='debug level, defaults to 3 - info')
+
+	del_cmd=subcmd.add_parser('del', help='search and delete map from persist store')
+	del_cmd.add_argument('-f', '--file', dest='config_file', default=map_file, help='persist store config file')
+	del_cmd.add_argument('--all', help='delete all entries from the persist store')
+	del_cmd.add_argument('--debug', dest='dbg_level', choices=range(0,5), default=defaultlvl, type=int, help='debug level, defaults to 3 - info')
+	del_grp = del_cmd.add_mutually_exclusive_group()
+	del_grp.add_argument('-s', '--scsiid', dest='scsiid', default=None, help='scsiid to lookup persist store')
+	del_grp.add_argument('-u', '--uuid', dest='uuid', default=None, help='uuid to lookup persist store')
+
+	# id_cmd=subcmd.add_parser('getid', help='get the scsi id for the given device')
+	id_cmd=subcmd.add_parser('getid')
+	id_cmd.add_argument('-f', '--file', dest='config_file', default=map_file, help='persist store config file')
+	id_cmd.add_argument('-d', '--device', dest='device', required=True, help='device')
+	id_cmd.add_argument('--debug', dest='dbg_level', choices=range(0,5), default=defaultlvl, type=int, help='debug level, defaults to 3 - info')
+
+	blkl_cmd=subcmd.add_parser('blacklist', help='blacklist the entry')
+	blkl_cmd.add_argument('-f', '--file', dest='config_file', default=map_file, help='persist store config file')
+	blkl_cmd.add_argument('-u', '--uuid', dest='uuid', required=True, help='uuid to blacklist')
+	blkl_cmd.add_argument('--debug', dest='dbg_level', choices=range(0,5), default=defaultlvl, type=int, help='debug level, defaults to 3 - info')
+
+	whtl_cmd=subcmd.add_parser('whitelist', help='whitelist the entry')
+	whtl_cmd.add_argument('-f', '--file', dest='config_file', default=map_file, help='persist store config file')
+	whtl_cmd.add_argument('-u', '--uuid', dest='uuid', required=True, help='uuid to whitelist')
+	whtl_cmd.add_argument('--debug', dest='dbg_level', choices=range(0,5), default=defaultlvl, type=int, help='debug level, defaults to 3 - info')
+
+	# lkup_cmd=subcmd.add_parser('lookup', help='lookup and update if required')
+	lkup_cmd=subcmd.add_parser('lookup')
+	lkup_cmd.add_argument('-f', '--file', dest='config_file', default=map_file, help='persist store config file')
+	lkup_cmd.add_argument('-d', '--device', dest='device', required=True, help='device')
+	lkup_cmd.add_argument('-u', '--uuid', dest='uuid', required=True, help='uuid to lookup persist store')
+	lkup_cmd.add_argument('--debug', dest='dbg_level', choices=range(0,5), default=defaultlvl, type=int, help='debug level, defaults to 3 - info')
+
+	args = pser.parse_args()
+
+	hsm_logger.setLevel(loglvl[args.dbg_level])
+
+	# print ('{0}'.format(args))
+	if  (args.subcmd == 'show'):
+		f_show(mfile=args.config_file, uuid=args.uuid, scsiid=args.scsiid)
+	elif (args.subcmd == 'add'):
+		f_add(mfile=args.config_file, uuid=args.uuid, scsiid=args.scsiid, blacklist=args.blacklist)
+	elif (args.subcmd == 'del'):
+		f_del(mfile=args.config_file, uuid=args.uuid, scsiid=args.scsiid)
+	elif (args.subcmd == 'getid'):
+		f_getid(mfile=args.config_file, device=args.device)
+	elif (args.subcmd == 'blacklist'):
+		f_blacklist(mfile=args.config_file, uuid=args.uuid)
+	elif (args.subcmd == 'whitelist'):
+		f_whitelist(mfile=args.config_file, uuid=args.uuid)
+	elif (args.subcmd == 'lookup'):
+		f_lookup(mfile=args.config_file, device=args.device, uuid=args.uuid)
+	else:
+		pser.print_help()
+	# sys.exit(0)
+	# os._exit(0)
+
+if __name__ == '__main__':
+	main()
+	# os._exit(0)
+	sys.exit(0)

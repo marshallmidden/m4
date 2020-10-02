@@ -1,0 +1,141 @@
+From 21eb397a5fc9227cd95d23e8c74a49cf6a293e57 Mon Sep 17 00:00:00 2001
+From: Hari Bathini <hbathini@linux.vnet.ibm.com>
+Date: Wed, 9 Aug 2017 23:47:42 +0530
+Subject: [PATCH] kexec-tools: powerpc: fix command line overflow error
+
+Since kernel commit a5980d064fe2 ("powerpc: Bump COMMAND_LINE_SIZE
+to 2048"), powerpc bumped command line size to 2048 but the size
+used here is still the default value of 512. Bump it to 2048 to
+fix command line overflow errors observed when command line length
+is above 512 bytes. Also, get rid of the multiple definitions of
+COMMAND_LINE_SIZE macro in ppc architecture.
+
+Signed-off-by: Hari Bathini <hbathini@linux.vnet.ibm.com>
+Signed-off-by: Simon Horman <horms@verge.net.au>
+Signed-off-by: Pingfan Liu <piliu@redhat.com>
+---
+ kexec/arch/ppc/crashdump-powerpc.c | 6 +++++-
+ kexec/arch/ppc/crashdump-powerpc.h | 2 --
+ kexec/arch/ppc/fs2dt.c             | 1 -
+ kexec/arch/ppc/kexec-ppc.h         | 3 ++-
+ kexec/arch/ppc/ops.h               | 1 -
+ kexec/arch/ppc64/crashdump-ppc64.c | 6 ++++--
+ kexec/arch/ppc64/crashdump-ppc64.h | 2 +-
+ 7 files changed, 12 insertions(+), 9 deletions(-)
+
+diff --git a/kexec/arch/ppc/crashdump-powerpc.c b/kexec/arch/ppc/crashdump-powerpc.c
+index dde6de7..4ad026f 100644
+--- a/kexec/arch/ppc/crashdump-powerpc.c
++++ b/kexec/arch/ppc/crashdump-powerpc.c
+@@ -252,8 +252,12 @@ static void ulltoa(unsigned long long i, char *str)
+ /* Append str to cmdline */
+ static void add_cmdline(char *cmdline, char *str)
+ {
++	int cmdline_size;
+ 	int cmdlen = strlen(cmdline) + strlen(str);
+-	if (cmdlen > (COMMAND_LINE_SIZE - 1))
++
++	cmdline_size = (kernel_version() < KERNEL_VERSION(3, 10, 0) ?
++			512 : COMMAND_LINE_SIZE);
++	if (cmdlen > (cmdline_size - 1))
+ 		die("Command line overflow\n");
+ 	strcat(cmdline, str);
+ }
+diff --git a/kexec/arch/ppc/crashdump-powerpc.h b/kexec/arch/ppc/crashdump-powerpc.h
+index 9b9b01e..97b5095 100644
+--- a/kexec/arch/ppc/crashdump-powerpc.h
++++ b/kexec/arch/ppc/crashdump-powerpc.h
+@@ -20,8 +20,6 @@ extern struct arch_options_t arch_options;
+ #define KERNELBASE	PAGE_OFFSET
+ #define __pa(x)		((unsigned long)(x)-PAGE_OFFSET)
+ 
+-#define COMMAND_LINE_SIZE	512 /* from kernel */
+-
+ #ifdef CONFIG_BOOKE
+ /* We don't need backup region in Book E */
+ #define BACKUP_SRC_START	0x0000
+diff --git a/kexec/arch/ppc/fs2dt.c b/kexec/arch/ppc/fs2dt.c
+index 6e77379..fed499b 100644
+--- a/kexec/arch/ppc/fs2dt.c
++++ b/kexec/arch/ppc/fs2dt.c
+@@ -37,7 +37,6 @@
+ #define TREEWORDS		65536	/* max 32 bit words for properties */
+ #define MEMRESERVE		256	/* max number of reserved memory blks */
+ #define MAX_MEMORY_RANGES	1024
+-#define COMMAND_LINE_SIZE	512	/* from kernel */
+ 
+ static char pathname[MAXPATH];
+ static char propnames[NAMESPACE] = { 0 };
+diff --git a/kexec/arch/ppc/kexec-ppc.h b/kexec/arch/ppc/kexec-ppc.h
+index f8fd678..04e728e 100644
+--- a/kexec/arch/ppc/kexec-ppc.h
++++ b/kexec/arch/ppc/kexec-ppc.h
+@@ -6,6 +6,8 @@
+ #define CORE_TYPE_ELF32	1
+ #define CORE_TYPE_ELF64	2
+ 
++#define COMMAND_LINE_SIZE	2048 /* from kernel */
++
+ extern unsigned char setup_simple_start[];
+ extern uint32_t setup_simple_size;
+ 
+@@ -76,7 +78,6 @@ extern int init_memory_region_info(void);
+ extern int read_memory_region_limits(int fd, unsigned long long *start,
+ 					unsigned long long *end);
+ extern int get_devtree_value(const char *fname, unsigned long long *pvalue);
+-#define COMMAND_LINE_SIZE	512 /* from kernel */
+ /*fs2dt*/
+ void reserve(unsigned long long where, unsigned long long length);
+ 
+diff --git a/kexec/arch/ppc/ops.h b/kexec/arch/ppc/ops.h
+index 7334a05..5e7a070 100644
+--- a/kexec/arch/ppc/ops.h
++++ b/kexec/arch/ppc/ops.h
+@@ -12,7 +12,6 @@
+ #define _PPC_BOOT_OPS_H_
+ #include "types.h"
+ 
+-#define	COMMAND_LINE_SIZE	512
+ #define	MAX_PATH_LEN		256
+ #define	MAX_PROP_LEN		256 /* What should this be? */
+ 
+diff --git a/kexec/arch/ppc64/crashdump-ppc64.c b/kexec/arch/ppc64/crashdump-ppc64.c
+index 5a71d51..13995bf 100644
+--- a/kexec/arch/ppc64/crashdump-ppc64.c
++++ b/kexec/arch/ppc64/crashdump-ppc64.c
+@@ -381,7 +381,7 @@ static void ultoa(uint64_t i, char *str)
+ static int add_cmdline_param(char *cmdline, uint64_t addr, char *cmdstr,
+ 				char *byte)
+ {
+-	int cmdlen, len, align = 1024;
++	int cmdline_size, cmdlen, len, align = 1024;
+ 	char str[COMMAND_LINE_SIZE], *ptr;
+ 
+ 	/* Passing in =xxxK / =xxxM format. Saves space required in cmdline.*/
+@@ -402,7 +402,9 @@ static int add_cmdline_param(char *cmdline, uint64_t addr, char *cmdstr,
+ 	strcat(str, byte);
+ 	len = strlen(str);
+ 	cmdlen = strlen(cmdline) + len;
+-	if (cmdlen > (COMMAND_LINE_SIZE - 1))
++	cmdline_size = (kernel_version() < KERNEL_VERSION(3, 10, 0) ?
++			512 : COMMAND_LINE_SIZE);
++	if (cmdlen > (cmdline_size - 1))
+ 		die("Command line overflow\n");
+ 	strcat(cmdline, str);
+ 	dbgprintf("Command line after adding elfcorehdr: %s\n", cmdline);
+diff --git a/kexec/arch/ppc64/crashdump-ppc64.h b/kexec/arch/ppc64/crashdump-ppc64.h
+index d654c6b..42ccc31 100644
+--- a/kexec/arch/ppc64/crashdump-ppc64.h
++++ b/kexec/arch/ppc64/crashdump-ppc64.h
+@@ -16,7 +16,7 @@ void add_usable_mem_rgns(unsigned long long base, unsigned long long size);
+ #define __pa(x)         ((unsigned long)(x)-PAGE_OFFSET)
+ #define MAXMEM          (-KERNELBASE-VMALLOCBASE)
+ 
+-#define COMMAND_LINE_SIZE       512 /* from kernel */
++#define COMMAND_LINE_SIZE       2048 /* from kernel */
+ /* Backup Region, First 64K of System RAM. */
+ #define BACKUP_SRC_START    0x0000
+ #define BACKUP_SRC_END      0xffff
+-- 
+2.7.4
+

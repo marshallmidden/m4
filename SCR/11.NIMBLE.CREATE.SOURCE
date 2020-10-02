@@ -1,0 +1,233 @@
+#!/usr/bin/perl -w
+
+# GUI:
+#	Manage->Volumes->new volume
+#	    $SOURCE = Volume Name
+#	    Description -- source-I.P.R.H-I.P.H.Q
+#	    Performance Policy -- default
+#	    New Initiator Group
+#		Name: m4-$SOURCE-rh-2-hq
+#		(Initiator section)
+#		Name: rh   IQN: *    IP_Address: I.P.R.H
+#		[Create]
+#	Leave "Allow multiple initiator access" clear (unchecked).
+#	[Next]
+#	Size:  2 GB
+#	Location: default
+#	[Next]
+#	Radio Button No volume collection clicked.
+#	[Next]
+#	Do not change Volume Caching (default/Normal).
+#	[Finish]
+#-----------------------------------------------------------------------------
+# On Nimble to enable auto-login with ssh keys. NOTE: --key is .ssh/id_rsa.pub.
+# sshkey --add m4 --type rsa --key 'AAAAEAAAADAQABAAABAQDHA8KuLWeeuysJhuxdHX9fQ+C0BH6q5s....' --user admin
+#-----------------------------------------------------------------------------
+use warnings;
+use strict;
+
+require 'nn.common.pm';
+#-----------------------------------------------------------------------------
+# Forward referenced subroutines.
+sub checkargs();
+
+#-----------------------------------------------------------------------------
+# Global variables initialized from arguments passed to script.
+my $PROG = $0;
+my $NIMBLE_IP = $ARGV[0];
+my $LOGIN = $ARGV[1];
+my $RH_IP = $ARGV[2];
+my $SOURCE = $ARGV[3];
+my $INITIATORGRP = $ARGV[4];
+if ($#ARGV > 4) {die "$PROG only takes maximum of 5 arguments, not " . $#ARGV+1 . "\n";}
+
+# Global variables.
+our $command;				# Command to execute.
+our $output;				# Output from command executed.
+our $status;
+our $SSH = '';				# Where to execute a command.
+
+#-----------------------------------------------------------------------------
+checkargs();
+
+#-----------------------------------------------------------------------------
+# Print error message, then usage statement, then exit script with error.
+
+sub usage($)
+{
+    my $e = $_[0];
+    print STDERR "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\n";
+    print STDERR "${e}\n";
+    print STDERR "..............................................................................\n";
+    print STDERR "Usage: ${PROG} NIMBLE_IP LOGIN RH_IP SOURCE_VOL INITIATOR_GROUP\n";
+    print STDERR "       NIMBLE_IP       = IP of NIMBLE iSCSI volume server.\n";
+    print STDERR "       LOGIN           = Name of login on NIMBLE.\n";
+    print STDERR "       RH_IP           = RedHat client IP.\n";
+    print STDERR "       SOURCE_VOL      = Name of Source Volume.\n";
+    print STDERR "       INITIATOR_GROuP = Name of initiator group to create.\n";
+    print STDERR "This script ssh's into the Nimble iSCSI volume server and creates the source volume.\n";
+    print STDERR "First it creates an initiator group with source and RH IP.\n";
+    print STDERR "\n";
+    print STDERR "Example: ${PROG} 10.0.11.123 admin 10.0.11.36 at-m4-source initiator-grp\n";
+    print STDERR "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n";
+    exit 1;
+}   # End of usage
+
+#-----------------------------------------------------------------------------
+# Check that the arguments passed in have somewhat reasonable values.
+
+sub checkargs()
+{
+    if (!defined($NIMBLE_IP) || $NIMBLE_IP eq '')
+    {
+	usage('First argument must be the IP of the NIMBLE system used.');
+    }
+
+    if (!defined($LOGIN) || $LOGIN eq '')
+    {
+	usage('Second argument must be the login of the NIMBLE system used.');
+    }
+
+    $SSH = "ssh -x ${LOGIN}\@${NIMBLE_IP}";	# Where to execute a command.
+    my $SAVE_NIMBLE_SSH = $SSH;
+
+    # Check NIMBLE_IP works with no password ssh.
+    execute('echo works 2>&1');
+    if ($output ne 'works')
+    {
+	cmd_error("Storage IP ($NIMBLE_IP) not reachable via ssh.", __FILE__, __LINE__)
+    }
+
+    if (!defined($RH_IP) || $RH_IP eq '')
+    {
+	usage('Third argument must be the IP of the RedHat system used.');
+    }
+    $SSH = "ssh -x root\@${RH_IP}";		# Where to execute a command.
+    # Check RH_IP works with no password ssh.
+    execute('echo works 2>&1');
+    if ($output ne 'works')
+    {
+	cmd_error("Client IP ($RH_IP) not reachable via ssh.", __FILE__, __LINE__)
+    }
+
+    # Restore NIMBLE as the thing we execute commands on.
+    $SSH = $SAVE_NIMBLE_SSH;
+
+    if (!defined($SOURCE) || $SOURCE eq '')
+    {
+       usage('Fourth argument must be the name of the SOURCE volume on the Nimble.');
+    }
+
+    if (!defined($INITIATORGRP) || $INITIATORGRP eq '')
+    {
+       usage('Fifth argument must be the name of the initiatorgrp on the Nimble.');
+    }
+}   # End of checkargs
+
+#-----------------------------------------------------------------------------
+# Check volume NOT on Nimble.
+
+sub check_no_volume($)
+{
+    my $volume = $_[0];
+
+    execute("vol --list 2>&1");
+    my @lines = split(/\n/, $output);
+    foreach my $l (@lines)
+    {
+	if ($l =~ /^$volume\s/)
+	{
+	    cmd_error("Already a volume with name $volume on Nimble $NIMBLE_IP.", __FILE__, __LINE__);
+	}
+    }
+}   # End of check_no_volume
+
+#-----------------------------------------------------------------------------
+# Check initiatorgroup is NOT on Nimble.
+
+sub check_no_initiatorgrp($)
+{
+    my $ig = $_[0];
+
+    execute("initiatorgrp --list 2>&1");
+    my @lines = split(/\n/, $output);
+    foreach my $l (@lines)
+    {
+	if ($l =~ /^$ig\s/)
+	{
+	    cmd_error("Already an initiatorgrp with name $ig on Nimble $NIMBLE_IP.", __FILE__, __LINE__);
+	}
+    }
+}   # End of check_no_initiatorgrp
+
+
+#-----------------------------------------------------------------------------
+sub create_initiatorgrp($)
+{
+    my $ig = $_[0];
+
+    execute("initiatorgrp --create $ig 2>&1");
+    if ($output ne '')
+    {
+	cmd_error("Error creating initiatorgrp with name $ig on Nimble $NIMBLE_IP.", __FILE__, __LINE__);
+    }
+}   # End of create_initiatorgrp
+
+#-----------------------------------------------------------------------------
+sub add_to_initiatorgrp($$$)
+{
+    my $ig = $_[0];
+    my $ip = $_[1];
+    my $vol = $_[2];
+
+    execute("initiatorgrp --add_initiators $ig --label $ig-$ip-$vol --initiator_name \"*\" --ipaddr $ip 2>&1");
+    if ($output ne '')
+    {
+	cmd_error("Error creating initiatorgrp with name $ig on Nimble $NIMBLE_IP.", __FILE__, __LINE__);
+    }
+}   # End of add_to_initiatorgrp
+
+#-----------------------------------------------------------------------------
+sub create_volume($$)
+{
+    my $vol = $_[0];
+    my $ig = $_[1];
+
+    execute("vol --create $vol --size 2048 --description $vol-$ig " .
+            "--perfpolicy default --initiatorgrp $ig --start_offline --multi_initiator no 2>&1");
+    if ($output ne '')
+    {
+	cmd_error("Error creating volume $vol with initiatorgrp $ig on Nimble $NIMBLE_IP.", __FILE__, __LINE__);
+    }
+}   # End of create_volume
+
+#-----------------------------------------------------------------------------
+# Set nimble volume online.
+
+sub set_volume_online($)
+{
+    my $vol = $_[0];
+
+    execute("vol --online $vol 2>&1");
+    if ($output ne '')
+    {
+	cmd_error("Error setting volume $vol online on Nimble $NIMBLE_IP.", __FILE__, __LINE__);
+    }
+}   # End of set_volume_online
+
+#=============================================================================
+# Start of main program.
+
+check_no_volume($SOURCE);			# Error if source already exists on nimble.
+check_no_initiatorgrp($INITIATORGRP);		# Error if initiatorgrp already exists on nimble.
+
+create_initiatorgrp($INITIATORGRP);
+add_to_initiatorgrp($INITIATORGRP, $RH_IP, $SOURCE);
+create_volume($SOURCE, $INITIATORGRP);
+set_volume_online($SOURCE);
+
+#-----------------------------------------------------------------------------
+print STDERR "\nDONE with $PROG\n";
+#-----------------------------------------------------------------------------
+exit 0;
+#-----------------------------------------------------------------------------

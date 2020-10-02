@@ -1,0 +1,187 @@
+#!/usr/bin/perl -w
+#-----------------------------------------------------------------------------
+use warnings;
+use strict;
+
+require 'nn.common.pm';
+#-----------------------------------------------------------------------------
+# Forward referenced subroutines.
+sub checkargs();
+
+#-----------------------------------------------------------------------------
+# Global variables initialized from arguments passed to script.
+my $PROG = $0;
+my $HYPERQ_IP = $ARGV[0];
+my $SOURCE = $ARGV[1];
+my $TARGET = $ARGV[2];
+if ($#ARGV > 2) {die "$PROG only takes maximum of 3 arguments, not " . $#ARGV+1 . "\n";}
+
+# Global variables.
+our $command = '';                      # Command to execute.
+our $output = '';                       # Output from command executed.
+our $status = '';
+our $SSH = '';                          # Where to execute a command.
+
+#-----------------------------------------------------------------------------
+checkargs();
+
+#-----------------------------------------------------------------------------
+# Print error message, then usage statement, then exit script with error.
+
+sub usage($)
+{
+    my $e = $_[0];
+    print STDERR "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\n";
+    print STDERR "${e}\n";
+    print STDERR "..............................................................................\n";
+    print STDERR "Usage: ${PROG} HYPERQ_IP SOURCE_VOL TARGET_VOL\n";
+    print STDERR "       HYPERQ_IP  = IP of HyperQ.\n";
+    print STDERR "       SOURCE_VOL = source volume name.\n";
+    print STDERR "       TARGET_VOL = target volume name.\n";
+    print STDERR "This script ssh's into the HyperQ and removes a finished migration.\n";
+    print STDERR "\n";
+    print STDERR "Example: ${PROG} 10.0.11.34 at-m4-source at-m4-target\n";
+    print STDERR "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n";
+    exit 1;
+}   # End of usage
+
+#-----------------------------------------------------------------------------
+# Check that the arguments passed in have somewhat reasonable values.
+
+sub checkargs()
+{
+    if (!defined($HYPERQ_IP) || $HYPERQ_IP eq '')
+    {
+        usage('First argument must be the IP of the HyperQ system used.');
+    }
+
+    $SSH = "ssh -x root\@${HYPERQ_IP}";		# Where to execute a command.
+
+    if (!defined($SOURCE) || $SOURCE eq '')
+    {
+       usage('Second argument must be the name of the source volume.');
+    }
+
+    if (!defined($TARGET) || $TARGET eq '')
+    {
+       usage('Third argument must be the name of the target volume.');
+    }
+
+    # Check HYPERQ_IP works with no password ssh.
+    execute('echo works 2>&1');
+    if ($output ne 'works')
+    {
+        cmd_error("HYPERQ_IP (${HYPERQ_IP}) not setup correctly.", __FILE__, __LINE__)
+    }
+}   # End of checkargs
+
+#-----------------------------------------------------------------------------
+sub find_migration_id()
+{
+    execute('/home/padmin/hsm listmigrations');
+
+    if ($output eq '')
+    {
+	cmd_error("HyperQ $HYPERQ_IP did not return anything for hsm listmigrations command");
+    }
+
+    my @lines = split(/\n/, $output);
+    my $flag_id;
+    my $flag_src;
+    my $flag_target;
+    my $flag_status;
+    my $flag_progress;
+
+    foreach my $l (@lines)
+    {
+	if ($l =~ /^Current Migrations/) { next; }
+	if ($l =~ /^Migration ID: (.*)$/) { $flag_id = $1; next; }
+	if ($l =~ /^Source Name: /) { $flag_src = $l; next; }
+	if ($l =~ /^Target Name: /) { $flag_target = $l; next; }
+	if ($l =~ /^Threads: /) { next; }
+	if ($l =~ /^In-Path: /) { next; }
+	if ($l =~ /^ZIZO: /) { next; }
+	if ($l =~ /^Scheduled Migration: /) { next; }
+	if ($l =~ /^Scheduled DefaultRate: /) { next; }
+	if ($l =~ /^Config Rate: /) { next; }
+	if ($l =~ /^Use Schedule: /) { next; }
+	if ($l =~ /^Scheduled Start: /) { next; }
+	if ($l =~ /^Scheduled End: /) { next; }
+	if ($l =~ /^Actual Start: /) { next; }
+	if ($l =~ /^Actual End: /) { next; }
+	if ($l =~ /^Status: /) { $flag_status = $l; next; }
+	if ($l =~ /^Progress: /) { $flag_progress = $l; next; }
+	if ($l =~ /^---------------------------------------------------------------------------/)
+	{
+	    if (!defined($flag_id)) { next; }
+	    if ($flag_src !~ /: ip-[0-9.]+:[0-9]+-iscsi-iqn\..*:$SOURCE-.*-lun-[0-9]+$/)
+	    {
+		undef($flag_id);
+		next;
+	    }
+	    if ($flag_target !~ /: ip-[0-9.]+:[0-9]+-iscsi-iqn\..*:$TARGET-.*-lun-[0-9]+$/)
+	    {
+		undef($flag_id);
+		next;
+	    }
+
+	    if ($flag_status !~ /Status: SUCCESS$/)
+	    {
+		cmd_error("Migration not ready for GOLIVE for $SOURCE to $TARGET -- '$flag_status'!=SUCCESS",
+			  __FILE__, __LINE__);
+	    }
+	    if ($flag_progress !~ /Progress: 100%$/)
+	    {
+		cmd_error("Migration not ready for GOLIVE for $SOURCE to $TARGET -- '$flag_progress\n'!=100%",
+			  __FILE__, __LINE__);
+	    }
+	    return($flag_id);
+	}
+    }
+    cmd_error("Did not find a migration for $SOURCE to $TARGET", __FILE__, __LINE__);
+}   # End of find_migration_id
+
+#-----------------------------------------------------------------------------
+sub check_migration_gone()
+{
+    execute('/home/padmin/hsm listmigrations');
+
+    if ($output eq '')
+    {
+	cmd_error("HyperQ $HYPERQ_IP did not return anything for hsm listmigrations command");
+    }
+
+    my @lines = split(/\n/, $output);
+    my $flag_id;
+    my $flag_src;
+    my $flag_target;
+    my $flag_status;
+    my $flag_progress;
+
+    foreach my $l (@lines)
+    {
+	if ($l =~ /^Current Migrations/) { next; }
+	if ($l =~ /^---------------------------------------------------------------------------/) { next; }
+	cmd_error("unexpected line '$l' in hsm listmigrations for $SOURCE to $TARGET", __FILE__, __LINE__);
+    }
+}   # End of check_migration_gone
+
+#=============================================================================
+# Start of main program.
+
+my $id = find_migration_id();
+
+execute("/home/padmin/hsm removemigration $id");
+if ($output !~ /Successfully removed migration ID: /)
+{
+    cmd_error("hsm removemigration gave unexpected output.", __FILE__, __LINE__);
+}
+
+# Check migration is gone.
+check_migration_gone();
+
+#-----------------------------------------------------------------------------
+print STDERR "\nDONE with $PROG\n";
+#-----------------------------------------------------------------------------
+exit 0;
+#=============================================================================

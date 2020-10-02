@@ -1,0 +1,101 @@
+#!/usr/bin/perl -w
+#-----------------------------------------------------------------------------
+use warnings;
+use strict;
+
+require 'nn.common.pm';
+#-----------------------------------------------------------------------------
+# Forward referenced subroutines.
+sub checkargs();
+
+#-----------------------------------------------------------------------------
+# Global variables initialized from arguments passed to script.
+my $PROG = $0;
+my $NIMBLE_IP = $ARGV[0];
+my $LOGIN = $ARGV[1];
+my $TARGET = $ARGV[2];
+if ($#ARGV > 2) {die "$PROG only takes maximum of 3 arguments, not " . $#ARGV+1 . "\n";}
+
+# Global variables.
+our $command;                           # Command to execute.
+our $output;                            # Output from command executed.
+our $status;
+our $SSH = '';                          # Where to execute a command.
+
+#-----------------------------------------------------------------------------
+checkargs();
+
+#-----------------------------------------------------------------------------
+# Print error message, then usage statement, then exit script with error.
+
+sub usage($)
+{
+    my $e = $_[0];
+    print STDERR "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\n";
+    print STDERR "${e}\n";
+    print STDERR "..............................................................................\n";
+    print STDERR "Usage: ${PROG} NIMBLE_IP LOGIN TARGET_VOL\n";
+    print STDERR "       NIMBLE_IP       = IP of NIMBLE iSCSI volume server.\n";
+    print STDERR "       LOGIN           = Name of login on NIMBLE.\n";
+    print STDERR "       TARGET_VOL      = Name of Target Volume.\n";
+    print STDERR "This script ssh's into the Nimble iSCSI volume server and allows the target volume\n";
+    print STDERR "to have multi-access.\n";
+    print STDERR "\n";
+    print STDERR "Example: ${PROG} 10.0.11.123 admin at-m4-target\n";
+    print STDERR "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n";
+    exit 1;
+}   # End of usage
+
+#-----------------------------------------------------------------------------
+# Check that the arguments passed in have somewhat reasonable values.
+
+sub checkargs()
+{
+    if (!defined($NIMBLE_IP) || $NIMBLE_IP eq '')
+    {
+	usage('First argument must be the IP of the NIMBLE system used.');
+    }
+
+    if (!defined($LOGIN) || $LOGIN eq '')
+    {
+	usage('Second argument must be the login of the NIMBLE system used.');
+    }
+
+    $SSH = "ssh -x ${LOGIN}\@${NIMBLE_IP}";	# Where to execute a command.
+
+    # Check NIMBLE_IP works with no password ssh.
+    execute('echo works 2>&1');
+    if ($output ne 'works')
+    {
+	cmd_error("Storage IP ($NIMBLE_IP) not reachable via ssh.", __FILE__, __LINE__)
+    }
+
+    if (!defined($TARGET) || $TARGET eq '')
+    {
+       usage('Third argument must be the name of the TARGET volume on the Nimble.');
+    }
+
+}   # End of checkargs
+
+#-----------------------------------------------------------------------------
+sub allow_multi_initiator($)
+{
+    my $vol = $_[0];
+
+    execute("vol --edit $vol --multi_initiator yes");
+    if ($output ne '')
+    {
+	cmd_error("Error setting multi-initiator to yes for vol $vol on Nimble $NIMBLE_IP.", __FILE__, __LINE__);
+    }
+}   # End of allow_multi_initiator
+
+#=============================================================================
+# Start of main program.
+
+allow_multi_initiator($TARGET);
+
+#-----------------------------------------------------------------------------
+print STDERR "\nDONE with $PROG\n";
+#-----------------------------------------------------------------------------
+exit 0;
+#-----------------------------------------------------------------------------

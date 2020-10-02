@@ -1,0 +1,238 @@
+#!/usr/bin/perl -w
+#-----------------------------------------------------------------------------
+use warnings;
+use strict;
+
+require 'nn.common.pm';
+use warnings;
+use strict;
+#-----------------------------------------------------------------------------
+# Forward referenced subroutines.
+sub checkargs();
+
+#-----------------------------------------------------------------------------
+# Global variables initialized from arguments passed to script.
+my $PROG = $0;
+my $HYPERQ_IP = $ARGV[0];
+my $RH_IP = $ARGV[1];
+my $SOURCE = $ARGV[2];
+if ($#ARGV > 2) {die "$PROG only takes maximum of 3 arguments, not " . $#ARGV+1 . "\n";}
+
+# Global variables.
+our $command;                           # Command to execute.
+our $output;                            # Output from command executed.
+our $status;
+our $SSH = '';                          # Where to execute a command.
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+our $rh_init_name = '';			# RedHat initiator name.
+
+#-----------------------------------------------------------------------------
+checkargs();
+
+#-----------------------------------------------------------------------------
+# Print error message, then usage statement, then exit script with error.
+
+sub usage($)
+{
+    my $e = $_[0];
+    print STDERR "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\n";
+    print STDERR "${e}\n";
+    print STDERR "..............................................................................\n";
+    print STDERR "Usage: ${PROG} HYPERQ_IP RH_IP SOURCE_VOL\n";
+    print STDERR "       HYPERQ_IP  = HyperQ IP.\n";
+    print STDERR "       RH_IP      = RedHat client IP.\n";
+    print STDERR "       SOURCE_VOL = Name of Source Volume.\n";
+    print STDERR "This script ssh's into the HQ and RH, and maps the HQ volume to RedHat client.\n";
+    print STDERR "\n";
+    print STDERR "Example: ${PROG} 10.0.11.34 10.0.11.36 at-m4-source\n";
+    print STDERR "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n";
+    exit 1;
+}   # End of usage
+
+#-----------------------------------------------------------------------------
+# Check that the arguments passed in have somewhat reasonable values.
+
+sub checkargs()
+{
+    if (!defined($RH_IP) || $RH_IP eq '')
+    {
+        usage('Second argument must be the IP of the RedHat Client system used.');
+    }
+
+    $SSH = "ssh -x root\@${RH_IP}";             # Where to execute a command.
+    # Check RH_IP works with no password ssh.
+    execute('echo works 2>&1');
+    if ($output ne 'works')
+    {
+        usage("Second argument, Client IP ($RH_IP) not reachable via ssh.");
+    }
+# root@rhel68-11-36:~# cat /etc/iscsi/initiatorname.iscsi
+# InitiatorName=iqn.1994-05.com.redhat:41b1c9ec79f1
+    execute('cat /etc/iscsi/initiatorname.iscsi | sed -e "s/^InitiatorName=//"');
+    if ($output eq '')
+    {
+        usage("Second argument, Client IP ($RH_IP) does not have /etc/iscsi/initiatorname.iscsi");
+    }
+    $rh_init_name = $output;			# RedHat initiator name.
+
+    $SSH = "ssh -x root\@${HYPERQ_IP}";		# Where to execute a command.
+    # Check HYPERQ_IP works with no password ssh.
+    execute('echo works 2>&1');
+    if ($output ne 'works')
+    {
+        usage("First argument, HYPERQ IP ($HYPERQ_IP) not reachable via ssh.");
+    }
+
+    if (!defined($SOURCE) || $SOURCE eq '')
+    {
+       usage('Third argument must be the name of the SOURCE volume on the Nimble.');
+    }
+}   # End of checkargs
+
+#-----------------------------------------------------------------------------
+# Output of listhbas | grep iqn
+
+sub get_hyperq_iqn_hba_names()
+{
+    execute('/home/padmin/listhbas | grep iqn | sed -e "s/^.*: //"');
+    if ($output eq '')
+    {
+	cmd_error('Did not find any HyperQ hba name(s) with iqn in them.', __FILE__, __LINE__);
+    }
+    my @iqns = split(/\n/, $output);
+    return(@iqns);
+}   # End of get_hyperq_iqn_hba_names
+
+#-----------------------------------------------------------------------------
+# root@HQ7000:~# listmfs
+# Current MFS's configurations:
+# ---------------------------------------------------------------------------
+# ID: 13
+# Name: ip-10.0.11.123:3260-iscsi-iqn.2007-11.com.nimblestorage:at-m4-source-v5b672f81b23e3568.00000048.e9591ae9-lun-0
+
+# output of listmfs | grep '^Name: '
+
+sub get_hyperq_mfg_name()
+{
+    execute("/home/padmin/listmfs | grep \"^Name: .*$SOURCE\" | sed -e \"s/^Name: //\"");
+    if ($output eq '')
+    {
+	cmd_error("Did not find any HyperQ MFS name(s) with $SOURCE in them.", __FILE__, __LINE__);
+    }
+    my @mfs = split(/\n/, $output);
+    if ($#mfs > 0)
+    {
+	cmd_error("Expected one HyperQ MFS with $SOURCE in it, not $#mfs.", __FILE__, __LINE__);
+    }
+    return($mfs[0]);
+}   # End of get_hyperq_mfg_name
+
+#-----------------------------------------------------------------------------
+# Do the command to allow RH access.
+# root@HQ7000:/home/padmin# maptargets block --name ip-10.0.11.123:3260-iscsi-iqn.2007-11.com.nimblestorage:at-m4-source-v5b672f81b23e3568.00000048.e9591ae9-lun-0 --tgtiqn1 '10.0.11.34 iqn.2016-12.com.parseclabs:hyperqtg.90b94c40da73' --clientiqn1 'iqn.1994-05.com.redhat:41b1c9ec79f1' --mapped Y --emulate Y
+# Starting to map available targets to clients...
+# Updating device...
+# Successfully mapped target and client iqns
+
+sub map_target($$@)
+{
+    my ($mfg_name, $rh_init_name, $array_iqns) = @_;
+    my @iqns = @{$array_iqns};
+
+    my $p1 = "/home/padmin/maptargets block --name \"$mfg_name\"";
+    my $p3 = "--clientiqn1 \"$rh_init_name\"";
+    my $p4 = "--mapped Y --emulate Y";
+    my $flag = 0;				# non-zero if one of the iqns worked.
+
+    foreach my $i (@iqns)
+    {
+	my $p2 = "--tgtiqn1 \"$i\"";
+	execute("$p1 $p2 $p3 $p4");
+	if ($output =~ /Successfully mapped target and client iqns/)
+	{
+	    $flag++;
+	}
+	else
+	{
+	    cmd_warning("Did not map correctly.", __FILE__, __LINE__);
+	}
+    }
+    if ($flag == 0)
+    {
+	cmd_error("Did not map any IQN correctly.", __FILE__, __LINE__);
+    }
+}   # End of map_target
+
+#-----------------------------------------------------------------------------
+# root@HQ7000:~# listmfs
+# Current MFS's configurations:
+# ---------------------------------------------------------------------------
+# ID: 13
+# Name: ip-10.0.11.123:3260-iscsi-iqn.2007-11.com.nimblestorage:at-m4-source-v5b672f81b23e3568.00000048.e9591ae9-lun-0
+
+sub verify_hyperq_mfs($$@)
+{
+    my ($mfg_name, $rh_init_name, $array_iqns) = @_;
+    my @iqns = @{$array_iqns};
+
+    execute("/home/padmin/listmfs");
+    if ($output eq '')
+    {
+	cmd_error("Did not get any HyperQ output from listmfs.", __FILE__, __LINE__);
+    }
+    my @lines = split(/\n/, $output);
+    foreach my $l (@lines)
+    {
+	if ($l =~ /^Current MFS's configurations:$/) { next; }
+	if ($l =~ /^---------------------------------------------------------------------------$/) { next; }
+	if ($l =~ /^ID: /) { next; }			# Ignore the ID number.
+	if ($l =~ /^Name: $mfg_name$/) { next; }
+	if ($l =~ /^Target: /) { next; }		# This is not verified.
+	if ($l =~ /^Host: iSCSI$/) { next; }
+	if ($l =~ /^In-Path: Enabled$/) { next; }
+	if ($l =~ /^Mode: SCSI$/) { next; }
+	if ($l =~ /^Mig Target: No$/) { next; }
+	if ($l =~ /^Status: ONLINE$/) { next; }
+	if ($l =~ /^Mapped: Yes$/) { next; }
+	if ($l =~ /^Emulate: Yes$/) { next; }
+	if ($l =~ /^Client HBA: $rh_init_name$/) { next; }
+	if ($l =~ /^Target HBA: /) { next; }
+	if ($l =~ /^Target HBA 2: None$/) { next; }
+	if ($l =~ /^Client HBA 2: None$/) { next; }
+	if ($l =~ /^Target HBA 3: None$/) { next; }
+	if ($l =~ /^Client HBA 3: None$/) { next; }
+	if ($l =~ /^Target HBA 4: None$/) { next; }
+	if ($l =~ /^Client HBA 4: None$/) { next; }
+	my $flags = 0;
+	foreach my $i (@iqns)
+	{
+	    if ($l =~ /^Target HBA *[234]*: $i$/)
+	    {
+		$flags = 1;
+		last;
+	    }
+	}
+	if ($flags == 1) { next; }		# Target HBA: matched!
+	cmd_error("Unexpected line from listmfs: '$l'", __FILE__, __LINE__);
+    }
+}   # End of verify_hyperq_mfs
+
+#=============================================================================
+# Start of main program.
+
+#++ $rh_init_name = $output;			# RedHat initiator_name, set in checkargs().
+
+my @iqns = get_hyperq_iqn_hba_names();		# output of listhbas | grep iqn
+
+my $mfg_name = get_hyperq_mfg_name();		# output of listmfs | grep '^Name: '
+
+map_target($mfg_name, $rh_init_name, \@iqns);	# Do the command(s) to allow RH access.
+
+verify_hyperq_mfs($mfg_name, $rh_init_name, \@iqns); # Verify command did something reasonable.
+
+#-----------------------------------------------------------------------------
+print STDERR "\nDONE with $PROG\n";
+#-----------------------------------------------------------------------------
+exit 0;
+#-----------------------------------------------------------------------------
+

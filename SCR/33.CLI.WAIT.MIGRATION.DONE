@@ -1,0 +1,168 @@
+#!/usr/bin/perl -w
+#-----------------------------------------------------------------------------
+use warnings;
+use strict;
+
+require 'nn.common.pm';
+#-----------------------------------------------------------------------------
+# Forward referenced subroutines.
+sub checkargs();
+
+#-----------------------------------------------------------------------------
+# Global variables initialized from arguments passed to script.
+my $PROG = $0;
+my $HYPERQ_IP = $ARGV[0];
+my $SOURCE = $ARGV[1];
+my $TARGET = $ARGV[2];
+if ($#ARGV > 2) {die "$PROG only takes maximum of 3 arguments, not " . $#ARGV+1 . "\n";}
+
+# Global variables.
+our $command = '';                      # Command to execute.
+our $output = '';                       # Output from command executed.
+our $status = '';
+our $SSH = '';                          # Where to execute a command.
+
+#-----------------------------------------------------------------------------
+checkargs();
+
+#-----------------------------------------------------------------------------
+# Print error message, then usage statement, then exit script with error.
+
+sub usage($)
+{
+    my $e = $_[0];
+    print STDERR "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\n";
+    print STDERR "${e}\n";
+    print STDERR "..............................................................................\n";
+    print STDERR "Usage: ${PROG} HYPERQ_IP SOURCE_VOL TARGET_VOL\n";
+    print STDERR "       HYPERQ_IP  = IP of HyperQ.\n";
+    print STDERR "       SOURCE_VOL = source volume name.\n";
+    print STDERR "       TARGET_VOL = target volume name.\n";
+    print STDERR "This script ssh's into the HyperQ and waits for migration to complete.\n";
+    print STDERR "\n";
+    print STDERR "Example: ${PROG} 10.0.11.34 at-m4-source at-m4-target\n";
+    print STDERR "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n";
+    exit 1;
+}   # End of usage
+
+#-----------------------------------------------------------------------------
+# Check that the arguments passed in have somewhat reasonable values.
+
+sub checkargs()
+{
+    if (!defined($HYPERQ_IP) || $HYPERQ_IP eq '')
+    {
+        usage('First argument must be the IP of the HyperQ system used.');
+    }
+
+    $SSH = "ssh -x root\@${HYPERQ_IP}";		# Where to execute a command.
+
+    if (!defined($SOURCE) || $SOURCE eq '')
+    {
+       usage('Second argument must be the name of the source volume.');
+    }
+
+    if (!defined($TARGET) || $TARGET eq '')
+    {
+       usage('Third argument must be the name of the target volume.');
+    }
+
+    # Check HYPERQ_IP works with no password ssh.
+    execute('echo works 2>&1');
+    if ($output ne 'works')
+    {
+        cmd_error("HYPERQ_IP (${HYPERQ_IP}) not setup correctly.", __FILE__, __LINE__)
+    }
+}   # End of checkargs
+
+#-----------------------------------------------------------------------------
+# Find migration, loop until "Status: SUCCESS" and "Progress: 100%"
+
+sub wait_migration_complete()
+{
+    for (;;)
+    {
+	execute('/home/padmin/hsm listmigrations');
+
+	if ($output eq '')
+	{
+	    cmd_error("HyperQ $HYPERQ_IP did not return anything for hsm listmigrations command");
+	}
+
+	my @lines = split(/\n/, $output);
+	my $flag_id = 0;
+	my $flag_src = 0;
+	my $flag_target = 0;
+	my $flag_status = 0;
+	my $flag_progress = 0;
+	my $count = 0;
+
+	foreach my $l (@lines)
+	{
+	    if ($l =~ /^Current Migrations/) { next; }
+	    if ($l =~ /^Migration ID: (.*)/) { $flag_id = $1; next; }
+	    if ($l =~ /^Source Name: /) { $flag_src = $l; next; }
+	    if ($l =~ /^Target Name: /) { $flag_target = $l; next; }
+	    if ($l =~ /^Threads: /) { next; }
+	    if ($l =~ /^In-Path: /) { next; }
+	    if ($l =~ /^ZIZO: /) { next; }
+	    if ($l =~ /^Scheduled Migration: /) { next; }
+	    if ($l =~ /^Scheduled DefaultRate: /) { next; }
+	    if ($l =~ /^Config Rate: /) { next; }
+	    if ($l =~ /^Use Schedule: /) { next; }
+	    if ($l =~ /^Scheduled Start: /) { next; }
+	    if ($l =~ /^Scheduled End: /) { next; }
+	    if ($l =~ /^Actual Start: /) { next; }
+	    if ($l =~ /^Actual End: /) { next; }
+	    if ($l =~ /^Status: /) { $flag_status = $l; next; }
+	    if ($l =~ /^Progress: /) { $flag_progress = $l; next; }
+	    if ($l =~ /^---------------------------------------------------------------------------/)
+	    {
+		if ($flag_id == 0) { next; }
+		if ($flag_src !~ /: ip-[0-9.]+:[0-9]+-iscsi-iqn\..*:$SOURCE-.*-lun-[0-9]+$/)
+		{
+		    $flag_id = 0;
+		    next;
+		}
+		if ($flag_target !~ /: ip-[0-9.]+:[0-9]+-iscsi-iqn\..*:$TARGET-.*-lun-[0-9]+$/)
+		{
+		    $flag_id = 0;
+		    next;
+		}
+		if ($flag_status !~ /Status: SUCCESS$/)
+		{
+		    printf STDERR "%4d - $flag_status  $flag_progress\n";
+		    sleep(5);
+		    $count++;
+		}
+		if ($flag_progress !~ /Progress: 100%$/)
+		{
+		    printf STDERR "%4d - $flag_status  $flag_progress\n";
+		    sleep(5);
+		    $count++;
+		}
+		return;
+	    }
+	}
+	if ($flag_id == 0)
+	{
+	    cmd_error("Did not find a migration for $SOURCE to $TARGET", __FILE__, __LINE__);
+	}
+    }
+}   # End of wait_migration_complete
+
+#=============================================================================
+# Start of main program.
+
+wait_migration_complete();
+
+#-----------------------------------------------------------------------------
+print STDERR "\nDONE with $PROG\n";
+#-----------------------------------------------------------------------------
+exit 0;
+#=============================================================================
+#-- echo 'Wait for Migration to complete on HQ:'
+#-- echo '  1) Login admin@localhost.com -- password admin.'
+#-- echo '  2) On left side, select drop down tab "Logs->Run History".'
+#-- echo '  3) Top entry should have "Interface Name" be "FSR RESTART" and "Status" be "SUCCESS".'
+#-- echo '  3) When the "Progress" column says "100%", the migration has completed.'

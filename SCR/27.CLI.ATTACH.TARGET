@@ -1,0 +1,176 @@
+#!/usr/bin/perl -w
+#-----------------------------------------------------------------------------
+use warnings;
+use strict;
+
+require 'nn.common.pm';
+#-----------------------------------------------------------------------------
+# Forward referenced subroutines.
+sub checkargs();
+
+#-----------------------------------------------------------------------------
+# Global variables initialized from arguments passed to script.
+my $PROG = $0;
+my $NIMBLE_IP = $ARGV[0];
+my $LOGIN = $ARGV[1];
+my $HYPERQ_IP = $ARGV[2];
+my $TARGET = $ARGV[3];
+if ($#ARGV > 3) {die "$PROG only takes maximum of 4 arguments, not " . $#ARGV+1 . "\n";}
+
+# Global variables.
+our $command;                           # Command to execute.
+our $output;                            # Output from command executed.
+our $status;
+our $SSH = '';                          # Where to execute a command.
+
+#-----------------------------------------------------------------------------
+checkargs();
+
+#-----------------------------------------------------------------------------
+# Print error message, then usage statement, then exit script with error.
+
+sub usage($)
+{
+    my $e = $_[0];
+    print STDERR "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\n";
+    print STDERR "${e}\n";
+    print STDERR "..............................................................................\n";
+    print STDERR "Usage: ${PROG} NIMBLE_IP LOGIN HYPERQ_IP TARGET_VOL\n";
+    print STDERR "       NIMBLE_IP       = IP of NIMBLE iSCSI volume server.\n";
+    print STDERR "       LOGIN           = Name of login on NIMBLE.\n";
+    print STDERR "       HYPERQ_IP       = HyperQ IP.\n";
+    print STDERR "       TARGET_VOL      = Name of Target Volume.\n";
+    print STDERR "This script ssh's into the HQ and attaches the iSCSI NIMBLE's target volume.\n";
+    print STDERR "\n";
+    print STDERR "Example: ${PROG} 10.0.11.123 admin 10.0.11.34 at-m4-target\n";
+    print STDERR "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n";
+    exit 1;
+}   # End of usage
+
+#-----------------------------------------------------------------------------
+# Check that the arguments passed in have somewhat reasonable values.
+
+sub checkargs()
+{
+    if (!defined($NIMBLE_IP) || $NIMBLE_IP eq '')
+    {
+        usage('First argument must be the IP of the NIMBLE system used.');
+    }
+
+    if (!defined($LOGIN) || $LOGIN eq '')
+    {
+        usage('Second argument must be the login of the NIMBLE system used.');
+    }
+
+    $SSH = "ssh -x ${LOGIN}\@${NIMBLE_IP}";     # Where to execute a command.
+
+    # Check NIMBLE_IP works with no password ssh.
+    execute('echo works 2>&1');
+    if ($output ne 'works')
+    {
+        usage("Storage IP ($NIMBLE_IP) not reachable via ssh.");
+    }
+
+    if (!defined($HYPERQ_IP) || $HYPERQ_IP eq '')
+    {
+        usage('Third argument must be the IP of the HyperQ used.');
+    }
+    $SSH = "ssh -x root\@${HYPERQ_IP}";             # Where to execute a command.
+
+    # Check HYPERQ_IP works with no password ssh.
+    execute('echo works 2>&1');
+    if ($output ne 'works')
+    {
+        usage("HyperQ IP ($HYPERQ_IP) not reachable via ssh.");
+    }
+
+    if (!defined($TARGET) || $TARGET eq '')
+    {
+       usage('Fourth argument must be the name of the TARGET volume on the Nimble.');
+    }
+}   # End of checkargs
+
+#-----------------------------------------------------------------------------
+# root@HQ7000:/home/padmin# /home/padmin/querytargets 10.0.11.123
+# Querying 10.0.11.123 to get a list of targets..
+# PORTAL:10.0.11.123:3260
+# TARGET:iqn.2007-11.com.nimblestorage:at-m4-target-v5b672f81b23e3568.00000048.e9591ae9
+# Successfully listed all available targets on 10.0.11.123
+
+sub query_targets()
+{
+    execute("/home/padmin/querytargets $NIMBLE_IP | grep $TARGET");
+    if ($output eq '')
+    {
+	cmd_error("/home/padmin/querytargets did not find '$TARGET' available.", __FILE__, __LINE__);
+    }
+    $output =~ s/^PORTAL://;
+    $output =~ s/ TARGET:/ /;
+    return($output);
+}   # End of query_targets
+
+## ---------------------------------------------------------------------------
+# root@HQ7000:/home/padmin# /home/padmin/addiscsi target 10.0.11.123:3260 iqn.2007-11.com.nimblestorage:at-m4-target-v5b672f81b23e3568.00000048.e9591ae9
+# Adding ISCSI Target...
+# Successfully added iSCSI target: MFS-10.0.11.123-PORTAL:10.0.11.123:3260
+# TARGET:iqn.2007-11.com.nimblestorage:at-m4-target-v5b672f81b23e3568.00000048.e9591ae9
+
+sub add_iscsi_mfs($)
+{
+    my $npi = $_[0];
+    my $ip = $npi;
+    my $iqn = $npi;
+    $ip =~ s/ .*$//;
+    $iqn =~ s/^.* //;
+
+    execute("/home/padmin/addiscsi target $npi");
+    if ($output !~ /PORTAL:$ip /)
+    {
+	cmd_error("/home/padmin/addiscsi target did not return IP of '$ip'.", __FILE__, __LINE__);
+    }
+    if ($output !~ /TARGET:$iqn/)
+    {
+	cmd_error("/home/padmin/addiscsi target did not return Target of '$iqn'.", __FILE__, __LINE__);
+    }
+}   # End of add_iscsi_mfs
+
+#=============================================================================
+# Start of main program.
+
+my $nimble_portal_iqn = query_targets();
+
+add_iscsi_mfs($nimble_portal_iqn);
+
+#-----------------------------------------------------------------------------
+print STDERR "\nDONE with $PROG\n";
+#-----------------------------------------------------------------------------
+exit 0;
+#-----------------------------------------------------------------------------
+
+## #!/bin/bash -e
+## #-----------------------------------------------------------------------------
+## echo ''
+## #-----------------------------------------------------------------------------
+## echo ''
+## echo 'Attach Target Volume from Nimble to HQ:'
+## echo '  1) Login admin@localhost.com -- password admin.'
+## 
+## echo '  2) Click on left tab of "Storage Devices".'
+## echo '  3) Under ISCSI TARGET section, "Add Target".'
+## echo '  4) Enter Host Name or IP: 10.0.11.123	-- "Next".'
+## echo '  5) Should now be two devices (find the Target), click "select" button for it.'
+## echo '  6) Check everything, should be radio button 'iSCSI' semi-highlighted.'
+## echo '     Click green button label "Update".'
+## echo '  7) Click on left tab of "Logs" -> "Run History".'
+## echo '     Should be entry with "ApplyTARGET SUCCESS".'
+## echo '       If not, do a screen refresh of GUI, unti it finishes.'
+## echo '     Click on left tab of "Logs" -> "Error Log".'
+## echo '     Should be nothing with date/time recent.'
+## echo '  8) Click on left tab of "Storage Devices".'
+## echo '     Should have a "new" red "BLOCK DEVICES" and "view details" should be verified.'
+## echo '     i.e. make sure it is the right disk name -- usually in the iqn name (Name and Path).'
+## echo '  9) Click on checkbox "Enable as Migration Target".'
+## echo '     Click green "Update".'
+## echo '  10) On "Storage Devices" page, under "BLOCK DEVICES", target should NOW show in "black".'
+## echo ''
+## #-----------------------------------------------------------------------------

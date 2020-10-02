@@ -1,0 +1,177 @@
+#!/usr/bin/perl -w
+
+#-----------------------------------------------------------------------------
+# This gets logs from the CLIENT, HYPERQ, and NIMBLE.
+# This is so that YOU may check that everything is working/proceeding correctly.
+
+#-----------------------------------------------------------------------------
+use warnings;
+use strict;
+
+#-----------------------------------------------------------------------------
+# For log printing below.
+#-----------------------------------------------------------------------------
+sub log_separator()
+{
+    print LOGFILE "==============================================================================\n";
+}   # End of log_separator
+
+#-----------------------------------------------------------------------------
+my $the_command;		# Command to run.
+
+sub add_command($)
+{
+    my ($cmd) = @_;
+
+    if (defined($the_command))
+    {
+	$the_command .= ';';
+    }
+    else
+    {
+	$the_command = '';
+    }
+    $the_command .= "echo \"##### $cmd #####\";";
+    $the_command .= "$cmd 2>&1";
+}   # End of add_command
+
+#-----------------------------------------------------------------------------
+sub run_command($$)
+{
+    my ($prefix, $where) = @_;
+    my $output = `$where '$the_command'`;
+
+    my $str = '##############################################################################';
+    substr($str, 5, length($prefix) + 3) = " $prefix: ";
+    printf LOGFILE "%s\n%s", $str, $output;
+
+    undef($the_command);
+}   # End of run_command
+
+#-----------------------------------------------------------------------------
+sub log_status_into_file($$$$$$$$)
+{
+    if (defined($main::log_things) && $main::log_things ne '')
+    {
+        return;
+    }
+    my ($prog, $cmd, $rh, $hq, $nimble, $nimble_login, $source, $target) = @_;
+    my $output;
+
+    my $prenum = $cmd;
+    $prenum =~ s/[^0-9].*$//;
+
+    open(LOGFILE, '>', "${main::PROG}.log.$prenum") or die "Could not open log file $main::PROG.log.$prenum. $!";
+
+    print STDERR "Printing detailed status to $main::PROG.log.$prenum\n";
+
+    log_separator();
+    my $date = `/bin/date '+%Y-%m-%d_%H-%M-%S'`;
+    print LOGFILE "$date";
+    print LOGFILE "After command: $cmd\n";
+
+    log_separator();
+
+#==    add_command('echo hi');
+#==    add_command('echo there');
+#==    add_command('echo .');
+#==    run_command('rh', "ssh -x root\@$rh");
+    add_command('iscsiadm -m discovery');
+    add_command('iscsiadm -m node');
+    add_command('iscsiadm -m session');
+    add_command('df');
+    add_command('mount');
+    add_command('lsblk -o NAME,MAJ:MIN,TYPE,FSTYPE,MOUNTPOINT,UUID,MODEL,SIZE');
+    add_command('blkid -o list');
+    add_command('dmsetup ls --tree -o device');
+    add_command('dmsetup info -C');
+    add_command('vgs');
+    add_command('pvs');
+    add_command('lvs');
+    add_command('lsmod | grep multipath');
+    add_command('ls -l /dev/{sd,dm,vd,md,nvme}*');
+    add_command('multipath -ll');
+    add_command('lsscsi');
+    add_command('hsmadm show');
+    add_command('lsmod | grep hsm');
+    add_command('tail -n 20 /var/log/messages');
+    run_command('rh', "ssh -x root\@$rh");
+
+    log_separator();
+
+    add_command('iscsiadm -m discovery');
+    add_command('iscsiadm -m node');
+    add_command('iscsiadm -m session');
+    add_command('df');
+    add_command('mount');
+    add_command('lsblk -o NAME,MAJ:MIN,TYPE,FSTYPE,MOUNTPOINT,UUID,MODEL,SIZE');
+    add_command('blkid -o list');
+    add_command('dmsetup ls --tree -o device');
+    add_command('dmsetup info -C');
+    add_command('vgs');
+    add_command('pvs');
+    add_command('lvs');
+    add_command('lsmod | grep multipath');
+    add_command('ls -l /dev/{sd,dm,vd,md,nvme}*');
+    add_command('multipath -ll');
+    add_command('/home/padmin/hsm listmigrations');
+    add_command('/home/padmin/hsm listschedules');
+    add_command('/home/padmin/listmfs');
+    add_command('/home/padmin/listhbas');
+    add_command('/home/padmin/listtargets');
+    add_command('tail -n 20 /var/log/kern.log');
+    run_command('HyperQ', "ssh -x root\@$hq");
+
+    log_separator();
+
+    add_command('initiatorgrp --list');
+    add_command('vol --list');
+    add_command("vol --info $source");
+    add_command("vol --info $target");
+    run_command('iSCSI Nimble', "ssh -x $nimble_login\@$nimble");
+
+    log_separator();
+
+    close(LOGFILE);
+}   # End of log_status_into_file
+
+#-----------------------------------------------------------------------------
+our $log_things = $ARGV[0];             # Any argument to script will NOT print logs.
+#-----------------------------------------------------------------------------
+# Change this section for correct IP addresses, Nimble Volume names, etc.
+
+my $CLIENT       = '10.0.11.36';
+my $HYPERQ       = '10.0.11.34';
+
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# Assume SSH keys have been installed. To enable auto-login with ssh keys.
+# NOTE: --key is .ssh/id_rsa.pub.
+# sshkey --add m4 --type rsa --key 'AAAAEAAAADAQABAAABAQDHA8KuLWeeuysJhuxdHX9fQ+C0BH6q5s....' --user admin
+
+my $NIMBLE       = '10.0.11.123';
+my $NIMBLE_LOGIN = 'admin';
+# Volumes and other things on the nimble will be changed to lowercase. Thus start them that way.
+my $PREFIX       = 'at-m4-';		# AT -> Auto Testing
+# NOTE: volume names cannot have underscores in the names, use period or minus sign.
+my $SOURCE       = $PREFIX . 'source';
+my $TARGET       = $PREFIX . 'target';
+my $INITIATORGRP    = $PREFIX . 'initiator-grp';
+
+#=============================================================================
+# Global variables.
+our $PROG = $0;
+
+my $command = '';			# Command to execute.
+my $output = '';			# Output from command executed.
+my $status = '';
+my $SSH = '';				# Where to execute a command.
+
+#=============================================================================
+# Start of main program.
+
+$command = '01.manual';
+log_status_into_file($PROG, $command, $CLIENT, $HYPERQ, $NIMBLE, $NIMBLE_LOGIN, $SOURCE, $TARGET);
+#-----------------------------------------------------------------------------
+exit 0;
+#=============================================================================
+

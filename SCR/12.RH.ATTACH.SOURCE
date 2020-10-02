@@ -1,0 +1,542 @@
+#!/usr/bin/perl -w
+
+# NOTDONEYET - for current usage, non-multipath.
+# MULTIPATH - for multipath usage.
+
+#-----------------------------------------------------------------------------
+use warnings;
+use strict;
+
+require 'nn.common.pm';
+#-----------------------------------------------------------------------------
+# Forward referenced subroutines.
+sub checkargs();
+
+#-----------------------------------------------------------------------------
+# Global variables initialized from arguments passed to script.
+my $PROG = $0;
+my $RH_IP = $ARGV[0];
+my $NIMBLE1 = $ARGV[1];
+my $SOURCE = $ARGV[2];
+# MULTIPATH - my $NIMBLE2 = $ARGV[3];
+if ($#ARGV > 2) {die "$PROG only takes maximum of 3 arguments, not " . $#ARGV+1 . "\n";}
+
+# Global variables.
+our $command = '';			# Command to execute.
+our $output = '';			# Output from command executed.
+our $status = '';
+our $SSH = '';				# Where to execute a command.
+
+my $DEVICE;				# Figured out device for SOURCE.
+
+#-----------------------------------------------------------------------------
+checkargs();
+
+#-----------------------------------------------------------------------------
+# Print error message, then usage statement, then exit script with error.
+
+sub usage($)
+{
+    my $e = $_[0];
+    print STDERR "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\n";
+    print STDERR "${e}\n";
+    print STDERR "..............................................................................\n";
+# MULTIPATH -     print STDERR "Usage: ${PROG} RH_IP ST_ETH1 ST_ETH2\n";
+    print STDERR "Usage: ${PROG} RH_IP ST_ETH\n";
+    print STDERR "       RH_IP   = IP of RedHat I/O server.\n";
+    print STDERR "       ST_ETH  = IP of iSCSI storage.\n";
+# MULTIPATH -     print STDERR "       ST_ETH1 = IP of iSCSI storage, ethernet 1.\n";
+# MULTIPATH -     print STDERR "       ST_ETH2 = IP of iSCSI storage, ethernet 2.\n";
+    print STDERR "This script ssh's into the redhat server and sets up source connection to the\n";
+    print STDERR "iSCSI storage device for the source disk.\n";
+    print STDERR "\n";
+    print STDERR "Example: ${PROG} 10.0.11.36 10.0.11.123 at-m4-source\n";
+# MULTIPATH -     print STDERR "Example: ${PROG} 10.0.11.36 10.0.11.124 10.0.11.125 at-m4-source\n";
+    print STDERR "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n";
+    exit 1;
+}   # End of usage
+
+#-----------------------------------------------------------------------------
+# Check that the arguments passed in have somewhat reasonable values.
+
+sub checkargs()
+{
+    if (!defined($RH_IP) || $RH_IP eq '')
+    {
+	usage('First argument must be the IP of the RedHat system used.');
+    }
+
+    $SSH = "ssh -x root\@${RH_IP}";		# Where to execute a command.
+
+    if (!defined($NIMBLE1) || $NIMBLE1 eq '')
+    {
+       usage('Second argument must be the IP of the Nimble eth1.');
+    }
+# MULTIPATH -     if (!defined($NIMBLE2) || $NIMBLE2 eq '')
+# MULTIPATH -     {
+# MULTIPATH -        usage('Third argument must be the IP of the Nimble eth2.');
+# MULTIPATH -     }
+
+    if (!defined($SOURCE) || $SOURCE eq '')
+    {
+       usage('Third argument must be the Source volume name.');
+    }
+
+    # Check RH_IP works with no password ssh.
+    execute('echo works 2>&1');
+    if ($output ne 'works')
+    {
+	cmd_error("RH_IP (${RH_IP}) not setup correctly, or not a redhat linux machine.", __FILE__, __LINE__)
+    }
+}   # End of checkargs
+
+#-----------------------------------------------------------------------------
+# MULTIPATH
+# MULTIPATH - # Setup eth1 and eth0 iface's for iSCSI.
+# MULTIPATH - 
+# MULTIPATH - sub setup_ifaces()
+# MULTIPATH - {
+# MULTIPATH -     execute("iscsiadm -m iface -I iscsi-eth0 -o new");
+# MULTIPATH -     execute("iscsiadm -m iface -I iscsi-eth0 -o update -n iface.net_ifacename -v eth0");
+# MULTIPATH -     execute("iscsiadm -m iface -I iscsi-eth1 -o new");
+# MULTIPATH -     execute("iscsiadm -m iface -I iscsi-eth1 -o update -n iface.net_ifacename -v eth1");
+# MULTIPATH - }
+
+#-----------------------------------------------------------------------------
+# Discover source iSCSI volume on IP address.
+
+sub discover_source($)
+{
+    my $src = $_[0];
+
+    execute("iscsiadm -m discovery -t st -p ${NIMBLE1} || true");
+    if ($output =~ /Connection refused/)
+    {
+	cmd_error("Connection refused for ${NIMBLE1}", __FILE__, __LINE__);
+    }
+    my @orig_lines = split(/\n/, $output);
+    my @lines;
+    foreach my $i (@orig_lines)
+    {
+	my $flag = 0;
+#print STDERR "i='$i'\n";
+        if ($i =~ /^Starting iscsid:/)
+	{
+	    next;
+	}
+	foreach my $j (@lines)
+	{
+#print STDERR "j='$j'\n";
+	    if ($i eq $j)
+	    {
+		$flag = 1;
+		last;
+	    }
+	}
+	if ($flag == 0)
+	{
+	    push(@lines, $i);
+	}
+    }
+    if ($#lines < 0)
+    {
+	cmd_error("No iSCSI devices found on ${NIMBLE1}", __FILE__, __LINE__);
+    }
+    if ($#lines > 0)		# Really > 1
+    {
+	cmd_error("Too many iSCSI devices found on ${NIMBLE1} ($#{lines}:'@{lines}')", __FILE__, __LINE__);
+    }
+
+    if ($lines[0] !~ /^$NIMBLE1:.* iqn\..*:$src/)
+    {
+	cmd_error("Did not find volume $src in $lines[0]", __FILE__, __LINE__);
+    }
+
+# MULTIPATH -     execute("iscsiadm -m discovery -t st -p ${NIMBLE2} | wc -l || true");
+# MULTIPATH -     if ($output > 1)
+# MULTIPATH -     {
+# MULTIPATH - 	cmd_error("Too many iSCSI devices found on ${NIMBLE2}", __FILE__, __LINE__);
+# MULTIPATH -     }
+# MULTIPATH -     if ($output == 0)
+# MULTIPATH -     {
+# MULTIPATH - 	cmd_error("No iSCSI devices found on ${NIMBLE2}", __FILE__, __LINE__);
+# MULTIPATH -     }
+    return($output);
+}   # End of discover_source
+
+#-----------------------------------------------------------------------------
+# Login source iSCSI volume for everything.
+
+sub login_source($)
+{
+    my $src = $_[0];
+    my $iqn = $src;
+    $iqn =~ s/^.* iqn/iqn/;
+
+    # Check session already logged in.
+    execute('iscsiadm -m session');
+# NOTE: for multiple sessions, must parse all lines.
+    my $line = $output;
+    $line =~ s/^.*(${src}).*$/$1/s;
+    if ($line eq $src)
+    {
+	return;
+    }
+
+#--    # Login all possible sessions.
+#--    execute('iscsiadm -m node -L all');
+    # Login only source possible volume session.
+    execute("iscsiadm -m node -T $iqn -l");
+    $line = $output;
+    $line =~ s/^.*(${iqn}).*$/$1/s;
+    if ($line ne $iqn)
+    {
+	cmd_error("Did not appear to login to only $iqn.", __FILE__, __LINE__);
+    }
+
+    # Check session really exists.
+    execute('iscsiadm -m session');
+# NOTE: for multiple sessions, must parse all lines.
+    $line = $output;
+    $line =~ s/^.*(${src}).*$/$1/s;
+    if ($line ne $src)
+    {
+	cmd_error("Did not appear to login to only $src.", __FILE__, __LINE__);
+    }
+}   # End of login_source
+
+#-----------------------------------------------------------------------------
+# Create file system on /dev/$DEVICE and mount it.
+
+sub create_fs_mnt($)
+{
+    my $device = $_[0];
+
+    # Create a new file system on /dev/$device.
+    execute("echo y | mkfs -t ext2 /dev/$device");
+    # Output returned is complicated!
+    if ($status != 0)
+    {
+	cmd_error("mkfs command returned error code ($status).", __FILE__, __LINE__);
+    }
+
+    # Mount $device on /mnt.
+    execute("mount /dev/$device /mnt");
+    if ($status != 0)
+    {
+	cmd_error("mount command returned error code ($status).", __FILE__, __LINE__);
+    }
+}   # End of create_fs_mnt
+
+#-----------------------------------------------------------------------------
+# Figure out which device was attached.
+
+sub figure_out_new_device($$)
+{
+    my $old = $_[0];
+    my $new = $_[1];
+
+    if ($old eq $new)
+    {
+	cmd_error("No new device appeared in /dev -- perhaps it was already mounted?", __FILE__, __LINE__);
+    }
+    my @o = split(/\s/, $old);
+    my @n = split(/\s/, $new);
+    my %new_in_n;
+    my %disappeared_from_o;
+    @disappeared_from_o{ @o } = @o;
+    delete @disappeared_from_o{ @n };
+    my @k = keys(%disappeared_from_o);
+    if ($#k >= 0)
+    {
+	cmd_error("Devices disappeared from /dev: " . join(' ', @k), __FILE__, __LINE__);
+    }
+    @new_in_n{ @n } = @n;
+    delete @new_in_n{ @o };
+    @k = keys(%new_in_n);
+    if ($#k < 0)
+    {
+	cmd_error('No new devices in /dev?', __FILE__, __LINE__);
+    }
+
+# print STDERR "New Devices in /dev: " . join(' ', @k) . "\n";
+
+    # Figure out which is the device.
+    # a) Ignore sg devices (raw SCSI device).
+    # b) remember sd? devices (base level).
+    # c) remember sd??* devices (partitions).
+    # d) remember dm-* devices (device manager -- multipath in our case).
+    my $sd_base;
+    my @sd_partitions;
+    my $dev_mapper;
+
+    foreach my $i (@k)
+    {
+	if ($i =~ /^sd.$/)		# base level SCSI device
+	{
+	    if (defined($sd_base))
+	    {
+		cmd_error("Got two low level SCSI devices: $sd_base and $i", __FILE__, __LINE__);
+	    }
+	    $sd_base = $i;
+	}
+	elsif ($i =~ /^sd.*$/)		# SCSI device partitions
+	{
+	    push(@sd_partitions, $i);
+	}
+	elsif ($i =~ /^dm-[0-9]+$/)		# device mapper
+	{
+	    if (defined($dev_mapper))
+	    {
+		cmd_error("Got two device mapper devices: $dev_mapper and $i", __FILE__, __LINE__);
+	    }
+	    $dev_mapper = $i;
+	}
+	elsif ($i =~ /^sg.*$/)		# raw SCSI device
+	{
+	    next;			# ignore
+	}
+	else
+	{
+	    cmd_error("Unexpected new device ($i) in list: @k", __FILE__, __LINE__);
+	}
+    }
+
+    # Unmount any partitions
+    foreach my $i (@sd_partitions, $dev_mapper)
+    {
+	execute("umount -l /dev/$i");
+	execute("mdadm --zero-superblock --force /dev/$i");
+	execute("wipefs --all /dev/$i");
+    }
+    # Get rid of anything on the base device (partition tables, file systems).
+    if (defined($sd_base))
+    {
+	execute("umount -l /dev/$sd_base");
+	execute("mdadm --zero-superblock --force /dev/$sd_base");
+	execute("wipefs --all /dev/$sd_base");
+	execute("sgdisk -oZ /dev/$sd_base");
+	sleep(1);
+	execute("partprobe /dev/$sd_base");
+    }
+
+    # Check partitions disappeared.
+    foreach my $i (@sd_partitions)
+    {
+	execute("if [ -e /dev/$i ]; then echo 0; else echo 1; fi");
+	if ($output eq '0')
+	{
+	    cmd_error("Partition ($i) still exists, manually fix.", __FILE__, __LINE__);
+	}
+    }
+
+    # If 'dm-*' device existed, does it still exist? If so, that is the DEVICE.
+    if (defined($dev_mapper))
+    {
+	execute("if [ -e /dev/$dev_mapper ]; then echo 0; else echo 1; fi");
+	if ($output eq '1')
+	{
+	    cmd_error("Partition ($dev_mapper) disappeared, manually fix/try-again?", __FILE__, __LINE__);
+	}
+	$DEVICE = $dev_mapper;
+    }
+    elsif (defined($sd_base))
+    {
+	execute("if [ -e /dev/$sd_base ]; then echo 0; else echo 1; fi");
+	if ($output eq '1')
+	{
+	    cmd_error("Partition ($sd_base) disappeared, manually fix/try-again?", __FILE__, __LINE__);
+	}
+	$DEVICE = $sd_base;
+    }
+    else
+    {
+	cmd_error("No usable partition for making a file system on.", __FILE__, __LINE__);
+    }
+
+    # Check /mnt not busy (already mounted)
+    execute('mount | fgrep "on /mnt type"');
+    if ($output ne '')
+    {
+	cmd_error("/mnt is already mounted: $output", __FILE__, __LINE__);
+    }
+
+    # SAVE DEVICE in file on 36 for later usage.
+    execute("echo /dev/$DEVICE > /root/some.io.device.mnt");
+
+
+    # Create file system on $DEVICE and mount it.
+    create_fs_mnt($DEVICE);
+}   # End of figure_out_new_device
+
+#-----------------------------------------------------------------------------
+# Copy some data to found DEVICE.
+
+sub copy_data_to_mnt()
+{
+    execute("tar cf - --one-file-system / 2>/dev/null | tar xpf - -C /mnt 2>/dev/null");
+}   # End of copy_data_to_mnt
+
+#=============================================================================
+# Start of main program.
+
+# Check /mnt not busy (already mounted)
+execute('mount | fgrep "on /mnt type"');
+if ($output ne '')
+{
+    execute('umount -l /mnt');
+    print STDERR 'Sleep 2 seconds to let lazy umount finish -- will not fix iSCSI sessions attached.';
+    sleep(2);
+}
+
+# Save current devices
+execute('cd /dev ; echo *');
+my $orig_devs = $output;
+
+# MULTIPATH - setup_ifaces();		# Set up two ifaces, for eth0 and eth1.
+
+my $src = discover_source($SOURCE);
+login_source($src);
+
+#-----------------------------------------------------------------------------
+print STDERR 'Sleep 2 seconds to let system calm down from all the discovery work.';
+sleep(2);
+
+# Save NEW current devices
+execute('cd /dev ; echo *');
+my $new_devs = $output;
+
+# Figure out which device(s) were attached with the iSCSI login.
+figure_out_new_device($orig_devs, $new_devs);
+#-----------------------------------------------------------------------------
+copy_data_to_mnt();
+#-----------------------------------------------------------------------------
+print STDERR "\nDONE with $PROG\n";
+#-----------------------------------------------------------------------------
+exit 0;
+#=============================================================================
+
+# MULTIPATH -- TO DO YET!
+# Following if for multipath -- supposedly.
+#++ Creating the interface files for MPIO
+#++ 
+#++     [root@BobTestBox ~]# iscsiadm -m iface -I eth1 -o new
+#++     New interface eth1 added
+#++ 
+#++     [root@BobTestBox ~]# iscsiadm -m iface -I eth2 -o new
+#++     New interface eth2 added
+#++ 
+#++ Updating the interface name for each port
+#++ 
+#++     [root@BobTestBox ~]# iscsiadm -m iface -I eth1 -o update -n iface.net_ifacename -v eth1
+#++     eth1 updated.
+#++ 
+#++     [root@BobTestBox ~]# iscsiadm -m iface -I eth2 -o update -n iface.net_ifacename -v eth2
+#++     eth2 updated.
+#++ 
+#++     [root@BobTestBox ~]# cat /var/lib/iscsi/ifaces/eth1
+#++     # BEGIN RECORD 2.0-872
+#++     iface.iscsi_ifacename = eth1
+#++     iface.net_ifacename = eth1
+#++     iface.transport_name = tcp
+#++     # END RECORD
+#++     [root@localhost ~]# cat /var/lib/iscsi/ifaces/eth2
+#++     # BEGIN RECORD 2.0-872
+#++     iface.iscsi_ifacename = eth2
+#++     iface.net_ifacename = eth2
+#++     iface.transport_name = tcp
+#++     # END RECORD
+#++ Iscsi target Discovering using iscsiadm command
+#++ 
+#++     [root@BobTestBox ~]# iscsiadm -m discovery -t st -p 172.28.*.*:3260
+#++     172.28.*.*:3260,1 iqn.2001-05.com.equallogic:0-8a0906-a146b2a07-57858e634784f7b0-bobrhel
+#++     172.28.*.*:3260,1 iqn.2001-05.com.equallogic:0-8a0906-a146b2a07-57858e634784f7b0-bobrhel
+#++ 
+#++ Logging into target ( You have option to login individually also)
+#++ 
+#++     [root@BobTestBox ~]# iscsiadm -m node -l
+#++     Logging in to [iface: eth2, target:
+#++ iqn.2001-05.com.equallogic:0-8a0906-a146b2a07-57858e634784f7b0-bobrhel, portal: 172.28.*.*,3260] Logging in
+#++ to [iface: default, target: iqn.2001-05.com.equallogic:0-8a0906-a146b2a07-57858e634784f7b0-bobrhel, portal:
+#++ 172.28.*.*,3260] Logging in to [iface: eth1, target:
+#++ iqn.2001-05.com.equallogic:0-8a0906-a146b2a07-57858e634784f7b0-bobrhel, portal: 172.28.*.*,3260] Login to
+#++ [iface: eth2, target: iqn.2001-05.com.equallogic:0-8a0906-a146b2a07-57858e634784f7b0-bobrhel, portal:
+#++ 172.28.*.*,3260] successful.
+#++     Login to [iface: default, target:
+#++ iqn.2001-05.com.equallogic:0-8a0906-a146b2a07-57858e634784f7b0-bobrhel, portal: 172.28.*.*,3260] successful.
+#++     Login to [iface: eth1, target: iqn.2001-05.com.equallogic:0-8a0906-a146b2a07-57858e634784f7b0-bobrhel,
+#++ portal: 172.28.*.*,3260] successful.
+#++     [root@BobTestBox ~]#
+#++ 
+#++ Display scsi attached device
+#++ 
+#++     [root@BobTestBox ~]# cat /proc/scsi/scsi
+#++     Attached devices:
+#++     Host: scsi0 Channel: 00 Id: 00 Lun: 00
+#++     Vendor: VMware Model: Virtual disk Rev: 1.0
+#++     Type: Direct-Access ANSI SCSI revision: 02
+#++     Host: scsi7 Channel: 00 Id: 00 Lun: 00
+#++     Vendor: EQLOGIC Model: 100E-00 Rev: 5.2
+#++     Type: Direct-Access ANSI SCSI revision: 05
+#++     Host: scsi6 Channel: 00 Id: 00 Lun: 00
+#++     Vendor: EQLOGIC Model: 100E-00 Rev: 5.2
+#++     Type: Direct-Access ANSI SCSI revision: 05
+#++     [root@BobTestBox ~]#
+#++ 
+#++ Below command will display Iscsi session details
+#++ 
+#++     [root@BobTestBox ~]# iscsiadm -m session
+#++     tcp: [6] 172.28.*.*:3260,1 iqn.2001-05.com.equallogic:0-8a0906-a146b2a07-57858e634784f7b0-bobrhel
+#++     tcp: [7] 172.28.*.*:3260,1 iqn.2001-05.com.equallogic:0-8a0906-a146b2a07-57858e634784f7b0-bobrhel
+#++     [root@BobTestBox ~]#
+#++ 
+#++ Display Disk details
+#++ 
+#++ Below command will display linux disk details that are known to kernel.
+#++ 
+#++     [root@BobTestBox ~]# fdisk -l
+#++ 
+#++     Disk /dev/sda: 5368 MB, 5368709120 bytes
+#++     255 heads, 63 sectors/track, 652 cylinders
+#++     Units = cylinders of 16065 * 512 = 8225280 bytes
+#++ 
+#++     Device Boot Start End Blocks Id System
+#++     /dev/sda1 * 1 574 4610623+ 83 Linux
+#++     /dev/sda2 575 652 626535 82 Linux swap / Solaris
+#++ 
+#++     Disk /dev/dm-0: 1085 MB, 1085276160 bytes
+#++     255 heads, 63 sectors/track, 131 cylinders
+#++     Units = cylinders of 16065 * 512 = 8225280 bytes
+#++ 
+#++     Disk /dev/dm-0 doesn't contain a valid partition table
+#++ 
+#++     Disk /dev/sde: 1085 MB, 1085276160 bytes
+#++     34 heads, 61 sectors/track, 1022 cylinders
+#++     Units = cylinders of 2074 * 512 = 1061888 bytes
+#++ 
+#++     Disk /dev/sde doesn't contain a valid partition table
+#++ 
+#++     Disk /dev/sdf: 1085 MB, 1085276160 bytes
+#++     34 heads, 61 sectors/track, 1022 cylinders
+#++     Units = cylinders of 2074 * 512 = 1061888 bytes
+#++ 
+#++     Disk /dev/sdf doesn't contain a valid partition table
+#++ 
+#++ Restarting Multipath deamon ( You can set alias ,uuid , device details , blacklist node in multhipath.conf
+#++ file before restarting)
+#++ 
+#++     [root@BobTestBox ~]# /etc/init.d/multipathd restart
+#++     Stopping multipathd daemon: [FAILED] Starting multipathd daemon: [ OK ] [root@BobTestBox ~]#
+#++ 
+#++ Display multhipath details
+#++ 
+#++     [root@BobTestBox ~]# multipath -ll
+#++     Bob_rhel_lun () dm-0 EQLOGIC,100E-00
+#++     [size=1.0G][features=1 queue_if_no_path][hwhandler=0][rw] \_ round-robin 0 [prio=2][enabled] \_ 3:0:0:0
+#++ sdc 8:32 [active][ready] \_ 1:0:0:0 sdd 8:48 [active][ready] [root@BobTestBox ~]#
+#++ 
+#++ Device mapper target device status
+#++ 
+#++     [root@BobTestBox ~]# dmsetup ls --target=multipath
+#++     Bob_rhel_lun (253, 0)
+#++     [root@BobTestBox ~]#

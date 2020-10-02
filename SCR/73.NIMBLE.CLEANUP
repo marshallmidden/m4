@@ -1,0 +1,189 @@
+#!/usr/bin/perl -w
+# Reset Nimble between runs.
+
+#-----------------------------------------------------------------------------
+use warnings;
+use strict;
+
+require 'nn.common.pm';
+#-----------------------------------------------------------------------------
+# Forward referenced subroutines.
+sub checkargs();
+
+#-----------------------------------------------------------------------------
+# Global variables initialized from arguments passed to script.
+my $PROG = $0;
+my $NIMBLE_IP = $ARGV[0];
+my $LOGIN = $ARGV[1];
+my $RH_IP = $ARGV[2];
+my $HYPERQ = $ARGV[3];
+my $SOURCE = $ARGV[4];
+my $TARGET = $ARGV[5];
+my $INITIATORGRP = $ARGV[6];
+if ($#ARGV > 6) {die "$PROG only takes maximum of 7 arguments, not " . $#ARGV+1 . "\n";}
+
+# Global variables.
+our $command;				# Command to execute.
+our $output;				# Output from command executed.
+our $status;
+our $SSH = '';				# Where to execute a command.
+
+#-----------------------------------------------------------------------------
+checkargs();
+
+#-----------------------------------------------------------------------------
+# Print error message, then usage statement, then exit script with error.
+
+sub usage($)
+{
+    my $e = $_[0];
+    print STDERR "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\n";
+    print STDERR "${e}\n";
+    print STDERR "..............................................................................\n";
+    print STDERR "Usage: ${PROG} IP_NIMBLE LOGIN SOURCE_VOL TARGET_VOL INITIATOR_GROUP\n\n";
+    print STDERR "       IP_NIMBLE   = IP of NIMBLE iSCSI volume server.\n";
+    print STDERR "       LOGIN       = Name of login on NIMBLE.\n";
+    print STDERR "       IP_RH       = IP of RedHat client.\n";
+    print STDERR "       HYPERQ_IP   = IP of HyperQ.\n";
+    print STDERR "       SOURCE_VOL  = Name of Source Volume.\n";
+    print STDERR "       TARGET_VOL  = Name of Target Volume.\n";
+    print STDERR "       INITIATOR_GROuP = Name of initiator group to delete.\n";
+    print STDERR "This script ssh's into the Nimble iSCSI volume server and cleans up after an iSCSI migration.\n";
+    print STDERR "\n";
+    print STDERR "Example: ${PROG} 10.0.11.123 admin 10.0.11.36 10.0.11.34 at-m4-source at-m4-target initiator-grp\n";
+    print STDERR "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n";
+    exit 1;
+}   # End of usage
+
+#-----------------------------------------------------------------------------
+# Check that the arguments passed in have somewhat reasonable values.
+
+sub checkargs()
+{
+    if (!defined($NIMBLE_IP) || $NIMBLE_IP eq '')
+    {
+	usage('First argument must be the IP of the RedHat system used.');
+    }
+
+    if (!defined($LOGIN) || $LOGIN eq '')
+    {
+        usage('Second argument must be the login of the NIMBLE system used.');
+    }
+
+    $SSH = "ssh -x ${LOGIN}\@${NIMBLE_IP}";	# Where to execute a command.
+    my $SAVE_NIMBLE_SSH = $SSH;
+
+    # Check Nimble IP works with no password ssh.
+    execute('echo works 2>&1');
+    if ($output ne 'works')
+    {
+	cmd_error("Storage IP (${NIMBLE_IP}) not reachable via ssh.", __FILE__, __LINE__)
+    }
+
+    if (!defined($RH_IP) || $RH_IP eq '')
+    {
+	usage('Third argument must be the IP of the RedHat system used.');
+    }
+
+    $SSH = "ssh -x root\@${RH_IP}";	# Where to execute a command.
+
+    # Check IP works with no password ssh.
+    execute('echo works 2>&1');
+    if ($output ne 'works')
+    {
+	cmd_error("Client IP (${RH_IP}) not reachable via ssh.", __FILE__, __LINE__)
+    }
+
+    if (!defined($HYPERQ) || $HYPERQ eq '')
+    {
+	usage('Fourth argument must be the IP of the HyperQ used.');
+    }
+
+    $SSH = "ssh -x root\@${HYPERQ}";	# Where to execute a command.
+
+    # Check IP works with no password ssh.
+    execute('echo works 2>&1');
+    if ($output ne 'works')
+    {
+	cmd_error("HyperQ (${HYPERQ}) not reachable via ssh.", __FILE__, __LINE__)
+    }
+
+    # Restore NIMBLE as the thing we execute commands on.
+    $SSH = $SAVE_NIMBLE_SSH;
+
+    if (!defined($SOURCE) || $SOURCE eq '')
+    {
+       usage('Fifth argument must be the name of the SOURCE Volume on the Nimble.');
+    }
+    if (!defined($TARGET) || $TARGET eq '')
+    {
+       usage('Sixth argument must be the name of the TARGET Volume on the Nimble.');
+    }
+    if (!defined($INITIATORGRP) || $INITIATORGRP eq '')
+    {
+       usage('Seventh argument must be the name of the INITIATORGRP Volume on the Nimble.');
+    }
+}   # End of checkargs
+
+#-----------------------------------------------------------------------------
+# Set volume offline.
+
+sub set_volume_offline($)
+{
+    my $vol = $_[0];
+
+    # Assume it works. (i.e. output rather complex)
+    execute("vol --offline $vol --force");
+}   # End of set_target_offline
+
+#-----------------------------------------------------------------------------
+# Remove initiator group from Nimble.
+
+sub remove_initiator($$$)
+{
+    my $ig = $_[0];
+    my $rh_ip = $_[1];
+    my $vol = $_[2];
+
+    execute("initiatorgrp --remove_initiator $ig --label $ig-$rh_ip-$vol");
+}   # End of remove_initiator
+
+#-----------------------------------------------------------------------------
+# Delete initiator group on the Nimble.
+
+sub delete_initiator($)
+{
+    my $ig = $_[0];
+
+    execute("initiatorgrp --delete $ig");
+}   # End of delete_initiator
+
+#-----------------------------------------------------------------------------
+# Delete volume on the Nimble.
+
+sub delete_volume($)
+{
+    my $vol = $_[0];
+
+    execute("vol --delete $vol");
+}   # End of delete_volume
+
+#=============================================================================
+# Start of main program.
+
+set_volume_offline($SOURCE);
+set_volume_offline($TARGET);
+
+remove_initiator($INITIATORGRP, $RH_IP, $SOURCE);
+remove_initiator($INITIATORGRP, $HYPERQ, $SOURCE);
+remove_initiator($INITIATORGRP, $RH_IP, $TARGET);
+
+delete_volume($SOURCE);
+delete_volume($TARGET);
+
+delete_initiator($INITIATORGRP);
+#-----------------------------------------------------------------------------
+print STDERR "\nDONE with $PROG\n";
+#-----------------------------------------------------------------------------
+exit 0;
+#-----------------------------------------------------------------------------

@@ -1,0 +1,247 @@
+#!/usr/bin/perl -w
+#-----------------------------------------------------------------------------
+use warnings;
+use strict;
+
+require 'nn.common.pm';
+#-----------------------------------------------------------------------------
+# Forward referenced subroutines.
+sub checkargs();
+
+#-----------------------------------------------------------------------------
+# Global variables initialized from arguments passed to script.
+my $PROG = $0;
+my $RH_IP = $ARGV[0];
+my $HYPERQ_IP = $ARGV[1];
+if ($#ARGV > 1) {die "$PROG only takes maximum of 2 arguments, not " . $#ARGV+1 . "\n";}
+
+# Global variables.
+our $command = '';			# Command to execute.
+our $output = '';			# Output from command executed.
+our $status = '';
+our $SSH = '';				# Where to execute a command.
+
+my $DEVICE;				# Figured out device for SOURCE.
+
+#-----------------------------------------------------------------------------
+checkargs();
+
+#-----------------------------------------------------------------------------
+# Print error message, then usage statement, then exit script with error.
+
+sub usage($)
+{
+    my $e = $_[0];
+    print STDERR "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\n";
+    print STDERR "${e}\n";
+    print STDERR "..............................................................................\n";
+    print STDERR "Usage: ${PROG} RH_IP ST_ETH\n";
+    print STDERR "       RH_IP     = IP of RedHat I/O server.\n";
+    print STDERR "       HYPERQ_IP = IP of HyperQ.\n";
+    print STDERR "This script ssh's into the redhat server and removes all connections to HyperQ.\n";
+    print STDERR "\n";
+    print STDERR "Example: ${PROG} 10.0.11.36 10.0.11.34\n";
+    print STDERR "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n";
+    exit 1;
+}   # End of usage
+
+#-----------------------------------------------------------------------------
+# Check that the arguments passed in have somewhat reasonable values.
+
+sub checkargs()
+{
+    if (!defined($RH_IP) || $RH_IP eq '')
+    {
+	usage('First argument must be the IP of the RedHat system used.');
+    }
+
+    $SSH = "ssh -x root\@${RH_IP}";		# Where to execute a command.
+
+    if (!defined($HYPERQ_IP) || $HYPERQ_IP eq '')
+    {
+       usage('Second argument must be the IP of the HyperQ.');
+    }
+
+    # Check RH_IP works with no password ssh.
+    execute('echo works 2>&1');
+    if ($output ne 'works')
+    {
+	cmd_error("RH_IP (${RH_IP}) not setup correctly, or not a redhat linux machine.", __FILE__, __LINE__)
+    }
+}   # End of checkargs
+
+#-----------------------------------------------------------------------------
+# Logout all HyperQ attached devices.
+
+sub logout_hyperq()
+{
+    # Check session already logged in.
+    execute('iscsiadm -m session');
+# NOTE: for multiple sessions, must parse all lines.
+    my @lines = split(/\n/, $output);
+
+    foreach my $l (@lines)
+    {
+	if ($l =~ /^tcp: .* $HYPERQ_IP:[0-9,]+ (iqn.*)$/)
+	{
+	    my $iqn = $1;
+	    execute("iscsiadm -m node -T $iqn -u");
+	    my $line = $output;
+	    $line =~ s/^.*(${iqn}).*$/$1/s;
+	    if ($line ne $iqn)
+	    {
+		cmd_error("Did not appear to logout $iqn.", __FILE__, __LINE__);
+	    }
+	}
+    }
+}   # End of logout_hyperq
+
+#-----------------------------------------------------------------------------
+# Figure out which devices disappeared.
+
+sub figure_out_old_device($$)
+{
+    my $new = $_[0];
+    my $old = $_[1];
+
+    if ($old eq $new)
+    {
+	cmd_error("No device disappeared in /dev?", __FILE__, __LINE__);
+    }
+    my @o = split(/\s/, $old);
+    my @n = split(/\s/, $new);
+    my %new_in_n;
+    my %disappeared_from_o;
+    @disappeared_from_o{ @o } = @o;
+    delete @disappeared_from_o{ @n };
+    my @k = keys(%disappeared_from_o);
+    if ($#k >= 0)
+    {
+	cmd_error("Devices disappeared from /dev: " . join(' ', @k), __FILE__, __LINE__);
+    }
+    @new_in_n{ @n } = @n;
+    delete @new_in_n{ @o };
+    @k = keys(%new_in_n);
+    if ($#k < 0)
+    {
+	cmd_error('No extra old devices in /dev?', __FILE__, __LINE__);
+    }
+
+# print STDERR "New Devices in /dev: " . join(' ', @k) . "\n";
+
+    # Figure out which is the device.
+    # a) Ignore sg devices (raw SCSI device).
+    # b) remember sd? devices (base level).
+    # c) remember sd??* devices (partitions).
+    # d) remember dm-* devices (device manager -- multipath in our case).
+    my $sd_base;
+    my @sd_partitions;
+    my $dev_mapper;
+
+    foreach my $i (@k)
+    {
+	if ($i =~ /^sd.$/)		# base level SCSI device
+	{
+	    if (defined($sd_base))
+	    {
+		cmd_error("Found two missing low level SCSI devices: $sd_base and $i", __FILE__, __LINE__);
+	    }
+	    $sd_base = $i;
+	}
+	elsif ($i =~ /^sd.*$/)		# SCSI device partitions
+	{
+	    push(@sd_partitions, $i);
+	}
+	elsif ($i =~ /^dm-[0-9]+$/)		# device mapper
+	{
+	    if (defined($dev_mapper))
+	    {
+		cmd_error("Found two missing device mapper devices: $dev_mapper and $i", __FILE__, __LINE__);
+	    }
+	    $dev_mapper = $i;
+	}
+	elsif ($i =~ /^sg.*$/)		# raw SCSI device
+	{
+	    next;			# ignore
+	}
+	else
+	{
+	    cmd_error("Unexpected missing device ($i) in list: @k", __FILE__, __LINE__);
+	}
+    }
+
+    # If 'dm-*' device existed, does it still exist? If so, that is the DEVICE.
+    if (defined($dev_mapper))
+    {
+	$DEVICE = $dev_mapper;
+    }
+    elsif (defined($sd_base))
+    {
+	$DEVICE = $sd_base;
+    }
+    else
+    {
+	cmd_error("No usable missing device.", __FILE__, __LINE__);
+    }
+
+}   # End of figure_out_old_device
+
+#-----------------------------------------------------------------------------
+# What should output of 'multipath -ll' be? Check it is correct.
+sub check_multipath()
+{
+    print STDERR "NOTDONEYET - " . __FILE__ . ':' . __LINE__ . ':' . (caller(0))[3] . "\n";
+}   # End of check_multipath
+
+#-----------------------------------------------------------------------------
+# What should output of 'hsm show' be? Check it is correct.
+sub check_hsmadm_show()
+{
+    print STDERR "NOTDONEYET - " . __FILE__ . ':' . __LINE__ . ':' . (caller(0))[3] . "\n";
+}   # End of check_hsmadm_show
+
+#-----------------------------------------------------------------------------
+# What should output of 'lsscsi' be? Check it is correct.
+sub check_lsscsi()
+{
+    print STDERR "NOTDONEYET - " . __FILE__ . ':' . __LINE__ . ':' . (caller(0))[3] . "\n";
+}   # End of check_lsscsi
+
+#-----------------------------------------------------------------------------
+# What should output of 'lsblk' be? Check it is correct.
+sub check_lsblk()
+{
+    print STDERR "NOTDONEYET - " . __FILE__ . ':' . __LINE__ . ':' . (caller(0))[3] . "\n";
+}   # End of check_lsblk
+
+#=============================================================================
+# Start of main program.
+
+# Save current devices
+execute('cd /dev ; echo *');
+my $orig_devs = $output;
+
+logout_hyperq();
+
+#-----------------------------------------------------------------------------
+print STDERR 'Sleep 2 seconds to let system calm down from all the discovery work.';
+sleep(2);
+
+# Save NEW current devices
+execute('cd /dev ; echo *');
+my $new_devs = $output;
+
+# Figure out which device(s) were detached with the iSCSI logout.
+figure_out_old_device($orig_devs, $new_devs);
+#-----------------------------------------------------------------------------
+print STDERR "Gone device='$DEVICE'\n";
+#-----------------------------------------------------------------------------
+check_multipath();
+check_hsmadm_show();
+check_lsscsi();
+check_lsblk();
+#-----------------------------------------------------------------------------
+print STDERR "\nDONE with $PROG\n";
+#-----------------------------------------------------------------------------
+exit 0;
+#=============================================================================

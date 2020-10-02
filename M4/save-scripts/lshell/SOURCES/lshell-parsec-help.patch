@@ -1,0 +1,128 @@
+diff -Nrp -U 7 --no-dereference --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' lshell-0.9.16-orig/bin/lshell/lshell/checkconfig.py lshell-0.9.16/lshell/checkconfig.py
+--- lshell-0.9.16-orig/bin/lshell/lshell/checkconfig.py	2013-08-19 14:59:37.000000000 -0500
++++ lshell-0.9.16/lshell/checkconfig.py	2020-07-13 15:06:13.244530912 -0500
+@@ -534,14 +534,15 @@ class CheckConfig:
+                     'strict',
+                     'aliases',
+                     'prompt',
+                     'prompt_short',
+                     'allowed_cmd_path',
+                     'history_size',
+                     'login_script',
++                    'help_messages',
+                     'quiet']:
+             try:
+                 if len(self.conf_raw[item]) == 0:
+                     self.conf[item] = ""
+                 else:
+                     self.conf[item] = self.myeval(self.conf_raw[item], item)
+             except KeyError:
+diff -Nrp -U 7 --no-dereference --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' lshell-0.9.16-orig/bin/lshell/lshell/shellcmd.py lshell-0.9.16/lshell/shellcmd.py
+--- lshell-0.9.16-orig/bin/lshell/lshell/shellcmd.py	2013-09-07 18:07:08.000000000 -0500
++++ lshell-0.9.16/lshell/shellcmd.py	2020-07-13 15:06:13.252530886 -0500
+@@ -468,15 +468,15 @@ class ShellCmd(cmd.Cmd, object):
+                     p = subprocess.Popen( "`which echo` %s" % item,
+                                           shell=True,
+                                           stdin=subprocess.PIPE,
+                                           stdout=subprocess.PIPE )
+                     (cin, cout) = (p.stdin, p.stdout)
+                 except ImportError:
+                     cin, cout = os.popen2('`which echo` %s' % item)
+-                item = cout.readlines()[0].split(' ')[0].strip()
++                item = str(cout.readlines()[0]).split(' ')[0].strip()
+                 item = os.path.expandvars(item)
+             tomatch = os.path.realpath(item)
+             if os.path.isdir(tomatch) and tomatch[-1] != '/':
+                 tomatch += '/'
+             match_allowed = re.findall(allowed_path_re, tomatch)
+             if denied_path_re:
+                 match_denied = re.findall(denied_path_re, tomatch)
+@@ -571,15 +571,15 @@ class ShellCmd(cmd.Cmd, object):
+                     readline.set_completer(self.old_completer)
+                 except ImportError:
+                     pass
+             try:
+                 readline.write_history_file(self.conf['history_file'])
+             except IOError:
+                 self.log.error('WARN: couldn\'t write history '
+-			       'to file %s\n' % self.conf['history_file'])
++                               'to file %s\n' % self.conf['history_file'])
+ 
+     def complete(self, text, state):
+         """Return the next possible completion for 'text'.
+         If a command has not been entered, then complete against command list.
+         Otherwise try to call complete_<command> to get list of completions.
+         """
+         if state == 0:
+@@ -706,27 +706,18 @@ class ShellCmd(cmd.Cmd, object):
+         """ This method overrides the original do_help method.
+         Instead of printing out the that are documented or not, it returns the
+         list of allowed commands when '?' or 'help' is entered.
+         Of course, it doesn't override the help function: any help_* method
+         will be called (e.g. help_help(self) )
+         """
+         if arg:
+-            try:
+-                func = getattr(self, 'help_' + arg)
+-            except AttributeError:
+-                try:
+-                    doc = getattr(self, 'do_' + arg).__doc__
+-                    if doc:
+-                        self.stdout.write("%s\n"%str(doc))
+-                        return
+-                except AttributeError:
+-                    pass
+-                self.stdout.write("%s\n"%str(self.nohelp % (arg,)))
++            if 'help_messages' in self.conf and arg in self.conf['help_messages']:
++                self.stdout.write("  {} - {}\n".format(arg, self.conf['help_messages'][arg]))
+                 return
+-            func()
++            self.stdout.write("  {} - No help for command, or command not available\n".format(arg))
+         else:
+             # Get list of allowed commands, remove duplicate 'help' then sort
+             list_tmp = sorted(list(dict.fromkeys(self.completenames('')).keys()))
+             self.columnize(list_tmp)
+ 
+     def help_help(self):
+         """ Print Help on Help """
+diff -Nrp -U 7 --no-dereference --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' lshell-0.9.16-orig/lshell/utils.py lshell-0.9.16/lshell/utils.py
+--- lshell-0.9.16-orig/lshell/utils.py	2020-08-03 15:19:30.000000000 -0500
++++ lshell-0.9.16/lshell/utils.py	2020-08-04 15:46:49.887068386 -0500
+@@ -36,31 +36,33 @@ except:
+         return bytes
+ 
+ 
+ def get_aliases(line, aliases):
+     """ Replace all configured aliases in the line
+     """
+ 
++    unique = 0
+     for item in list(aliases.keys()):
+         reg1 = '(^|; |;)%s([ ;&\|]+|$)(.*)' % item
+         reg2 = '(^|; |;)%s([ ;&\|]+|$)' % item
+ 
+-        # in case aliase bigin with the same command
+-        # (this is until i find a proper regex solution..)
+-        aliaskey = str(urandom(10))
++        # In case alias begins with the same command - use a unique substitution.
++	# Note: we do not allow < nor > -- input/output redirection => file destroyed.
++        aliaskey = "<UNIQUE-%d>" % (unique)
+ 
+         while re.findall(reg1, line):
+             (before, after, rest) = re.findall(reg1, line)[0]
+             linesave = line
+-            cmd = "%s %s" % (item, rest)
++            #-- cmd = "%s %s" % (item, rest)
+ 
+             line = re.sub(reg2, "%s%s%s" % (before, aliaskey, after), line, 1)
+             # if line does not change after sub, exit loop
+             if linesave == line:
+                 break
+         # replace the key by the actual alias
+         line = line.replace(aliaskey, aliases[item])
++        unique = unique + 1
+ 
+     for char in [';']:
+         # remove all remaining double char
+         line = line.replace('%s%s' %(char, char), '%s' %char)
+     return line

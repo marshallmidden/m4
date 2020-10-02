@@ -1,0 +1,260 @@
+#!/usr/bin/perl -w
+#-----------------------------------------------------------------------------
+use warnings;
+use strict;
+
+require 'nn.common.pm';
+use warnings;
+use strict;
+#-----------------------------------------------------------------------------
+# Forward referenced subroutines.
+sub checkargs();
+
+#-----------------------------------------------------------------------------
+# Global variables initialized from arguments passed to script.
+my $PROG = $0;
+my $HYPERQ_IP = $ARGV[0];
+my $SOURCE = $ARGV[1];
+my $TARGET = $ARGV[2];
+if ($#ARGV > 2) {die "$PROG only takes maximum of 3 arguments, not " . $#ARGV+1 . "\n";}
+
+# Global variables.
+our $command;                           # Command to execute.
+our $output;                            # Output from command executed.
+our $status;
+our $SSH = '';                          # Where to execute a command.
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+our $rh_init_name = '';			# RedHat initiator name.
+
+#-----------------------------------------------------------------------------
+checkargs();
+
+#-----------------------------------------------------------------------------
+# Print error message, then usage statement, then exit script with error.
+
+sub usage($)
+{
+    my $e = $_[0];
+    print STDERR "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\n";
+    print STDERR "${e}\n";
+    print STDERR "..............................................................................\n";
+    print STDERR "Usage: ${PROG} HYPERQ_IP SOURCE_VOL TARGET_VOL\n";
+    print STDERR "       HYPERQ_IP  = HyperQ IP.\n";
+    print STDERR "       SOURCE_VOL = Name of Source Volume.\n";
+    print STDERR "       TARGET_VOL = Name of Target Volume.\n";
+    print STDERR "This script ssh's into the HQ and creates a migration from Source to Target.\n";
+    print STDERR "\n";
+    print STDERR "Example: ${PROG} 10.0.11.34 at-m4-source at-m4-target\n";
+    print STDERR "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n";
+    exit 1;
+}   # End of usage
+
+#-----------------------------------------------------------------------------
+# Check that the arguments passed in have somewhat reasonable values.
+
+sub checkargs()
+{
+    if (!defined($HYPERQ_IP) || $HYPERQ_IP eq '')
+    {
+        usage('First argument must be the HyperQ IP address.');
+    }
+
+    if (!defined($SOURCE) || $SOURCE eq '')
+    {
+        usage('Second argument must be the name of the Source volume.');
+    }
+
+    if (!defined($TARGET) || $TARGET eq '')
+    {
+        usage('Third argument must be the name of the Target volume.');
+    }
+
+    $SSH = "ssh -x root\@${HYPERQ_IP}";		# Where to execute a command.
+    # Check HYPERQ_IP works with no password ssh.
+    execute('echo works 2>&1');
+    if ($output ne 'works')
+    {
+        usage("First argument, HYPERQ IP ($HYPERQ_IP) not reachable via ssh.");
+    }
+}   # End of checkargs
+
+#-----------------------------------------------------------------------------
+sub get_mfs_names()
+{
+    my $src;
+    my $target;
+
+    execute("/home/padmin/listmfs");
+    if ($output eq '')
+    {
+	cmd_error("Did not get any HyperQ output from listmfs.", __FILE__, __LINE__);
+    }
+    my @lines = split(/\n/, $output);
+    my $skip = 0;
+    my $okay = 0;
+    foreach my $l (@lines)
+    {
+	if ($l =~ /^---------------------------------------------------------------------------$/) { next; }
+	if ($l =~ /^Current MFS's configurations:$/) { next; }
+	if ($l =~ /^ID: /) { next; }			# Ignore the ID number.
+	if ($l =~ /^Name: /)
+	{
+
+	    if ($l =~ /^Name: (ip-[0-9.]+:[0-9]+-iscsi-iqn.*:$SOURCE-.*)$/)
+	    {
+		$src = $1;
+	    }
+	    elsif ($l =~ /^Name: (ip-[0-9.]+:[0-9]+-iscsi-iqn.*:$TARGET-.*)$/)
+	    {
+		$target = $1;
+	    }
+	    next;
+	}
+	if ($l =~ /^Target: /) { next; }		# This is not verified.
+	if ($l =~ /^Host: iSCSI$/) { next; }
+	if ($l =~ /^In-Path: /) { next; }
+	if ($l =~ /^Mode: SCSI$/) { next; }
+	if ($l =~ /^Mig Target: /) { next; }
+	if ($l =~ /^Status: ONLINE$/) { next; }
+	if ($l =~ /^Mapped: /) { next; }
+	if ($l =~ /^Emulate: /) { next; }
+	if ($l =~ /^Client HBA: /) { next; }
+	if ($l =~ /^Target HBA: /) { next; }
+	if ($l =~ /^Target HBA 2: /) { next; }
+	if ($l =~ /^Client HBA 2: /) { next; }
+	if ($l =~ /^Target HBA 3: /) { next; }
+	if ($l =~ /^Client HBA 3: /) { next; }
+	if ($l =~ /^Target HBA 4: /) { next; }
+	if ($l =~ /^Client HBA 4: /) { next; }
+	cmd_error("Unexpected line from listmfs: '$l'", __FILE__, __LINE__);
+    }
+
+    if (!defined($src))
+    {
+	cmd_error("Did not find MFS with $SOURCE", __FILE__, __LINE__);
+    }
+    if (!defined($target))
+    {
+	cmd_error("Did not find MFS with $TARGET", __FILE__, __LINE__);
+    }
+    return ($src, $target);
+}   # End of get_mfs_names
+
+#-----------------------------------------------------------------------------
+sub create_migration($$)
+{
+    my $src = $_[0];
+    my $target = $_[1];
+
+    execute("/home/padmin/hsm addmigration --inpath=Y --zizo --log $src $target");
+    if ($output !~ /^Migration ID for .*: [0-9]+$/)
+    {
+	cmd_error("Unexpected output from hsm addmigration.", __FILE__, __LINE__);
+    }
+}   # End of create_migration
+
+#-----------------------------------------------------------------------------
+sub verify_migration()
+{
+    execute('/home/padmin/hsm listmigrations');
+
+    if ($output eq '')
+    {
+	cmd_error("HyperQ $HYPERQ_IP did not return anything for hsm listmigrations command", __FILE__, __LINE__);
+    }
+
+    my @lines = split(/\n/, $output);
+    my $flag_src;
+    my $flag_target;
+
+    foreach my $l (@lines)
+    {
+	if ($l =~ /^Current Migrations/) { next; }
+	if ($l =~ /^Migration ID: /) { next; }
+	if ($l =~ /^Source Name: (.*)$/)
+	{
+	    if ($l =~ /^Source Name: ip-[0-9.]+:[0-9]+-iscsi-iqn.*:$SOURCE-.*$/)
+	    {
+		$flag_src = $l;
+	    }
+	    next;
+	}
+	if ($l =~ /^Target Name: (.*)$/)
+	{
+	    if ($l =~ /^Target Name: ip-[0-9.]+:[0-9]+-iscsi-iqn.*:$TARGET-.*$/)
+	    {
+		$flag_target = $l;
+	    }
+	    next;
+	}
+	if ($l =~ /^Threads: /) { next; }
+	if ($l =~ /^In-Path: Yes$/) { next; }
+	if ($l =~ /^ZIZO: Yes$/) { next; }
+	if ($l =~ /^Scheduled Migration: /) { next; }
+	if ($l =~ /^Scheduled DefaultRate: /) { next; }
+	if ($l =~ /^Config Rate: /) { next; }
+	if ($l =~ /^Use Schedule: 0$/) { next; }
+	if ($l =~ /^Scheduled Start: None$/) { next; }
+	if ($l =~ /^Scheduled End: None$/) { next; }
+	if ($l =~ /^Actual Start: /) { next; }
+	if ($l =~ /^Actual End: /) { next; }
+	if ($l =~ /^Status: NOT STARTED$/) { next; }
+	if ($l =~ /^Progress: 0%$/) { next; }
+	if ($l =~ /^---------------------------------------------------------------------------/)
+	{
+	    next;
+	}
+	cmd_error("Unexpected line from hsm listmigrations: '$l'", __FILE__, __LINE__);
+    }
+    if (!defined($flag_src) || !defined($flag_target))
+    {
+	cmd_error("Did not find a migration for $SOURCE to $TARGET", __FILE__, __LINE__);
+    }
+}   # End of verify_migration
+
+#-----------------------------------------------------------------------------
+# What should output of 'multipath -ll' be? Check it is correct.
+sub check_multipath()
+{
+    print STDERR "NOTDONEYET - " . __FILE__ . ':' . __LINE__ . ':' . (caller(0))[3] . "\n";
+}   # End of check_multipath
+
+#-----------------------------------------------------------------------------
+# What should output of 'hsm show' be? Check it is correct.
+sub check_hsmadm_show()
+{
+    print STDERR "NOTDONEYET - " . __FILE__ . ':' . __LINE__ . ':' . (caller(0))[3] . "\n";
+}   # End of check_hsmadm_show
+
+#-----------------------------------------------------------------------------
+# What should output of 'lsscsi' be? Check it is correct.
+sub check_lsscsi()
+{
+    print STDERR "NOTDONEYET - " . __FILE__ . ':' . __LINE__ . ':' . (caller(0))[3] . "\n";
+}   # End of check_lsscsi
+
+#-----------------------------------------------------------------------------
+# What should output of 'lsblk' be? Check it is correct.
+sub check_lsblk()
+{
+    print STDERR "NOTDONEYET - " . __FILE__ . ':' . __LINE__ . ':' . (caller(0))[3] . "\n";
+}   # End of check_lsblk
+
+#=============================================================================
+# Start of main program.
+
+my ($mfs_source_name, $mfs_target_name) = get_mfs_names();
+
+create_migration($mfs_source_name, $mfs_target_name);
+
+verify_migration();			# Verify command did something reasonable.
+
+check_multipath();
+check_hsmadm_show();
+check_lsscsi();
+check_lsblk();
+#-----------------------------------------------------------------------------
+print STDERR "\nDONE with $PROG\n";
+#-----------------------------------------------------------------------------
+exit 0;
+#-----------------------------------------------------------------------------

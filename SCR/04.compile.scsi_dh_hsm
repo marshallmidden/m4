@@ -1,0 +1,45 @@
+#!/bin/bash -ex
+#-----------------------------------------------------------------------------
+RH_IP=$1
+if [ "${RH_IP}x" = "x" ]; then
+    echo 'First argument must be the IP of the RedHat system to run I/O on.'
+    exit 1
+fi
+if [ $# -gt 1 ]; then
+    let i=$#+1
+    echo "$0 only takes maximum of 1 arguments, not $i"
+    exit 1
+fi
+
+W="root@${RH_IP}"
+SSH="ssh -x ${W}"
+# Check RH_IP is reachable.
+${SSH} uptime
+
+#-----------------------------------------------------------------------------
+# subscription-manager register --username ParsecLabs --password 03.HyperQ.03 --auto-attach
+
+# Make sure these packages are installed!
+${SSH} 'yum install sg3_utils 2>&1'
+${SSH} 'yum install device-mapper-multipath.x86_64 2>&1'
+${SSH} 'yum install iscsi-initiator-utils 2>&1'
+${SSH} 'yum install lsscsi 2>&1'
+#-----------------------------------------------------------------------------
+# Make sure the kernel development files are present.
+$SSH 'yum install kernel-devel-`uname -r`'
+
+# Put the device handler on the redhat machine.
+scp -rp device_handler ${W}:/root/
+
+# Clean leftover files out of module, compile, then install it. 
+$SSH 'cd device_handler && make clean'
+$SSH 'cd device_handler && make'
+$SSH 'cd device_handler && make install'
+A=`$SSH 'find /lib* -xdev -name "scsi_dh_hsm.ko"'`
+echo "Found kernel module:'$A'"
+if [ "$A" == "" ]; then echo "ERROR: kernel module NOT where expected to be."; exit 1; fi
+#-----------------------------------------------------------------------------
+echo "DONE with $0"
+#-----------------------------------------------------------------------------
+exit 0
+#-----------------------------------------------------------------------------

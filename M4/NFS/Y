@@ -1,0 +1,150 @@
+#!/bin/bash
+TIMEFORMAT='real %R sec  user %U sec  system %S sec - %%%P CPU usage'
+#-----------------------------------------------------------------------------
+# FILES is an input variable.
+# FILES=`echo /media/parsecdata/simulator/input_files/{5,6,7,8,9}*`
+# FILES=`echo /media/parsecdata/simulator/input_files/*`
+# FILES=`echo /mnt/v1/SIMULATOR/[io]*`
+# FILES=`echo /media/parsecdata/simulator/[io]*`
+
+if [ "${FILES}" = '' ]; then
+    echo "FILES variable not set.\n"
+    exit 1
+fi
+#=============================================================================
+seefree()
+{
+    E=`date +%s`
+    free -m | egrep 'Mem|Swap'
+    numactl --hardware | grep free
+    slabtop -o -s c | sed -n -e '4p' -e '8,9p'
+    N=`vmstat -f | awk '{print $1}'`
+    let T=$E-$S
+    if [ $T -eq 0 ]; then let T=1; fi
+    let F=($N-$O)/$T
+    S=$E
+    O=$N
+    echo "forks/sec $F" "Seconds=$T"
+    smem -wk
+    date
+    echo "----------------------------------------------"
+    Z=`free -m  | grep Swap | awk '{print $3}'`
+    if [ $Z != 0 ] ; then
+	echo "SWAP USED: $Z ..."
+    fi
+}
+#=============================================================================
+SIMULATOR()
+{
+    sysctl vm.vfs_cache_pressure=$1
+
+    # Get rid of swap in use.
+    echo "swapoff -a"
+    swapoff -a
+    echo "swapon -a"
+    swapon -a
+
+    sysctl vm.drop_caches=3		# Drop slabtop displayed cache and buffer cache.
+    sleep 1				# Pause to let things settle down -- just in case.
+    echo "seefree before running test."
+    seefree				# Get output before run, after caches dropped.
+
+    echo "Start two large programs"
+#-2-    ./large 196608 & L=$!		# Grab most of 192g of 256g ram. (leaving 64g)
+#-2-    ./large 32768 & M=$!		# Grab 32g of 64 ram. (leaving 32g)
+    ./large 114688 & L=$!		# Grab 112g of 256g ram.
+    echo "large number 1 started, sleep 10"
+    sleep 10				# Give a few moments to get most of it started.
+    ./large 114688 & M=$!		# Grab 112g of 256g ram.
+    echo "large number 2 started, sleep 10"
+    sleep 10				# Give a few moments to get most of it started.
+
+    echo "start find ${FILES}"
+    let c=0
+    unset W
+    for i in $FILES; do
+# For filling the slabcache.
+       echo -n "find $i -size 0 & "
+       find $i -size 0 & J=$!
+       let W[$c]=$J
+       echo "${W[$c]}"
+# For filling the buffer/cache with data.
+#++       find $i -type f -a -exec dd if='{}' of=/dev/null status=none ';' & J=$!
+#++       let V[$c]=$J
+#++       echo "${V[$c]}"
+       let c=$c+1
+    done
+
+#++    echo "wait ${W[*]} ${V[*]}"
+    echo "wait ${W[*]}"
+#++    wait ${W[*]} ${V[*]}
+    wait ${W[*]}
+
+    echo "seefree after running test."
+    seefree				# Get output at end of run.
+
+    echo "kill large programs"
+    kill $L || true			# Kill the first "large" program.
+    kill $M || true			# Kill the second "large" program.
+    wait
+
+    killall ./W.wait.kill		# get rid of task that kills when swap is used.
+
+    echo "seefree after programs killed."
+    seefree				# Get output at end of run.
+}
+#=============================================================================
+TESTRUN()
+{
+    sysctl vm.swappiness=$1
+
+    # Initialize variables for seefree
+    S=`date +%s`
+    # Get forks per second
+    O=`vmstat -f | awk '{print $1}'`
+
+#    SIMULATOR 100
+#    SIMULATOR 150
+#    SIMULATOR 200
+#    SIMULATOR 300
+#    SIMULATOR 400
+#    SIMULATOR 500
+#    SIMULATOR 600
+#    SIMULATOR 700
+#    SIMULATOR 800
+#    SIMULATOR 900
+#    SIMULATOR 1000
+#    SIMULATOR 2000
+    SIMULATOR 10000		# Default by jeff
+#    SIMULATOR 100000
+#    SIMULATOR 1000000
+}
+
+#=============================================================================
+ulimit -c unlimited
+ulimit -n 1048576
+
+#-- echo "The defaults are:"
+#-- sysctl vm.min_unmapped_ratio
+#-- sysctl vm.min_free_kbytes
+#-- sysctl vm.vfs_cache_pressure
+#-- sysctl vm.swappiness
+
+echo "Initialize to supposed Parsec values:"
+sysctl vm.min_unmapped_ratio=10
+#?? sysctl vm.min_free_kbytes=7913604	# 2% of memory
+MemSize=`grep MemTotal: /proc/meminfo | awk '{print $2}'`
+let MemSize=${MemSize}/50		# 2% of whatever is on the machine.
+sysctl vm.min_free_kbytes=${MemSize}
+sysctl vm.vfs_cache_pressure=10000	# Jeff's magic number (which doesn't matter.
+sysctl vm.swappiness=1			# Crazy number.
+
+echo "First time..."
+# First argument is "sysctl vm.swappiness=$1" value.
+TESTRUN 1				# Default Parsec value.
+# TESTRUN 0
+
+killall W
+##############################################################################
+echo DONE with $0
+##############################################################################

@@ -1,0 +1,81 @@
+#!/bin/bash
+#------------------------------------------------------------------------------
+TIMEFORMAT='real %R sec  user %U sec  system %S sec - %%%P CPU usage'
+#------------------------------------------------------------------------------
+export READ_IP='192.168.15.186'
+export READ_VOL='/vol/m4_bigdst1'
+#-----------------------------------------------------------------------------
+export READ_MNT='/mnt/m4_bigdst1'
+export FILES=`echo ${READ_MNT}/big_tree_1/ ${READ_MNT}/*_files/[0123456789]`
+#-----------------------------------------------------------------------------
+
+NFS_FLAGS='-o ro,noatime,rsize=65536,wsize=65536,namlen=255,soft,proto=tcp,timeo=600,retrans=2,sec=sys,mountproto=tcp,local_lock=none'
+
+#-----------------------------------------------------------------------------
+# Nothing in slabs nor buffer/cache, etc.
+sysctl vm.drop_caches=3
+
+echo 'Initialize to supposed Parsec values:'
+sysctl vm.min_unmapped_ratio=1
+MemSize=`grep MemTotal: /proc/meminfo | awk '{print $2}'`
+let MemSize=${MemSize}/50                       # 2% of whatever is on the machine.
+sysctl vm.min_free_kbytes=${MemSize}
+sysctl vm.vfs_cache_pressure=10000
+#-----------------------------------------------------------------------------
+# Setup:
+mkdir -p ${READ_MNT}
+# Clean up left-over mounts from previous runs.
+umount -f ${READ_MNT} 2>/dev/null	|| true
+#-----------------------------------------------------------------------------
+set -x
+time mount -t nfs ${NFS_FLAGS} ${READ_IP}:${READ_VOL} ${READ_MNT}
+set +x
+#=============================================================================
+# Run the test.
+ulimit -c unlimited
+ulimit -n 1048576
+
+swapoff -a
+swapon -a
+
+sysctl vm.drop_caches=3		# Drop slabtop displayed cache and buffer cache.
+
+./large 8192 & L=$!		# Grab (8g) of 64 ram. (leaving 56g)
+./large 49152 & M=$!		# Grab (32g + 16g) of 64 ram. (leaving 16g)
+echo "large started, sleep 10"
+sleep 10				# Give it a few moments to get most of it.
+
+echo "SECONDS before doing find commands=${SECONDS}"
+let c=0
+unset W
+for i in $FILES; do
+# For filling the slabcache.
+   echo -n "find $i -size 0 & "
+   find $i -size 0 & J=$!
+   let W[$c]=$J
+   echo "${W[$c]}"
+# For filling the buffer/cache with data.
+#++       find $i -type f -a -exec dd if='{}' of=/dev/null status=none ';' & J=$!
+#++       let V[$c]=$J
+#++       echo "${V[$c]}"
+   let c=$c+1
+done
+
+#++    echo "wait ${W[*]} ${V[*]}"
+echo "wait ${W[*]}"
+#++    wait ${W[*]} ${V[*]}
+wait ${W[*]}
+echo "SECONDS after doing find command complete=${SECONDS}"
+
+echo "kill large program"
+kill $M $L || true				# Kill the "large" program(s).
+wait
+#=============================================================================
+# Cleanup after test.
+time umount -f ${READ_MNT} 2>/dev/null	|| true
+set +x
+#-----------------------------------------------------------------------------
+echo DONE with $0
+##############################################################################
+exit 0
+##############################################################################

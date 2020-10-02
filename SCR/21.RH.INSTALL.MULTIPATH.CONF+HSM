@@ -1,0 +1,104 @@
+#!/bin/bash -ex
+
+IP=$1
+if [ "${IP}x" = "x" ]; then
+    echo 'First argument must be the IP of the RedHat system to install on.'
+    exit 1
+fi
+if [ $# -gt 1 ]; then
+    let i=$#+1
+    echo "$0 only takes maximum of 1 arguments, not $i"
+    exit 1
+fi
+
+W="root@${IP}"
+SSH="ssh -x ${W}"
+# Check IP is reachable.
+${SSH} uptime
+#-----------------------------------------------------------------------------
+R=`${SSH} 'uname -r'`
+if [ "${R}" = "2.6.32-696.6.3.el6.x86_64" -o "${R}" = "2.6.32-642.el6.x86_64" ]; then
+    echo 'SSH to a correct RedHat system!'
+else
+    echo 'ERROR: Only run this toward a RedHat system!'
+    exit 1
+fi
+#-----------------------------------------------------------------------------
+# Make sure these packages are installed!
+${SSH} 'yum install sg3_utils 2>&1'
+${SSH} 'yum install device-mapper-multipath 2>&1'
+${SSH} 'yum install iscsi-initiator-utils 2>&1'
+#-----------------------------------------------------------------------------
+# Test iscsiadm present.
+A=`${SSH} 'iscsiadm -m node 2>&1 || true'`
+if [ "$A" == 'bash: iscsiadm: command not found' ]; then
+    echo 'ERROR: iscsiadm command not present.'
+    exit 1
+fi
+#-----------------------------------------------------------------------------
+# Test multipath command present.
+A=`${SSH} 'multipath -ll 2>&1'`
+if [ "$A" == 'bash: multipath: command not found' ]; then
+    echo 'ERROR: multipath command does not appear to be present.'
+    exit 1
+fi
+echo "NOTDONEYET - verify 'multipath -ll' is working."
+#-----------------------------------------------------------------------------
+# Install original multipath configuration and other files.
+A=`${SSH} 'echo /etc/multipath.conf.or*'`
+B=`${SSH} 'echo /etc/multipath.conf.hs*'`
+if [ "$A" != "/etc/multipath.conf.org" -o "$B" != "/etc/multipath.conf.hsm" ]; then
+    scp -p hsm/multipath.conf.org ${W}:/etc/multipath.conf
+    scp -p hsm/multipath.conf.org ${W}:/etc/
+    scp -p hsm/multipath.conf.hsm ${W}:/etc/
+fi
+${SSH} 'cp /etc/multipath.conf.org /etc/multipath.conf'
+${SSH} 'service multipathd restart'
+#-----------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
+# Install hsmadm and hsmio commands.
+A=`${SSH} 'echo /sbin/hsmad*'`
+B=`${SSH} 'echo /usr/bin/hsmi*'`
+if [ "$A" != "/sbin/hsmadm" -o "$B" != "/usr/bin/hsmio" ]; then
+    scp -p hsm/hsmadm ${W}:/sbin/
+    scp -p hsm/hsmio ${W}:/usr/bin/
+fi
+
+A=`${SSH} 'echo /root/some.i[o]'`
+if [ "$A" != "/root/some.io" ]; then
+    scp -p hsm/some.io ${W}:/root/
+fi
+
+A=`${SSH} 'echo /lib64/multipath/libcheckhsm.s[o]'`
+if [ "$A" != "/lib64/multipath/libcheckhsm.so" ]; then
+    scp -p hsm/libcheckhsm.so ${W}:/lib64/multipath/libcheckhsm.so
+fi
+
+A=`${SSH} 'find /lib/modules/ -xdev -name scsi_dh_hsm.ko'`
+if [ "$A" == "" ]; then
+    echo "ERROR: module not install, run 04.compile.scsi_dh_hsm"
+    exit 1
+fi
+#-----------------------------------------------------------------------------
+echo 'Installing HSM multipath configuration.'
+${SSH} 'cp /etc/multipath.conf.hsm /etc/multipath.conf'
+${SSH} 'service multipathd restart'
+#-----------------------------------------------------------------------------
+A=`${SSH} 'lsmod | grep hsm'`;
+if [ "$A" == "" ]; then
+    echo "ERROR: module did not load with multipath configuration change!"
+    exit 1
+fi
+echo "NOTDONEYET - verify 'lsmod | grep hsm' has zero devices."
+#-----------------------------------------------------------------------------
+A=`${SSH} 'hsmadm show'`;
+if [ "$A" == "" ]; then
+    echo "ERROR: hsmadm did not output anything!"
+    exit 1
+fi
+echo "NOTDONEYET - verify 'hsmadm show' is working."
+#-----------------------------------------------------------------------------
+echo "DONE with $0"
+#-----------------------------------------------------------------------------
+exit 0
+#-----------------------------------------------------------------------------

@@ -1,0 +1,247 @@
+#!/usr/bin/perl -w
+
+# NOTDONEYET - multipath.
+
+#-----------------------------------------------------------------------------
+use warnings;
+use strict;
+
+require 'nn.common.pm';
+#-----------------------------------------------------------------------------
+# Forward referenced subroutines.
+sub checkargs();
+
+#-----------------------------------------------------------------------------
+# Global variables initialized from arguments passed to script.
+my $PROG = $0;
+my $RH_IP = $ARGV[0];
+my $HYPERQ = $ARGV[1];
+if ($#ARGV > 1) {die "$PROG only takes maximum of 2 arguments, not " . $#ARGV+1 . "\n";}
+
+# Global variables.
+our $command = '';			# Command to execute.
+our $output = '';			# Output from command executed.
+our $status = '';
+our $SSH = '';				# Where to execute a command.
+
+my $DEVICE;				# Figured out device for SOURCE.
+
+#-----------------------------------------------------------------------------
+checkargs();
+
+#-----------------------------------------------------------------------------
+# Print error message, then usage statement, then exit script with error.
+
+sub usage($)
+{
+    my $e = $_[0];
+
+    print STDERR "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\n";
+    print STDERR "${e}\n";
+    print STDERR "..............................................................................\n";
+    print STDERR "Usage: ${PROG} RH_IP HYPERQ_IP\n";
+    print STDERR "       RH_IP     = IP of RedHat I/O server.\n";
+    print STDERR "       HYPERQ_IP = IP of HyperQ storage.\n";
+    print STDERR "This script ssh's into the redhat server and sets up source connection to the\n";
+    print STDERR "iSCSI storage device for the source disk via the HyperQ.\n";
+    print STDERR "\n";
+    print STDERR "Example: ${PROG} 10.0.11.36 10.0.11.34\n";
+    print STDERR "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n";
+    exit 1;
+}   # End of usage
+
+#-----------------------------------------------------------------------------
+# Check that the arguments passed in have somewhat reasonable values.
+
+sub checkargs()
+{
+    if (!defined($RH_IP) || $RH_IP eq '')
+    {
+	usage('ERROR: First argument must be the IP of the RedHat system used.');
+    }
+
+    $SSH = "ssh -x root\@${RH_IP}";		# Where to execute a command.
+
+    if (!defined($HYPERQ) || $HYPERQ eq '')
+    {
+       usage('ERROR: Second argument must be the IP of the HyperQ.');
+    }
+
+    # Check IP works with no password ssh.
+    execute('echo works 2>&1');
+    if ($output ne 'works')
+    {
+	cmd_error("RH_IP (${RH_IP}) not setup correctly, or not a redhat linux machine.", __FILE__, __LINE__)
+    }
+}   # End of checkargs
+
+#-----------------------------------------------------------------------------
+# Discover source iSCSI volume on IP address.
+
+sub discover_hyperq_source()
+{
+    execute("iscsiadm -m discovery -t st -p ${HYPERQ} || true");
+    if ($output =~ /Connection refused/)
+    {
+	cmd_error("Connection refused for ${HYPERQ}", __FILE__, __LINE__);
+    }
+    my @orig_lines = split(/\n/, $output);
+    my @lines;
+    foreach my $i (@orig_lines)
+    {
+        if ($i =~ /^Starting iscsid:/)
+	{
+	    next;
+	}
+	if ($i !~ /^${HYPERQ}:\d+,\d+ iqn\./ )		# Ignore non-hyperq iSCSI devices.
+	{
+	    next;
+	}
+	push(@lines, $i);
+    }
+    if ($#lines < 0)
+    {
+	cmd_error("No iSCSI devices found on ${HYPERQ}", __FILE__, __LINE__);
+    }
+
+    return(@lines);
+}   # End of discover_hyperq_source
+
+#-----------------------------------------------------------------------------
+# Login source iSCSI volume for everything.
+
+sub login_hyperq_source(@)
+{
+    my @src = @{$_[0]};
+    my @iqn;
+    my $i; 
+    my $j;
+    my $k;
+    my @line;
+    my $cnt;
+
+    foreach $i (@src)
+    {
+	$i =~ s/^.* (iqn[^ ]*)/$1/;
+	push(@iqn, $i);
+    }
+
+    # Check session already logged in.
+    execute('iscsiadm -m session');
+    @line = split(/\n/, $output);
+    $cnt = 0;
+    foreach $i (@line)
+    {
+	foreach $j (@iqn)
+	{
+	    $k = $i;
+	    $k =~ s/^.*($j).*$/$1/s;
+	    if ($j eq $k)
+	    {
+		$cnt++;
+		last;
+	    }
+	}
+    }
+    if ($cnt == ($#src + 1))
+    {
+	print STDERR "Everything already logged in.\n";
+	return;				# Already everything logged in.
+    }
+
+    # Login all possible sessions.
+    execute('iscsiadm -m node -L all');
+    my $newcnt = 0;
+    foreach $i (@iqn)
+    {
+	$j = $output;
+	$j =~ s/^.*($i).*$/$1/s;
+	if ($j eq $i)
+	{
+	    $newcnt++;
+	}
+    }
+    my $needed = ($#src + 1) - $cnt;
+    if ($needed != $newcnt)
+    {
+        cmd_error("Needed to login to $needed, but only logged into $newcnt.", __FILE__, __LINE__);
+    }
+
+    # Check session(s) really exist(s).
+    execute('iscsiadm -m session');
+    @line = split(/\n/, $output);
+    $cnt = 0;
+    my @good;
+    foreach $i (@line)
+    {
+	foreach $j (@iqn)
+	{
+	    $k = $i;
+	    $k =~ s/^.*($j).*$/$1/s;
+	    if ($j eq $k)
+	    {
+		push(@good, $j);
+		$cnt++;
+		last;
+	    }
+	}
+    }
+    if ($cnt != ($#src + 1))
+    {
+	if ($cnt > 0)
+	{
+	    cmd_warning("Got something attached, but not everything! Wanted:\n  " . join("\n  ", @src) .
+	                "\n got:\n  " . join("\n  ", @good), __FILE__, __LINE__);
+	}
+	else
+	{
+	    cmd_error("Did not log in everything! Want (cnt=$cnt #src=" . $#src + 1 . ":\n  " . join("\n  ", @src), __FILE__, __LINE__);
+	}
+    }
+}   # End of login_hyperq_source
+
+#-----------------------------------------------------------------------------
+# What should output of 'multipath -ll' be? Check it is correct.
+sub check_multipath()
+{
+    print STDERR "NOTDONEYET - " . __FILE__ . ':' . __LINE__ . ':' . (caller(0))[3] . "\n";
+}   # End of check_multipath
+
+#-----------------------------------------------------------------------------
+# What should output of 'hsm show' be? Check it is correct.
+sub check_hsmadm_show()
+{
+    print STDERR "NOTDONEYET - " . __FILE__ . ':' . __LINE__ . ':' . (caller(0))[3] . "\n";
+}   # End of check_hsmadm_show
+
+#-----------------------------------------------------------------------------
+# What should output of 'lsscsi' be? Check it is correct.
+sub check_lsscsi()
+{
+    print STDERR "NOTDONEYET - " . __FILE__ . ':' . __LINE__ . ':' . (caller(0))[3] . "\n";
+}   # End of check_lsscsi
+
+#-----------------------------------------------------------------------------
+# What should output of 'lsblk' be? Check it is correct.
+sub check_lsblk()
+{
+    print STDERR "NOTDONEYET - " . __FILE__ . ':' . __LINE__ . ':' . (caller(0))[3] . "\n";
+}   # End of check_lsblk
+
+#=============================================================================
+# Start of main program.
+
+my @src = discover_hyperq_source();
+login_hyperq_source(\@src);
+
+check_multipath();
+check_hsmadm_show();
+check_lsscsi();
+check_lsblk();
+#-----------------------------------------------------------------------------
+print STDERR "\nDONE with $PROG\n";
+#-----------------------------------------------------------------------------
+exit 0;
+#=============================================================================
+#--    execute('iscsiadm -m node -L all');
+#-----------------------------------------------------------------------------

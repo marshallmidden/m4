@@ -1,0 +1,162 @@
+#!/usr/bin/perl -w
+
+#-----------------------------------------------------------------------------
+use warnings;
+use strict;
+
+require 'nn.common.pm';
+#-----------------------------------------------------------------------------
+# Forward referenced subroutines.
+sub checkargs();
+
+#-----------------------------------------------------------------------------
+# Global variables initialized from arguments passed to script.
+my $PROG = $0;
+my $IP = $ARGV[0];
+
+# Global variables.
+our $command = '';			# Command to execute.
+our $output = '';			# Output from command executed.
+our $status = '';
+our $SSH = '';				# Where to execute a command.
+
+#-----------------------------------------------------------------------------
+checkargs();
+
+#-----------------------------------------------------------------------------
+# Print error message, then usage statement, then exit script with error.
+
+sub usage($)
+{
+    my $e = $_[0];
+    print STDERR "------------------------------------------------------------------------------\n";
+    print STDERR "ERROR(%status): ${e}\n";
+    print STDERR "------------------------------------------------------------------------------\n";
+    print STDERR "Usage: ${PROG} RH_IP\n";
+    print STDERR "       RH_IP   = IP of RedHat I/O server.\n";
+    print STDERR "This script ssh's into the redhat server and cleans up after an iSCSI migration.\n";
+    print STDERR "\n";
+    print STDERR "Example: ${PROG} 10.0.11.36\n";
+    exit 1;
+}   # End of usage
+
+#-----------------------------------------------------------------------------
+# Check that the arguments passed in have somewhat reasonable values.
+
+sub checkargs()
+{
+    if (!defined($IP) || $IP eq '')
+    {
+	usage('First argument must be the IP of the RedHat system used.');
+    }
+
+    $SSH = "ssh -x root\@${IP}";		# Where to execute a command.
+
+    # Check IP works with no password ssh.
+    execute('echo works 2>&1');
+    if ($output ne 'works')
+    {
+	cmd_error("IP (${IP}) not setup correctly, or not a redhat linux machine.", __FILE__, __LINE__)
+    }
+
+#-    execute('uname -r');
+#-    if ($output ne '2.6.32-696.6.3.el6.x86_64')
+#-    {
+#-	cmd_error("IP (${IP}) is not 2.6.32-696.6.3.el6.x86_6", __FILE__, __LINE__);
+#-    }
+}   # End of checkargs
+
+#-----------------------------------------------------------------------------
+# Log out of all iSCSI connections.
+
+sub umount_mnt()
+{
+    # Possibly umount /mnt from /dev/sdc.
+    execute('umount -l /mnt');
+}   # End of umount_mnt
+
+#-----------------------------------------------------------------------------
+# Log out of all iSCSI connections.
+
+sub logout_all_iscsi()
+{
+    # See all connections present.
+    execute('iscsiadm -m session 2>&1 || true');
+    # Check that all connections are gone.
+    if ($output ne 'iscsiadm: No active sessions.')
+    {
+	# Try to log out of all connections (two ways to do it).
+	execute('iscsiadm -m node -u');
+	execute('iscsiadm -m node -U all');
+	# Check again that all connections are gone.
+	execute('iscsiadm -m session 2>&1 || true');
+	if ($output ne 'iscsiadm: No active sessions.')
+	{
+	    cmd_error('Cannot appear to log out of iSCSI sessions.', __FILE__, __LINE__);
+	}
+    }
+}   # End of logout_all_iscsi
+
+#-----------------------------------------------------------------------------
+# Clean up discoverydb.
+
+sub clean_up_discoverydb()
+{
+    # Find all connections present.
+    execute('iscsiadm -m discoverydb');
+    my @lines = split(/\n/, $output);
+    my $l;
+    foreach $l (@lines)
+    {
+	$l =~ s/ .*$//;
+	execute("iscsiadm -m discoverydb -t st -o delete -p $l");
+    }
+    
+    # Find all connections present.
+    execute('iscsiadm -m discoverydb');
+    # Check that all connections are gone.
+    if ($output ne '')
+    {
+	cmd_error('Cannot appear to clean up discoverydb.', __FILE__, __LINE__);
+    }
+}   # End of clean_up_discoverydb
+
+#-----------------------------------------------------------------------------
+# Check that no SCSI devices (other than physical attached disks) are present.
+
+sub check_only_physical_scsi_disks()
+{
+    execute('lsscsi | egrep -v " Micron_| ST[1-9][0-9][0-9]| Samsung SSD| VMware | ATA | SanDisk "');
+    my @lines = split(/\n/, $output);
+    if ($#lines >= 0)
+    {
+	cmd_error('Found several unexpected SCSI devices - fix script or unmount.', __FILE__, __LINE__);
+    }
+}   # End of check_only_physical_scsi_disks
+
+#-----------------------------------------------------------------------------
+# Make sure all devices gone are removed.
+
+sub rescan_scsi_bus_twice()
+{
+    execute('rescan-scsi-bus -r --nooptscan -w');
+    # Do it twice because redhat says you have to in certain cases.
+    execute('rescan-scsi-bus -r --nooptscan -w');
+}   # End of rescan_scsi_bus_twice
+
+#=============================================================================
+# Start of main program.
+umount_mnt();				# Unmount possible /mnt from /dev/sdc.
+logout_all_iscsi();			# Log out of all iSCSI devices.
+clean_up_discoverydb();			# Remove everything from discoverydb.
+check_only_physical_scsi_disks();	# Make sure iSCSI disks are gone.
+
+rescan_scsi_bus_twice();		# Make sure all devices gone are removed.
+#-----------------------------------------------------------------------------
+print STDERR "\nDONE with $PROG\n";
+#-----------------------------------------------------------------------------
+exit 0;
+#-----------------------------------------------------------------------------
+# On Nimble to enable auto-login with ssh keys. NOTE: --key is .ssh/id_rsa.pub.
+# sshkey --add m4 --type rsa --key 'AAAAEAAAADAQABAAABAQDHA8KuLWeeuysJhuxdHX9fQ+C0BH6q5s....' --user admin
+#-----------------------------------------------------------------------------

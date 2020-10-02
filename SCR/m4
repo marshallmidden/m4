@@ -1,0 +1,190 @@
+#!/usr/bin/perl -w
+
+#-----------------------------------------------------------------------------
+# This is for iSCSI scripts.
+# This runs the tests, one after another.
+# It waits for input (return) between tests.
+# This is so that YOU may check that everything is working/proceeding correctly.
+
+#-----------------------------------------------------------------------------
+use warnings;
+use strict;
+
+require 'nn.common.pm';
+#-----------------------------------------------------------------------------
+our $log_things;		# Defined will NOT print logs.
+our $no_wait;			# Defined will NOT wait for read from stdin.
+our $no_output;			# Defined will NOT print any output.
+
+while (defined($ARGV[0]))
+{
+    if ($ARGV[0] =~ /^--nolog/)
+    {
+	$log_things = 0;
+	shift(@ARGV);
+	next;
+    }
+    elsif ($ARGV[0] =~ /^--nowait/)
+    {
+	$no_wait = 0;
+	shift(@ARGV);
+	next;
+    }
+    elsif ($ARGV[0] =~ /^--nooutput/)
+    {
+	$no_output = 0;
+	shift(@ARGV);
+	next;
+    }
+    elsif ($ARGV[0] =~ /^--/)
+    {
+	print STDERR "Unexpected argument to script '$ARGV[0]'\n";
+	exit 1;
+    }
+    last;
+}
+my $GUI_or_CLI = $ARGV[0];		# First argument is GUI or CLI, default CLI.
+if (!defined($GUI_or_CLI))
+{
+    $GUI_or_CLI = 'CLI';
+}
+elsif ($GUI_or_CLI =~ /^GUI$/i)
+{
+    $GUI_or_CLI = 'GUI';
+}
+elsif ($GUI_or_CLI =~ /^CLI$/i)
+{
+    $GUI_or_CLI = 'CLI';
+}
+else
+{
+    print STDERR "Unrecognized argument -- expected CLI or GUI.\n";
+    exit 1;
+}
+
+#-----------------------------------------------------------------------------
+# Change this section for correct IP addresses, Nimble Volume names, etc.
+
+my $CLIENT       = '10.0.11.36';
+my $HYPERQ       = '10.0.11.34';
+
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# Assume SSH keys have been installed. To enable auto-login with ssh keys.
+# NOTE: --key is .ssh/id_rsa.pub.
+# sshkey --add m4 --type rsa --key 'AAAAEAAAADAQABAAABAQDHA8KuLWeeuysJhuxdHX9fQ+C0BH6q5s....' --user admin
+
+my $NIMBLE       = '10.0.11.123';
+my $NIMBLE_LOGIN = 'admin';
+# Volumes and other things on the nimble will be changed to lowercase. Thus start them that way.
+my $PREFIX       = 'at-m4-';		# AT -> Auto Testing
+# NOTE: volume names cannot have underscores in the names, use period or minus sign.
+my $SOURCE       = $PREFIX . 'source';
+my $TARGET       = $PREFIX . 'target';
+my $INITIATORGRP    = $PREFIX . 'initiator-grp';
+
+#=============================================================================
+# Global variables.
+our $PROG = $0;
+
+my $command = '';			# Command to execute.
+my $output = '';			# Output from command executed.
+my $status = '';
+my $SSH = '';				# Where to execute a command.
+
+#-----------------------------------------------------------------------------
+my %Commands;
+#	    Script					    Arguments to script
+#	    -------------				    --------------------
+#++ $Commands{ '11.NIMBLE.CREATE.SOURCE' }			= [ $NIMBLE, $NIMBLE_LOGIN, $CLIENT, $SOURCE, $INITIATORGRP ];
+#++ $Commands{ '12.RH.ATTACH.SOURCE' } 			= [ $CLIENT, $NIMBLE, $SOURCE ];
+#++ $Commands{ '13.RH.START.SOURCE.IO' } 			= [ $CLIENT ];
+#++ # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#++ $Commands{ '21.RH.INSTALL.MULTIPATH.CONF+HSM' }		= [ $CLIENT ];
+#++ $Commands{ '22.NIMBLE.ALLOW.SOURCE.2.HQ' }		= [ $NIMBLE, $NIMBLE_LOGIN, $HYPERQ, $SOURCE, $INITIATORGRP ];
+#++ $Commands{ "23.${GUI_or_CLI}.ATTACH.SOURCE" } 		= [ $NIMBLE, $NIMBLE_LOGIN, $HYPERQ, $SOURCE ];
+#++ $Commands{ "24.${GUI_or_CLI}.EXPORT.SOURCE" } 		= [ $HYPERQ, $CLIENT, $SOURCE ];
+#++ $Commands{ '25.RH.ATTACH.HQ.SOURCE' } 			= [ $CLIENT, $HYPERQ ];
+#++ $Commands{ '26.NIMBLE.CREATE.TARGET' } 			= [ $NIMBLE, $NIMBLE_LOGIN, $TARGET, $INITIATORGRP ];
+#++ $Commands{ "27.${GUI_or_CLI}.ATTACH.TARGET" } 		= [ $NIMBLE, $NIMBLE_LOGIN, $HYPERQ, $TARGET ];
+#++ $Commands{ "28.${GUI_or_CLI}.MFS.MAPTARGET" } 		= [ $HYPERQ, $CLIENT, $TARGET ];
+#++ # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#++ $Commands{ "31.${GUI_or_CLI}.CREATE.MIGRATION" }	= [ $HYPERQ, $SOURCE, $TARGET ];
+#++ $Commands{ "32.${GUI_or_CLI}.START.MIGRATION" }		= [ $HYPERQ, $SOURCE, $TARGET ];
+#++ $Commands{ "33.${GUI_or_CLI}.WAIT.MIGRATION.DONE" }	= [ $HYPERQ, $SOURCE, $TARGET];
+#++ $Commands{ "34.${GUI_or_CLI}.VERIFY.MIGRATION" }	= [ $HYPERQ ];
+#++ $Commands{ '35.NIMBLE.ALLOW.TARGET.2.RH' } 		= [ $NIMBLE, $NIMBLE_LOGIN, $TARGET ];
+#++ $Commands{ '36.RH.ATTACH.TARGET' } 			= [ $CLIENT, $NIMBLE, $TARGET ];
+#++ $Commands{ "37.${GUI_or_CLI}.GOLIVE" } 			= [ $HYPERQ, $SOURCE, $TARGET ];
+#++ $Commands{ '38.CLI.REMOVE.MIGRATION' } 			= [ $HYPERQ, $SOURCE, $TARGET ];
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#++ $Commands{ '41.RH.DISCONNECT.SOURCE' } 			= [ $CLIENT, $NIMBLE, $SOURCE ];
+#++ $Commands{ '42.RH.DISCONNECT.HQ.ALL' } 		= [ $CLIENT, $HYPERQ ];
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+$Commands{ "51.${GUI_or_CLI}.VERIFY.S+T.DATA" }		= [$HYPERQ ];
+$Commands{ "52.${GUI_or_CLI}.DISCONNECT.ALL" }		= [$HYPERQ, $NIMBLE, $SOURCE, $TARGET ];
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+$Commands{ '60.RH.STOP.IO' } 				= [ $CLIENT ];
+$Commands{ '61.RH.UNINSTALL.MULTIPATH.CONF+HSM' }	= [ $CLIENT ];
+$Commands{ '62.RH.MOUNT.SOURCE-SOMEWHERE' } 		= [ $CLIENT ];
+$Commands{ '63.RH.VERIFY.S+T.DATA' } 			= [ $CLIENT ];
+$Commands{ '64.RH.UNMOUNT.SOURCE-SOMEWHERETA' }		= [ $CLIENT ];
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+$Commands{ '71.RH.CLEANUP' } 				= [ $CLIENT ];
+$Commands{ "72.${GUI_or_CLI}.CLEANUP" }			= [ $HYPERQ ];
+$Commands{ '73.NIMBLE.CLEANUP' } 			= [ $NIMBLE, $NIMBLE_LOGIN, $CLIENT, $HYPERQ, $SOURCE, $TARGET, $INITIATORGRP ];
+
+#-----------------------------------------------------------------------------
+# Execute a command and set global variable output.
+sub script_execute($)
+{
+    my $cmd = $_[0];
+
+    if (!defined($no_output))
+    {
+	print STDERR "Starting script '$cmd'\n";
+
+	if (!defined($no_wait))
+	{
+	    print STDERR "Press RETURN to execute > ";
+	    my $got = <>;
+	}
+    }
+
+    $output = `$cmd`;
+    $status = ($? >> 8) & 255;
+    chomp($output); chomp($output);
+    $output =~ s/\r//g;
+    if (!defined($no_output))
+    {
+	print STDERR "\nDone '$cmd' Status: $status\n";
+	print STDERR "$output\n";
+    }
+}   # End of script_execute
+
+#=============================================================================
+# Start of main program.
+
+foreach $command (sort(keys(%Commands)))
+{
+    script_execute("./" . ${command} . ' ' . join(' ', @{$Commands{ $command }}) );
+    if ($status ne 0)
+    {
+	print "EXIT STATUS: $status\n";
+    }
+    log_status_into_file($PROG, $command, $CLIENT, $HYPERQ, $NIMBLE, $NIMBLE_LOGIN, $SOURCE, $TARGET);
+    if ($status ne 0)
+    {
+	if (!defined($log_things))
+	{
+	    print "EXIT STATUS: $status -- After printing log file\n";
+	}
+	exit 1;
+    }
+    if (!defined($no_output))
+    {
+	print "==============================================================================\n";
+    }
+}
+#-----------------------------------------------------------------------------
+exit 0;
+#=============================================================================
