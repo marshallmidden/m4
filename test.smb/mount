@@ -1,0 +1,92 @@
+#!/bin/bash -e
+echo "In $0 $* <------------------------------------------------------------"
+if [ "$?" = "" ]; then
+    echo "Need first argument to be volume (m4_v1 / m4_v2) on 172.22.13.100 to mount."
+    exit 1
+fi
+IP="$1"
+SHARE1="$2"
+if [ "${IP}" = '' -o "${SHARE1}" = '' ]; then
+    echo 'Need two arguments at least. IP and share-name.'
+    exit 1
+fi
+OPT="$3"
+SHARE2="$4"
+#-----------------------------------------------------------------------------
+DOMAIN="AD"
+# Two users Parsec.Admin and Parsec.Backup.
+#+ USR="Parsec.Admin"
+#+ PW="Cobra!Indigo"
+USR="Parsec.Backup"
+PW='Cobra!Indigo'
+#-----------------------------------------------------------------------------
+M="/mnt/${IP}"
+#-----------------------------------------------------------------------------
+if [ "${OPT}" != "" -a "${OPT}" != "-" ]; then
+    OPTIONS=",${OPT}"
+else
+    OPTIONS=""
+fi
+#-----------------------------------------------------------------------------
+#?? -not-with-sfu-# OPTIONS="${OPTIONS},mfsymlinks"		## not needed if sfu specified?
+#?? OPTIONS="${OPTIONS},sfu"		## FIGURE THIS OUT
+# OPTIONS="${OPTIONS},ro"
+#-- OPTIONS="${OPTIONS},rw"
+OPTIONS="${OPTIONS},noperm"
+OPTIONS="${OPTIONS},nosetuids"
+OPTIONS="${OPTIONS},nodev"
+OPTIONS="${OPTIONS},noexec"
+OPTIONS="${OPTIONS},cache=none"
+OPTIONS="${OPTIONS},user_xattr"		## FIGURE THIS OUT
+OPTIONS="${OPTIONS},cifsacl"		## FIGURE THIS OUT 
+# ?? need cifsacl ... Mounting with -o cifsacl can change ACLs via mode-bit translation too (not recommended!)
+OPTIONS="${OPTIONS},nomapchars"
+OPTIONS="${OPTIONS},serverino"
+OPTIONS="${OPTIONS},soft"
+OPTIONS="${OPTIONS},nounix"
+OPTIONS="${OPTIONS},acl"		## FIGURE THIS OUT
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#-- OPTIONS="${OPTIONS},vers=1.0"	# Isilon requires vers=1.0
+# OPTIONS="${OPTIONS},vers=2.0"	# works reliably.
+# OPTIONS="${OPTIONS},vers=2.1"	# works reliably.
+# OPTIONS="${OPTIONS},vers=3.0"	# works reliably.
+# 		      # v3.1.1  # works reliably.
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# OPTIONS="${OPTIONS},backupuid=0,backupgid=0"	# Breaks getcifsacl
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# OPTIONS="${OPTIONS},noatime"			# Illegal option.
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+OPTIONS="${OPTIONS},nodfs"
+#-----------------------------------------------------------------------------
+#  smbclient -W AD -U Parsec.Admin -L ad.parsec.lab
+#  smbclient --workgroup=AD --user=Parsec.Admin --list=ad.parsec.lab
+#  smbclient --workgroup=AD --user=Parsec.Backup --list=172.22.13.100 -m NT1
+#  smbclient --workgroup=AD --user='Parsec.Admin%Cobra!Indigo' --list=ad.parsec.lab
+#  smbclient --workgroup=AD --user='Parsec.Admin%Cobra!Indigo' --list=172.22.13.100 -m NT1
+#                                                                                      SMB2
+#                                                                                      SMB3
+#-----------------------------------------------------------------------------
+check_mount()
+{
+    mkdir -p ${M}/$1
+    until [ `mount | grep -c " ${M}/$1 "` -eq 0 ]; do
+        echo "umount /${M}/$1"
+        umount "/${M}/$1" || sleep 2
+    done
+    mount -t cifs "//${IP}/$1" "${M}/$1" -o username=${USR},password=${PW},domain=${DOMAIN}${OPTIONS}
+}
+#-----------------------------------------------------------------------------
+#- echo ${OPTIONS}
+if [ "${SHARE1}" != 'NONE' ]; then
+    check_mount ${SHARE1}
+    mount | grep "//${IP}/${SHARE1} on ${M}/${SHARE1}"
+fi
+if [ "${SHARE2}" != '' -a "${SHARE2}" != 'NONE' ]; then
+    check_mount ${SHARE2}
+    mount | grep "//${IP}/${SHARE2} on ${M}/${SHARE2}"
+fi
+#-----------------------------------------------------------------------------
+echo "Done with $0 $*"
+exit 0
+#-----------------------------------------------------------------------------
+# End of script mount
