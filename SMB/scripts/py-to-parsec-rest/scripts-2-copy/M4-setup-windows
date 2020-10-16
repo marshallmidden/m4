@@ -1,0 +1,281 @@
+#!/bin/bash -e
+# Run script as user parsec.admin
+echo "In $0 $* <------------------------------------------------------------"
+#-----------------------------------------------------------------------------
+dir="$1"
+if [ "$1" = "" ]; then
+    echo "Script expects a directory to create setup files in."
+    echo "Script expects second argument of a few letters for uniqueness."
+    exit 1
+fi
+pa="$2"
+if [ "$2" = "" ]; then
+    echo "Script expects second argument of a few letters for uniqueness."
+    exit 1
+fi
+V="$3"
+v=`echo "${V}" | sed -e 's/://' | tr A-Z a-z`
+echo "V=${V}"
+echo "v=${v}"
+if [ "$3" = "" ]; then
+    echo "Script expects third argument of a Volume letter."
+    exit 1
+fi
+CIFSIP="$4"
+
+# Assumes Parsec.Backup and pw for net-use.bat script.
+#-----------------------------------------------------------------------------
+W=`pwd`
+#-----------------------------------------------------------------------------
+create_random_file()
+{
+    echo "create_random_file $1 $2 $3 $4 $5"
+    size="$1"					|| true
+    bs="$2"					|| true
+    name="$3"					|| true
+    wn=`echo "${name}" | sed -e 'sa/a\\\\ag'`   || true
+    sparse="$4"					|| true
+    attrib="$5"					|| true
+    let count="${size}/${bs}"			|| true
+    let remainder="${size}-(${bs}*${count})"	|| true
+    if [ -e "${name}" ]; then
+	cmd.exe /c attrib -r -s -h -i "${wn}"
+	cmd.exe /c attrib -x "${wn}"
+    fi
+    rm -f "${name}"
+    cmd.exe /c copy NUL "${wn}" >/dev/null
+    if [ "${sparse}" = "sparse" ]; then
+	cmd.exe /c fsutil sparse setflag "${wn}" 
+    fi
+# NOTDONEYET?  fsutil file createnew abc.def ${count}  # zeros in file
+    if [ "${size}" -ne 0 ]; then
+	if [ "${count}" -gt 0 ]; then
+# NOTDONEYET?
+	    dd status=noxfer,none if=/dev/urandom of="${name}" bs="${bs}" count="${count}" oflag=append conv=notrunc
+	fi
+	if [ "${remainder}" -gt 0 ]; then
+# NOTDONEYET?
+	    dd status=noxfer,none if=/dev/urandom of="${name}" bs="${remainder}" count=1 oflag=append conv=notrunc
+	fi
+    fi
+    if [ "${attrib}" != '' ]; then
+	echo "turn on attributes ${attrib}"
+	# The order matters. Best to do them all at once.
+	cmd.exe /c attrib ${attrib} "${wn}"
+    fi
+}   # End of create_random_file
+#-----------------------------------------------------------------------------
+create_tiny_file()
+{
+    echo "create_tiny_file $1 $2 $3 $4 $5"
+    name="$1"					|| true
+    wn=`echo "${name}" | sed -e 'sa/a\\\\ag'`   || true
+    sparse="$4"					|| true
+    attrib="$5"					|| true
+    if [ -e "${name}" ]; then
+	cmd.exe /c attrib -r -s -h -i "${wn}"
+	cmd.exe /c attrib -x "${wn}"
+    fi
+    rm -f "${name}"
+    if [ "${sparse}" = "sparse" ]; then
+	cmd.exe /c copy NUL "${wn}" >/dev/null
+	cmd.exe /c fsutil sparse setflag "${wn}" 
+    fi
+    cmd.exe /c echo "This is file named ${wn}." '>' "${wn}"
+    if [ "${attrib}" != '' ]; then
+	# The order matters. Best to do them all at once.
+	echo "turn on attributes ${attrib}"
+	cmd.exe /c attrib ${attrib} "${wn}"
+    fi
+}   # End of create_tiny_file
+#-----------------------------------------------------------------------------
+set_attrib()
+{
+    name="$1"					|| true
+    wn=`echo "${name}" | sed -e 'sa/a\\\\ag'`   || true
+    attrib="$2"					|| true
+    # Turn off all attributes.
+    cmd.exe /c attrib -r -s -h -i "${wn}"
+    cmd.exe /c attrib -x "${wn}"
+    if [ "${attrib}" != '' ]; then
+	echo "turn on attributes ${attrib}"
+	# The order matters. Best to do them all at once.
+	cmd.exe /c attrib ${attrib} "${wn}"
+    fi
+}   # End of set_attrib
+#-----------------------------------------------------------------------------
+#--    echo "turn_on_hidden $1"
+#--    cmd.exe /c attrib +h "$1"
+#--    echo "turn_on_readonly $1"
+#--    cmd.exe /c attrib +r "$1"
+#--    echo "turn_on_noscrub $1"
+#--    cmd.exe /c attrib +x "$1"
+#--    echo "turn_on_system $1"
+#--    cmd.exe /c attrib +s "$1"
+#--    echo "turn_on_noindex $1"
+#--    cmd.exe /c attrib +i "$1"
+#--    echo "turn_off_archive $1"
+#--    cmd.exe /c attrib -a "$1"
+#-----------------------------------------------------------------------------
+make_directory ()
+{
+    echo "make_directory $1"
+    name="$1"
+    wn=`echo "${name}" | sed -e 'sa/a\\\\ag'`   || true
+    if [ -e "${name}" ]; then
+	cmd.exe /c attrib -s -r -h "${wn}"
+    fi
+    rm -rf "${name}"
+    cmd.exe /c mkdir "${wn}"
+}
+#=============================================================================
+if [ "${CIFSIP}" != '' ]; then
+    net use ${V} /delete || true
+    net use ${V} /delete /y || true
+    cmd.exe /c net-use.bat ${V} ${CIFSIP} ${dir} 'AD\Parsec.Backup' 'Cobra!Indigo'
+fi
+#=============================================================================
+#+ mount
+#+ ls /cygdrive/
+#+ ls /cygdrive/m/
+# Get to right place.
+# Try to second guess ...
+if [ -e "${V}/${dir}" ]; then
+    cd "${V}/${dir}"
+else
+    cd "${V}/"
+    dir=''
+fi
+#-----------------------------------------------------------------------------
+# Create normal files.
+create_random_file    7654321 1048576 10.b2-"${pa}".txz
+create_random_file     654321 1048576 20.b2-"${pa}".txz
+create_random_file       3210 1048576 A.var.target-"${pa}".txz
+create_random_file       4096 1048576 4096-"${pa}"
+create_random_file       8192 1048576 8192-"${pa}"
+create_random_file      16384 1048576 16384-"${pa}"
+create_tiny_file                      tiny-"${pa}".txt
+create_tiny_file                      tiny-with-long-name-"${pa}".txt
+create_random_file          0 1048576 dir-"${pa}"
+#--------------------
+create_tiny_file                      noA-"${pa}".big 2 3 '' '-a'
+create_random_file          0 1048576 noA-"${pa}"         '' '-a'
+#--------------------
+create_tiny_file                      s-"${pa}".big   2 3 '' '+s'
+create_random_file          0 1048576 s-"${pa}"           '' '+s'
+#--------------------
+create_random_file    8196    8192    .DS_Store-"${pa}"   '' '+h'
+create_random_file       0 1048576    h-"${pa}"           '' '+h'
+#--------------------
+#-- 1g create_random_file 1234567890 1048576 e-"${pa}".big	
+create_random_file 123456789 1048576 e-"${pa}".big        '' '+r'	# about .12 g.
+create_random_file          0 1048576 readonly-"${pa}"    '' '+r'
+#--------------------
+create_tiny_file                      ni-"${pa}".big  2 3 '' '+i'
+create_random_file          0 1048576 noindex-"${pa}"     '' '+i'
+#--------------------
+create_tiny_file                      ns-"${pa}".big  2 3 '' '+x'
+create_random_file          0 1048576 noscrub-"${pa}"     '' '+x'
+#--------------------
+create_tiny_file                      p-"${pa}".big 2 3 sparse	# P
+create_random_file          0 1048576 p-"${pa}"        "sparse" 	# P
+#--------------------
+create_tiny_file                      main-file.xyz
+#--------------------
+# Create directories.
+f="direc-${pa}"
+make_directory "${f}"
+create_tiny_file "${f}/file1"
+
+f="file1"
+# X attribute may fail, but set others.
+create_tiny_file "${f}" 2 3 sparse '+x'
+cmd.exe /c attrib +r +a +s +h +i "${f}"
+
+# The order matters. Best to do them all at once.
+# Cannot sparse a directory	-- but every other attribute turned on.
+#--------------------
+f="directory--${pa}"
+make_directory "${f}"
+create_tiny_file "${f}/file1"
+create_tiny_file "${f}/file2"
+
+set_attrib "${f}" "+x"
+# X attribute may fail, but set others.
+cmd.exe /c attrib +r +a +s +h +i "${f}"
+#--------------------
+# Symlinks need to be done with Local administrator permissions.
+# See script M4-setup-admin -- which must be run with correct permissions.
+#-----------------------------------------------------------------------------
+create_bat_file()
+{
+    echo "create_bat_file $1"
+    name="$1"					|| true
+    wn=`echo "${name}" | sed -e 'sa/a\\\\ag'`   || true
+    if [ -e "${name}" ]; then
+	cmd.exe /c attrib -s -r "${wn}"
+    fi
+    rm -f "${name}"
+    cmd.exe /c echo REM -- This is file named ${wn}. '>' "${wn}"
+}
+#-----------------------------------------------------------------------------
+create_bat_file                      "${pa}-1-normal.bat"
+create_bat_file                      "${pa}-2.bat"
+create_bat_file                      "${pa}-3-large.bat"
+cmd.exe /c fsutil 8dot3name set "${V}" 0 || true	# Turn on 8dot3name support, if possible.
+cmd.exe /c fsutil file setshortname  "${pa}-3-large.bat" "${pa}-3.bat" || true
+#-----------------------------------------------------------------------------
+f="existing-${pa}"
+create_tiny_file                      "${f}"
+rm -rf "${f}.lnk"
+echo '' | ${W}/m4-shortcut "${f}" "${f}.lnk"
+#-----------------------------------------------------------------------------
+# Create some streams. One on a file, and three on another, and a directory.
+f="stream1.${pa}"
+create_tiny_file "${f}"
+g="stream3.${pa}"
+create_tiny_file "${g}"
+#--------------------
+h="streamdir-${pa}"
+make_directory "${h}"
+create_tiny_file "${h}/file1.txt"
+create_tiny_file "${h}/file2.txt"
+create_tiny_file "${h}/file3.txt"
+#--------------------
+i="nesteddir-${pa}"
+make_directory "${i}"
+create_tiny_file "${i}/nestedfile1.txt"
+i="nesteddir-${pa}/level2"
+make_directory "${i}"
+create_tiny_file "${i}/level2file.txt"
+#-----------------------------------------------------------------------------
+# Must be back where executables are.
+cd "${W}"
+
+mount
+set -x
+
+cmd.exe /c m4stream.bat "${V}" "${dir}" "${f}" "data-1-${f}" "This is stream data 1 for ${f}." >T
+#--------------------
+cmd.exe /c m4stream.bat "${V}" "${dir}" "${g}" "data-1-${g}" "This is stream data 1 for ${g}." >>T
+cmd.exe /c m4stream.bat "${V}" "${dir}" "${g}" "data-2-${g}" "This is stream data 2 for ${g}." >>T
+cmd.exe /c m4stream.bat "${V}" "${dir}" "${g}" "data-3-${g}" "This is stream data 3 for ${g}." >>T
+#--------------------
+cmd.exe /c m4stream.bat "${V}" "${dir}" "${h}" "data-1-${h}" "This is stream data 1 for ${h}." >>T
+if [ "${dir}" != '' ]; then
+    cmd.exe /c m4stream.bat "${V}" "${dir}\\${h}" "file1.txt" "data-1-file1.txt" "This is stream data 1 for ${h}/file1.txt" >>T
+    cmd.exe /c m4stream.bat "${V}" "${dir}\\${h}" "file2.txt" "data-1-file2.txt" "This is stream data 1 for ${h}/file2.txt" >>T
+    cmd.exe /c m4stream.bat "${V}" "${dir}\\${h}" "file2.txt" "data-2-file2.txt" "This is stream data 2 for ${h}/file2.txt" >>T
+    cmd.exe /c m4stream.bat "${V}" "${dir}\\${h}" "file3.txt" "data-0-file3.txt" >>T
+else
+    cmd.exe /c m4stream.bat "${V}" "${h}" "file1.txt" "data-1-file1.txt" "This is stream data 1 for ${h}/file1.txt" >>T
+    cmd.exe /c m4stream.bat "${V}" "${h}" "file2.txt" "data-1-file2.txt" "This is stream data 1 for ${h}/file2.txt" >>T
+    cmd.exe /c m4stream.bat "${V}" "${h}" "file2.txt" "data-2-file2.txt" "This is stream data 2 for ${h}/file2.txt" >>T
+    cmd.exe /c m4stream.bat "${V}" "${h}" "file3.txt" "data-0-file3.txt" >>T
+fi
+tr -d '\r' < T | sed -e '/^$/d'
+#-----------------------------------------------------------------------------
+echo "Done with $0 $* <------------------------------------------------------------"
+exit 0
+#-----------------------------------------------------------------------------
+# End of script M4-setup-windows

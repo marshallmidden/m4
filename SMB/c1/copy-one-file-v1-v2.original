@@ -1,0 +1,111 @@
+#!/bin/bash -ex
+# Copy one SMB file in the methodology that m4 thinks is reasonable.
+#-----------------------------------------------------------------------------
+TIMEFORMAT='real %R sec  user %U sec  system %S sec - %%%P CPU usage'
+#-----------------------------------------------------------------------------
+W=`pwd`
+P=${W}/`dirname $0`
+#-----------------------------------------------------------------------------
+FILES=$*			# File to copy
+if [ "$FILES" = '' ]; then
+    FILES="${FILES} file1"				# AH - hidden file
+    FILES="${FILES} e.tgz"				# AR - read only file
+    FILES="${FILES} functionmultiversioning.txz"	# AX - reFS only attribute
+    FILES="${FILES} GIT.tgz"				# AI - no indexing
+    FILES="${FILES} old-mount"				# AH - hidden file
+    FILES="${FILES} rubygems-2.6.14.tgz"		# AS - system file
+    FILES="${FILES} pxfs.bits"				#  - No bits, no A (Archive)
+    FILES="${FILES} streams.exe"			#     AD\parsec.admin vs backup and Administrators.
+    FILES="${FILES} touchy-feely"			# A - zero size file
+    FILES="${FILES} windows-created"			# A - tiny file of 18 bytes.
+fi
+#-----------------------------------------------------------------------------
+S='/mnt/smb-server-2012.ad.parsec.lab/m4-v1/'
+D='/mnt/smb-server-2012.ad.parsec.lab/m4-v2/'
+#-----------------------------------------------------------------------------
+# Remove old mounts.
+${P}/umount.smb-server-2012.ad.parsec.lab
+# mount Destination: m4-v2
+${P}/mount.smb-server-2012.ad.parsec.lab m4-v2 rw
+# Mount source: m4-v1
+${P}/mount.smb-server-2012.ad.parsec.lab m4-v1 ro
+#-----------------------------------------------------------------------------
+copy_file()
+{
+    # Remove that one file, if it exists on destination file system.
+    rm -f ${D}/$1 || true
+    # a)  touch destination_file.     # To create it.
+    touch ${D}/$1 || true
+    # Copy the file.
+    dd if=${S}/$1 of=${D}/$1 bs=1M || true
+    # Get file attributes.
+    DOSATTR=`getfattr -n user.cifs.dosattrib -e hex -- ${S}/$1 | tail -n +2 | sed -e 's/^.*=//'`
+    # Cannot have system files, nor read-only files.
+    let t="${DOSATTR} & 0x22200200" || true
+    let r="${DOSATTR} & 0x26200200" || true		?? unknown what is allowed ??
+    s=`printf "0x%08x" ${t}` || true
+    #   Masking out ATTR_MASK:
+    #     ATTR_RDONLY     = 0x00000001,
+    #     ATTR_HIDDEN     = 0x00000002,
+    #     ATTR_SYSTEM     = 0x00000004,
+    #     ATTR_ARCHIVE    = 0x00000020,
+    #     ATTR_NOIDX      = 0x00002000,
+    #     ATTR_NOSCRUB    = 0x00020000,
+    #     ATTR_MASK       = (ATTR_RDONLY | ATTR_HIDDEN | ATTR_ARCHIVE | ATTR_NOIDX | ATTR_NOSCRUB)
+    #                     = 0x00022022 -> 0x22200200 byte swapped
+    #   To do: add in other bits: P,X. -- See enum eattr.
+    setfattr -n user.cifs.dosattrib -v ${s} -- ${D}/$1 || true
+    # NTFS creationtime value.
+    CREATIONTIME=`getfattr -n user.cifs.creationtime -e hex -- ${S}/$1 | tail -n +2 | sed -e 's/^.*=//' || true`
+    setfattr -n user.cifs.creationtime -v ${CREATIONTIME} -- ${D}/$1 || true
+    # Get access control list values, and set them on the new one.
+    SYSTEMACL=`getfattr -n system.cifs_acl -e hex -- ${S}/$1 | tail -n +2 | sed -e 's/^.*=//' || true`
+    setfattr -n system.cifs_acl -v ${SYSTEMACL} -- ${D}/$1 || true
+    # f) Get all other attributes.
+    M=`getfattr -m '-' -e hex -- ${S}/$1 | tail -n +2 | sed -e 's/^.*=//' || true`
+    for i in $M ; do
+	O=`getfattr -n $i -e hex -- ${S}/$1 | tail -n +2 | sed -e 's/^.*=//' || true`
+	setfattr -n $i -v ${O} -- ${D}/$1 || true
+    done
+    # Set dos attributes to correct values -- read-only, system, etc...
+    setfattr -n user.cifs.dosattrib -v ${DOSATTR} -- ${D}/$1 || true
+    # Set dates to reference file. (Assumes reference filesystem is read-only.)
+    touch --reference=${S}/$1 ${D}/$1 || true
+}
+#-----------------------------------------------------------------------------
+directory_attr_plus()
+{
+    SRC="$1"
+    DST="$2"
+    DOSATTR=`getfattr -n user.cifs.dosattrib -e hex -- ${SRC} | tail -n +2 | sed -e 's/^.*=//'`
+    CREATIONTIME=`getfattr -n user.cifs.creationtime -e hex -- ${SRC} | tail -n +2 | sed -e 's/^.*=//' || true`
+    setfattr -n user.cifs.creationtime -v ${CREATIONTIME} -- ${DST} || true
+    SYSTEMACL=`getfattr -n system.cifs_acl -e hex -- ${SRC} | tail -n +2 | sed -e 's/^.*=//' || true`
+    setfattr -n system.cifs_acl -v ${SYSTEMACL} -- ${DST} || true
+    M=`getfattr -m '-' -e hex -- ${SRC} | tail -n +2 | sed -e 's/^.*=//' || true`
+    for i in $M ; do
+	O=`getfattr -n $i -e hex -- ${SRC} | tail -n +2 | sed -e 's/^.*=//' || true`
+	setfattr -n $i -v ${O} -- ${DST} || true
+    done
+    setfattr -n user.cifs.dosattrib -v ${DOSATTR} -- ${DST} || true
+    touch --reference=${SRC} ${DST} || true
+}
+#-----------------------------------------------------------------------------
+for F in $FILES; do
+    if [ -d "$F" ]; then
+	echo "$F is a directory, this script does not handle directories."
+    elif [ -b "$F" -o -c "$F" -o -L "$F" -o -p "$F" ]; then
+	echo "$F is not a normal file, not handled."
+    else
+	time copy_file $F
+    fi
+done
+#-----------------------------------------------------------------------------
+directory_attr_plus $S $D
+#-----------------------------------------------------------------------------
+./umount.smb-server-2012.ad.parsec.lab m4-v1
+./umount.smb-server-2012.ad.parsec.lab m4-v2
+#-----------------------------------------------------------------------------
+echo "Done with $0"
+exit 0
+#-----------------------------------------------------------------------------

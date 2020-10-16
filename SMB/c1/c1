@@ -1,0 +1,172 @@
+#!/bin/bash -e
+# vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
+#-----------------------------------------------------------------------------
+# Copy one SMB file in the methodology that Jeff thinks was reasonable -- LHR.
+#-----------------------------------------------------------------------------
+TIMEFORMAT='real %R sec  user %U sec  system %S sec - %%%P CPU usage'
+#-----------------------------------------------------------------------------
+s='/home/m4/s'
+#-----------------------------------------------------------------------------
+S='/mnt/SMB-Server-2012.ad.parsec.lab/m4-v1/'
+D='/mnt/SMB-Server-2012.ad.parsec.lab/m4-v2/'
+#-----------------------------------------------------------------------------
+#-- W=`pwd`
+#-----------------------------------------------------------------------------
+FILES=$*                        # File to copy
+if [ "$FILES" = '' ]; then
+    FILES='.DS_Store-pa'
+fi
+#-----------------------------------------------------------------------------
+# Remove all old mounts from cifs servers.
+M=`cd ${s} && make | grep umount | awk '{ print $1 }' | sort -u`
+( cd ${s} && make ${M} ) >> /dev/null 2>&1
+
+# mount Destination and Source: m4-v2 and m4-v1
+( cd ${s} && make mount_w2012 )
+echo '------------------------------------------------------------------------------'
+set -x
+#-----------------------------------------------------------------------------
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# xlhr.cpp:
+#define CIFS_IOCTL_MAGIC 0xCF
+#define CIFS_GET_ATTRS _IOWR(CIFS_IOCTL_MAGIC, 8, struct smb_query_attrs)
+#        if ((rv = ioctl(dirfd(streq->dirp), CIFS_GET_ATTRS, &attrs)) < 0) {
+#-----------------------------------------------------------------------------
+# lhr:
+#    user.cifs.dosattrib                -> pxlhr.h        XATTR_CIFSD_ATTRIB
+#                        #define XATTR_CIFSD_ACL          "system.cifs_acl"
+#                        #define XATTR_CIFSD_ATTRIB       "user.cifs.dosattrib"
+#                        #define XATTR_CIFSD_CREATIONTIME "user.cifs.creationtime"
+#                        #define XATTR_CIFSD_GETFSATTR    "user.cifs.getfsattr"
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# lhr.cpp
+#    root_node():
+#         stat()
+#         int l = fgetxattr(dirfd, XATTR_CIFSD_GETFSATTR, &_b, sizeof(_b));
+#         smbfsattr._set(_b)
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#        setfromsmbacl()
+# meta.cpp:        int l = fgetxattr(fd, XATTR_CIFSD_ACL, NULL, 0);
+#                smbacl.clear();
+#                smbacl.resize(l+1);
+# meta.cpp:                int l2 = fgetxattr(fd, XATTR_CIFSD_ACL, smbacl.data(), smbacl.size());
+#        setfromsmbattr()
+# meta.cpp:        int l = fgetxattr(fd, XATTR_CIFSD_ATTRIB, &_b, sizeof(_b));
+#        setfromsmbcreate()
+# meta.cpp:        int l = fgetxattr(fd, XATTR_CIFSD_CREATIONTIME, &t, sizeof(t));
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#        getattrbits()
+# rop.cpp:        int l = fgetxattr(fd, XATTR_CIFSD_ATTRIB, &_b, sizeof(_b));
+#        xp_descend_req::process_request()
+# rop.cpp:                        if (fsetxattr(ac.fd, XATTR_CIFSD_ATTRIB, &_b, sizeof(_b), 0) < 0) {
+#        xp_ascend_req::process_request()
+# rop.cpp:                        if (fsetxattr(dp->fd, XATTR_CIFSD_ATTRIB, &_b, sizeof(_b), 0) < 0) {
+#        doUnlinkAt()
+# rop.cpp:                        if (fsetxattr(ac.fd, XATTR_CIFSD_ATTRIB, &_b, sizeof(_b), 0) < 0) {
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+#        setmeta()
+# rop.cpp:                        if (fsetxattr(ac.fd, XATTR_CIFSD_ATTRIB, &_b, sizeof(_b), 0) < 0) {
+# rop.cpp:                                if (fsetxattr(ac.fd, XATTR_CIFSD_ACL, setminfo.smbacl.data(), setminfo.smbacl.size(), 0) < 0) {
+# rop.cpp:                                if (fsetxattr(ac.fd, XATTR_CIFSD_CREATIONTIME, &t, sizeof(t), 0) < 0) {
+# rop.cpp:                        if (fsetxattr(ac.fd, XATTR_CIFSD_ATTRIB, &_b, sizeof(_b), 0) < 0) {
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+#        xp_opennode_req::process_request()
+# rop.cpp:                        if (fsetxattr(tmpac.fd, XATTR_CIFSD_ATTRIB, &_b, sizeof(_b), 0) < 0) {
+#        xp_closenode_req::process_request()
+# rop.cpp:                        if (fsetxattr(dp->fd, XATTR_CIFSD_ATTRIB, &_b, sizeof(_b), 0) < 0) {
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#-----------------------------------------------------------------------------
+copy_file()
+{
+    # Remove that one file, if it exists on destination file system.
+    rm -f ${D}/$1 || true
+    # a)  touch destination_file.     # To create it.
+    touch ${D}/$1 || true
+    # Copy the file.
+    dd if=${S}/$1 of=${D}/$1 bs=1M || true
+    #--------------------------------------
+    # JT GET ACL
+    # Get access control list values, and set them on the new one.
+    SYSTEMACL=`getfattr -n system.cifs_acl -e hex -- ${S}/$1 | tail -n +2 | sed -e 's/^.*=//' || true`
+    #--------------------------------------
+    # JT GET DOSATTRIBUTE 1
+    # Get file attributes.
+    DOSATTR=`getfattr -n user.cifs.dosattrib -e hex -- ${S}/$1 | tail -n +2 | sed -e 's/^.*=//'`
+    #--------------------------------------
+    # JT GET CREATIONTIME
+    # NTFS creationtime value.
+    CREATIONTIME=`getfattr -n user.cifs.creationtime -e hex -- ${S}/$1 | tail -n +2 | sed -e 's/^.*=//' || true`
+    #--------------------------------------
+    # JT SET DOSATTRIBUTE a
+    # Cannot have system files, nor read-only files.
+    let t="${DOSATTR} & 0x22200200" || true
+    let r="${DOSATTR} & 0x26200200" || true                ?? unknown what is allowed ??
+    s=`printf "0x%08x" ${t}` || true
+    #   Masking out ATTR_MASK:
+    #     ATTR_RDONLY     = 0x00000001,
+    #     ATTR_HIDDEN     = 0x00000002,
+    #     ATTR_SYSTEM     = 0x00000004,
+    #     ATTR_ARCHIVE    = 0x00000020,
+    #     ATTR_NOIDX      = 0x00002000,
+    #     ATTR_NOSCRUB    = 0x00020000,
+    #     ATTR_MASK       = (ATTR_RDONLY | ATTR_HIDDEN | ATTR_ARCHIVE | ATTR_NOIDX | ATTR_NOSCRUB)
+    #                     = 0x00022022 -> 0x22200200 byte swapped
+    #   To do: add in other bits: P,X. -- See enum eattr.
+    setfattr -n user.cifs.dosattrib -v ${s} -- ${D}/$1 || true
+    #--------------------------------------
+    # JT SET CREATIONTIME
+    setfattr -n user.cifs.creationtime -v ${CREATIONTIME} -- ${D}/$1 || true
+    #--------------------------------------
+    #--------------------------------------
+    # JT SET ACL
+    setfattr -n system.cifs_acl -v ${SYSTEMACL} -- ${D}/$1 || true
+    #--------------------------------------
+    # JT DONE DONE:
+    # f) Get all other attributes.
+    #-- M=`getfattr -m '-' -e hex -- ${S}/$1 | tail -n +2 | sed -e 's/^.*=//' || true`
+    #-- for i in $M ; do
+    #--         O=`getfattr -n $i -e hex -- ${S}/$1 | tail -n +2 | sed -e 's/^.*=//' || true`
+    #--         setfattr -n $i -v ${O} -- ${D}/$1 || true
+    #-- done
+    #--------------------------------------
+    # JT SET DOSATTRIBUTE b
+    setfattr -n user.cifs.dosattrib -v ${s} -- ${D}/$1 || true
+    # Set dos attributes to correct values -- read-only, system, etc...
+    setfattr -n user.cifs.dosattrib -v ${DOSATTR} -- ${D}/$1 || true
+    # Set dates to reference file. (Assumes reference filesystem is read-only.)
+    touch --reference=${S}/$1 ${D}/$1 || true
+}
+#-----------------------------------------------------------------------------
+directory_attr_plus()
+{
+    SRC="$1"
+    DST="$2"
+    DOSATTR=`getfattr -n user.cifs.dosattrib -e hex -- ${SRC} | tail -n +2 | sed -e 's/^.*=//'`
+    CREATIONTIME=`getfattr -n user.cifs.creationtime -e hex -- ${SRC} | tail -n +2 | sed -e 's/^.*=//' || true`
+    setfattr -n user.cifs.creationtime -v ${CREATIONTIME} -- ${DST} || true
+    SYSTEMACL=`getfattr -n system.cifs_acl -e hex -- ${SRC} | tail -n +2 | sed -e 's/^.*=//' || true`
+    setfattr -n system.cifs_acl -v ${SYSTEMACL} -- ${DST} || true
+    M=`getfattr -m '-' -e hex -- ${SRC} | tail -n +2 | sed -e 's/^.*=//' || true`
+    for i in $M ; do
+        O=`getfattr -n $i -e hex -- ${SRC} | tail -n +2 | sed -e 's/^.*=//' || true`
+        setfattr -n $i -v ${O} -- ${DST} || true
+    done
+    setfattr -n user.cifs.dosattrib -v ${DOSATTR} -- ${DST} || true
+    touch --reference=${SRC} ${DST} || true
+}
+#-----------------------------------------------------------------------------
+for F in $FILES; do
+    if [ -d "$F" ]; then
+        echo "$F is a directory, this script does not handle directories."
+    elif [ -b "$F" -o -c "$F" -o -L "$F" -o -p "$F" ]; then
+        echo "$F is not a normal file, not handled."
+    else
+        time copy_file $F
+    fi
+done
+#-----------------------------------------------------------------------------
+directory_attr_plus $S $D
+#-----------------------------------------------------------------------------
+echo "Done with $0"
+exit 0
+#-----------------------------------------------------------------------------

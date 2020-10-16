@@ -1,0 +1,320 @@
+#!/bin/bash -e
+echo "IN M4-compare $* <------------------------------------------------------------"
+# NOTE: no spaces in file names! That comm -12 followed by for of the output...
+#------------------------------------------------------------------------------
+# set DIR_X = /x -- for showing 8dot3 short names.
+#-- DIR_X="/x"
+DIR_X=
+#------------------------------------------------------------------------------
+if [ "`uname -s`" = "Linux" ]; then
+    echo 'This script is intended to be run on windows, not Linux'
+    exit 1
+fi
+#------------------------------------------------------------------------------
+arg1="$1"
+arg2="$2"
+if [ "${arg1}" = '' ]; then
+    echo 'Need one or two directory arguments to script, two to compare...'
+    exit 1
+fi
+
+V="`echo \"${arg1}\" | sed -e 's;/.*$;;'`"
+SHARE="`echo \"${arg1}\" | sed -e 's;^.*/;;'`"
+
+#------------------------------------------------------------------------------
+#-- ssh Parsec.Backup@${Windows} ./m4-compare "${V}/${Directory}" "${CIFSIP}" "${PW}"
+# Talk about strange bash processing. It deletes a blank argument. Thus 3 is not ''.
+if [ "$4" != "" ]; then
+    unset arg2
+    CIFSIP="$2"
+    WUSR="$3"
+    PW="$4"
+    arg1="${V}/"
+#--??    cmd.exe /c net-use.bat ${V} ${CIFSIP} ${SHARE} 'AD\Parsec.Backup' 'Cobra!Indigo'
+    cmd.exe /c net-use.bat ${V} ${CIFSIP} ${SHARE} "${WUSR}" "${PW}"
+elif [ "$3" != "" ]; then
+    unset arg2
+fi
+#------------------------------------------------------------------------------
+if [ -e "${arg1}" ]; then
+    echo "directory exists: ${arg1}"
+elif [ -e "${V}" ];then
+    arg1="${V}"
+    echo "directory changed to: ${arg1}"
+else
+    echo "directory does not exist? '${arg1}'"
+    exit 0
+fi
+#------------------------------------------------------------------------------
+W=`pwd`
+#------------------------------------------------------------------------------
+O1="${W}/f1"
+L1="${W}/l1"
+S1="${W}/S1"
+rm -f "${O1}" "${L1}" "${L1}.s" "${L1}.u" "${S1}"
+touch "${O1}"
+if [ "${arg2}" != '' ]; then
+    O2="${W}/f2"
+    L2="${W}/l2"
+    S2="${W}/S2"
+    rm -f "${O2}" "${L2}" "${L2}.s" "${L2}.u" "${S2}"
+    touch "${O2}"
+fi
+#------------------------------------------------------------------------------
+get_sparse()
+{
+    D="$1"
+    O="$2"
+    D1=`find "${D}" -type d | sort -u`
+    for d in ${D1} ; do
+        e=`echo $d | sed -e 's;/$;;'`
+        fi=`/bin/ls -1d ${e}/* ${e}/.* | tr -d '\r' | sort -u`
+        for f in ${fi} ; do
+            if [ "$f" != "${e}/." -a "$f" != "${e}/.." -a "$f" != "${e}/*" ]; then
+                a=`fsutil sparse queryflag "$f" | tr -d '\r'`;
+                if [ "$a" != 'This file is NOT set as sparse' ]; then
+                    echo "$f - $a"                                      >> "${O}";
+                fi
+            fi
+        done
+    done
+}
+#------------------------------------------------------------------------------
+echo 'doing get_sparse for arg1'
+get_sparse "${arg1}" "${O1}"
+if [ "${arg2}" != '' ]; then
+    echo 'doing get_sparse for arg2'
+    get_sparse "${arg2}" "${O2}"
+fi
+#------------------------------------------------------------------------------
+get_ls_output()
+{
+    D="$1"
+    O="$2"
+    echo                                                                >> "${O}"
+    echo "ls -lnAR ${D}"                                                >> "${O}"
+    ls -lnAR "${D}" | tr -d '\r' | sed -e '/^$/d' | grep -v '^total '   >> "${O}" 2>&1
+
+    echo                                                                >> "${O}"
+    echo "stat the files"                                               >> "${O}"
+    e=`echo $D | sed -e 's;/$;;'`
+    stat --printf="%A %F h=%h size=%s uid=%u gid=%g - %n\n  birth=%W access=%X modification=%Y - %n\n" ${e}/* \
+                    | tr -d '\r' | sed -e '/^$/d'                       >> "${O}" 2>&1
+}
+#------------------------------------------------------------------------------
+echo 'doing get_get_ls_output for arg1'
+get_ls_output "${arg1}" "${O1}"
+if [ "${arg2}" != '' ]; then
+    echo 'doing get_get_ls_output for arg2'
+    get_ls_output "${arg2}" "${O2}"
+fi
+#------------------------------------------------------------------------------
+get_attribs()
+{
+    D="$1"
+    O="$2"
+    echo                                                                >> "${O}"
+    echo "attrib"                                                       >> "${O}"
+    D1=`find "${D}" -type d | sort -u`
+    for d in ${D1} ; do
+        e=`echo $d | sed -e 's;/$;;'`
+        fi=`/bin/ls -1d ${e}/* ${e}/.* | tr -d '\r' | sort -u`
+        for f in ${fi} ; do
+            if [ "$f" != "${e}/." -a "$f" != "${e}/.." -a "$f" != "${e}/*" ]; then
+                a=`cmd.exe /c attrib "$f" | tr -d '\r'`
+                echo "$a"                                               >> "${O}"
+            fi
+        done
+    done
+}
+#------------------------------------------------------------------------------
+echo 'doing get_attribs for arg1'
+get_attribs "${arg1}" "${O1}"
+if [ "${arg2}" != '' ]; then
+    echo 'doing get_attribs for arg2'
+    get_attribs "${arg2}" "${O2}"
+fi
+#------------------------------------------------------------------------------
+get_icacls()
+{
+    D="$1"
+    O="$2"
+    echo "icacls"                                                       >> "${O}"
+    D1=`find "${D}" -type d | sort -u`
+    for d in ${D1} ; do
+        e=`echo $d | sed -e 's;/$;;'`
+        fi=`/bin/ls -1d ${e}/* ${e}/.* | tr -d '\r' | sort -u`
+        for f in ${fi} ; do
+            if [ "$f" != "${e}/." -a "$f" != "${e}/.." -a "$f" != "${e}/*" ]; then
+                a=`cmd.exe /c icacls "$f" /C /L | tr -d '\r'`
+                echo "$a"                                               >> "${O}"
+                a=`cmd.exe /c icacls "$f" /verify /C /L /Q | tr -d '\r'`
+                if [ "$a" != 'Successfully processed 0 files; Failed processing 0 files' ]; then
+                    echo "$a"                                               >> "${O}"
+                fi
+            fi
+        done
+    done
+}
+#------------------------------------------------------------------------------
+get_icacls "${arg1}" "${O1}"
+if [ "${arg2}" != '' ]; then
+    get_icacls "${arg2}" "${O2}"
+fi
+#------------------------------------------------------------------------------
+# On dir command,  /tw=last written, /tc=creation, /ta=last access.
+get_dirs_output()
+{
+    D="$1"
+    O="$2"
+    for t in /tw /tc /ta; do
+        cd "${D}"                                     # NOTE!
+        echo                                                                >> "${O}"
+        echo cmd.exe /c dir /ON /ah /q /r /s "$t" ${DIR_X}                  >> "${O}"
+        cmd.exe /c dir /ON /ah /q /r /s "$t" ${DIR_X} | tr -d '\r' | sed -e '/^$/d' | \
+            grep -v ' Dir(s) .* bytes free$' | \
+            grep -v ' Total Files Listed:$' | \
+            grep -v ' File(s) .*bytes$' >> "${O}" 2>&1
+
+        echo                                                                >> "${O}"
+        echo cmd.exe /c dir /ON /as /q /r /s "$t" ${DIR_X}                  >> "${O}"
+        cmd.exe /c dir /ON /as /q /r /s "$t" ${DIR_X} | tr -d '\r' | sed -e '/^$/d' | \
+            grep -v ' Dir(s) .* bytes free$' | \
+            grep -v ' Total Files Listed:$' | \
+            grep -v ' File(s) .*bytes$' >> "${O}" 2>&1
+
+        echo                                                                >> "${O}"
+        echo cmd.exe /c dir /ON /q /r /s "$t" ${DIR_X}                      >> "${O}"
+        cmd.exe /c dir /ON /q /r /s "$t" ${DIR_X} | tr -d '\r' | sed -e '/^$/d' | \
+            grep -v ' Dir(s) .* bytes free$' | \
+            grep -v ' Total Files Listed:$' | \
+            grep -v ' File(s) .*bytes$' >> "${O}" 2>&1
+    done
+}
+#------------------------------------------------------------------------------
+get_dirs_output "${arg1}" "${O1}"
+if [ "${arg2}" != '' ]; then
+    get_dirs_output "${arg2}" "${O2}"
+fi
+#------------------------------------------------------------------------------
+# Run commands for *.bat ... to get output, check names and short-names right.
+BATS=`find "${D}" -name '*.bat' | sort -u`
+# Must add the 8dot3 directly set file name(s).
+BATS="${BATS} pa-3.bat pb-3.bat pc-3.bat"
+for b in ${BATS} ; do
+    echo "running ${b}"    >> "${O1}"
+    cmd.exe /c ${b} | tr -d '\r' | sed -e '/^$/d' >> "${O1}" || true
+done
+#------------------------------------------------------------------------------
+# Turn of non-zero exit/return status being an error.
+#------------------------------------------------------------------------------
+if [ "${arg2}" != '' ]; then
+    sed --in-place "${O2}" -e "s;${arg2};${arg1};g"
+    W1=`echo "${arg1}" | sed -e 's/^c:/C:/' -e 's;/;\\\\\\\\;g'`
+    W2=`echo "${arg2}" | sed -e "s/^c:/C:/" -e 's;/;\\\\\\\\;g'`
+    sed --in-place "${O2}" -e "s;${W2};${W1};g"
+    echo
+    echo "diff command outputs ${arg1} ${arg2} ($O1 $O2) -- ${arg2} edited..."
+    diff -U 9 "${O1}" "${O2}" | grep -v '^ '
+fi
+#------------------------------------------------------------------------------
+get_hardlinks()
+{
+    D="$1"
+    O="$2"
+    /bin/ls -1i "${D}"/ | sed -e 's/^  *//' | sort -n > "${O}"
+    sed -e 's/ .*$//' < "${O}" > "${O}.s"
+    T1=`wc -l "${O}.s" | sed -e 's/^  *//' -e 's/ .*$//'`
+    echo "Number of files in ${D} (${T1})"
+    # Number of hard links.
+    T2=`uniq -d "${O}.s" | tee "${O}.u" | wc -l`
+    echo "Number of hardlinks in ${D} (${T2})"
+}
+#------------------------------------------------------------------------------
+# Get hardlinks.
+get_hardlinks "${arg1}" "${L1}"
+A1="${T1}"                              # Number of files.
+B1="${T2}"                              # Number of hard links.
+echo "Number of files=${A1}  Number of hard links=${B1}" >> "${O1}"
+
+if [ "${arg2}" != '' ]; then
+    get_hardlinks "${arg2}" "${L2}"
+    A2="${T1}"                          # Number of files.
+    B2="${T2}"                          # Number of hard links.
+    #--------------------
+    if [ "${A1}" -ne "${A2}" ]; then
+        echo "Number of files mismatch (via ls) in ${arg1} (${A1}) verses ${arg2} (${A2})"
+    fi
+    #--------------------
+    echo 'Check hard link matches...'
+    if [ "${B1}" -ne "${B2}" ]; then
+        echo "Number of hard links does not match (${B1} verses ${B2})"
+    else
+        # Make sure file names are the same for the hard links.
+        C1=`cat "${L1}.u"`
+        C2=`cat "${L2}.u"`
+        t=0
+        # We have the hardlink inodes in C1 and C2 for each.
+        for i in ${C1} ; do
+            D1=`grep "^$i " "${L1}" | sed -e 's/^[0-9]* //' | sort`
+            D1=`echo "${D1}"`
+            # D1 is file names for first hardlink inodes.
+            m=0                 # flag for match not found
+            for j in ${C2} ; do
+                E2=`grep "^$j " "${L2}" | sed -e 's/^[0-9]* //' | sort`
+                E2=`echo "${E2}"`
+                if [ "$E1" = "$E2" ] ; then
+                    m=1
+                fi
+            done
+            if [ "$m" -eq 0 ]; then
+                echo "Hardlink file names do not match: $i : ${E1}"
+                echo "   Possible inodes ${C2} -- sorry, giving up how to print error message."
+                    t=1
+            fi
+        done
+        if [ "$t" -eq 0 ]; then
+            echo 'Looks good!'
+        fi
+    fi
+fi
+#------------------------------------------------------------------------------
+if [ "${arg2}" != '' ]; then
+    # Need three things, (2) files different, and files the same.
+    /bin/ls -1A "${arg1}" > "${S1}" 2>&1
+    /bin/ls -1A "${arg2}" > "${S2}" 2>&1
+    echo
+    N=`comm -23 "${S1}" "${S2}"`             # Files only in S1.
+    if [ "${N}" != '' ]; then
+        echo "Files only in ${arg1}:"
+        comm -23 "${S1}" "${S2}"
+        echo
+    fi
+    N=`comm -13 "${S1}" "${S2}"`             # Files only in S2.
+    if [ "${N}" != '' ]; then
+        echo "Files only in ${arg2}:"
+        comm -13 "${S1}" "${S2}"
+        echo
+    fi
+    N=`comm -12 "${S1}" "${S2}"`             # Files the same in both files.
+    if [ "${N}" != '' ]; then
+        echo "Common files in ${arg1} and ${arg2}:"
+        comm -12 "${S1}" "${S2}"
+        echo
+    fi
+    for n in $N; do
+        # Save last access times, restore after diff.
+        s1=`stat --printf='%x' "${arg1}/${n}"`
+        s2=`stat --printf='%x' "${arg2}/${n}"`
+        diff -s -U 0 "${arg1}/${n}" "${arg2}/${n}"
+        # Restore last access times.
+        touch --time=access --date="${s1}" "${arg1}/${n}"
+        touch --time=access --date="${s2}" "${arg2}/${n}"
+    done
+fi
+#------------------------------------------------------------------------------
+echo "Done with $0 $* <------------------------------------------------------------"
+exit 0
+#------------------------------------------------------------------------------
+# vim: tabstop=8 expandtab shiftwidth=4 softtabstop=8
+# End of script M4-compare

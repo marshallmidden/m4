@@ -1,0 +1,130 @@
+#!/bin/bash -e
+echo "IN GET-INFO $* <------------------------------------------------------------"
+# ${W}/${D}/GET-INFO "${V}" "${SHARE}" "${IP} "${CIFSIP}" "${WUSR}" "${PW}"
+#-----------------------------------------------------------------------------
+W=`pwd`
+D=`dirname $0`
+f=${D:0:1}
+if [ "$f" = '/' ]; then
+    W=''
+    D=${D:1}
+    D=`echo "${D}" | sed -e 's;/\.$;;'`
+fi
+#-----------------------------------------------------------------------------
+usage()
+{
+    echo '------------------------------------------------------------------------------'
+    echo 'Usage:'
+    echo '1)  Volume    - Volume on windows box to setup. cygwin format.'
+    echo '2)  Directory - Directory on windows box to setup. cygwin format.'
+    echo '                Note: normal slashes, not back-slashes.'
+    echo '3)  IP        - IP/DNS name of windows box to setup file system with.'
+    echo '4)  CIFSIP    - IP/DNS name of storage to mount on windows box.'
+    echo '5)  WUSR      - WINDOWS USER for storage mount.'
+    echo '6)  PW        - PW for storage.'
+    echo "Examples:     ./GET-INFO 'M:' 'my-share-src' 172.wi.nd.ows 172.ne.ta.pp 'ad\\Parsec.Backup' 'my_pw'"
+    echo '------------------------------------------------------------------------------'
+    exit 1
+}
+#-----------------------------------------------------------------------------
+V="$1"			# Volume
+if [ "${V}" = "" ]; then
+    usage 'Missing first argument to script...'
+fi
+V=`echo "${V}" | tr a-z A-Z`
+#-----------------------------------------------------------------------------
+Directory="$2"
+if [ "${Directory}" = "" -a "$3" = "" ]; then
+    usage 'Missing second argument to script...'
+fi
+dir_win=`echo ${Directory} | sed -e 's;/;\\\\;g'`
+echo "Windows form of directory='${dir_win}'"
+#-----------------------------------------------------------------------------
+Windows="$3"
+if [ "${Windows}" = "" ]; then
+    usage 'Missing third argument to script...'
+fi
+#-----------------------------------------------------------------------------
+CIFSIP="$4"
+if [ "${CIFSIP}" = "" ]; then
+    CIFSIP="${Windows}"
+fi
+#-----------------------------------------------------------------------------
+WUSR="$5"
+PW="$6"
+#-----------------------------------------------------------------------------
+# NOTDONEYET
+if [ "$7" != "" ]; then
+    usage 'Too many arguments to script...'
+fi
+#=============================================================================
+M="/mnt/${CIFSIP}/${Directory}"
+O="outputs/f1-linux-${CIFSIP}-${Directory}"
+rm -f ${O}
+touch ${O}
+#-----------------------------------------------------------------------------
+uname -rv								# Save kernel being used.
+#-----------------------------------------------------------------------------
+vers=`mount | grep cifs | grep "${M}" | sed -e 's/^.*,vers=/vers=/' -e 's/,.*$//;'`
+if [ "$vers" = '' ]; then
+    echo "Directory ${M} not mounted?"
+    exit 1
+fi
+#-----------------------------------------------------------------------------
+scp ${W}/${D}/M4-compare Parsec.Backup@${Windows}:m4-compare		# Put script on windows machine.
+
+if [ "${PW}" = "" ]; then
+    ssh Parsec.Backup@${Windows} ./m4-compare "${V}/${Directory}"
+    scp Parsec.Backup@${Windows}:f1 ${W}/${D}/../outputs/f1-${Windows}-${Directory}	# Save dir output.
+else
+    ssh Parsec.Backup@${Windows} ./m4-compare "${V}/${Directory}" "${CIFSIP}" "${WUSR}" "${PW}"
+    scp Parsec.Backup@${Windows}:f1 ${W}/${D}/../outputs/f1-${CIFSIP}-${Directory}	# Save dir output.
+fi
+
+#-----------------------------------------------------------------------------
+print_linux_info()
+{
+    f="$1"
+    # Information from linux viewpoint on file.
+    ls -lAd "${f}" >> "${O}" || true
+    # The three Linux defined attributes.
+    getfattr -n system.cifs_acl -e hex -- "${f}" 2>/dev/null | tail -n +2 | sed -e '/^$/d' >> "${O}" || true
+    getfattr -n user.cifs.creationtime -e hex -- "${f}" 2>/dev/null | tail -n +2 | sed -e '/^$/d' >> "${O}" || true
+    getfattr -n user.cifs.dosattrib -e hex -- "${f}" 2>/dev/null | tail -n +2 | sed -e '/^$/d' >> "${O}" || true
+    # Any user added attributes.
+    getfattr -d -e hex -- "${f}" 2>/dev/null | tail -n +2 | sed -e '/^$/d' >> "${O}" || true
+#--     if [ "${vers}" != 'vers=1.0' -a "$1" != 'vers=2.0' ]; then
+#-- 	    smbinfo fileallinfo "${f}" >> "${O}" || true        # FileAllInfo
+#-- 	    smbinfo filefsfullsizeinfo "${f}" >> "${O}" || true # FileFsFullSizeInfo
+#-- 	    smbinfo fsctl-getobjid "${f}" >> "${O}" || true     # objectid of file and GUID
+#-- 	    smbinfo getcompression "${f}" >> "${O}" || true     # compression setting
+#-- 	    smbinfo list-snapshots "${f}" >> "${O}" || true     # List previous backup versions
+#-- 	    smbinfo quota "${f}" >> "${O}" || true              # quota
+#-- 	    smbinfo secdesc "${f}"  >> "${O}" || true           # security descriptor
+#-- 	    smbinfo keys "${f}" >> "${O}" || true               # decryption
+#--     fi
+    getcifsacl "${f}" >> "${O}" || true
+}
+#-----------------------------------------------------------------------------
+# Now get stuff from the parsec lightspeed (linux) side.
+# a) attributes
+# b) smbinfo
+
+# Find all directories - including main/first one.
+D1=`find ${M} -type d || true`
+# Go through each directory.
+for d in ${D1} ; do
+    # Print linux information for directory.
+    print_linux_info "${d}"
+    for f in ${d}/* ${d}/.* ; do
+	# Ignore . and .. directories.
+	if [ "${f}" != "${d}/." -a "${f}" != "${d}/.." -a "${f}" != "${d}/*" ]; then
+	    print_linux_info "${f}"
+	fi
+    done
+done
+#-----------------------------------------------------------------------------
+echo "Done with $0, output in file '${O}'."
+exit 0
+#-----------------------------------------------------------------------------
+

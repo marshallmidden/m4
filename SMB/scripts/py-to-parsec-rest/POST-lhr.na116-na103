@@ -1,0 +1,52 @@
+#!/bin/bash -ex
+# Update creationtime and utimes on a directory and sublevels.
+#-----------------------------------------------------------------------------
+NAMES='na116'
+NAMED='na103'
+SS="cifs_v1"
+DS="m4_smb_v2"
+IPS='172.22.14.116'
+IPD='172.22.15.103'
+#-----------------------------------------------------------------------------
+make mount_${NAMES}_${SS}
+make mount_${NAMED}_${DS}
+#-----------------------------------------------------------------------------
+S="/mnt/${IPS}/${SS}"
+D="/mnt/${IPD}/${DS}"
+#-----------------------------------------------------------------------------
+# Get a list of files, in reverse order -- so directory is after files in directory.
+rm -f /tmp/AAA.POST_LHR
+( cd "${D}" && find . | tac | sed -e "s/^\(.*\)$/abc '\1'/" > /tmp/AAA.POST_LHR )
+#-----------------------------------------------------------------------------
+abc()
+{
+    f="$1"
+    if [ "${f}" != '.' -a "${f}" != '..' ]; then
+        # NTFS creationtime value.
+        CT=`getfattr -n user.cifs.creationtime -e hex -- "${S}/${f}" | tail -n +2 | sed -e 's/^.*=//' || true`
+        setfattr -n user.cifs.creationtime -v "${CT}" -- "${D}/${f}" || true
+
+        # Set dates to reference file. (Assumes reference filesystem is read-only.)
+        touch --reference="${S}/${f}" "${D}/${f}" || true
+    fi
+}
+#-----------------------------------------------------------------------------
+directory_attr_plus()
+{
+    SRC="$1"
+    DST="$2"
+    CT=`getfattr -n user.cifs.creationtime -e hex -- ${SRC} | tail -n +2 | sed -e 's/^.*=//' || true`
+    setfattr -n user.cifs.creationtime -v ${CT} -- ${DST} || true
+    touch --reference=${SRC} ${DST} || true
+}
+#-----------------------------------------------------------------------------
+source /tmp/AAA.POST_LHR
+#-----------------------------------------------------------------------------
+directory_attr_plus "${S}" "${D}"
+#-----------------------------------------------------------------------------
+make umount_${NAMES}_${SS}
+make umount_${NAMED}_${DS}
+#-----------------------------------------------------------------------------
+echo "Done with $0"
+exit 0
+#-----------------------------------------------------------------------------

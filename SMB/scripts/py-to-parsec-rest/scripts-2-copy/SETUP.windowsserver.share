@@ -1,0 +1,191 @@
+#!/bin/bash -e
+echo "In $0 $* <------------------------------------------------------------"
+#-----------------------------------------------------------------------------
+# The intention of this script is to set up a share on a windows machine to
+# have different types of files, permissions, and three owners of files.
+# It tried to be automatic, but you must be local administrator to do SYMLINK's.
+#-----------------------------------------------------------------------------
+W=`pwd`			# Where script is being run from (i.e. home directory?).
+D=`dirname $0`		# Where this script is located and being run.
+f=${D:0:1}
+if [ "$f" = '/' ]; then
+    W=''
+    D=${D:1}
+    D=`echo "${D}" | sed -e 's;/\.$;;'`
+fi
+#-----------------------------------------------------------------------------
+usage()
+{
+    echo '------------------------------------------------------------------------------'
+    echo 'Usage:'
+    echo '1)  Volume    - Volume on windows box to setup. cygwin format.'
+    echo '2)  Directory - Directory on windows box to setup. cygwin format.'
+    echo '                Note: normal slashes, not back-slashes.'
+    echo '3)  IP        - IP/DNS name of network CIFS share to setup file system on.'
+    echo '4)  Server    - IP/DNS name of windows box to setup file system with.'
+    echo '5)  User1     - User#1 on windows box to login with and own some files.'
+    echo '6)  User2     - User#2 on windows box to login with and own some files.'
+    echo '7)  User3     - User#3 on windows box to login with and own some files.'
+    echo '8)  User4     - Local Administrative User on windows box to login with...'
+    echo "                Note: Users default to Parsec.Admin, Parsec.Backup, m4, special."
+    echo
+    echo "Examples:     ./SETUP.windowsserver.share'c:' 'my-share-src' 172.12.34.56 Win2012 me myself I"
+    echo "              ./SETUP.windowsserver.share'c:' 'my-share-dst' 98.76.54.32 Win2012.parsec.com"
+    echo '------------------------------------------------------------------------------'
+    exit 1
+}
+#-----------------------------------------------------------------------------
+V="$1"			# Volume
+if [ "${V}" = "" ]; then
+    usage 'Missing first argument to script...'
+fi
+V=`echo "${V}" | tr a-z A-Z`
+#-----------------------------------------------------------------------------
+Directory="$2"
+if [ "${Directory}" = "" ]; then
+    usage 'Missing second argument to script...'
+fi
+dir_win=`echo ${Directory} | sed -e 's;/;\\\\;g'`
+echo "Windows form of directory='${dir_win}'"
+#-----------------------------------------------------------------------------
+NetworkShare="$3"
+if [ "${NetworkShare}" = "" ]; then
+    usage 'Missing third argument to script...'
+fi
+#-----------------------------------------------------------------------------
+Windows="$4"
+if [ "${Windows}" = "" -o "${Windows}" = "${NetworkShare}" -o "${Windows}" = '-' ]; then
+    echo "Missing fourth argument to script, using ${NetworkShare}"
+    Windows="${NetworkShare}"
+    NetworkShare=''
+fi
+#-----------------------------------------------------------------------------
+User1="$5"
+if [ "${User1}" = "" ]; then
+    User1="Parsec.Admin@${Windows}"
+fi
+#-----------------------------------------------------------------------------
+User2="$6"
+if [ "${User2}" = "" ]; then
+    User2="Parsec.Backup@${Windows}"
+fi
+#-----------------------------------------------------------------------------
+User3="$7"
+if [ "${User3}" = "" ]; then
+    User3="m4@${Windows}"
+fi
+#-----------------------------------------------------------------------------
+# Administrative user.
+User4="$8"
+if [ "${User4}" = "" ]; then
+    User4="`echo "${Windows}" | sed -e 's/\..*$//'`+administrator@${Windows}"
+fi
+#-----------------------------------------------------------------------------
+if [ "$9" != "" ]; then
+    usage 'Too many arguments to script...'
+fi
+#=============================================================================
+echo "V=${V} Directory=${Directory} dir_win=${dir_win} NetworkShare=${NetworkShare}"
+echo "Windows=${Windows} User1=${User1} User2=${User2} User3=${User3} User4=${User4}"
+#=============================================================================
+set -x
+#-----------------------------------------------------------------------------
+# Put scripts on windows machine.
+#-----------------------------------------------------------------------------
+# Script to do most of the setup.
+scp ${W}/${D}/M4-setup-windows ${User1}:m4-setup-windows
+scp ${W}/${D}/M4-setup-windows ${User2}:m4-setup-windows
+scp ${W}/${D}/M4-setup-windows ${User3}:m4-setup-windows
+#--------------------
+# Script to run powershell and make a 'soft' link (.lnk - like linux 'ln -s').
+scp ${W}/${D}/M4-shortcut ${User1}:m4-shortcut
+scp ${W}/${D}/M4-shortcut ${User2}:m4-shortcut
+scp ${W}/${D}/M4-shortcut ${User3}:m4-shortcut
+#--------------------
+scp ${W}/${D}/M4stream.bat ${User1}:m4stream.bat
+scp ${W}/${D}/M4stream.bat ${User2}:m4stream.bat
+scp ${W}/${D}/M4stream.bat ${User3}:m4stream.bat
+#--------------------
+# Mount netapp on windows machine script, m4-setup-windows calls it.
+scp ${W}/${D}/Net-use.bat ${User1}:net-use.bat
+scp ${W}/${D}/Net-use.bat ${User2}:net-use.bat
+scp ${W}/${D}/Net-use.bat ${User3}:net-use.bat
+#--------------------
+# Run initial script on windows machine.
+ssh ${User1} ./m4-setup-windows "${Directory}" pa "${V}" "${NetworkShare}"
+ssh ${User2} ./m4-setup-windows "${Directory}" pb "${V}" "${NetworkShare}"
+ssh ${User3} ./m4-setup-windows "${Directory}" pc "${V}" "${NetworkShare}"
+#-----------------------------------------------------------------------------
+# Scripts to be run as admin user.
+scp -p ${W}/${D}/M4-setup-admin ${User4}:m4-setup-admin
+scp -p ${W}/${D}/Net-use.bat ${User4}:net-use.bat
+# Local Administrator - la
+ssh ${User4} ./m4-setup-admin "${V}/${Directory}" la "${NetworkShare}" 'AD\\Parsec.Backup' 'Cobra!Indigo'
+#=============================================================================
+set +x
+# On linux, use setfattr to create files with all possible attributes set.
+# Set each bit of user.cifs.dosattrib (32 of them).
+#-----------------------------------------------------------------------------
+FILEPREFIX='A'
+if [ "${NetworkShare}" != '' ]; then
+    M="/mnt/${NetworkShare}/${Directory}"
+else
+    M="/mnt/${Windows}/${Directory}"
+fi
+#-----------------------------------------------------------------------------
+make_file()
+{
+    h=`printf "0x%08x" ${1}`			|| true
+    f="${M}/${FILEPREFIX}.${h}"
+    rm -f "${f}"
+    echo "File ${FILEPREFIX}.${h} created." > "${f}"
+    setfattr -n user.cifs.dosattrib -v "${h}" -- "${f}"	|| true
+}
+#-----------------------------------------------------------------------------
+d=1						|| true
+e=1						|| true
+while [ "$d" -le 32 ]; do
+    make_file "$e"
+    let d=$d+1					|| true
+    let e=$e*2					|| true
+done
+#-----------------------------------------------------------------------------
+set -x
+# Set some user specific xattrs on a couple files.
+f="${M}/AAA1.xattr"
+echo "File AAA1.xattr created." > "${f}"
+setfattr -n "user.AAA1.xattr-yes-it-is" -v "AAA1.xattr value" -- "${f}" || true
+#--------------------
+f="${M}/AAA2.xattr"
+echo "File AAA2.xattr created." > "${f}"
+setfattr -n "user.AAA2.xattr-yes-it-is" -v "AAA2.xattr value" -- "${f}" || true
+#=============================================================================
+# Script to get output of directory -- lots to get. (Missing second arg, only get output.)
+scp ${W}/${D}/M4-compare ${User2}:m4-compare	# Only backup can read all of them.
+#--------------------
+ssh ${User2} ./m4-compare "${V}/${Directory}" "${NetworkShare}" 'AD\\Parsec.Backup' 'Cobra!Indigo'
+set +x
+#=============================================================================
+# Save dir output of directory layout - information - etc.
+S=`echo "${V}/${Directory}" | sed -e 's;^.*/;;'`	# Toss volume letter.
+# Cleanup from previous runs.
+rm -f "${W}/${D}/../outputs/output-${S}-setup-${Windows}"
+scp ${User2}:f1 "${W}/${D}/../outputs/output-${S}-setup-${Windows}"
+#=============================================================================
+# See linux getxfattr of all files."
+#=============================================================================
+for f in ${M}/*; do
+    X=`getfattr -m '-' -e hex -- ${f} | tail -n +2 | sed -e 's/^.*=//' || true`
+    for i in $X ; do
+	O=`getfattr -n "$i" -e hex -- ${f} | tail -n +2 | sed -e 's/^.*=//' || true`
+	echo "File ${f} has attribute ${i} with value '${O}'." >>"${W}/${D}/../outputs/output-${S}-setup-${Windows}"
+    done
+done
+#=============================================================================
+cat "${W}/${D}/../outputs/output-${S}-setup-${Windows}" | tr -d "\r" | sed -e '/^$/d' >A
+mv A "${W}/${D}/../outputs/output-${S}-setup-${Windows}"
+cat "${W}/${D}/../outputs/output-${S}-setup-${Windows}"
+#=============================================================================
+echo "Done with $0 $* <------------------------------------------------------------"
+exit 0
+#-----------------------------------------------------------------------------
