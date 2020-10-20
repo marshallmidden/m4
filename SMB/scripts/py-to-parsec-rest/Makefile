@@ -215,7 +215,7 @@ all2:
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -f AAA.* output/*
+	rm -f AAA.* outputs/*
 	rm -f DIFF-INFO/{XXX,YYY,ZZZ}* DIFF-SETUPS/{XXX,YYY,ZZZ}*
 #-----------------------------------------------------------------------------
 # End of Makefile
