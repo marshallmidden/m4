@@ -7,7 +7,7 @@
 #-- 	  172.22.12.112		SMB-Server-2019.ad.parsec.lab
 #-- 	  172.22.14.116		NetApp @ 172.22.14.116 - 7mode
 #-- 	  172.22.13.100		Isilon @ 172.22.13.100
-#-- 	  172.22.15.103		NetApp @ 172.22.15.103 - 9.
+#-- 	  172.22.15.113		NetApp @ 172.22.15.113 - 9.
 
 I	= SMB-Server-2008.ad.parsec.lab \
 	  SMB-Server-2012.ad.parsec.lab \

@@ -2,8 +2,8 @@
 .PHONY: all
 all:
 	./diff.w2019.m4-v1.and.na116.cifs_v2
-	./diff.na116.cifs_v1.and.na103.m4_smb_v2
-	./diff.na103.m4_smb_v1.and.is100.m4_v2
+	./diff.na116.cifs_v1.and.cdot113.m4_cdot_02
+	./diff.cdot113.m4_cdot_01.and.is100.m4_v2
 	./diff.is100.m4_v1.and.w2008.m4-v2
 	./diff.w2008.m4-v1.and.w2012.m4-v2
 	./diff.w2012.m4-v1.and.w2016.m4-v2
