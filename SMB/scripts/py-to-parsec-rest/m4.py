@@ -18,6 +18,8 @@ Synopsis:
     history                             # List previous successful commands.
     sleep                               # Sleep (ignored without value).
     sleep N                             # Sleep for number of seconds provided.
+    brief                               # j and p have little output.
+    brief on/off                        # Enable brief output, or back to full output.
 
     j                                   # List all jobs.
     j l                                 # List all jobs.
@@ -116,14 +118,16 @@ list_exit    = ['e', 'x', 'ex', 'exi', 'exit', 'q', 'qu', 'qui', 'quit']
 list_help    = ['he', 'hel', 'help']                                    # Overlaps history.
 list_history = ['hi', 'his', 'hist', 'histo', 'histor', 'history']      # Overlaps help.
 list_sleep   = ['s', 'sl', 'sle', 'slee', 'sleep']
+list_brief   = ['b', 'br', 'bri', 'brie', 'brief']
 
-tab_words = ['projects ', 'jobs ', 'quit', 'exit', 'help', 'history', 'sleep']
+tab_words = ['projects ', 'jobs ', 'quit', 'exit', 'help', 'history', 'sleep', 'brief']
 #-----------------------------------------------------------------------------
 class dnsCompleter:
     def __init__(self, options):
         self.options = options
         self.current_candidates = []
         return
+    # End of __init__
 
     def complete(self, text, state):
         if state == 0:
@@ -164,6 +168,8 @@ class dnsCompleter:
             response = None
         # yrt
         return response
+    # End of complete
+# End of dnsCompleter
 #-----------------------------------------------------------------------------
 def parse_args():
     global args
@@ -182,6 +188,8 @@ def parse_args():
                         help='The REST api version - default "/api/v2".')
     parser.add_argument('--verbose', '-v', action='store_true',
                         help = 'Verbose mode output')
+    parser.add_argument('--brief', '-b', '-br', action='store_true',
+                        help = 'Very brief output for job/project list')
     parser.add_argument('rest', nargs='*',
                         help='Optional command to execute')
     args = parser.parse_args()
@@ -189,7 +197,9 @@ def parse_args():
     if not args.parsec or not args.user or not args.passwd:
         print('Need --parsec and --user and --passwd')
         exit(1)
+    # fi
     return
+# End of parse_args
 #-----------------------------------------------------------------------------
 _httpResponseMap = {
     100 : 'Continue',
@@ -246,11 +256,14 @@ _httpResponseMap = {
     508 : 'Loop Detected',
     511 : 'Network Authentication Required',
 }
+# End of _httpResponseMap
 #-----------------------------------------------------------------------------
 def _httpMap(code):
     if isinstance(code, str):
         code = int(code)
+    # fi
     return _httpResponseMap.get(code, 'UNKNOWN')
+# End of _httpMap
 #-----------------------------------------------------------------------------
 # Print error from 'get/post' request and return.
 def print_get_error(str, response):
@@ -258,11 +271,13 @@ def print_get_error(str, response):
     print(json.dumps(response.json(), indent=4))
     print('Exiting with status 1')
     return
+# End of print_get_error
 #-----------------------------------------------------------------------------
 # Print error from URL 'get/post' request, and exit.
 def print_get_error_exit(str, response):
     print_get_error(str, response)
     exit(1)
+# End of print_get_error_exit
 #-----------------------------------------------------------------------------
 # Called initially.
 def Login(ipaddr, version, user, pw):
@@ -272,14 +287,18 @@ def Login(ipaddr, version, user, pw):
     r = requests.get(url, auth=(user, pw), verify=False)
     if r.status_code != 200:
         print_get_error_exit('Could not login to device! Return response:', r)
+    # fi
     return({'Authorization':'Bearer %s' % r.text}, BASEURL)
+# End of Login
 #-----------------------------------------------------------------------------
 def send_get(authentication, base_url, tackon):
     r = requests.get(base_url + tackon, headers=authentication, verify=False)
     if r.status_code != 200:
         print_get_error("Request for %s failed. Response:" % tackon, r)
         return (False, None)
+    # fi
     return(True, r)
+# End of send_get
 #-----------------------------------------------------------------------------
 def send_post(base_url, authentication, str, goodvalue):
     global pp
@@ -289,9 +308,12 @@ def send_post(base_url, authentication, str, goodvalue):
         results = r.json()
         if results and 'detail' in results:
             print(results['detail'])
+        # fi
         pp.pprint(results)
         return (False, r)
+    # fi
     return (True, r)
+# End of send_post
 #-----------------------------------------------------------------------------
 def send_post_json(base_url, authentication, str, info, goodvalue):
     global pp
@@ -301,9 +323,12 @@ def send_post_json(base_url, authentication, str, info, goodvalue):
         results = r.json()
         if results and 'detail' in results:
             print(results['detail'])
+        # fi
         pp.pprint(results)
         return (False, r)
+    # fi
     return (True, r)
+# End of send_post_json
 #-----------------------------------------------------------------------------
 def send_delete(base_url, authentication, str):
     global pp
@@ -313,80 +338,134 @@ def send_delete(base_url, authentication, str):
         results = r.json()
         if results and 'detail' in results:
             print(results['detail'])
+        # fi
         pp.pprint(results)
         return (False, r)
+    # fi
     return (True, r)
+# End of send_delete
 #-----------------------------------------------------------------------------
 # Called when program starts. This sets projMap dictionary.
 def ProjList(authentication, base_url, vargs, display):
     global projMap
+    global args
 
     if not vargs:
         # If no argument, print out all project ID's and their names.
         (ret, projlist) = send_get(authentication, base_url, 'datamovement/projects')
         if not ret:
             return False
+        # fi
         results = projlist.json()
         if results['projects'] == []:
-            if display:
+            if args.brief and display:
                 print('No projects present.')
+            # fi
             return True
-        if display:
+        # fi
+        if args.brief and display:
             print('Projects:')
+        # fi
         for proj in results['projects']:
             projMap[proj['id']] = proj['name']
             if display:
-                print('%(id)4d: message: %(message)s    name \"%(name)s\"' % proj)
+                if not args.brief:
+                    print('%(id)4d: message: %(message)s    name \"%(name)s\"' % proj)
+                else:
+                    print('%(id)4d' % proj)
+                # fi
+            # fi
+        # rof
         return True
+    # fi
 
     # Possible multiple arguments with names/numbers.
     ret = False
     for id in vargs:
         if not id:
             continue
+        # fi
         if not id.isdigit():
             (rt, projlist) = send_get(authentication, base_url, 'datamovement/projects')
             if not rt:
                 continue
+            # fi
             found = False
             for project in projlist.json()['projects']:
                 if project['name'] == id:
                     print('Project "%s" id %s' % (id, project['id']))
                     found = True
                     break
+                # fi
+            # rof
             if not found:
                 print('Could not get information on project name "%s"' % id)
+            # fi
             continue
+        # fi
 
         # A project id number if here.
         (rt, r) = send_get(authentication, base_url, 'datamovement/projects/%s' % id)
         if not rt:
             continue
+        # fi
         ret = True
         results = r.json()
         print('Project "%s":' % id)
         print(yaml.dump(results, default_flow_style=False))
+    # rof
     return ret
+# End of ProjList
 #-----------------------------------------------------------------------------
 def Help():
     print(__doc__)
     return True
+# End of Help
 #-----------------------------------------------------------------------------
 def Exit(subtype):
     if subtype is None or subtype == '':
         exit(0)
+    # fi
     if not subtype.isdigit():
         print("Error: argument is not a number '%s'" % subtype)
         return False
+    # fi
     exit(int(subtype))
+# End of Exit
 #-----------------------------------------------------------------------------
 def Sleep(subtype):
     if subtype is not None and subtype != '':
         if not subtype.isdigit():
             print("Error: argument is not a number '%s'" % subtype)
             return False
+        # fi
         time.sleep(int(subtype))
+    # fi
     return True
+# End of Sleep
+#-----------------------------------------------------------------------------
+def Brief(subtype):
+    global args
+
+    if subtype is None or subtype == '' or subtype == 'on':
+        args.brief = True
+        print('Brief mode enabled')
+        return True
+    # fi
+    if subtype == 'of' or subtype == 'off':
+        print('Brief mode disabled (i.e. full print mode)')
+        args.brief = False
+        return True
+    # fi
+
+    print("Error: Brief argument '%s' no recognized as 'on' or 'off'" % subtype)
+    if args.brief is None or args.brief:
+        print("Error: Brief left as 'on'")
+    else:
+        print("Error: Brief left as 'off'")
+    # fi
+    return False
+# End of Brief
 #-----------------------------------------------------------------------------
 def History():
     global history
@@ -395,7 +474,9 @@ def History():
     for cmd in history:
         print(' %4d: %s' % (cnt, cmd))
         cnt += 1
+    # rof
     return True
+# End of History
 #-----------------------------------------------------------------------------
 # Called from JobCreate.
 def _parseJobURI(uri):
@@ -404,27 +485,33 @@ def _parseJobURI(uri):
     m = re.match('^nfs://([^/]+)/(.*)$', uri)
     if m:
         return (True, {'type':'NFS', 'host':m.group(1), 'export':'/'+m.group(2)})
+    # fi
 
     # SMB/CIFS
     m = re.match('^cifs://([^/]+)/(.*)$', uri)
     if not m:
         m = re.match('^smb://([^/]+)/(.*)$', uri)
+    # fi
     if m:
         return (True, {'type':'SMB', 'host':m.group(1), 'share':m.group(2),
                  'username':username, 'password':password})
+    # fi
 
     # BLOCK - FC or iSCSI
     m = re.match('^block://(\w+)/*$', uri)
     if m:
         return (True, {'type':'BLOCK', 'serialnumber':m.group(1)})
+    # fi
 
     # Replication
     m = re.match('^parsec://([^/]+)/*$', uri)
     if m:
         return (True, {'type':'REPLICATION', 'host':m.group(1), 'remoteverifier':None})
+    # fi
 
     print("Unknown URI '%s'" % uri)
     return (False,dict())
+# End of _parseJobURI
 #-----------------------------------------------------------------------------
 def JobCreate(authentication, base_url, vargs):
     global _jobId
@@ -433,20 +520,24 @@ def JobCreate(authentication, base_url, vargs):
         print("Must have 4 arguments to create/new:")
         print("   projectId, source, destination, JobName")
         return False
+    # fi
 
     if len(vargs) != 4:
         print("Must have 4 arguments to create/new (not %s):" % len(vargs))
         print("   projectId, source, destination, JobName")
         return False
+    # fi
 
     (rt, s) = _parseJobURI(vargs[1])
     if not rt:
         print("Second argument must be URI for source. nfs://127.0.0.1/vol")
         return False
+    # fi
     (rt, d) = _parseJobURI(vargs[2])
     if not rt:
         print("Third argument must be URI for Destination. smb://127.0.0.1/share")
         return False
+    # fi
 
     id = vargs[0]
     if not id.isdigit():
@@ -455,15 +546,20 @@ def JobCreate(authentication, base_url, vargs):
         if not ret:
             print("Error: First argument is not a number or project name '%s'" % id)
             return False
+        # fi
         found = False
         for project in projlist.json()['projects']:
             if project['name'] == id:
                 id = project['id']
                 found = True
                 break
+            # fi
+        # rof
         if not found:
             print("Could not get information for project name %s" % id)
             return False
+        # fi
+    # fi
 
     # A project id number if here.
     id = int(id)
@@ -479,13 +575,17 @@ def JobCreate(authentication, base_url, vargs):
     (rt, r) = send_post_json(base_url, authentication, 'datamovement/jobs', info, 200)
     if not rt:
         return False
+    # fi
 
     results = r.json()
     if results and 'id' in results:
         print('Job ID: %(id)s' % results)
+    # fi
     if results and 'detail' in results:
         print(results['detail'])
+    # fi
     return True
+# End of JobCreate
 #-----------------------------------------------------------------------------
 # Called from _printJob, which is called from JobList.
 def _jobURL(job):
@@ -497,7 +597,9 @@ def _jobURL(job):
         return 'parsec://%(host)s' % job
     elif job['type'] == 'SMB':
         return 'cifs://%(host)s/%(share)s' % job
+    # fi
     return '%(type)s://???' % job
+# End of _jobURL
 #-----------------------------------------------------------------------------
 # Called from JobList.
 def _printJob(job):
@@ -509,11 +611,14 @@ def _printJob(job):
     if 'message' in job:
         if job['message']:
             mess = job['message']
+        # fi
+    # fi
     print('      state: %(state)s    name: \"%(name)s\"' % job)
     print('      src: \"%s\"' % _jobURL(job['source']))
     print('      dst: \"%s\"' % _jobURL(job['destination']))
     print('      message: %s' % mess)
     return
+# End of _printJob
 #-----------------------------------------------------------------------------
 def JobList(authentication, base_url, vargs):
     if not vargs:
@@ -522,14 +627,27 @@ def JobList(authentication, base_url, vargs):
         (rt, r) = send_get(authentication, base_url, 'datamovement/jobs')
         if not rt:
             return False
+        # fi
         results = r.json()
+        if args.brief:
+            if results['jobs'] != []:
+                for job in results['jobs']:
+                    print('%(id)4d' % job)
+                # rof
+            # fi
+            return True
+        # fi
+
         if results['jobs'] == []:
             print('No jobs present.')
         else:
             print('Jobs:')
             for job in results['jobs']:
                 _printJob(job)
+            # rof
+        # fi
         return True
+    # fi
 
     ret = False
     for jid in vargs:
@@ -538,6 +656,7 @@ def JobList(authentication, base_url, vargs):
             (rt, joblist) = send_get(authentication, base_url, 'datamovement/jobs')
             if not rt:
                 continue
+            # fi
             found = False
             for job in joblist.json()['jobs']:
                 if job['name'] == jid:
@@ -545,13 +664,18 @@ def JobList(authentication, base_url, vargs):
                              (jid, job['id'], job['projectid'], job['state'], job['status']))
                     found = True
                     break
+                # fi
+            # rof
             if not found:
                 print('Could not get information on job name "%s"' % jid)
+            # fi
             continue
+        # fi
         # Must be a number if here
         (rt, r) = send_get(authentication, base_url, 'datamovement/jobs/%s' % jid)
         if not rt:
             continue
+        # fi
         results = r.json()
         if results['status'] == 404:
             print('No job {0} present.'.format(jid))
@@ -559,25 +683,32 @@ def JobList(authentication, base_url, vargs):
             ret = True
             print('Job %s:' % jid)
             print(yaml.dump(results, default_flow_style=False))
+        # fi
+    # rof
     return ret
+# End of JobList
 #-----------------------------------------------------------------------------
 def JobProjList(authentication, base_url, vargs):
     if not vargs:
         print('No project ID present.')
         return False
+    # fi
     if len(vargs) != 1:
         print('Only one project ID allowed.')
         return False
+    # fi
 
     projid = vargs[0]
     if not projid:
         print('No project ID present.')
         return False
+    # fi
     if not projid.isdigit():
         (rt, projlist) = send_get(authentication, base_url, 'datamovement/projects')
         if not rt:
             print('No projects exist.')
             return False
+        # fi
         found = False
         for project in projlist.json()['projects']:
             if project['name'] == projid:
@@ -585,11 +716,15 @@ def JobProjList(authentication, base_url, vargs):
                 found = True
                 projid = project['id']
                 break
+            # fi
+        # rof
         if not found:
             print('Could not get information on project name "%s"' % id)
             return False
+        # fi
     else:
         projid = int(projid)
+    # fi
 
     # A project id number if here.
     (rt, r) = send_get(authentication, base_url, 'datamovement/projects/%s' % projid)
@@ -598,7 +733,9 @@ def JobProjList(authentication, base_url, vargs):
             print('Could not get information on project name "%s" giving id "%s"' % (vargs[0], projid))
         else:
             print('Could not get information on project id "%s"' % projid)
+        # fi
         return False
+    # fi
 
     # We know project projid exists.
     ret = False
@@ -608,6 +745,7 @@ def JobProjList(authentication, base_url, vargs):
     (rt, r) = send_get(authentication, base_url, 'datamovement/jobs')
     if not rt:
         return False
+    # fi
     joblist = r.json()
     if joblist['jobs'] == []:
         print('No jobs present.')
@@ -617,10 +755,15 @@ def JobProjList(authentication, base_url, vargs):
             if job['projectid'] == projid:
                 ret = True
                 _printJob(job)
+            # fi
+        # rof
+    # fi
     if not ret:
         print('No jobs for project ID="%s" present.' % projid)
         return False
+    # fi
     return True
+# End of JobProjList
 #-----------------------------------------------------------------------------
 def JobDele(authentication, base_url, vargs):
     ret = False
@@ -630,22 +773,30 @@ def JobDele(authentication, base_url, vargs):
             (rt, joblist) = send_get(authentication, base_url, 'datamovement/jobs')
             if not rt:
                 continue
+            # fi
             found = False
             for job in joblist.json()['jobs']:
                 if job['name'] == id:
                     id =  job['id']
                     found = True
                     break
+                # fi
+            # rof
             if not found:
                 print('Could not get information on job name "%s"' % id)
                 continue
+            # fi
+        # fi
         # If name, "id" changed.
         (rt, r) = send_delete(base_url, authentication, 'datamovement/jobs/%s' % id)
         if not rt:
             continue
+        # fi
         print('Job Dele', id)
         ret = True
+    # rof
     return ret
+# End of JobDele
 #-----------------------------------------------------------------------------
 def JobRun(authentication, base_url, vargs):
     ret = False
@@ -655,22 +806,30 @@ def JobRun(authentication, base_url, vargs):
             (rt, joblist) = send_get(authentication, base_url, 'datamovement/jobs')
             if not rt:
                 continue
+            # fi
             found = False
             for job in joblist.json()['jobs']:
                 if job['name'] == id:
                     id =  job['id']
                     found = True
                     break
+                # fi
+            # rof
             if not found:
                 print('Could not get information on job name "%s"' % id)
                 continue
+            # fi
+        # fi
         # If name, "id" changed.
         (rt, r) = send_post(base_url, authentication, 'datamovement/jobs/%s/start?verify=false' % id, 202)
         if not rt:
             continue
+        # fi
         print('Job Run', id)
         ret = True
+    # rof
     return ret
+# End of JobRun
 #-----------------------------------------------------------------------------
 def JobVerify(authentication, base_url, vargs):
     ret = False
@@ -680,22 +839,30 @@ def JobVerify(authentication, base_url, vargs):
             (rt, joblist) = send_get(authentication, base_url, 'datamovement/jobs')
             if not rt:
                 continue
+            # fi
             found = False
             for job in joblist.json()['jobs']:
                 if job['name'] == id:
                     id =  job['id']
                     found = True
                     break
+                # fi
+            # rof
             if not found:
                 print('Could not get information on job name "%s"' % id)
                 continue
+            # fi
+        # fi
         # If name, "id" changed.
         (rt, r) = send_post(base_url, authentication, 'datamovement/jobs/%s/start?verify=true' % id, 202)
         if not rt:
             continue
+        # fi
         print('Job Verify', id)
         ret = True
+    # rof
     return ret
+# End of JobVerify
 #-----------------------------------------------------------------------------
 def JobStop(authentication, base_url, vargs):
     ret = False
@@ -705,22 +872,30 @@ def JobStop(authentication, base_url, vargs):
             (rt, joblist) = send_get(authentication, base_url, 'datamovement/jobs')
             if not rt:
                 continue
+            # if
             found = False
             for job in joblist.json()['jobs']:
                 if job['name'] == id:
                     id =  job['id']
                     found = True
                     break
+                # if
+            # rof
             if not found:
                 print('Could not get information on job name "%s"' % id)
                 continue
+            # fi
+        # fi
         # If name, "id" changed.
         (rt,r) = send_post(base_url, authentication, 'datamovement/jobs/%s/stop' % id, 202)
         if not rt:
             continue
+        # fi
         print('Job Stop', id)
         ret = True
+    # rof
     return ret
+# End of JobStop
 #-----------------------------------------------------------------------------
 # NOTDONEYET -- not tested, cleaned up, etc.
 def JobEdit(authentication, base_url, vargs):
@@ -728,6 +903,7 @@ def JobEdit(authentication, base_url, vargs):
     if len(vargs) < 2:
         print('No edit values')
         return False
+    # fi
 
     # Need check vargs is correct format.  NOTDONEYET
 
@@ -749,6 +925,7 @@ def JobEdit(authentication, base_url, vargs):
             del data['warnings']
             del data['message']
             continue
+        # fi
         fields = edit.split('=', 1)
         if fields[0] == 'src.remoteverifier':
             data['source']['remoteverifier'] = fields[1]
@@ -756,6 +933,8 @@ def JobEdit(authentication, base_url, vargs):
         elif fields[0] == 'dst.remoteverifier':
             data['destination']['remoteverifier'] = fields[1]
             del data['destination']['localverifier']
+        # fi
+    # rof
     if data:
         params = {'If-Match':etag}
         url = base_url + 'datamovement/jobs/%s' % id
@@ -766,15 +945,20 @@ def JobEdit(authentication, base_url, vargs):
         results = r.json()
         if results and 'detail' in results:
             print(results['detail'])
+        # fi
+    # fi
     return False
+# End of JobEdit
 #-----------------------------------------------------------------------------
 def JobDisable(authentication, base_url, t_args):
     print("Job Disable is not written.")
     return False
+# End of JobDisable
 #-----------------------------------------------------------------------------
 def JobEnable(authentication, base_url, t_args):
     print("Job Enable is not written.")
     return False
+# End of JobEnable
 #-----------------------------------------------------------------------------
 # Second argument is 'list', 'dele', 'run', 'verify', 'stop', 'start', 'disable', 'enable', or 'stat'.
 # NOTDONEYET - disable, enable, stat
@@ -819,13 +1003,16 @@ def process_job(subtype, t_args, authentication, base_url):
     else:
         print("No job with subtype", subtype, "t_args =", t_args)
         ret = False
+    # fi
     return ret
+# End of process_job
 #-----------------------------------------------------------------------------
 def ProjCreate(authentication, base_url, vargs):
     if not vargs or not vargs or not vargs[0]:
         print("Must have 3 arguments to create/new:")
         print("   projectname [ sourceSMBvers [ destinationSMBvers ] ]")
         return False
+    # fi
 
     if len(vargs) == 1:
         projname = vargs[0]
@@ -843,11 +1030,14 @@ def ProjCreate(authentication, base_url, vargs):
         print("Must have 3 arguments to create/new (not %s):" % len(vargs))
         print("   projectname [ sourceSMBvers [ destinationSMBvers ] ]")
         return False
+    # fi
 
     if srcvers and srcvers == "default":
         srcvers = None
+    # fi
     if dstvers and dstvers == "default":
         dstvers = None
+    # fi
 
     # Create project with projname.
     info = {'name':projname,
@@ -859,8 +1049,10 @@ def ProjCreate(authentication, base_url, vargs):
     (rt, r) = send_post_json(base_url, authentication, 'datamovement/projects', info, 200)
     if not rt:
         return False
+    # fi
     print('Job Created', r.json()['id'])
     return True
+# End of ProjCreate
 #-----------------------------------------------------------------------------
 def ProjDele(authentication, base_url, vargs):
     ret = False
@@ -868,6 +1060,7 @@ def ProjDele(authentication, base_url, vargs):
     for id in vargs:
         if not id:
             continue
+        # fi
         if not id.isdigit():
             # A project name if here.
             if projlist is None:
@@ -875,23 +1068,32 @@ def ProjDele(authentication, base_url, vargs):
                 if not ret:
                     print("Error: argument is not a number or project name '%s'" % id)
                     continue
+                # fi
+            # fi
             found = False
             for project in projlist.json()['projects']:
                 if project['name'] == id:
                     id = project['id']
                     found = True
                     break
+                # fi
+            # rof
             if not found:
                 print("Could not get information for project name %s" % id)
                 continue
+            # fi
+        # fi
 
         # A project id number if here.
         (rt, r) = send_delete(base_url, authentication, 'datamovement/projects/%s' % id)
         if not rt:
             continue
+        # fi
         ret = True
         print('Project %s deleted.' % id)
+    # rof
     return ret
+# End of ProjDele
 #-----------------------------------------------------------------------------
 # Second argument is 'list', 'create', 'dele'
 # NOTDONEYET - 'run', 'verify', 'stop', 'start', 'disable', 'enable', or 'stat'.
@@ -915,7 +1117,9 @@ def process_proj(subtype, t_args, authentication, base_url):
     else:
         print("No project with subtype", subtype, "t_args =", t_args)
         ret = False
+    # fi
     return ret
+# End of process_proj
 #-----------------------------------------------------------------------------
 # Parse and process line.
 def process_line(t, authentication, base_url):
@@ -933,6 +1137,7 @@ def process_line(t, authentication, base_url):
         command = t[0]
         subtype = t[1]
         t_args = t[2:]
+    # fi
 
     # Try to process command.
     if command is None:                 # Ignore nothing given.
@@ -950,12 +1155,16 @@ def process_line(t, authentication, base_url):
         ret = History()
     elif command in list_sleep:
         ret = Sleep(subtype)
+    elif command in list_brief:
+        ret = Brief(subtype)
     else:
         print("Unrecognized command, or not unique", t)
         Help()
         ret = False
+    # fi
 
     return(ret)
+# End of process_line
 #-----------------------------------------------------------------------------
 # Main program follows.
 def main():
@@ -985,6 +1194,7 @@ def main():
     if args.rest and args.rest[0]:
         process_line(args.rest, authentication, base_url)
         return
+    # fi
 
     # Command line history.
     if os.path.exists(HIST_FILE):
@@ -1010,6 +1220,7 @@ def main():
                 line = line.strip()
                 if not sys.stdin.isatty():
                     print('READ>',line)
+                # fi
 
                 # Parse and process line.
                 try:
@@ -1037,6 +1248,7 @@ def main():
             sys.exit(1)
         # yrt
     # elihw
+# End of main
 #-----------------------------------------------------------------------------
 if __name__ == '__main__':
     main()
