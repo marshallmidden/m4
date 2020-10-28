@@ -358,12 +358,12 @@ def ProjList(authentication, base_url, vargs, display):
         # fi
         results = projlist.json()
         if results['projects'] == []:
-            if args.brief and display:
+            if not args.brief and display:
                 print('No projects present.')
             # fi
             return True
         # fi
-        if args.brief and display:
+        if not args.brief and display:
             print('Projects:')
         # fi
         for proj in results['projects']:
