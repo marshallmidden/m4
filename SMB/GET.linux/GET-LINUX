@@ -1,0 +1,102 @@
+#!/bin/bash -e
+echo "IN GET-LINUX $* <------------------------------------------------------------"
+# ${W}/${D}/GET-INFO "${V}" "${SHARE}" "${IP} "${CIFSIP}" "${WUSR}" "${PW}"
+#-----------------------------------------------------------------------------
+W=`pwd`
+D=`dirname $0`
+f=${D:0:1}
+if [ "$f" = '/' ]; then
+    W=''
+    D=${D:1}
+    D=`echo "${D}" | sed -e 's;/\.$;;'`
+fi
+#-----------------------------------------------------------------------------
+usage()
+{
+    echo '------------------------------------------------------------------------------'
+    echo 'Usage:'
+    echo '1)  Directory - Directory on windows box to setup. cygwin format.'
+    echo '                Note: normal slashes, not back-slashes.'
+    echo '2)  CIFSIP    - IP/DNS name of storage to mount on windows box.'
+    echo "Examples:     ./GET-INFO 'my-share-src' 172.ne.ta.pp"
+    echo '------------------------------------------------------------------------------'
+    exit 1
+}
+#-----------------------------------------------------------------------------
+Directory="$1"
+if [ "${Directory}" = "" ]; then
+    usage 'Missing first argument to script...'
+fi
+#-----------------------------------------------------------------------------
+CIFSIP="$2"
+if [ "${CIFSIP}" = "" ]; then
+    usage 'Missing second argument to script...'
+fi
+#-----------------------------------------------------------------------------
+# NOTDONEYET
+if [ "$3" != "" ]; then
+    usage 'Too many arguments to script...'
+fi
+#=============================================================================
+M="/mnt/${CIFSIP}/${Directory}"
+O="f1-linux-${CIFSIP}-${Directory}"
+rm -f ${O}
+touch ${O}
+#-----------------------------------------------------------------------------
+# Save kernel being used. Date/time run, etc.
+uname -rv >> "${O}"
+date >> "${O}"
+#-----------------------------------------------------------------------------
+vers=`mount | grep cifs | grep "${M}" | sed -e 's/^.*,vers=/vers=/' -e 's/,.*$//;'`
+if [ "$vers" = '' ]; then
+    echo "Directory ${M} not mounted?"
+    exit 1
+fi
+#-----------------------------------------------------------------------------
+print_linux_info()
+{
+    echo '------------------------------------------------------------------------------' >> "${O}"
+    f="$1"
+    # Information from linux viewpoint on file.
+    ls -lAd "${f}" >> "${O}" || true
+    # The three Linux defined attributes.
+    getfattr -n system.cifs_acl -e hex -- "${f}" 2>/dev/null | tail -n +2 | sed -e '/^$/d' >> "${O}" || true
+    getfattr -n user.cifs.creationtime -e hex -- "${f}" 2>/dev/null | tail -n +2 | sed -e '/^$/d' >> "${O}" || true
+    getfattr -n user.cifs.dosattrib -e hex -- "${f}" 2>/dev/null | tail -n +2 | sed -e '/^$/d' >> "${O}" || true
+    # Any user added attributes.
+    getfattr -d -e hex -- "${f}" 2>/dev/null | tail -n +2 | sed -e '/^$/d' >> "${O}" || true
+#--     if [ "${vers}" != 'vers=1.0' -a "$1" != 'vers=2.0' ]; then
+#-- 	    smbinfo fileallinfo "${f}" >> "${O}" || true        # FileAllInfo
+#-- 	    smbinfo filefsfullsizeinfo "${f}" >> "${O}" || true # FileFsFullSizeInfo
+#-- 	    smbinfo fsctl-getobjid "${f}" >> "${O}" || true     # objectid of file and GUID
+#-- 	    smbinfo getcompression "${f}" >> "${O}" || true     # compression setting
+#-- 	    smbinfo list-snapshots "${f}" >> "${O}" || true     # List previous backup versions
+#-- 	    smbinfo quota "${f}" >> "${O}" || true              # quota
+#-- 	    smbinfo secdesc "${f}"  >> "${O}" || true           # security descriptor
+#-- 	    smbinfo keys "${f}" >> "${O}" || true               # decryption
+#--     fi
+    getcifsacl "${f}" >> "${O}" || true
+}
+#-----------------------------------------------------------------------------
+# Now get stuff from the parsec lightspeed (linux) side.
+# a) attributes
+# b) smbinfo
+
+# Find all directories - including main/first one.
+D1=`find ${M} -type d || true`
+# Go through each directory.
+for d in ${D1} ; do
+    # Print linux information for directory.
+    print_linux_info "${d}"
+    for f in ${d}/* ${d}/.* ; do
+	# Ignore . and .. directories.
+	if [ "${f}" != "${d}/." -a "${f}" != "${d}/.." -a "${f}" != "${d}/*" ]; then
+	    print_linux_info "${f}"
+	fi
+    done
+done
+#-----------------------------------------------------------------------------
+echo '------------------------------------------------------------------------------' >> "${O}"
+echo "Done with $0, output in file '${O}'."
+exit 0
+#-----------------------------------------------------------------------------
