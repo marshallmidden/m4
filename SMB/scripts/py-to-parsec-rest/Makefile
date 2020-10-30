@@ -52,7 +52,7 @@ O	= "vers=default" \
 	  "vers=default" \
 	  "vers=default" \
 	  "vers=default" \
-	  "vers=1.0" \
+	  "vers=2.0" \
 	  "vers=default" \
 	  "vers=default"
 #--na103 2020-10-08	  "vers=default"  nor 1.0, 2.0, 2.1, 3.0, 3.02, 3.11
@@ -128,17 +128,18 @@ help::
 #-----------------------------------------------------------------------------
 define many_targets
     help::
-	@echo "setup_${word $1,${B}}          - Execute setup script for ${word $1,${I}}"
-	@echo "info_${word $1,${B}}_${word $1,${S}}     - Get information from ${word $1,${I}} share ${word $1,${S}}"
-	@echo "info_${word $1,${B}}_${word $1,${D}}     - Get information from ${word $1,${I}} share ${word $1,${D}}"
-	@echo "rm_files_${word $1,${B}}_${word $1,${S}} - Remove all files on ${word $1,${I}} share ${word $1,${S}}"
-	@echo "rm_files_${word $1,${B}}_${word $1,${D}} - Remove all files on ${word $1,${I}} share ${word $1,${D}}"
-	@echo "mount_${word $1,${B}}          - Mount both shares on /mnt/${word $1,${I}}/"
-	@echo "mount_${word $1,${B}}_${word $1,${S}}    - Mount share on /mnt/${word $1,${I}}/${word $1,${S}}"
-	@echo "mount_${word $1,${B}}_${word $1,${D}}    - Mount share on /mnt/${word $1,${I}}/${word $1,${D}}"
-	@echo "umount_${word $1,${B}}         - Un-mount both shares from /mnt/${word $1,${I}}/"
-	@echo "umount_${word $1,${B}}_${word $1,${S}}   - Un-mount share from /mnt/${word $1,${I}}/${word $1,${S}}"
-	@echo "umount_${word $1,${B}}_${word $1,${D}}   - Un-mount share from /mnt/${word $1,${I}}/${word $1,${D}}"
+	@echo "${word $1,${B}}"
+	@echo "  setup_${word $1,${B}}          - Execute setup script for ${word $1,${I}}"
+	@echo "  info_${word $1,${B}}_${word $1,${S}}     - Get information from ${word $1,${I}} share ${word $1,${S}}"
+	@echo "  info_${word $1,${B}}_${word $1,${D}}     - Get information from ${word $1,${I}} share ${word $1,${D}}"
+	@echo "  rm_files_${word $1,${B}}_${word $1,${S}} - Remove all files on ${word $1,${I}} share ${word $1,${S}}"
+	@echo "  rm_files_${word $1,${B}}_${word $1,${D}} - Remove all files on ${word $1,${I}} share ${word $1,${D}}"
+	@echo "  mount_${word $1,${B}}          - Mount both shares on /mnt/${word $1,${I}}/"
+	@echo "    mount_${word $1,${B}}_${word $1,${S}}  - Mount share on /mnt/${word $1,${I}}/${word $1,${S}}"
+	@echo "    mount_${word $1,${B}}_${word $1,${D}}  - Mount share on /mnt/${word $1,${I}}/${word $1,${D}}"
+	@echo "  umount_${word $1,${B}}         - Un-mount both shares from /mnt/${word $1,${I}}/"
+	@echo "    umount_${word $1,${B}}_${word $1,${S}} - Un-mount share from /mnt/${word $1,${I}}/${word $1,${S}}"
+	@echo "    umount_${word $1,${B}}_${word $1,${D}} - Un-mount share from /mnt/${word $1,${I}}/${word $1,${D}}"
 	@echo ' . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .'
 # . . . . . . . . . . . . . . . . .
     .PHONY: setup_${word $1,${B}}
