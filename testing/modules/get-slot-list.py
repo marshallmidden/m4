@@ -308,6 +308,7 @@ def main(values):
                 all_output.append(tmp_output)
             return err_out
 
+        rp_tmp = []
         rports = glob.glob('{}/rport-*'.format(whereat[0]))
         rports = sorted(rports)
         for p in rports:
@@ -316,16 +317,20 @@ def main(values):
             # Process possible fc_remote_ports/${rp} directory here.
             if os.path.isdir('{}/fc_remote_ports/{}'.format(p, rp)):
                 many0 = readfile('{}/fc_remote_ports/{}/port_name'.format(p, rp))
+                remote_port_name = re.sub('^0x', '', many0[0])
+                remote_port_name = ':'.join(remote_port_name[m:m+2] for m in range(0, len(remote_port_name), 2))
                 many1 = readfile('{}/fc_remote_ports/{}/node_name'.format(p, rp))
+                remote_node_name = re.sub('^0x', '', many1[0])
+                remote_node_name = ':'.join(remote_node_name[m:m+2] for m in range(0, len(remote_node_name), 2))
                 many2 = readfile('{}/fc_remote_ports/{}/port_state'.format(p, rp))
                 many3 = readfile('{}/fc_remote_ports/{}/roles'.format(p, rp))
                 if args.json:
-                    tmp_rports = {'port name':many0[0],
-                                'node name':many1[0],
-                                'port state':many2[0],
+                    tmp_rports = {'remoteportname':remote_port_name,
+                                'remotenodename':remote_node_name,
+                                'portstate':many2[0],
                                 'roles':many3[0]}
                 else:
-                    tmp_rports = '\n    {}  {}  {:<10}  {}'.format(many0[0], many1[0], many2[0], many3[0])
+                    tmp_rports = '\n    {}  {}  {:<10}  {}'.format(remote_port_name, remote_node_name, many2[0], many3[0])
             # See if any target* here.
             rp_targets = glob.glob('{}/target*/*:*:*'.format(p))
             # if no luns for rport, nothing to save or print.
@@ -354,7 +359,7 @@ def main(values):
                                     many3[0])
                 else:
                     rp_tmp_out = { 'lun':rpt_lun[0],
-                                 'SCSI type':scsi_short_device_types[int(many0[0])].strip(),
+                                 'SCSItype':scsi_short_device_types[int(many0[0])].strip(),
                                  'wwid':many1[0].strip(),
                                  'vendor':many2[0].strip(),
                                  'model':many3[0].strip() }
@@ -365,7 +370,7 @@ def main(values):
                     many6 = readfile('{}/state'.format(rp_t))
                     many7 = readfile('{}/access_state'.format(rp_t))
                     if args.json:
-                        rp_tmp_out.update( { 'ioerr cnt':many4[0],
+                        rp_tmp_out.update( { 'ioerrcnt':many4[0],
                                            'dh_state':many5[0].strip(),
                                            'state':many6[0].strip(),
                                            'access_state':many7[0].strip() })
@@ -376,14 +381,21 @@ def main(values):
                     rp_output += [ rp_tmp_out ]
                 else:
                     rp_output += rp_tmp_out
+            # End of for rp_targets
             if args.json:
                 if rp_output:
-                    tmp_rports.update( {'remote targets':rp_output} )
-                    tmp_output.update( tmp_rports )
+                    tmp_rports.update( {'remotetargets':rp_output} )
+                    rp_tmp.append( tmp_rports )
+                elif args.seen:
+                    rp_tmp.append( tmp_rports )
             else:
                 tmp_output += rp_output
-        if args.json and tmp_output:
-            all_output += [ { 'rports': tmp_output } ]
+        # End of for rports
+        if args.json:
+            if rp_tmp:
+                tmp_output.update( { 'rports': rp_tmp } )
+            if tmp_output:
+                all_output.append(tmp_output)
         else:
             all_output.append(tmp_output)
 
@@ -400,8 +412,8 @@ def main(values):
                            'Host', 'PCI Slot', 'Symbolic Name', 'State', 'WWPN',
                                 'Speed', 'Supported Speeds')
             if args.seen or args.luns:
-                tmp_output = tmp_output + '    {:<18}  {:18}  {:<10}  {}\n'.format(
-                             'Seen     port_name', '         node_name', 'port_state', 'roles')
+                tmp_output = tmp_output + '    {:<23}  {:23}  {:<10}  {}\n'.format(
+                             'Seen   remote_port_name', '       remote_node_name', 'port_state', 'roles')
                 tmp_output = tmp_output + '      {:>6}  {:>8}  {:<44}  {:<8}  {}\n'.format(
                              'LUN   ', 'SCSItype', 'wwid', 'vendor', 'model')
             if args.seen:
@@ -415,7 +427,7 @@ def main(values):
 
     #-----------------------------------------------------------------------------
     def parse_lspci():
-        nonlocal args, target_wwpns, initiator_wwpns, physical_slots, ht
+        nonlocal args, target_wwpns, initiator_wwpns, physical_slots, physical_slots_wwn, ht
         #-- nonlocal target_slots
 
         # Information from the lspci command -- slots, etc.
@@ -455,6 +467,9 @@ def main(values):
                     # k = physical slot (which really isn't physical slot ... ).
                     if 'Rev:' not in k:
                         k = re.sub('^.*[ \t]+', '', k)
+                        if not k.isdigit():
+                            continue
+                        k = int(k)
                     else:
                         k = 0
 
@@ -475,9 +490,31 @@ def main(values):
                         symbolic_name = symbolic_name[0]
 
                     if args.json:
-                        physical_slots[k] = { 'slot':k, 'card type and firmware':symbolic_name }
+                        # Find if physical_slot already exists for k.
+                        n = -1;
+                        found = 0
+                        for m in physical_slots:
+                            n += 1
+                            if m['slot'] == k:
+                                found = 1
+                                break
+                        if found == 0:
+                            physical_slots.append( { 'slot':k, 'cardtypeandfirmware':symbolic_name,
+                                                     'port_names': [] } )
+                            n = len(physical_slots) - 1
                     else:
-                        physical_slots[k] = '{:>02} - {}'.format(k, symbolic_name)
+                        t = '{:>02} - {}'.format(k, symbolic_name)
+                        n = -1;
+                        found = 0
+                        for m in physical_slots:
+                            n += 1
+                            if m == t:
+                                found = 1
+                                break
+                        if found == 0:
+                            physical_slots.append(t)
+                            n = len(physical_slots) - 1
+                            physical_slots_wwn.append('')
 
                     port_name = readfile('{}/port_name'.format(whereat[0]))
                     port_name = re.sub('^0x', '', port_name[0])
@@ -485,6 +522,10 @@ def main(values):
                     if port_name is None or port_name == '':
                         continue
                     fc_target_ports.append(port_name)
+                    if args.json:
+                        physical_slots[n]["port_names"].append(port_name)
+                    else:
+                        physical_slots_wwn[n] += ' - ' + port_name
 
                     if args.lots or args.full:
                         port_state = readfile('{}/port_state'.format(whereat[0]))
@@ -494,13 +535,13 @@ def main(values):
                         supported_speeds = readfile('{}/supported_speeds'.format(whereat[0]))
                         supported_speeds = re.sub(' ', '', supported_speeds[0])
                         if args.json:
-                            tmp_output = { 'linux host':host,
-                                           'pci slot':pci_slot,
-                                           'card&firmware':symbolic_name,
-                                           'port state':port_state,
-                                           'port name':port_name,
+                            tmp_output = { 'hostnumber':host,
+                                           'pcislot':pci_slot,
+                                           'cardandfirmware':symbolic_name,
+                                           'portstate':port_state,
+                                           'portname':port_name,
                                            'speed':speed,
-                                           'supported speeds':supported_speeds
+                                           'supportedspeeds':supported_speeds
                                          }
                         else:
                             tmp_output = ' {:<6.6} {:<12.12} {:<17.17} {:<8.8} {:<23.23} {:>7.7} - {}'.format(
@@ -569,11 +610,11 @@ def main(values):
             j = 0
             for a in all_output:
                 if ht[j] == '':
-                    output[j].update( { 'target/host':'Initiator' } )
+                    output[j].update( { 'targetorhost':'Initiator' } )
                 elif ht[j] in target_wwpns.keys():
-                    output[j].update( { 'target/host':'Target' } )
+                    output[j].update( { 'targetorhost':'Target' } )
                 else:
-                    output[j].update( { 'target/host':'Initiator' } )
+                    output[j].update( { 'targetorhost':'Initiator' } )
                 j = j + 1
         else:
             j = 0
@@ -591,7 +632,7 @@ def main(values):
 
     #-----------------------------------------------------------------------------
     def check_target_wwpn():
-        nonlocal wwpn, target_wwpns, physical_slots, initiator_wwpns
+        nonlocal wwpn, target_wwpns, physical_slots, physical_slots_wwn, initiator_wwpns
 
         if args.json:
             err_out = []
@@ -612,24 +653,26 @@ def main(values):
         # Print out any target WWPN not physically present.
         if error:
             output = all_output_T_before()
-            n = []
-            for i in sorted(physical_slots.keys()):
-                n.append(physical_slots[i])
-            if not args.json:
+            if args.json:
+                output.append( {'targets': sorted(target_wwpns.keys()) } )
+                output.append( {'initiators': sorted(initiator_wwpns.keys()) } )
+                output.append( {'physicalslots': physical_slots } )
+                output.append( {'stderr':err_out})
+                print_json('', output)
+            else:
                 print(output, file=sys.stderr)
                 print('targets:', file=sys.stderr)
                 print('  ' + '\n'.join(sorted(target_wwpns.keys())), file=sys.stderr)
                 print('initiators:', file=sys.stderr)
                 print('  ' + '\n'.join(sorted(initiator_wwpns.keys())), file=sys.stderr)
                 print('physical_slots:', file=sys.stderr)
-                print('  ' + '\n'.join(n), file=sys.stderr)
+                m = 0
+                p = []
+                for n in physical_slots:
+                    p.append(n + physical_slots_wwn[m])
+                    m += 1
+                print('  ' + '\n'.join(p), file=sys.stderr)
                 print(err_out, file=sys.stderr)
-            else:
-                output.update( {'targets': sorted(target_wwpns.keys()) } )
-                output.update( {'initiators': sorted(initiator_wwpns.keys()) } )
-                output.update( {'physical slots': n } )
-                output.update( {'stderr':err_out})
-                print_json('', output)
             exit(1)
         return
     # End of check_target_wwpn
@@ -666,7 +709,7 @@ def main(values):
         output = all_output_T_before()
         if args.json:
             if output and output != '':
-                output = { 'qlogic ports': output }
+                output = { 'qlogicports': output }
             else:
                 output = dict()
 
@@ -696,15 +739,17 @@ def main(values):
 
         # (non, kind of) Physical slot output.
         if args.full:
-            m = sorted(physical_slots.keys())
-            n = []
-            for o in m:
-                n.append(physical_slots[o]);
+            n = physical_slots
             if args.json:
                 output.update( {"physical slots":n} )
             else:
                 output += 'physical_slots:\n'
-                output += '  ' + '\n  '.join(n) +'\n'
+                m = 0
+                p = []
+                for n in physical_slots:
+                    p.append(n + physical_slots_wwn[m])
+                    m += 1
+                output += '  ' + '\n  '.join(p) + '\n'
 
         return output
     # End of print_output
@@ -719,7 +764,8 @@ def main(values):
     #-----------------------------------------------------------------------------
     target_wwpns = dict()                       # WWPN's that are targets.
     initiator_wwpns = dict()                    # WWPN's that are initiators.
-    physical_slots = dict()                     # Physical slots of WWPN's.
+    physical_slots = []                         # Physical slots in use for FC cards.
+    physical_slots_wwn = []                     # WWPN's for a physical slot.
     #-- target_slots = dict()                       # Physical slots are targets. (Doesn't work.)
     ht = []                                     # Leading 'T' or ' ' for output lines.
     #-----------------------------------------------------------------------------
