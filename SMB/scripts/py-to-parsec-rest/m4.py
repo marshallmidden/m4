@@ -184,8 +184,8 @@ def parse_args():
                         help='Parsec user name')
     parser.add_argument('--passwd', '-p', type=str, default=os.environ.get('pxPASS', None),
                         help='Parsec password')
-    parser.add_argument('--version', default='/api/v2',
-                        help='The REST api version - default "/api/v2".')
+    parser.add_argument('--version', default='/api/v3',
+                        help='The REST api version - default "/api/v3".')
     parser.add_argument('--verbose', '-v', action='store_true',
                         help = 'Verbose mode output')
     parser.add_argument('--brief', '-b', '-br', action='store_true',
