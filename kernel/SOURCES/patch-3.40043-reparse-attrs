@@ -1,24 +1,7 @@
-diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' '--exclude=objtool' '--exclude=cpupower' a/Makefile b/Makefile
---- a/Makefile	2020-05-12 10:34:40.078363439 -0500
-+++ b/Makefile	2020-05-09 10:20:52.567540691 -0500
-@@ -1,12 +1,12 @@
- # SPDX-License-Identifier: GPL-2.0
- VERSION = 5
- PATCHLEVEL = 3
- SUBLEVEL = 0
--EXTRAVERSION = -2020.04.01.lightspeed.x86_64
-+EXTRAVERSION = -2020.05.04.lightspeed.x86_64
- NAME = Bobtail Squid
- 
- # *DOCUMENTATION*
- # To see a list of typical targets execute "make help"
- # More info can be located in ./README
- # Comments in this file are targeted only to the developer, do not
- # expect to learn how to build the kernel reading this file.
 diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' '--exclude=objtool' '--exclude=cpupower' a/fs/cifs/cifs_ioctl.h b/fs/cifs/cifs_ioctl.h
 --- a/fs/cifs/cifs_ioctl.h	2019-09-15 16:19:32.000000000 -0500
 +++ b/fs/cifs/cifs_ioctl.h	2020-05-11 17:26:41.543179243 -0500
-@@ -52,13 +52,23 @@ struct smb_query_info {
+@@ -53,28 +53,38 @@ struct smb_query_info {
  	__u32   additional_information;
  	__u32   flags;
  	__u32	input_buffer_length;
@@ -34,18 +17,33 @@ diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' 
 +} __packed;
 +
 +
+ struct smb3_key_debug_info {
+ 	__u64	Suid;
+ 	__u16	cipher_type;
+ 	__u8	auth_key[16]; /* SMB2_NTLMV2_SESSKEY_SIZE */
+ 	__u8	smb3encryptionkey[SMB3_SIGN_KEY_SIZE];
+ 	__u8	smb3decryptionkey[SMB3_SIGN_KEY_SIZE];
+ } __packed;
+ 
+ struct smb3_notify {
+ 	__u32	completion_filter;
+ 	bool	watch_tree;
+ } __packed;
+ 
  #define CIFS_IOCTL_MAGIC	0xCF
  #define CIFS_IOC_COPYCHUNK_FILE	_IOW(CIFS_IOCTL_MAGIC, 3, int)
  #define CIFS_IOC_SET_INTEGRITY  _IO(CIFS_IOCTL_MAGIC, 4)
  #define CIFS_IOC_GET_MNT_INFO _IOR(CIFS_IOCTL_MAGIC, 5, struct smb_mnt_fs_info)
  #define CIFS_ENUMERATE_SNAPSHOTS _IOR(CIFS_IOCTL_MAGIC, 6, struct smb_snapshot_array)
  #define CIFS_QUERY_INFO _IOWR(CIFS_IOCTL_MAGIC, 7, struct smb_query_info)
+ #define CIFS_DUMP_KEY _IOWR(CIFS_IOCTL_MAGIC, 8, struct smb3_key_debug_info)
+ #define CIFS_IOC_NOTIFY _IOW(CIFS_IOCTL_MAGIC, 9, struct smb3_notify)
 +#define CIFS_GET_ATTRS _IOWR(CIFS_IOCTL_MAGIC, 8, struct ioctl_smb_query_attrs)
 +
 diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' '--exclude=objtool' '--exclude=cpupower' a/fs/cifs/cifsglob.h b/fs/cifs/cifsglob.h
 --- a/fs/cifs/cifsglob.h	2020-05-12 10:34:40.068363462 -0500
 +++ b/fs/cifs/cifsglob.h	2020-05-12 10:19:17.868297217 -0500
-@@ -495,16 +495,19 @@ struct smb_version_operations {
+@@ -506,18 +506,21 @@ struct smb_version_operations {
  			 umode_t mode,
  			 dev_t device_number);
  	/* version specific fiemap implementation */
@@ -55,6 +53,8 @@ diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' 
  	loff_t (*llseek)(struct file *, struct cifs_tcon *, loff_t, int);
 +
 +        int (*get_reparse_attrs)(unsigned xid, struct cifs_tcon *tcon, struct cifs_sb_info *cifs_sb, const char *full_path, __u32 *out_attrs);
+ 	/* Check for STATUS_IO_TIMEOUT */
+ 	bool (*is_status_io_timeout)(char *buf);
  };
  
 +
@@ -159,7 +159,7 @@ diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' 
  	struct fd src_file;
  	struct inode *src_inode;
  
-@@ -171,14 +247,20 @@ long cifs_ioctl(struct file *filep, unsi
+@@ -174,14 +250,20 @@ long cifs_ioctl(struct file *filep, unsi
  	__u64	ExtAttrBits = 0;
  	__u64   caps;
  
@@ -180,7 +180,7 @@ diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' 
  			caps = le64_to_cpu(tcon->fsUnixInfo.Capability);
  #ifdef CONFIG_CIFS_POSIX
  			if (CIFS_UNIX_EXTATTR_CAP & caps) {
-@@ -252,14 +334,15 @@ long cifs_ioctl(struct file *filep, unsi
+@@ -255,14 +337,15 @@ long cifs_ioctl(struct file *filep, unsi
  			break;
  		case CIFS_IOC_GET_MNT_INFO:
  			if (pSMBFile == NULL)
@@ -199,7 +199,7 @@ diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' 
 diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' '--exclude=objtool' '--exclude=cpupower' a/fs/cifs/smb1ops.c b/fs/cifs/smb1ops.c
 --- a/fs/cifs/smb1ops.c	2019-09-15 16:19:32.000000000 -0500
 +++ b/fs/cifs/smb1ops.c	2020-05-12 10:19:17.948297076 -0500
-@@ -577,14 +577,33 @@ cifs_query_path_info(const unsigned int
+@@ -579,14 +579,33 @@ cifs_query_path_info(const unsigned int
  		else if (tmprc == 0)
  			CIFSSMBClose(xid, tcon, fid.netfid);
  	}
@@ -252,9 +252,9 @@ diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' 
 diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' '--exclude=objtool' '--exclude=cpupower' a/fs/cifs/smb2inode.c b/fs/cifs/smb2inode.c
 --- a/fs/cifs/smb2inode.c	2020-05-12 10:34:40.068363462 -0500
 +++ b/fs/cifs/smb2inode.c	2020-05-12 10:19:17.948297076 -0500
-@@ -886,21 +886,63 @@ smb202_query_path_info(const unsigned in
+@@ -1080,22 +1080,64 @@ smb202_query_path_info(const unsigned in
  		goto out;
- 
+
  	move_smb2_info_to_cifs(data, smb2_data);
  out:
  	kfree(smb2_data);
@@ -280,7 +280,7 @@ diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' 
 +	if (do202)
 +		rc = smb202_compound_op(xid, tcon, cifs_sb, full_path, FILE_READ_ATTRIBUTES, FILE_OPEN, create_options, smb2_data, SMB2_OP_QUERY_INFO);
 +	else
-+		rc =   smb2_compound_op(xid, tcon, cifs_sb, full_path, FILE_READ_ATTRIBUTES, FILE_OPEN, create_options, smb2_data, SMB2_OP_QUERY_INFO);
++		rc =   smb2_compound_op(xid, tcon, cifs_sb, full_path, FILE_READ_ATTRIBUTES, FILE_OPEN, create_options, ACL_NO_MODE, smb2_data, SMB2_OP_QUERY_INFO, NULL);
 +
 +	if (rc)
 +		goto out;
@@ -311,16 +311,17 @@ diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' 
  
 -
  int
- smb2_mkdir(const unsigned int xid, struct cifs_tcon *tcon, const char *name,
+ smb2_mkdir(const unsigned int xid, struct inode *parent_inode, umode_t mode,
+ 	   struct cifs_tcon *tcon, const char *name,
  	   struct cifs_sb_info *cifs_sb)
  {
  	return smb2_compound_op(xid, tcon, cifs_sb, name,
  				FILE_WRITE_ATTRIBUTES, FILE_CREATE,
- 				CREATE_NOT_FILE, NULL, SMB2_OP_MKDIR);
+ 				CREATE_NOT_FILE, mode, NULL, SMB2_OP_MKDIR,
 diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' '--exclude=objtool' '--exclude=cpupower' a/fs/cifs/smb2ops.c b/fs/cifs/smb2ops.c
 --- a/fs/cifs/smb2ops.c	2020-05-12 10:34:40.069363459 -0500
 +++ b/fs/cifs/smb2ops.c	2020-05-12 10:19:17.869297216 -0500
-@@ -4595,14 +4595,17 @@ struct smb_version_operations smb20_oper
+@@ -5009,14 +5009,17 @@ struct smb_version_operations smb20_oper
  	.tree_connect = SMB2_tcon,
  	.tree_disconnect = SMB2_tdis,
  	.qfs_tcon = smb2_qfs_tcon,
@@ -338,7 +339,7 @@ diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' 
  	.set_file_info = smb2_set_file_info,
  	.set_compression = smb2_set_compression,
  	.mkdir = smb2_mkdir,
-@@ -4693,14 +4696,17 @@ struct smb_version_operations smb21_oper
+@@ -5108,14 +5111,17 @@ struct smb_version_operations smb21_oper
  	.tree_connect = SMB2_tcon,
  	.tree_disconnect = SMB2_tdis,
  	.qfs_tcon = smb2_qfs_tcon,
@@ -356,7 +357,7 @@ diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' 
  	.set_file_info = smb2_set_file_info,
  	.set_compression = smb2_set_compression,
  	.mkdir = smb2_mkdir,
-@@ -4793,14 +4799,17 @@ struct smb_version_operations smb30_oper
+@@ -5210,14 +5216,17 @@ struct smb_version_operations smb30_oper
  	.tree_connect = SMB2_tcon,
  	.tree_disconnect = SMB2_tdis,
  	.qfs_tcon = smb3_qfs_tcon,
@@ -374,7 +375,7 @@ diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' 
  	.set_file_info = smb2_set_file_info,
  	.set_compression = smb2_set_compression,
  	.mkdir = smb2_mkdir,
-@@ -4901,14 +4910,17 @@ struct smb_version_operations smb311_ope
+@@ -5321,14 +5330,17 @@ struct smb_version_operations smb311_ope
  	.tree_connect = SMB2_tcon,
  	.tree_disconnect = SMB2_tdis,
  	.qfs_tcon = smb3_qfs_tcon,
@@ -395,18 +396,7 @@ diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' 
 diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' '--exclude=objtool' '--exclude=cpupower' a/fs/cifs/smb2proto.h b/fs/cifs/smb2proto.h
 --- a/fs/cifs/smb2proto.h	2020-05-12 10:34:40.070363457 -0500
 +++ b/fs/cifs/smb2proto.h	2020-05-12 10:19:17.869297216 -0500
-@@ -71,24 +71,28 @@ extern int open_shroot(unsigned int xid,
- 
- extern int open_shroot_202(unsigned int xid, struct cifs_tcon *tcon,
- 			struct cifs_fid *pfid);
- 
- extern void close_shroot(struct cached_fid *cfid);
- extern void move_smb2_info_to_cifs(FILE_ALL_INFO *dst,
- 				   struct smb2_file_all_info *src);
-+
- extern int smb2_query_path_info(const unsigned int xid, struct cifs_tcon *tcon,
- 				struct cifs_sb_info *cifs_sb,
- 				const char *full_path, FILE_ALL_INFO *data,
+@@ -86,14 +86,17 @@ extern int open_shroot(unsigned int xid,
  				bool *adjust_tz, bool *symlink);
  
  extern int smb202_query_path_info(const unsigned int xid, struct cifs_tcon *tcon,
@@ -424,8 +414,3 @@ diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' 
  			      FILE_BASIC_INFO *buf, const unsigned int xid);
  extern int smb311_posix_mkdir(const unsigned int xid, struct inode *inode,
  			       umode_t mode, struct cifs_tcon *tcon,
-Binary files a/rheldup3.x509 and b/rheldup3.x509 differ
-Binary files a/rhelkpatch1.x509 and b/rhelkpatch1.x509 differ
-Binary files a/tools/power/x86/turbostat/turbostat and b/tools/power/x86/turbostat/turbostat differ
-Binary files a/tools/power/x86/x86_energy_perf_policy/x86_energy_perf_policy and b/tools/power/x86/x86_energy_perf_policy/x86_energy_perf_policy differ
-Binary files a/tools/thermal/tmon/tmon and b/tools/thermal/tmon/tmon differ

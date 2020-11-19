@@ -7,6 +7,7 @@ help:
 	@echo '  kb        - kb-clean then do the rpmbuild as done via Jenkins.'
 	@echo '              unpacks source from tar and apply patches.'
 	@echo '  kb-clean  - Get rid of rpmbuild directories/files, etc.'
+	@echo '  prep      - kb-clean then do an rpmbuild -bp to unpack source with patches.'
 	@echo '  kernel    - Used by Jenkins automation scripts to build the'
 	@echo '              kernel for ISO installation and update .tgz files.'
 	@echo ''

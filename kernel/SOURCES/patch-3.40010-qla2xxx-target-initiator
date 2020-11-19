@@ -33,10 +33,10 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_gbl.h b/drivers/sc
 diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_init.c b/drivers/scsi/qla2xxx/qla_init.c
 --- a/drivers/scsi/qla2xxx/qla_init.c
 +++ b/drivers/scsi/qla2xxx/qla_init.c
-@@ -39,14 +39,32 @@ static int qla25xx_init_queues(struct ql
+@@ -38,14 +38,32 @@ static int qla25xx_init_queues(struct ql
  static int qla24xx_post_prli_work(struct scsi_qla_host*, fc_port_t *);
- static void qla24xx_handle_plogi_done_event(struct scsi_qla_host *,
-     struct event_arg *);
+ static void qla24xx_handle_gpdb_event(scsi_qla_host_t *vha,
+ 				      struct event_arg *ea);
  static void qla24xx_handle_prli_done_event(struct scsi_qla_host *,
      struct event_arg *);
  static void __qla24xx_handle_gpdb_event(scsi_qla_host_t *, struct event_arg *);
@@ -66,7 +66,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_init.c b/drivers/s
  {
  	srb_t *sp = from_timer(sp, t, u.iocb_cmd.timer);
  	struct srb_iocb *iocb;
-@@ -2160,14 +2178,94 @@ qla83xx_nic_core_fw_load(scsi_qla_host_t
+@@ -2172,14 +2190,94 @@ qla83xx_nic_core_fw_load(scsi_qla_host_t
  
  exit:
  	qla83xx_idc_unlock(vha, 0);
@@ -102,7 +102,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_init.c b/drivers/s
 +	    nvram_base = 0;
 +	    if (IS_QLA2100(ha) || IS_QLA2200(ha) || IS_QLA2300(ha)) {
 +		reg_2xxx = &ha->iobase->isp;
-+		if ((RD_REG_WORD(&reg_2xxx->ctrl_status) >> 14) == 1) {
++		if ((RD_REG_WORD_PIO(&reg_2xxx->ctrl_status) >> 14) == 1) {
 +		    nvram_base = 0x80;
 +		}
 +	    }
@@ -161,7 +161,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_init.c b/drivers/s
  * Input:
  *      ha = adapter block pointer.
  *
-@@ -2227,14 +2325,42 @@ qla2x00_initialize_adapter(scsi_qla_host
+@@ -2239,14 +2337,42 @@ qla2x00_initialize_adapter(scsi_qla_host
  	rval = qla2xxx_get_flash_info(vha);
  	if (rval) {
  		ql_log(ql_log_fatal, vha, 0x004f,
@@ -204,7 +204,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_init.c b/drivers/s
  		 * If DONRESET_BIT0 is set, drivers should not set dev_state
  		 * to NEED_RESET. But if NEED_RESET is set, drivers should
  		 * should honor the reset. */
-@@ -7186,14 +7312,71 @@ qla24xx_nvram_config(scsi_qla_host_t *vh
+@@ -7262,14 +7388,71 @@ qla24xx_nvram_config(scsi_qla_host_t *vh
  		nv->max_luns_per_target = cpu_to_le16(128);
  		nv->port_down_retry_count = cpu_to_le16(30);
  		nv->link_down_timeout = cpu_to_le16(30);
@@ -279,21 +279,21 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_init.c b/drivers/s
 diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_isr.c b/drivers/scsi/qla2xxx/qla_isr.c
 --- a/drivers/scsi/qla2xxx/qla_isr.c
 +++ b/drivers/scsi/qla2xxx/qla_isr.c
-@@ -22,11 +22,13 @@ static void qla2x00_status_entry(scsi_ql
- static void qla2x00_status_cont_entry(struct rsp_que *, sts_cont_entry_t *);
- static int qla2x00_error_entry(scsi_qla_host_t *, struct rsp_que *,
- 	sts_entry_t *);
+@@ -30,11 +30,13 @@ static void qla2x00_status_entry(scsi_ql
+ 	void *pkt);
+ static struct purex_item *qla27xx_copy_fpin_pkt(struct scsi_qla_host *vha,
+ 	void **pkt, struct rsp_que **rsp);
  
 +extern char *qlini_targets;
 +
- const char *const port_state_str[] = {
- 	"Unknown",
- 	"UNCONFIGURED",
- 	"DEAD",
- 	"LOST",
- 	"ONLINE"
- };
-@@ -3533,16 +3535,21 @@ qla24xx_enable_msix(struct qla_hw_data *
+ static void
+ qla27xx_process_purex_fpin(struct scsi_qla_host *vha, struct purex_item *item)
+ {
+ 	void *pkt = &item->iocb;
+ 	uint16_t pkt_size = item->size;
+ 
+ 	ql_dbg(ql_dbg_init + ql_dbg_verbose, vha, 0x508d,
+@@ -4017,16 +4019,21 @@ qla24xx_enable_msix(struct qla_hw_data *
  		qentry->in_use = 1;
  	}
  
@@ -318,7 +318,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_isr.c b/drivers/sc
 diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_mid.c b/drivers/scsi/qla2xxx/qla_mid.c
 --- a/drivers/scsi/qla2xxx/qla_mid.c
 +++ b/drivers/scsi/qla2xxx/qla_mid.c
-@@ -464,16 +464,28 @@ qla24xx_vport_create_req_sanity_check(st
+@@ -485,16 +485,28 @@ qla24xx_vport_create_req_sanity_check(st
  
  scsi_qla_host_t *
  qla24xx_create_vhost(struct fc_vport *fc_vport)
@@ -347,7 +347,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_mid.c b/drivers/sc
  		    "scsi_host_alloc() failed for vport.\n");
  		return(NULL);
  	}
-@@ -514,15 +526,33 @@ qla24xx_create_vhost(struct fc_vport *fc
+@@ -538,15 +550,33 @@ qla24xx_create_vhost(struct fc_vport *fc
  		host->max_cmd_len = 32;
  	else
  		host->max_cmd_len = MAX_CMDSZ;
@@ -449,7 +449,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_os.c b/drivers/scs
  
  static int apidev_major;
  
-@@ -308,16 +358,18 @@ struct scsi_host_template qla2xxx_driver
+@@ -326,16 +376,18 @@ struct scsi_host_template qla2xxx_driver
  
  static void qla2x00_clear_drv_active(struct qla_hw_data *);
  static void qla2x00_free_device(scsi_qla_host_t *);
@@ -468,7 +468,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_os.c b/drivers/scs
   */
  
  __inline__ void
-@@ -2756,17 +2808,23 @@ qla2x00_probe_one(struct pci_dev *pdev,
+@@ -2789,17 +2841,23 @@ qla2x00_probe_one(struct pci_dev *pdev,
  	char fw_str[30], wq_name[30];
  	struct scsi_host_template *sht;
  	int bars, mem_only = 0;
@@ -492,7 +492,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_os.c b/drivers/scs
  	    pdev->device == PCI_DEVICE_ID_QLOGIC_ISP5432 ||
  	    pdev->device == PCI_DEVICE_ID_QLOGIC_ISP2532 ||
  	    pdev->device == PCI_DEVICE_ID_QLOGIC_ISP8001 ||
-@@ -3077,14 +3135,19 @@ qla2x00_probe_one(struct pci_dev *pdev,
+@@ -3106,14 +3164,19 @@ qla2x00_probe_one(struct pci_dev *pdev,
  		goto probe_hw_failed;
  	}
  
@@ -512,7 +512,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_os.c b/drivers/scs
  		goto probe_hw_failed;
  	}
  
-@@ -3126,15 +3189,35 @@ qla2x00_probe_one(struct pci_dev *pdev,
+@@ -3155,15 +3218,35 @@ qla2x00_probe_one(struct pci_dev *pdev,
  	host->max_channel = MAX_BUSES - 1;
  	/* Older HBAs support only 16-bit LUNs */
  	if (!IS_QLAFX00(ha) && !IS_FWI2_CAPABLE(ha) &&
@@ -548,7 +548,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_os.c b/drivers/scs
  	    "cmd_per_len=%d unique_id=%d max_cmd_len=%d max_channel=%d "
  	    "max_lun=%llu transportt=%p, vendor_id=%llu.\n", host->max_id,
  	    host->this_id, host->cmd_per_lun, host->unique_id,
-@@ -3254,14 +3337,37 @@ qla2x00_probe_one(struct pci_dev *pdev,
+@@ -3288,14 +3371,37 @@ qla2x00_probe_one(struct pci_dev *pdev,
  			ql_log(ql_log_fatal, base_vha, 0x0150,
  			    "HW State: FAILED.\n");
  		}
@@ -586,7 +586,8 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_os.c b/drivers/scs
  		host->can_queue = req->num_outstanding_cmds - 10;
  
  	ql_dbg(ql_dbg_init, base_vha, 0x0032,
-@@ -7259,75 +7365,86 @@ qla2x00_module_init(void)
+@@ -7946,78 +8052,89 @@ struct scsi_host_template qla2xxx_driver_template = {
+ 		return -ENOMEM;
  	}
  
  	/* Initialize target kmem_cache and mem_pools */
@@ -673,7 +674,9 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_os.c b/drivers/scs
  destroy_cache:
  	kmem_cache_destroy(srb_cachep);
  	return ret;
-@@ -7341,15 +7458,21 @@ qla2x00_module_exit(void)
+ }
+ 
+@@ -8029,15 +8146,21 @@ qla2x00_module_exit(void)
  {
  	pci_unregister_driver(&qla2xxx_pci_driver);
  	qla2x00_release_firmware();
@@ -698,10 +701,10 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_os.c b/drivers/scs
 diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_target.c b/drivers/scsi/qla2xxx/qla_target.c
 --- a/drivers/scsi/qla2xxx/qla_target.c
 +++ b/drivers/scsi/qla2xxx/qla_target.c
-@@ -29,19 +29,51 @@
+@@ -27,19 +27,51 @@
+ #include <scsi/scsi.h>
+ #include <scsi/scsi_host.h>
  #include <scsi/scsi_tcq.h>
- #include <target/target_core_base.h>
- #include <target/target_core_fabric.h>
  
  #include "qla_def.h"
  #include "qla_target.h"
@@ -750,7 +753,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_target.c b/drivers
  	"\"exclusive\" - initiator mode will be enabled on load, "
  	"disabled on enabling target mode and then on disabling target mode "
  	"enabled back; "
-@@ -6357,23 +6389,88 @@ static void qlt_sess_work_fn(struct work
+@@ -6315,23 +6347,88 @@ static void qlt_sess_work_fn(struct work
  		spin_lock_irqsave(&tgt->sess_work_lock, flags);
  
  		kfree(prm);
@@ -839,7 +842,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_target.c b/drivers
  		return 0;
  	}
  
-@@ -6608,47 +6705,90 @@ void qlt_lport_deregister(struct scsi_ql
+@@ -6554,47 +6651,90 @@ void qlt_lport_deregister(struct scsi_ql
  	scsi_host_put(sh);
  }
  EXPORT_SYMBOL(qlt_lport_deregister);
@@ -930,7 +933,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_target.c b/drivers
   *
   * host_reset, bring up w/ Target Mode Enabled
   */
-@@ -6847,16 +6987,25 @@ qlt_24xx_process_atio_queue(struct scsi_
+@@ -6803,16 +6943,25 @@ qlt_24xx_process_atio_queue(struct scsi_
  void
  qlt_24xx_config_rings(struct scsi_qla_host *vha)
  {
@@ -950,13 +953,13 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_target.c b/drivers
  		return;
 +#endif	// NEW_MATCH_WWPN
  
- 	WRT_REG_DWORD(ISP_ATIO_Q_IN(vha), 0);
- 	WRT_REG_DWORD(ISP_ATIO_Q_OUT(vha), 0);
- 	RD_REG_DWORD(ISP_ATIO_Q_OUT(vha));
+ 	wrt_reg_dword(ISP_ATIO_Q_IN(vha), 0);
+ 	wrt_reg_dword(ISP_ATIO_Q_OUT(vha), 0);
+ 	rd_reg_dword(ISP_ATIO_Q_OUT(vha));
  
  	if (ha->flags.msix_enabled) {
  		if (IS_QLA83XX(ha) || IS_QLA27XX(ha) || IS_QLA28XX(ha)) {
-@@ -6976,31 +7125,47 @@ qlt_24xx_config_nvram_stage1(struct scsi
+@@ -6932,31 +7081,47 @@ qlt_24xx_config_nvram_stage1(struct scsi
  
  void
  qlt_24xx_config_nvram_stage2(struct scsi_qla_host *vha,
@@ -1004,7 +1007,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_target.c b/drivers
  			ha->tgt.saved_exchange_count = nv->exchange_count;
  			ha->tgt.saved_firmware_options_1 =
  			    nv->firmware_options_1;
-@@ -7079,28 +7244,45 @@ qlt_81xx_config_nvram_stage1(struct scsi
+@@ -7035,28 +7200,45 @@ qlt_81xx_config_nvram_stage1(struct scsi
  
  void
  qlt_81xx_config_nvram_stage2(struct scsi_qla_host *vha,
@@ -1050,7 +1053,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_target.c b/drivers
  
  void
  qlt_modify_vp_config(struct scsi_qla_host *vha,
-@@ -7116,17 +7298,23 @@ qlt_modify_vp_config(struct scsi_qla_hos
+@@ -7072,17 +7254,23 @@ qlt_modify_vp_config(struct scsi_qla_hos
  }
  
  void
@@ -1074,7 +1077,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_target.c b/drivers
  	} else {
  		ISP_ATIO_Q_IN(base_vha) = &ha->iobase->isp24.atio_q_in;
  		ISP_ATIO_Q_OUT(base_vha) = &ha->iobase->isp24.atio_q_out;
-@@ -7218,16 +7406,22 @@ qlt_handle_abts_recv(struct scsi_qla_hos
+@@ -7174,16 +7362,22 @@ qlt_handle_abts_recv(struct scsi_qla_hos
  	queue_work(qla_tgt_wq, &op->work);
  	return;
  }
@@ -1097,7 +1100,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_target.c b/drivers
  	if (!ha->tgt.tgt_vp_map)
  		return -ENOMEM;
  
-@@ -7240,16 +7434,21 @@ qlt_mem_alloc(struct qla_hw_data *ha)
+@@ -7196,16 +7390,21 @@ qlt_mem_alloc(struct qla_hw_data *ha)
  	}
  	return 0;
  }
@@ -1119,7 +1122,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_target.c b/drivers
  		    ha->tgt.atio_dma);
  	}
  	ha->tgt.atio_ring = NULL;
-@@ -7262,16 +7461,25 @@ qlt_mem_free(struct qla_hw_data *ha)
+@@ -7218,16 +7417,25 @@ qlt_mem_free(struct qla_hw_data *ha)
  void
  qlt_update_vp_map(struct scsi_qla_host *vha, int cmd)
  {
@@ -1145,7 +1148,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_target.c b/drivers
  	case SET_VP_IDX:
  		vha->hw->tgt.tgt_vp_map[vha->vp_idx].vha = vha;
  		break;
-@@ -7315,14 +7523,164 @@ void qlt_update_host_map(struct scsi_qla
+@@ -7271,14 +7479,164 @@ void qlt_update_host_map(struct scsi_qla
  	} else if (vha->d_id.b24 != id.b24) {
  		qlt_update_vp_map(vha, RESET_AL_PA);
  		vha->d_id = id;
@@ -1310,7 +1313,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_target.c b/drivers
  	else if (strcasecmp(qlini_mode, QLA2XXX_INI_MODE_STR_DISABLED) == 0)
  		ql2x_ini_mode = QLA2XXX_INI_MODE_DISABLED;
  	else if (strcasecmp(qlini_mode, QLA2XXX_INI_MODE_STR_ENABLED) == 0)
-@@ -7338,22 +7696,35 @@ static int __init qlt_parse_ini_mode(voi
+@@ -7294,22 +7652,35 @@ static int __init qlt_parse_ini_mode(voi
  int __init qlt_init(void)
  {
  	int ret;
@@ -1346,7 +1349,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_target.c b/drivers
  	if (!qla_tgt_mgmt_cmd_cachep) {
  		ql_log(ql_log_fatal, NULL, 0xd04b,
  		    "kmem_cache_create for qla_tgt_mgmt_cmd_cachep failed\n");
-@@ -7386,28 +7757,40 @@ int __init qlt_init(void)
+@@ -7342,28 +7713,40 @@ int __init qlt_init(void)
  		    "alloc_workqueue for qla_tgt_wq failed\n");
  		ret = -ENOMEM;
  		goto out_cmd_mempool;

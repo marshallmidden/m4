@@ -1,9 +1,10 @@
 # We have to override the new %%install behavior because, well... the kernel is special.
 %global __spec_install_pre %{___build_pre}
+%define __python /usr/bin/python3
 
 Summary: The Linux kernel
 
-# Light specification file. 2020-08-18
+# Light specification file. 2020-11-18
 %define buildid .lightspeed
 
 # For a kernel released for public testing, released_kernel should be 1.
@@ -12,9 +13,8 @@ Summary: The Linux kernel
 
 %global distro_build 693
 
-# A parsec is 3.086e13.  This is really v5.3, the zero is hidden on "git tag".
-%define rpmversion 5.3.0
-%define pkgrelease 2020.08.18
+%define rpmversion 5.9.8
+%define pkgrelease 2020.11.18
 
 %define pkg_release %{pkgrelease}%{?buildid}
 
@@ -207,7 +207,7 @@ Summary: The Linux kernel
 
 # Should make listnewconfig fail if there's config options
 # printed out?
-%define listnewconfig_fail 1
+%define listnewconfig_fail 0
 
 # To temporarily exclude an architecture from being built, add it to
 # %%nobuildarches. Do _NOT_ use the ExclusiveArch: line, because if we
@@ -228,7 +228,7 @@ Summary: The Linux kernel
 %endif
 
 # Architectures we build tools/cpupower on
-%define cpupowerarchs x86_64 ppc64 ppc64le
+%define cpupowerarchs ppc64 ppc64le
 
 # Architectures where we compress modules
 %ifarch x86_64
@@ -321,7 +321,7 @@ BuildRequires: hostname, net-tools, bc
 BuildRequires: xmlto, asciidoc
 BuildRequires: openssl
 BuildRequires: hmaccalc
-BuildRequires: python-devel, newt-devel, perl(ExtUtils::Embed)
+BuildRequires: newt-devel, perl(ExtUtils::Embed)
 %ifarch x86_64
 BuildRequires: pesign >= 0.109-4
 %endif
@@ -352,7 +352,6 @@ BuildRequires: rpm-build >= 4.9.0-1, elfutils >= 0.153-1
 BuildRequires: glibc-static
 %endif
 
-# Source0: linux-%{rpmversion}-%{pkgrelease}.tar.xz
 Source0: linux-%{rpmversion}.tar.xz
 
 Source1: Makefile.common
@@ -409,8 +408,7 @@ Source9999: lastcommit.stat
 
 # LightSpeed kernel patches. Very order dependent. Replace module first.
 # Numbered as BASIC (or Fortran) program -- leaving room for additions.
-PATCH40000: patch-3.40000-qla2xxx-v530-to-v536
-PATCH40001: patch-3.40001-no-bashcompletion-cpupower
+PATCH40003: patch-3.40003-rpm-debugedit-no-trailing-slashes
 PATCH40010: patch-3.40010-qla2xxx-target-initiator
 PATCH40011: patch-3.40011-less-console-output
 PATCH40012: patch-3.40012-qla2xxx-long-pause
@@ -423,8 +421,8 @@ PATCH40041: patch-3.40041-smb-202-7mode
 PATCH40042: patch-3.40042-add_getfsattr
 PATCH40043: patch-3.40043-reparse-attrs
 PATCH40044: patch-3.40044-disable_nobufferwrite
-PATCH40045: patch-3.40045-transport-wait-credits
 PATCH40046: patch-3.40046-SMB202_mem_leak
+PATCH40050: patch-3.40050-scripts-to-python3
 
 # empty final patch to facilitate testing of kernel patches
 Patch999999: linux-kernel-test.patch
@@ -523,7 +521,7 @@ This package provides debug information for the perf python bindings.
 %{expand:%%global debuginfo_args %{?debuginfo_args} -p '.*%%{python_sitearch}/perf.so(\.debug)?|XXX' -o python-perf-debuginfo.list}
 
 
-%endif # with_perf
+%endif
 
 %if %{with_tools}
 
@@ -576,9 +574,10 @@ This package provides debug information for package kernel-tools.
 # symlinks because of the trailing nonmatching alternation and
 # the leading .*, because of find-debuginfo.sh's buggy handling
 # of matching the pattern against the symlinks file.
-%{expand:%%global debuginfo_args %{?debuginfo_args} -p '.*%%{_bindir}/centrino-decode(\.debug)?|.*%%{_bindir}/powernow-k8-decode(\.debug)?|.*%%{_bindir}/cpupower(\.debug)?|.*%%{_libdir}/libcpupower.*|.*%%{_libdir}/libcpupower.*|.*%%{_bindir}/turbostat(\.debug)?|.*%%{_bindir}/x86_energy_perf_policy(\.debug)?|.*%%{_bindir}/tmon(\.debug)?|XXX' -o kernel-tools-debuginfo.list}
 
-%endif # with_tools
+%{expand:%%global debuginfo_args %{?debuginfo_args} -p 'XXX' -o kernel-tools-debuginfo.list}
+
+%endif
 
 %if %{with_gcov}
 %package gcov
@@ -736,8 +735,7 @@ cd linux-%{KVRA}
 cp $RPM_SOURCE_DIR/kernel-%{version}-*.config .
 
 # Start of LightSpeed kernel patches being applied.
-ApplyOptionalPatch patch-3.40000-qla2xxx-v530-to-v536
-ApplyOptionalPatch patch-3.40001-no-bashcompletion-cpupower
+ApplyOptionalPatch patch-3.40003-rpm-debugedit-no-trailing-slashes
 ApplyOptionalPatch patch-3.40010-qla2xxx-target-initiator
 ApplyOptionalPatch patch-3.40011-less-console-output
 ApplyOptionalPatch patch-3.40012-qla2xxx-long-pause
@@ -750,8 +748,8 @@ ApplyOptionalPatch patch-3.40041-smb-202-7mode
 ApplyOptionalPatch patch-3.40042-add_getfsattr
 ApplyOptionalPatch patch-3.40043-reparse-attrs
 ApplyOptionalPatch patch-3.40044-disable_nobufferwrite
-ApplyOptionalPatch patch-3.40045-transport-wait-credits
 ApplyOptionalPatch patch-3.40046-SMB202_mem_leak
+ApplyOptionalPatch patch-3.40050-scripts-to-python3
 
 # The empty test patch -- put LightSpeed patches before this.
 ApplyOptionalPatch linux-kernel-test.patch
@@ -1145,25 +1143,25 @@ BuildKernel %make_target %kernel_image kdump
 %ifarch %{cpupowerarchs}
 # cpupower
 # make sure version-gen.sh is executable.
-chmod +x tools/power/cpupower/utils/version-gen.sh
+#-- chmod +x tools/power/cpupower/utils/version-gen.sh
 make %{?cross_opts} %{?_smp_mflags} -C tools/power/cpupower CPUFREQ_BENCH=false
-%ifarch x86_64
-    pushd tools/power/cpupower/debug/x86_64
-    make %{?_smp_mflags} centrino-decode powernow-k8-decode
-    popd
+#-- %ifarch x86_64
+#--     pushd tools/power/cpupower/debug/x86_64
+#--     make %{?_smp_mflags} centrino-decode powernow-k8-decode
+#--     popd
+#-- %endif
+#-- %ifarch x86_64
+#--    pushd tools/power/x86/x86_energy_perf_policy/
+#--    make
+#--    popd
+#--    pushd tools/power/x86/turbostat
+#--    make
+#--    popd
+#-- %endif
 %endif
-%ifarch x86_64
-   pushd tools/power/x86/x86_energy_perf_policy/
-   make
-   popd
-   pushd tools/power/x86/turbostat
-   make
-   popd
-%endif #turbostat/x86_energy_perf_policy
-%endif
-pushd tools
-make tmon
-popd
+#-- pushd tools
+#-- make tmon
+#-- popd
 %endif
 
 %if %{with_doc}
@@ -1263,7 +1261,7 @@ mkdir -p $man9dir
 find Documentation/DocBook/man -name '*.9.gz' -print0 |
 xargs -0 --no-run-if-empty %{__install} -m 444 -t $man9dir $m
 ls $man9dir | grep -q '' || > $man9dir/BROKEN
-%endif # with_doc
+%endif
 
 # We have to do the headers install before the tools install because the
 # kernel headers_install will remove any header files in /usr/include that
@@ -1292,7 +1290,7 @@ mkdir -p $INSTALL_KABI_PATH
 
 # install kabi releases directories
 tar xjvf %{SOURCE30} -C $INSTALL_KABI_PATH
-%endif  # with_kernel_abi_whitelists
+%endif
 
 %if %{with_perf}
 # perf tool binary and supporting scripts/binaries
@@ -1307,37 +1305,37 @@ rm -f $RPM_BUILD_ROOT/%{_bindir}/trace
 %{perf_make} DESTDIR=$RPM_BUILD_ROOT try-install-man || %{doc_build_fail}
 %endif
 
-%if %{with_tools}
-%ifarch %{cpupowerarchs}
-make -C tools/power/cpupower DESTDIR=$RPM_BUILD_ROOT libdir=%{_libdir} mandir=%{_mandir} CPUFREQ_BENCH=false install
-rm -f %{buildroot}%{_libdir}/*.{a,la}
-%find_lang cpupower
-mv cpupower.lang ../
-%ifarch x86_64
-    pushd tools/power/cpupower/debug/x86_64
-    install -m755 centrino-decode %{buildroot}%{_bindir}/centrino-decode
-    install -m755 powernow-k8-decode %{buildroot}%{_bindir}/powernow-k8-decode
-    popd
-%endif
-chmod 0755 %{buildroot}%{_libdir}/libcpupower.so*
-mkdir -p %{buildroot}%{_unitdir} %{buildroot}%{_sysconfdir}/sysconfig
-install -m644 %{SOURCE2000} %{buildroot}%{_unitdir}/cpupower.service
-install -m644 %{SOURCE2001} %{buildroot}%{_sysconfdir}/sysconfig/cpupower
-%ifarch %{ix86} x86_64
-   mkdir -p %{buildroot}%{_mandir}/man8
-   pushd tools/power/x86/x86_energy_perf_policy
-   make DESTDIR=%{buildroot} install
-   popd
-   pushd tools/power/x86/turbostat
-   make DESTDIR=%{buildroot} install
-   popd
-%endif #turbostat/x86_energy_perf_policy
-pushd tools/thermal/tmon
-make INSTALL_ROOT=%{buildroot} install
-popd
-%endif
-
-%endif
+#-- %if %{with_tools}
+#-- %ifarch %{cpupowerarchs}
+#-- make -C tools/power/cpupower DESTDIR=$RPM_BUILD_ROOT libdir=%{_libdir} mandir=%{_mandir} CPUFREQ_BENCH=false install
+#-- rm -f %{buildroot}%{_libdir}/*.{a,la}
+#-- %find_lang cpupower
+#-- mv cpupower.lang ../
+#-- %ifarch x86_64
+#--     pushd tools/power/cpupower/debug/x86_64
+#--     install -m755 centrino-decode %{buildroot}%{_bindir}/centrino-decode
+#--     install -m755 powernow-k8-decode %{buildroot}%{_bindir}/powernow-k8-decode
+#--     popd
+#-- %endif
+#-- chmod 0755 %{buildroot}%{_libdir}/libcpupower.so*
+#-- mkdir -p %{buildroot}%{_unitdir} %{buildroot}%{_sysconfdir}/sysconfig
+#-- install -m644 %{SOURCE2000} %{buildroot}%{_unitdir}/cpupower.service
+#-- install -m644 %{SOURCE2001} %{buildroot}%{_sysconfdir}/sysconfig/cpupower
+#-- %ifarch %{ix86} x86_64
+#--    mkdir -p %{buildroot}%{_mandir}/man8
+#--    pushd tools/power/x86/x86_energy_perf_policy
+#--    make DESTDIR=%{buildroot} install
+#--    popd
+#--    pushd tools/power/x86/turbostat
+#--    make DESTDIR=%{buildroot} install
+#--    popd
+#-- %endif
+#-- pushd tools/thermal/tmon
+#-- make INSTALL_ROOT=%{buildroot} install
+#-- popd
+#-- %endif
+#-- 
+#-- %endif
 
 %if %{with_bootwrapper}
 make %{?cross_opts} ARCH=%{hdrarch} DESTDIR=$RPM_BUILD_ROOT bootwrapper_install WRAPPER_OBJDIR=%{_libdir}/kernel-wrapper WRAPPER_DTSDIR=%{_libdir}/kernel-wrapper/dts
@@ -1459,7 +1457,7 @@ fi\
 
 %post kdump
     ln -sf /boot/vmlinuz-%{KVRA}.kdump /boot/zfcpdump
-%endif # s390x
+%endif
 
 if [ -x /sbin/ldconfig ]
 then
@@ -1531,43 +1529,46 @@ fi
 %endif
 
 %if %{with_tools}
-%files -n kernel-tools -f cpupower.lang
+#-- %files -n kernel-tools -f cpupower.lang
+%files -n kernel-tools
 %defattr(-,root,root)
-%ifarch %{cpupowerarchs}
-%{_bindir}/cpupower
-%ifarch x86_64
-%{_bindir}/centrino-decode
-%{_bindir}/powernow-k8-decode
-%endif
-%{_unitdir}/cpupower.service
-%{_mandir}/man[1-8]/cpupower*
-%config(noreplace) %{_sysconfdir}/sysconfig/cpupower
-%ifarch %{ix86} x86_64
-%{_bindir}/x86_energy_perf_policy
-%{_mandir}/man8/x86_energy_perf_policy*
-%{_bindir}/turbostat
-%{_mandir}/man8/turbostat*
-%endif
-%endif
-%{_bindir}/tmon
+#-- %ifarch %{cpupowerarchs}
+#-- %{_bindir}/cpupower
+#-- %ifarch x86_64
+#-- %{_bindir}/centrino-decode
+#-- %{_bindir}/powernow-k8-decode
+#-- %endif
+#-- %{_unitdir}/cpupower.service
+#-- %{_mandir}/man[1-8]/cpupower*
+#-- %config(noreplace) %{_sysconfdir}/sysconfig/cpupower
+#-- %ifarch %{ix86} x86_64
+#-- %{_bindir}/x86_energy_perf_policy
+#-- %{_mandir}/man8/x86_energy_perf_policy*
+#-- %{_bindir}/turbostat
+#-- %{_mandir}/man8/turbostat*
+#-- %endif
+#-- %endif
+#-- %{_bindir}/tmon
 %if %{with_debuginfo}
 %files -f kernel-tools-debuginfo.list -n kernel-tools-debuginfo
+#TODO: crvaale quick hack to get around debug files not being owned by other debuginfo parts
+/usr/lib/debug/
 %defattr(-,root,root)
 %endif
 
-%ifarch %{cpupowerarchs}
-%files -n kernel-tools-libs
-%defattr(-,root,root)
-%{_libdir}/libcpupower.so.0
-%{_libdir}/libcpupower.so.0.0.1
+#-- %ifarch %{cpupowerarchs}
+#-- %files -n kernel-tools-libs
+#-- %defattr(-,root,root)
+#-- %{_libdir}/libcpupower.so.0
+#-- %{_libdir}/libcpupower.so.0.0.1
 
-%files -n kernel-tools-libs-devel
-%defattr(-,root,root)
-%{_libdir}/libcpupower.so
-%{_includedir}/cpufreq.h
+#-- %files -n kernel-tools-libs-devel
+#-- %defattr(-,root,root)
+#-- %{_libdir}/libcpupower.so
+#-- %{_includedir}/cpufreq.h
+#-- %endif
+
 %endif
-
-%endif # with_tools
 
 %if %{with_gcov}
 %ifarch x86_64 s390x ppc64 ppc64le
@@ -1625,6 +1626,9 @@ fi
 %kernel_variant_files %{with_kdump} kdump
 
 %changelog
+* Thu Nov 19 2020 Marshall Midden
+- [kernel] rhel-kernel: Kernel v5.9.8 with patches updated, use gcc-10.0.2.
+
 * Tue Aug 18 2020 jturner
 - [kernel] rhel-kernel: SMB 202 mem leak
 
