@@ -34,8 +34,7 @@ Synopsis:
     job verify jobid ["name"] [id]      # Start verify job(s) by ID or name.
     jobs                                # Easier to remember than "job". :)
 
-    job create "hi" src dst "job name"
-                                        # Create job attached to project "hi",
+    job create "hi" src dst "job name"  # Create job attached to project "hi",
                                           moving src to dst, named "job name".
 
     job new projid src_uri dest_uri "job name" src_vers dst_vers
@@ -52,6 +51,8 @@ Synopsis:
                                         # Create project with provided name.
                                           with source SMB version, and destination.
     projects                            # Easier to remember than proj. :)
+
+NOTDONEYET - storage
 
 Examples:
     job new 26 nfs://172.22.14.107/vol/m4_v1 nfs://172.22.14.107/vol/m4_v2
@@ -111,16 +112,79 @@ PROJECT_RUNLIMIT = None
 username='AD/Parsec.Backup'
 password='Cobra!Indigo'
 #=============================================================================
-# parsing first argument
-list_proj    = ['p', 'pr', 'pro', 'proj', 'proje', 'projec', 'project', 'projects']
-list_job     = ['j', 'jo', 'job', 'jobs']
-list_exit    = ['e', 'x', 'ex', 'exi', 'exit', 'q', 'qu', 'qui', 'quit']
-list_help    = ['he', 'hel', 'help']                                    # Overlaps history.
-list_history = ['hi', 'his', 'hist', 'histo', 'histor', 'history']      # Overlaps help.
-list_sleep   = ['s', 'sl', 'sle', 'slee', 'sleep']
-list_brief   = ['b', 'br', 'bri', 'brie', 'brief']
-
-tab_words = ['projects ', 'jobs ', 'quit', 'exit', 'help', 'history', 'sleep', 'brief']
+# For the completer - the list of words.
+# Note: trailing spaces are words that take arguments, split_for_unique ignores them. 
+tab_words = { 'projects' : ['', 'list',
+                            'create', 'new', 'add',
+                            'delete',
+                            'help'],
+                            # NOTDONEYET - 'update', 'edit'
+              'jobs':      ['', 'list',
+                            'create', 'new', 'add',
+                            'delete',
+                            'edit',
+                            'run', 'start',
+                            'stop',
+                            'verify',
+                            'disable',
+                            'enable',
+                            'help'],
+                            # NOTDONEYET - 'stat'
+              'quit':      [],      # No arguments
+              'exit':      [],      # No arguments
+              'help':      [],      # No arguments
+              'history':   [],      # No arguments
+              'sleep':     [],      # A number of seconds to sleep.
+              'brief':     ['', 'on', 'enabled',
+                            'off', 'disabled'],
+              # NOTDONEYET - 'schedules'
+              # NOTDONEYET - 'fast3'
+              'storage':   {'':'',
+                            'list': ["me", "those"],
+                            'devices':'',
+                            'fc':'',
+                            'scsi':'',
+                            'files':'',
+                            'nfs':'',
+                            'smb':'',
+                            'systems':'',
+                            'help':''},
+            }
+#-----------------------------------------------------------------------------
+# Note: trailing spaces are words that take arguments, split_for_unique ignores them.
+def split_for_unique(string):
+    array = []
+    for i in range(len(string)):
+        first = string[0: i+1: 1]
+        array.append(first)
+    return array
+# End of split_for_unique
+#-----------------------------------------------------------------------------
+# Get rid of entries that are the same.
+def unique_dict_array(strings):
+    d = { x : split_for_unique(x) for x in strings }
+    k = [x for x in d.keys()]
+    for i1 in range(len(k)):                # From first to last-1
+        v1 = d[k[i1]]
+        flag1 = []                          # Items to delete from v1.
+        for i2 in range(i1+1, len(k)):      # From next to last
+            for c in v1:
+                v2 = d[k[i2]]
+                for b in v2:
+                    if c == b:
+                        if c not in flag1:
+                            flag1.append(c)
+                        d[k[i2]].remove(b)
+                    # fi
+                # rof
+            # rof
+        # rof
+        for r in flag1:
+            d[k[i1]].remove(r)
+        # rof
+    # ror
+    return d
+# End of unique_dict_array
 #-----------------------------------------------------------------------------
 class dnsCompleter:
     def __init__(self, options):
@@ -130,38 +194,70 @@ class dnsCompleter:
     # End of __init__
 
     def complete(self, text, state):
+        # State 0 is the only one that we set up anything for.
         if state == 0:
-            # This is the first time for this text -- build possible match list.
-            origline = readline.get_line_buffer().rstrip()
-            line = origline.lstrip()
-            delta = len(origline) - len(line)
-            begin = readline.get_begidx() - delta
-            end = readline.get_endidx() - delta
-            being_completed = line[begin:end]
-            words = line.split()
+            # This is the first time for this text, with "tab" pressed.
+            origline = readline.get_line_buffer()   # Need to know about white-space on right.
+            begin = readline.get_begidx()           # Start of word being completed in line.
+            end = readline.get_endidx()             # Where tab was pressed in line.
+            the_line_to_complete = origline[0:end]
+            being_completed = origline[begin:end]   # Word being completed.
+            the_words = the_line_to_complete.split()
+            number_words = len(the_words)           # Subtract one if using as index. range() goes up to...
+            if being_completed != '':
+                number_words = number_words - 1
 
-            if not words:                   # If no starting word, all are possible.
-                self.current_candidates = sorted(self.options)
+            # print("--origline='{}'".format(origline))
+            # print("--begin={}".format(begin))
+            # print("--end={}".format(end))
+            # print("--the_line_to_complete='{}'".format(the_line_to_complete))
+            # print("--being_completed='{}'".format(being_completed))
+            # print("--the_words='{}'".format(the_words))
+            # print("--number_words={}".format(number_words))
+
+            # Possibilities -
+            #   one tab auto complete for word starting with...
+            #   two tabs display possibilities for words starting with -- or all words if nothing.
+            #
+            # Need to determine number of words.
+            # Need to determine if start of new word (true), false if in middle of word.
+            # If --being_completed == '', set up for two tabs with all possible here.
+            # If --being_completed == 'hi', setup for two tabs with all possible 'hi's AND one tab completes.
+
+            # See if first words exist and are right.
+            c = ''
+            what = unique_dict_array(self.options)
+            full = self.options
+            for j in range(number_words):
+                unique = False
+                c = ''
+                for c in what:
+                    if the_words[j] in what[c]:
+                        unique = True
+                        break;
+                if not unique:
+                    return None
+                full = full[c]
+                what = unique_dict_array(full)
+
+            if being_completed == '':                   # If no starting word, all are possible.
+                self.current_candidates = sorted(what.keys())
             else:
+                self.current_candidates = sorted(what.keys())
                 try:
-                    if begin != 0:          # If first character of first word.
-                        # later word        # No autofill for other arguments.
-                        return None
-                    # fi
-                    # first word
-                    candidates = self.options
+                    candidates = self.current_candidates
                     if being_completed:
                         # Match with portion of input already typed.
                         self.current_candidates = [ w for w in candidates if w.startswith(being_completed) ]
-                    else:
-                        # Matching empty string, use all possible input.
-                        self.current_candidates = candidates
-                    # fi
+                        # Add space after it if only one choice.
+                        if len(self.current_candidates) == 1:
+                            self.current_candidates[0] = self.current_candidates[0] + ' '
+                    # fi    being_completed
                 except (KeyError, IndexError) as err:
                     self.current_candidates = []
                 # yrt
-            # fi
-        # fi
+            # fi    not the_words
+        # fi   state == 0
         try:
             response = self.current_candidates[state]
         except IndexError:
@@ -447,18 +543,18 @@ def Sleep(subtype):
 def Brief(subtype):
     global args
 
-    if subtype is None or subtype == '' or subtype == 'on':
+    if subtype is None or subtype == '' or subtype == 'on' or subtype in split_for_unique('enabled'):
         args.brief = True
         print('Brief mode enabled')
         return True
     # fi
-    if subtype == 'of' or subtype == 'off':
+    if subtype == 'of' or subtype == 'off' or subtype in split_for_unique('disabled'):
         print('Brief mode disabled (i.e. full print mode)')
         args.brief = False
         return True
     # fi
 
-    print("Error: Brief argument '%s' no recognized as 'on' or 'off'" % subtype)
+    print("Error: Brief argument '%s' not recognized as 'on' or 'off'" % subtype)
     if args.brief is None or args.brief:
         print("Error: Brief left as 'on'")
     else:
@@ -623,7 +719,6 @@ def _printJob(job):
 def JobList(authentication, base_url, vargs):
     if not vargs:
         # If no argument, print out all job ID's and their names.
-        url = base_url + 'datamovement/jobs'
         (rt, r) = send_get(authentication, base_url, 'datamovement/jobs')
         if not rt:
             return False
@@ -741,7 +836,6 @@ def JobProjList(authentication, base_url, vargs):
     ret = False
 
     # Get all the jobs.
-    url = base_url + 'datamovement/jobs'
     (rt, r) = send_get(authentication, base_url, 'datamovement/jobs')
     if not rt:
         return False
@@ -960,48 +1054,45 @@ def JobEnable(authentication, base_url, t_args):
     return False
 # End of JobEnable
 #-----------------------------------------------------------------------------
+def JobHelp(job_words):
+    print("Job subtypes possible:")
+    print("  {}".format(job_words))
+# End of JobHelp
+#-----------------------------------------------------------------------------
 # Second argument is 'list', 'dele', 'run', 'verify', 'stop', 'start', 'disable', 'enable', or 'stat'.
 # NOTDONEYET - disable, enable, stat
 
 def process_job(subtype, t_args, authentication, base_url):
-    # Create or New mean the same thing.
-    list_job_create = ['c', 'cr', 'cre', 'crea', 'creat', 'create', 'n', 'ne', 'new']
-    list_job_dele   = ['de', 'del', 'dele', 'delet', 'delete']
-    list_job_edit   = ['ed', 'edi', 'edit']
-    list_job_list   = ['l', 'li', 'lis', 'list']
-    list_job_proj   = ['p', 'pr', 'pro', 'proj', 'proje', 'projec', 'project', 'projects']
-    list_job_run    = ['r', 'ru', 'run']
-    list_job_stop   = ['s', 'st', 'sto', 'stop']
-    list_job_verify = ['v', 've', 'ver', 'veri', 'verif', 'verify']
-    list_job_disable= ['di', 'dis', 'disa', 'disab', 'disabl', 'disable']
-    list_job_enable = ['en', 'ena', 'enab', 'enabl', 'enable']
-
+    list_job = unique_dict_array(tab_words["jobs"])
+ 
     ret = False
     if subtype is None:                 # No subtype, print out jobs.
         ret = JobList(authentication, base_url, t_args)
-    elif subtype in list_job_list:
+    elif subtype in list_job['list']:
         ret = JobList(authentication, base_url, t_args)
-    elif subtype in list_job_proj:
-        ret = JobProjList(authentication, base_url, t_args)
-
-    elif subtype in list_job_create:
+    # Create or New mean the same thing.
+    elif subtype in list_job['create'] or subtype in list_job['new']:
         ret = JobCreate(authentication, base_url, t_args)
-    elif subtype in list_job_dele:
+    elif subtype in list_job['delete']:
         ret = JobDele(authentication, base_url, t_args)
-    elif subtype in list_job_edit:
+    elif subtype in list_job['edit']:
         ret = JobEdit(authentication, base_url, t_args)
-    elif subtype in list_job_run:
+    elif subtype in list_job['run'] or subtype in list_job['start']:
         ret = JobRun(authentication, base_url, t_args)
-    elif subtype in list_job_stop:
+    elif subtype in list_job['stop']:
         ret = JobStop(authentication, base_url, t_args)
-    elif subtype in list_job_verify:
+    elif subtype in list_job['verify']:
         ret = JobVerify(authentication, base_url, t_args)
-    elif subtype in list_job_disable:
+    elif subtype in list_job['disable']:
         ret = JobDisable(authentication, base_url, t_args)
-    elif subtype in list_job_enable:
+    elif subtype in list_job['enable']:
         ret = JobEnable(authentication, base_url, t_args)
+    elif subtype in list_job['help'] or subtype[0] == '?':
+        JobHelp(tab_words["jobs"])
+        ret = False
     else:
         print("No job with subtype", subtype, "t_args =", t_args)
+        JobHelp(tab_words["jobs"])
         ret = False
     # fi
     return ret
@@ -1095,31 +1186,119 @@ def ProjDele(authentication, base_url, vargs):
     return ret
 # End of ProjDele
 #-----------------------------------------------------------------------------
-# Second argument is 'list', 'create', 'dele'
-# NOTDONEYET - 'run', 'verify', 'stop', 'start', 'disable', 'enable', or 'stat'.
+def ProjectHelp(project_words):
+    print("Project subtypes possible:")
+    print("  {}".format(project_words))
+# End of ProjectHelp
+#-----------------------------------------------------------------------------
+# NOTDONEYET - 'updated', 'edit'
 
 def process_proj(subtype, t_args, authentication, base_url):
     # Create or New mean the same thing.
-    list_proj_create = ['c', 'cr', 'cre', 'crea', 'creat', 'create', 'n', 'ne', 'new']
-    list_proj_dele   = ['d', 'de', 'del', 'dele', 'delet', 'delete']
-    list_proj_list   = ['l', 'li', 'lis', 'list']
+    list_proj = unique_dict_array(tab_words["projects"])
 
     ret = False
     if subtype is None:                 # No subtype, print out projects.
         ret = ProjList(authentication, base_url, t_args, True)
-    elif subtype in list_proj_list:
+    elif subtype in list_proj['list']:
         ret = ProjList(authentication, base_url, t_args, True)
 
-    elif subtype in list_proj_create:
+    elif subtype in list_proj['create'] or subtype in list_proj['new'] or subtype in list_proj['add']:
         ret = ProjCreate(authentication, base_url, t_args)
-    elif subtype in list_proj_dele:
+    elif subtype in list_proj['delete']:
         ret = ProjDele(authentication, base_url, t_args)
+    elif subtype in list_proj['help'] or subtype[0] == '?':
+        ProjectHelp(tab_words["projects"])
+        ret = False
     else:
         print("No project with subtype", subtype, "t_args =", t_args)
+        ProjectHelp(tab_words["projects"])
         ret = False
     # fi
     return ret
 # End of process_proj
+#-----------------------------------------------------------------------------
+def StorageAssetsDevices(authentication, base_url, vargs):
+    if not args.brief:
+        print('...')
+    (rt, r) = send_get(authentication, base_url, 'storage/assets/devices')
+    if not rt:
+        if not args.brief:
+            print('Could not get information on storage devices')
+        return False
+    # fi
+
+    storagedevices = r.json()
+    if storagedevices['deviceassets'] == []:
+        if not args.brief:
+            print('No storage devices present.')
+    else:
+        if not args.brief:
+            print('Storage Devices:')
+        for s in storagedevices['deviceassets']:
+            print("name='{}'  id={}  online={}  protocolid={}".format(s['name'], s['id'], s['online'], s['protocolid']))
+        # rof
+    # fi
+    return True
+# End of StorageAssetsDevices
+#-----------------------------------------------------------------------------
+def StorageAssetsFiles(authentication, base_url, vargs):
+    if not args.brief:
+        print('...')
+    (rt, r) = send_get(authentication, base_url, 'storage/assets/files')
+    if not rt:
+        if not args.brief:
+            print('Could not get information on storage files')
+        return False
+    # fi
+
+    storagefiles = r.json()
+    if storagefiles['fileassets'] == []:
+        if not args.brief:
+            print('No storage files present.')
+    else:
+        if not args.brief:
+            print('Storage Files:')
+        for s in storagefiles['fileassets']:
+            print("name='{}'  id={}  online={}  protocolid={}  type='{}'  share='{}'".format(
+                  s['name'], s['id'], s['online'], s['protocolid'],
+                  s['definition']['type'], s['definition']['share']))
+        # rof
+    # fi
+    return True
+# End of StorageAssetsFiles
+#-----------------------------------------------------------------------------
+def StorageHelp(storage_words):
+    print("Storage subtypes possible:")
+    print("  {}".format(storage_words))
+# End of StorageHelp
+#-----------------------------------------------------------------------------
+def process_storage(subtype, t_args, authentication, base_url):
+    #-- storage_words = ['list', 'assets', 'files', 'systems', 'help']
+    list_storage = unique_dict_array(tab_words["storage"])
+
+    ret = False
+    if subtype is None or subtype in list_storage['list']:
+        ret = StorageAssetsDevices(authentication, base_url, t_args)
+        ret = StorageAssetsFiles(authentication, base_url, t_args)
+    elif subtype in list_storage['devices'] or subtype in list_storage['fc']:
+        ret = StorageAssetsDevices(authentication, base_url, t_args)
+    elif subtype in list_storage['files'] or subtype in list_storage['nfs'] or subtype in list_storage['smb']:
+        ret = StorageAssetsFiles(authentication, base_url, t_args)
+#    elif subtype in list_storage['systems']:
+#        ret = StorageSystems(authentication, base_url, t_args)
+    elif subtype in list_storage['help'] or subtype[0] == '?':
+        print("process_storage #9")
+        StorageHelp(storage_words)
+        print("process_storage #10")
+        ret = False
+    else:
+        print("No storage with subtype", subtype, "t_args =", t_args)
+        StorageHelp(storage_words)
+        ret = False
+    # fi
+    return ret
+# End of process_storage
 #-----------------------------------------------------------------------------
 # Parse and process line.
 def process_line(t, authentication, base_url):
@@ -1139,23 +1318,28 @@ def process_line(t, authentication, base_url):
         t_args = t[2:]
     # fi
 
+    # For parsing first argument - get all possible first, then get rid of duplicates.
+    first_list = unique_dict_array(tab_words)
+
     # Try to process command.
     if command is None:                 # Ignore nothing given.
         ret = False
         pass
-    elif command in list_proj:
+    elif command in first_list['projects']:
         ret = process_proj(subtype, t_args, authentication, base_url)
-    elif command in list_job:
+    elif command in first_list['jobs']:
         ret = process_job(subtype, t_args, authentication, base_url)
-    elif command in list_exit:
+    elif command in first_list['storage']:
+        ret = process_storage(subtype, t_args, authentication, base_url)
+    elif command in first_list['exit'] or command in first_list['quit']:
         ret = Exit(subtype)
-    elif command in list_help:
+    elif command in first_list['help'] or command[0] == '?':
         ret = Help()
-    elif command in list_history:
+    elif command in first_list['history']:
         ret = History()
-    elif command in list_sleep:
+    elif command in first_list['sleep']:
         ret = Sleep(subtype)
-    elif command in list_brief:
+    elif command in first_list['brief']:
         ret = Brief(subtype)
     else:
         print("Unrecognized command, or not unique", t)
