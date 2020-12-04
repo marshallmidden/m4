@@ -114,6 +114,7 @@ password='Cobra!Indigo'
 #=============================================================================
 # For the completer - the list of words.
 # Note: trailing spaces are words that take arguments, split_for_unique ignores them. 
+# NOTE: lower case.
 tab_words = { 'projects' : ['', 'list',
                             'create', 'new', 'add',
                             'delete',
@@ -232,7 +233,7 @@ class dnsCompleter:
                 unique = False
                 c = ''
                 for c in what:
-                    if the_words[j] in what[c]:
+                    if the_words[j].lower() in what[c]:
                         unique = True
                         break;
                 if not unique:
@@ -248,7 +249,7 @@ class dnsCompleter:
                     candidates = self.current_candidates
                     if being_completed:
                         # Match with portion of input already typed.
-                        self.current_candidates = [ w for w in candidates if w.startswith(being_completed) ]
+                        self.current_candidates = [ w for w in candidates if w.startswith(being_completed.lower()) ]
                         # Add space after it if only one choice.
                         if len(self.current_candidates) == 1:
                             self.current_candidates[0] = self.current_candidates[0] + ' '
@@ -1044,12 +1045,12 @@ def JobEdit(authentication, base_url, vargs):
     return False
 # End of JobEdit
 #-----------------------------------------------------------------------------
-def JobDisable(authentication, base_url, t_args):
+def JobDisable(authentication, base_url, vargs):
     print("Job Disable is not written.")
     return False
 # End of JobDisable
 #-----------------------------------------------------------------------------
-def JobEnable(authentication, base_url, t_args):
+def JobEnable(authentication, base_url, vargs):
     print("Job Enable is not written.")
     return False
 # End of JobEnable
@@ -1068,26 +1069,26 @@ def process_job(subtype, t_args, authentication, base_url):
     ret = False
     if subtype is None:                 # No subtype, print out jobs.
         ret = JobList(authentication, base_url, t_args)
-    elif subtype in list_job['list']:
+    elif subtype.lower() in list_job['list']:
         ret = JobList(authentication, base_url, t_args)
     # Create or New mean the same thing.
-    elif subtype in list_job['create'] or subtype in list_job['new']:
+    elif subtype.lower() in list_job['create'] or subtype.lower() in list_job['new']:
         ret = JobCreate(authentication, base_url, t_args)
-    elif subtype in list_job['delete']:
+    elif subtype.lower() in list_job['delete']:
         ret = JobDele(authentication, base_url, t_args)
-    elif subtype in list_job['edit']:
+    elif subtype.lower() in list_job['edit']:
         ret = JobEdit(authentication, base_url, t_args)
-    elif subtype in list_job['run'] or subtype in list_job['start']:
+    elif subtype.lower() in list_job['run'] or subtype.lower() in list_job['start']:
         ret = JobRun(authentication, base_url, t_args)
-    elif subtype in list_job['stop']:
+    elif subtype.lower() in list_job['stop']:
         ret = JobStop(authentication, base_url, t_args)
-    elif subtype in list_job['verify']:
+    elif subtype.lower() in list_job['verify']:
         ret = JobVerify(authentication, base_url, t_args)
-    elif subtype in list_job['disable']:
+    elif subtype.lower() in list_job['disable']:
         ret = JobDisable(authentication, base_url, t_args)
-    elif subtype in list_job['enable']:
+    elif subtype.lower() in list_job['enable']:
         ret = JobEnable(authentication, base_url, t_args)
-    elif subtype in list_job['help'] or subtype[0] == '?':
+    elif subtype.lower() in list_job['help'] or subtype[0] == '?':
         JobHelp(tab_words["jobs"])
         ret = False
     else:
@@ -1200,14 +1201,15 @@ def process_proj(subtype, t_args, authentication, base_url):
     ret = False
     if subtype is None:                 # No subtype, print out projects.
         ret = ProjList(authentication, base_url, t_args, True)
-    elif subtype in list_proj['list']:
+    elif subtype.lower() in list_proj['list']:
         ret = ProjList(authentication, base_url, t_args, True)
 
-    elif subtype in list_proj['create'] or subtype in list_proj['new'] or subtype in list_proj['add']:
+    elif (subtype.lower() in list_proj['create'] or subtype.lower() in list_proj['new'] or
+            subtype.lower() in list_proj['add']):
         ret = ProjCreate(authentication, base_url, t_args)
-    elif subtype in list_proj['delete']:
+    elif subtype.lower() in list_proj['delete']:
         ret = ProjDele(authentication, base_url, t_args)
-    elif subtype in list_proj['help'] or subtype[0] == '?':
+    elif subtype.lower() in list_proj['help'] or subtype[0] == '?':
         ProjectHelp(tab_words["projects"])
         ret = False
     else:
@@ -1236,7 +1238,13 @@ def StorageAssetsDevices(authentication, base_url, vargs):
         if not args.brief:
             print('Storage Devices:')
         for s in storagedevices['deviceassets']:
-            print("name='{}'  id={}  online={}  protocolid={}".format(s['name'], s['id'], s['online'], s['protocolid']))
+            if not vargs:
+                print("name='{}'  id={}  online={}  protocolid={}".format(s['name'], s['id'], s['online'], s['protocolid']))
+            else:
+                if s['name'] in vargs or s['id'] in vargs:
+                    print("name='{}'  id={}  online={}  protocolid={}".format(s['name'], s['id'], s['online'], s['protocolid']))
+                # fi
+            # fi
         # rof
     # fi
     return True
@@ -1260,9 +1268,17 @@ def StorageAssetsFiles(authentication, base_url, vargs):
         if not args.brief:
             print('Storage Files:')
         for s in storagefiles['fileassets']:
-            print("name='{}'  id={}  online={}  protocolid={}  type='{}'  share='{}'".format(
-                  s['name'], s['id'], s['online'], s['protocolid'],
-                  s['definition']['type'], s['definition']['share']))
+            if not vargs:
+                print("name='{}'  id={}  online={}  protocolid={}  type='{}'  share='{}'".format(
+                      s['name'], s['id'], s['online'], s['protocolid'],
+                      s['definition']['type'], s['definition']['share']))
+            else:
+                if s['name'] in vargs or str(s['id']) in vargs:
+                    print("name='{}'  id={}  online={}  protocolid={}  type='{}'  share='{}'".format(
+                          s['name'], s['id'], s['online'], s['protocolid'],
+                          s['definition']['type'], s['definition']['share']))
+                # fi
+            # fi
         # rof
     # fi
     return True
@@ -1278,16 +1294,17 @@ def process_storage(subtype, t_args, authentication, base_url):
     list_storage = unique_dict_array(tab_words["storage"])
 
     ret = False
-    if subtype is None or subtype in list_storage['list']:
+    if subtype is None or subtype.lower() in list_storage['list']:
         ret = StorageAssetsDevices(authentication, base_url, t_args)
         ret = StorageAssetsFiles(authentication, base_url, t_args)
-    elif subtype in list_storage['devices'] or subtype in list_storage['fc']:
+    elif subtype.lower() in list_storage['devices'] or subtype.lower() in list_storage['fc']:
         ret = StorageAssetsDevices(authentication, base_url, t_args)
-    elif subtype in list_storage['files'] or subtype in list_storage['nfs'] or subtype in list_storage['smb']:
+    elif (subtype.lower() in list_storage['files'] or subtype.lower() in list_storage['nfs'] or
+            subtype.lower() in list_storage['smb']):
         ret = StorageAssetsFiles(authentication, base_url, t_args)
-#    elif subtype in list_storage['systems']:
+#    elif subtype.lower() in list_storage['systems']:
 #        ret = StorageSystems(authentication, base_url, t_args)
-    elif subtype in list_storage['help'] or subtype[0] == '?':
+    elif subtype.lower() in list_storage['help'] or subtype[0] == '?':
         print("process_storage #9")
         StorageHelp(storage_words)
         print("process_storage #10")
@@ -1306,14 +1323,14 @@ def process_line(t, authentication, base_url):
     if len(t) == 0:
         command = subtype = t_args = None
     elif len(t) == 1:
-        command = t[0]
+        command = t[0].lower()
         subtype = t_args = None
     elif len(t) == 2:
-        command = t[0]
+        command = t[0].lower()
         subtype = t[1]
         t_args = None
     else:
-        command = t[0]
+        command = t[0].lower()
         subtype = t[1]
         t_args = t[2:]
     # fi
