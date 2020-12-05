@@ -1,10 +1,15 @@
 #!/usr/bin/python3
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 #
-# TODO: project status ...  ??      history? info?
-# TODO: job status ...      ??
-# TODO: job log ...         ??
-# TODO: job errors ...      ??
+# NOTDONEYET -   job disable jobid ["name"] [id]     # Disable job(s) by ID or name.
+# NOTDONEYET -   job enable jobid ["name"] [id]      # Enable job(s) by ID or name.
+# NOTDONEYET - storage
+# NOTDONEYET - projects 'update', 'edit'
+# NOTDONEYET - jobs 'stat'
+# NOTDONEYET - 'schedules'
+# NOTDONEYET - 'fast3'
+# NOTDONEYET - Fibre Channel "devices" -> protocolid -> systemid
+
 '''
 2020-04-01 Modified from something Joel had and something William provided ...
 
@@ -24,8 +29,6 @@ Synopsis:
     j                                   # List all jobs.
     j l                                 # List all jobs.
     job delete jobid ["name"] [id]      # Delete job(s) by ID or name.
-    job disable jobid ["name"] [id]     # Disable job(s) by ID or name. -- NOTDONEYET
-    job enable jobid ["name"] [id]      # Enable job(s) by ID or name. -- NOTDONEYET
     job list                            # List all jobs.
     job list jobid ["name"] [id]        # List job(s) by ID or name.
     jobs project ["name"] [id]          # List job(s) for one project ID or name.
@@ -37,7 +40,7 @@ Synopsis:
     job create "hi" src dst "job name"  # Create job attached to project "hi",
                                           moving src to dst, named "job name".
 
-    job new projid src_uri dest_uri "job name" src_vers dst_vers
+    job create projid src_uri dest_uri "job name" src_vers dst_vers
                                         # Alternative name for "job create".
 
     job edit jobid {name=value}         # Useful for remote -- untested recently.
@@ -52,10 +55,8 @@ Synopsis:
                                           with source SMB version, and destination.
     projects                            # Easier to remember than proj. :)
 
-NOTDONEYET - storage
-
 Examples:
-    job new 26 nfs://172.22.14.107/vol/m4_v1 nfs://172.22.14.107/vol/m4_v2
+    job create 26 nfs://172.22.14.107/vol/m4_v1 nfs://172.22.14.107/vol/m4_v2
     jobs
     job run 59
     sleep 240
@@ -115,22 +116,9 @@ password='Cobra!Indigo'
 # For the completer - the list of words.
 # Note: trailing spaces are words that take arguments, split_for_unique ignores them. 
 # NOTE: lower case.
-tab_words = { 'projects' : ['', 'list',
-                            'create', 'new', 'add',
-                            'delete',
-                            'help'],
-                            # NOTDONEYET - 'update', 'edit'
-              'jobs':      ['', 'list',
-                            'create', 'new', 'add',
-                            'delete',
-                            'edit',
-                            'run', 'start',
-                            'stop',
-                            'verify',
-                            'disable',
-                            'enable',
-                            'help'],
-                            # NOTDONEYET - 'stat'
+tab_words = { 'projects' : ['', 'list', 'create', 'delete', 'help'],
+              'jobs':      ['', 'list', 'create', 'delete', 'edit', 'run', 'start',
+                            'stop', 'verify', 'disable', 'enable', 'help'],
               'quit':      [],      # No arguments
               'exit':      [],      # No arguments
               'help':      [],      # No arguments
@@ -138,17 +126,12 @@ tab_words = { 'projects' : ['', 'list',
               'sleep':     [],      # A number of seconds to sleep.
               'brief':     ['', 'on', 'enabled',
                             'off', 'disabled'],
-              # NOTDONEYET - 'schedules'
-              # NOTDONEYET - 'fast3'
               'storage':   {'':'',
-                            'list': ["me", "those"],
-                            'devices':'',
-                            'fc':'',
-                            'scsi':'',
-                            'files':'',
-                            'nfs':'',
-                            'smb':'',
-                            'systems':'',
+                            'list': '',
+                            'devices': ["list", "help"],
+                            'files': ["create", "delete", "list", "help"],
+                            'protocols': ["create", "delete", "list", "help"],
+                            'systems': ["create", "delete", "list", "help"],
                             'help':''},
             }
 #-----------------------------------------------------------------------------
@@ -267,7 +250,7 @@ class dnsCompleter:
         return response
     # End of complete
 # End of dnsCompleter
-#-----------------------------------------------------------------------------
+#=============================================================================
 def parse_args():
     global args
 
@@ -297,7 +280,7 @@ def parse_args():
     # fi
     return
 # End of parse_args
-#-----------------------------------------------------------------------------
+#=============================================================================
 _httpResponseMap = {
     100 : 'Continue',
     101 : 'Switching Protocols',
@@ -379,19 +362,19 @@ def print_get_error_exit(str, response):
 # Called initially.
 def Login(ipaddr, version, user, pw):
     # Get Authentication Authorization Bearer.
-    BASEURL = 'https://%s%s/' % (ipaddr, version)
+    BASEURL = 'https://{}{}/'.format(ipaddr, version)
     url = BASEURL + 'auth'
     r = requests.get(url, auth=(user, pw), verify=False)
     if r.status_code != 200:
         print_get_error_exit('Could not login to device! Return response:', r)
     # fi
-    return({'Authorization':'Bearer %s' % r.text}, BASEURL)
+    return({'Authorization':'Bearer {}'.format(r.text)}, BASEURL)
 # End of Login
 #-----------------------------------------------------------------------------
 def send_get(authentication, base_url, tackon):
     r = requests.get(base_url + tackon, headers=authentication, verify=False)
     if r.status_code != 200:
-        print_get_error("Request for %s failed. Response:" % tackon, r)
+        print_get_error("Request for {} failed. Response:".format(tackon), r)
         return (False, None)
     # fi
     return(True, r)
@@ -441,7 +424,7 @@ def send_delete(base_url, authentication, str):
     # fi
     return (True, r)
 # End of send_delete
-#-----------------------------------------------------------------------------
+#=============================================================================
 # Called when program starts. This sets projMap dictionary.
 def ProjList(authentication, base_url, vargs, display):
     global projMap
@@ -467,7 +450,7 @@ def ProjList(authentication, base_url, vargs, display):
             projMap[proj['id']] = proj['name']
             if display:
                 if not args.brief:
-                    print('%(id)4d: message: %(message)s    name \"%(name)s\"' % proj)
+                    print('%(id)4d: message: %(message)s    name "%(name)s"' % proj)
                 else:
                     print('%(id)4d' % proj)
                 # fi
@@ -490,57 +473,57 @@ def ProjList(authentication, base_url, vargs, display):
             found = False
             for project in projlist.json()['projects']:
                 if project['name'] == id:
-                    print('Project "%s" id %s' % (id, project['id']))
+                    print('Project "{}" id {}'.format(id, project['id']))
                     found = True
                     break
                 # fi
             # rof
             if not found:
-                print('Could not get information on project name "%s"' % id)
+                print('Could not get information on project name "{}"'.format(id))
             # fi
             continue
         # fi
 
         # A project id number if here.
-        (rt, r) = send_get(authentication, base_url, 'datamovement/projects/%s' % id)
+        (rt, r) = send_get(authentication, base_url, 'datamovement/projects/{}'.format(id))
         if not rt:
             continue
         # fi
         ret = True
         results = r.json()
-        print('Project "%s":' % id)
+        print('Project "{}":'.format(id))
         print(yaml.dump(results, default_flow_style=False))
     # rof
     return ret
 # End of ProjList
-#-----------------------------------------------------------------------------
+#=============================================================================
 def Help():
     print(__doc__)
     return True
 # End of Help
-#-----------------------------------------------------------------------------
+#=============================================================================
 def Exit(subtype):
     if subtype is None or subtype == '':
         exit(0)
     # fi
     if not subtype.isdigit():
-        print("Error: argument is not a number '%s'" % subtype)
+        print("Error: argument is not a number '{}'".format(subtype))
         return False
     # fi
     exit(int(subtype))
 # End of Exit
-#-----------------------------------------------------------------------------
+#=============================================================================
 def Sleep(subtype):
     if subtype is not None and subtype != '':
         if not subtype.isdigit():
-            print("Error: argument is not a number '%s'" % subtype)
+            print("Error: argument is not a number '{}'".format(subtype))
             return False
         # fi
         time.sleep(int(subtype))
     # fi
     return True
 # End of Sleep
-#-----------------------------------------------------------------------------
+#=============================================================================
 def Brief(subtype):
     global args
 
@@ -555,7 +538,7 @@ def Brief(subtype):
         return True
     # fi
 
-    print("Error: Brief argument '%s' not recognized as 'on' or 'off'" % subtype)
+    print("Error: Brief argument '{}' not recognized as 'on' or 'off'".format(subtype))
     if args.brief is None or args.brief:
         print("Error: Brief left as 'on'")
     else:
@@ -563,7 +546,7 @@ def Brief(subtype):
     # fi
     return False
 # End of Brief
-#-----------------------------------------------------------------------------
+#=============================================================================
 def History():
     global history
 
@@ -574,7 +557,7 @@ def History():
     # rof
     return True
 # End of History
-#-----------------------------------------------------------------------------
+#=============================================================================
 # Called from JobCreate.
 def _parseJobURI(uri):
     global username, password
@@ -606,33 +589,33 @@ def _parseJobURI(uri):
         return (True, {'type':'REPLICATION', 'host':m.group(1), 'remoteverifier':None})
     # fi
 
-    print("Unknown URI '%s'" % uri)
+    print("Unknown URI '{}'".format(uri))
     return (False,dict())
 # End of _parseJobURI
 #-----------------------------------------------------------------------------
 def JobCreate(authentication, base_url, vargs):
     global _jobId
 
-    if not vargs or not vargs or not vargs[0]:
-        print("Must have 4 arguments to create/new:")
-        print("   projectId, source, destination, JobName")
+    if not vargs or not vargs[0]:
+        print("Must have 4 arguments to create:")
+        print("   job create projectId, source, destination, JobName")
         return False
     # fi
 
     if len(vargs) != 4:
-        print("Must have 4 arguments to create/new (not %s):" % len(vargs))
-        print("   projectId, source, destination, JobName")
+        print("Must have 4 arguments to create (not {}):".format(len(vargs)))
+        print("   job create projectId, source, destination, JobName")
         return False
     # fi
 
     (rt, s) = _parseJobURI(vargs[1])
     if not rt:
-        print("Second argument must be URI for source. nfs://127.0.0.1/vol")
+        print("Second argument to job create must be URI for source. nfs://127.0.0.1/vol")
         return False
     # fi
     (rt, d) = _parseJobURI(vargs[2])
     if not rt:
-        print("Third argument must be URI for Destination. smb://127.0.0.1/share")
+        print("Third argument to job create must be URI for Destination. smb://127.0.0.1/share")
         return False
     # fi
 
@@ -641,7 +624,7 @@ def JobCreate(authentication, base_url, vargs):
         # A project name if here.
         (ret, projlist) = send_get(authentication, base_url, 'datamovement/projects')
         if not ret:
-            print("Error: First argument is not a number or project name '%s'" % id)
+            print("Error: First argument to job create is not a number or project name '{}'".format(id))
             return False
         # fi
         found = False
@@ -653,7 +636,7 @@ def JobCreate(authentication, base_url, vargs):
             # fi
         # rof
         if not found:
-            print("Could not get information for project name %s" % id)
+            print("Could not find project name {}".format(id))
             return False
         # fi
     # fi
@@ -683,7 +666,7 @@ def JobCreate(authentication, base_url, vargs):
     # fi
     return True
 # End of JobCreate
-#-----------------------------------------------------------------------------
+#=============================================================================
 # Called from _printJob, which is called from JobList.
 def _jobURL(job):
     if job['type'] == 'NFS':
@@ -703,20 +686,20 @@ def _printJob(job):
     global projMap
 
     job['proj'] = projMap[job['projectid']]
-    print('%(id)4d: Status %(status)-8s   projectid %(projectid)s    project name \"%(proj)s\"' % job)
+    print('%(id)4d: Status %(status)-8s   projectid %(projectid)s    project name "%(proj)s"' % job)
     mess = ''
     if 'message' in job:
         if job['message']:
             mess = job['message']
         # fi
     # fi
-    print('      state: %(state)s    name: \"%(name)s\"' % job)
-    print('      src: \"%s\"' % _jobURL(job['source']))
-    print('      dst: \"%s\"' % _jobURL(job['destination']))
-    print('      message: %s' % mess)
+    print('      state: %(state)s    name: "%(name)s"' % job)
+    print('      src: "{}"'.format(_jobURL(job['source'])))
+    print('      dst: "{}"'.format(_jobURL(job['destination'])))
+    print('      message: {}'.format(mess))
     return
 # End of _printJob
-#-----------------------------------------------------------------------------
+#=============================================================================
 def JobList(authentication, base_url, vargs):
     if not vargs:
         # If no argument, print out all job ID's and their names.
@@ -756,19 +739,19 @@ def JobList(authentication, base_url, vargs):
             found = False
             for job in joblist.json()['jobs']:
                 if job['name'] == jid:
-                    print('Job "%s"   id %s   projectid %s   state %s   status %s' % 
-                             (jid, job['id'], job['projectid'], job['state'], job['status']))
+                    print('Job "{}"   id {}   projectid {}   state {}   status {}'.format(
+                             jid, job['id'], job['projectid'], job['state'], job['status']))
                     found = True
                     break
                 # fi
             # rof
             if not found:
-                print('Could not get information on job name "%s"' % jid)
+                print('Could not get information on job name "{}"'.format(jid))
             # fi
             continue
         # fi
         # Must be a number if here
-        (rt, r) = send_get(authentication, base_url, 'datamovement/jobs/%s' % jid)
+        (rt, r) = send_get(authentication, base_url, 'datamovement/jobs/{}'.format(jid))
         if not rt:
             continue
         # fi
@@ -777,7 +760,7 @@ def JobList(authentication, base_url, vargs):
             print('No job {0} present.'.format(jid))
         else:
             ret = True
-            print('Job %s:' % jid)
+            print('Job {}:'.format(jid))
             print(yaml.dump(results, default_flow_style=False))
         # fi
     # rof
@@ -808,14 +791,14 @@ def JobProjList(authentication, base_url, vargs):
         found = False
         for project in projlist.json()['projects']:
             if project['name'] == projid:
-                print('Project "%s" id %s' % (projid, project['id']))
+                print('Project "{}" id {}'.format(projid, project['id']))
                 found = True
                 projid = project['id']
                 break
             # fi
         # rof
         if not found:
-            print('Could not get information on project name "%s"' % id)
+            print('Could not get information for project name "{}"'.format(id))
             return False
         # fi
     else:
@@ -823,38 +806,39 @@ def JobProjList(authentication, base_url, vargs):
     # fi
 
     # A project id number if here.
-    (rt, r) = send_get(authentication, base_url, 'datamovement/projects/%s' % projid)
+    (rt, r) = send_get(authentication, base_url, 'datamovement/projects/{}'.format(projid))
     if not rt:
         if vargs[0] != projid:
-            print('Could not get information on project name "%s" giving id "%s"' % (vargs[0], projid))
+            print('Could not get information on project name "{}" giving id "{}"'.format(vargs[0], projid))
         else:
-            print('Could not get information on project id "%s"' % projid)
+            print('Could not get information on project id "{}"'.format(projid))
         # fi
         return False
     # fi
-
-    # We know project projid exists.
-    ret = False
 
     # Get all the jobs.
     (rt, r) = send_get(authentication, base_url, 'datamovement/jobs')
     if not rt:
         return False
     # fi
+
+    # We know project projid exists.
     joblist = r.json()
     if joblist['jobs'] == []:
         print('No jobs present.')
-    else:
-        print('Jobs:')
-        for job in joblist['jobs']:
-            if job['projectid'] == projid:
-                ret = True
-                _printJob(job)
-            # fi
-        # rof
+        return False
     # fi
+
+    ret = False
+    print('Jobs:')
+    for job in joblist['jobs']:
+        if job['projectid'] == projid:
+            ret = True
+            _printJob(job)
+        # fi
+    # rof
     if not ret:
-        print('No jobs for project ID="%s" present.' % projid)
+        print('No jobs for project ID="{}" present.'.format(projid))
         return False
     # fi
     return True
@@ -878,12 +862,12 @@ def JobDele(authentication, base_url, vargs):
                 # fi
             # rof
             if not found:
-                print('Could not get information on job name "%s"' % id)
+                print('Could not get information on job name "{}"'.format(id))
                 continue
             # fi
         # fi
         # If name, "id" changed.
-        (rt, r) = send_delete(base_url, authentication, 'datamovement/jobs/%s' % id)
+        (rt, r) = send_delete(base_url, authentication, 'datamovement/jobs/{}'.format(id))
         if not rt:
             continue
         # fi
@@ -911,12 +895,12 @@ def JobRun(authentication, base_url, vargs):
                 # fi
             # rof
             if not found:
-                print('Could not get information on job name "%s"' % id)
+                print('Could not get information on job name "{}"'.format(id))
                 continue
             # fi
         # fi
         # If name, "id" changed.
-        (rt, r) = send_post(base_url, authentication, 'datamovement/jobs/%s/start?verify=false' % id, 202)
+        (rt, r) = send_post(base_url, authentication, 'datamovement/jobs/{}/start?verify=false'.format(id), 202)
         if not rt:
             continue
         # fi
@@ -944,12 +928,12 @@ def JobVerify(authentication, base_url, vargs):
                 # fi
             # rof
             if not found:
-                print('Could not get information on job name "%s"' % id)
+                print('Could not get information on job name "{}"'.format(id))
                 continue
             # fi
         # fi
         # If name, "id" changed.
-        (rt, r) = send_post(base_url, authentication, 'datamovement/jobs/%s/start?verify=true' % id, 202)
+        (rt, r) = send_post(base_url, authentication, 'datamovement/jobs/{}/start?verify=true'.format(id), 202)
         if not rt:
             continue
         # fi
@@ -977,12 +961,12 @@ def JobStop(authentication, base_url, vargs):
                 # if
             # rof
             if not found:
-                print('Could not get information on job name "%s"' % id)
+                print('Could not get information on job name "{}"'.format(id))
                 continue
             # fi
         # fi
         # If name, "id" changed.
-        (rt,r) = send_post(base_url, authentication, 'datamovement/jobs/%s/stop' % id, 202)
+        (rt,r) = send_post(base_url, authentication, 'datamovement/jobs/{}/stop'.format(id), 202)
         if not rt:
             continue
         # fi
@@ -1000,7 +984,7 @@ def JobEdit(authentication, base_url, vargs):
         return False
     # fi
 
-    # Need check vargs is correct format.  NOTDONEYET
+    # Need check vargs is correct format.
 
     id = None
     data = None
@@ -1008,7 +992,7 @@ def JobEdit(authentication, base_url, vargs):
     for edit in vargs:
         if id == None:
             id = edit
-            (rt, r) = send_get(authentication, base_url, 'datamovement/jobs/%s' % id)
+            (rt, r) = send_get(authentication, base_url, 'datamovement/jobs/{}'.format(id))
             etag = r.headers.get('etag').strip('"')
             data = r.json()
             del data['id']
@@ -1032,7 +1016,7 @@ def JobEdit(authentication, base_url, vargs):
     # rof
     if data:
         params = {'If-Match':etag}
-        url = base_url + 'datamovement/jobs/%s' % id
+        url = base_url + 'datamovement/jobs/{}'.format(id)
         authentication.update({'If-Match':etag})
         r = requests.put(url, headers=authentication, json = data, verify=False)
         del authentication['If-Match']
@@ -1057,52 +1041,58 @@ def JobEnable(authentication, base_url, vargs):
 #-----------------------------------------------------------------------------
 def JobHelp(job_words):
     print("Job subtypes possible:")
-    print("  {}".format(job_words))
+    print('  ' + ' '.join(sorted(job_words)))
 # End of JobHelp
 #-----------------------------------------------------------------------------
-# Second argument is 'list', 'dele', 'run', 'verify', 'stop', 'start', 'disable', 'enable', or 'stat'.
-# NOTDONEYET - disable, enable, stat
+# Second argument is 'list', 'dele', 'run', 'verify', 'stop', 'start', 'disable', 'enable'.
 
 def process_job(subtype, t_args, authentication, base_url):
     list_job = unique_dict_array(tab_words["jobs"])
  
-    ret = False
     if subtype is None:                 # No subtype, print out jobs.
-        ret = JobList(authentication, base_url, t_args)
-    elif subtype.lower() in list_job['list']:
-        ret = JobList(authentication, base_url, t_args)
-    # Create or New mean the same thing.
-    elif subtype.lower() in list_job['create'] or subtype.lower() in list_job['new']:
-        ret = JobCreate(authentication, base_url, t_args)
-    elif subtype.lower() in list_job['delete']:
-        ret = JobDele(authentication, base_url, t_args)
-    elif subtype.lower() in list_job['edit']:
-        ret = JobEdit(authentication, base_url, t_args)
-    elif subtype.lower() in list_job['run'] or subtype.lower() in list_job['start']:
-        ret = JobRun(authentication, base_url, t_args)
-    elif subtype.lower() in list_job['stop']:
-        ret = JobStop(authentication, base_url, t_args)
-    elif subtype.lower() in list_job['verify']:
-        ret = JobVerify(authentication, base_url, t_args)
-    elif subtype.lower() in list_job['disable']:
-        ret = JobDisable(authentication, base_url, t_args)
-    elif subtype.lower() in list_job['enable']:
-        ret = JobEnable(authentication, base_url, t_args)
-    elif subtype.lower() in list_job['help'] or subtype[0] == '?':
-        JobHelp(tab_words["jobs"])
-        ret = False
-    else:
-        print("No job with subtype", subtype, "t_args =", t_args)
-        JobHelp(tab_words["jobs"])
-        ret = False
+        return JobList(authentication, base_url, t_args)
     # fi
-    return ret
+    if subtype.lower() in list_job['list']:
+        return JobList(authentication, base_url, t_args)
+    # fi
+    # Create or New mean the same thing.
+    if subtype.lower() in list_job['create']:
+        return JobCreate(authentication, base_url, t_args)
+    # fi
+    if subtype.lower() in list_job['delete']:
+        return JobDele(authentication, base_url, t_args)
+    # fi
+    if subtype.lower() in list_job['edit']:
+        return JobEdit(authentication, base_url, t_args)
+    # fi
+    if subtype.lower() in list_job['run'] or subtype.lower() in list_job['start']:
+        return JobRun(authentication, base_url, t_args)
+    # fi
+    if subtype.lower() in list_job['stop']:
+        return JobStop(authentication, base_url, t_args)
+    # fi
+    if subtype.lower() in list_job['verify']:
+        return JobVerify(authentication, base_url, t_args)
+    # fi
+    if subtype.lower() in list_job['disable']:
+        return JobDisable(authentication, base_url, t_args)
+    # fi
+    if subtype.lower() in list_job['enable']:
+        return JobEnable(authentication, base_url, t_args)
+    # fi
+    if subtype.lower() in list_job['help'] or subtype[0] == '?':
+        JobHelp(tab_words["jobs"])
+        return False
+    # fi
+    print("No job with subtype '{}' -- t_args={}".format(subtype, t_args))
+    JobHelp(tab_words["jobs"])
+    return False
 # End of process_job
-#-----------------------------------------------------------------------------
+#=============================================================================
 def ProjCreate(authentication, base_url, vargs):
-    if not vargs or not vargs or not vargs[0]:
-        print("Must have 3 arguments to create/new:")
-        print("   projectname [ sourceSMBvers [ destinationSMBvers ] ]")
+    if not vargs or not vargs[0]:
+        print("Must have 3 arguments to create:")
+        print("   project create projectname [ sourceSMBvers [ destinationSMBvers ] ]")
         return False
     # fi
 
@@ -1119,8 +1109,8 @@ def ProjCreate(authentication, base_url, vargs):
         srcvers = vargs[1]
         dstvers = vargs[2]
     else:
-        print("Must have 3 arguments to create/new (not %s):" % len(vargs))
-        print("   projectname [ sourceSMBvers [ destinationSMBvers ] ]")
+        print("Must have 3 arguments to create (not {}):".format(len(vargs)))
+        print("   project create projectname [ sourceSMBvers [ destinationSMBvers ] ]")
         return False
     # fi
 
@@ -1142,7 +1132,7 @@ def ProjCreate(authentication, base_url, vargs):
     if not rt:
         return False
     # fi
-    print('Job Created', r.json()['id'])
+    print('Project Created', r.json()['id'])
     return True
 # End of ProjCreate
 #-----------------------------------------------------------------------------
@@ -1158,7 +1148,7 @@ def ProjDele(authentication, base_url, vargs):
             if projlist is None:
                 (ret, projlist) = send_get(authentication, base_url, 'datamovement/projects')
                 if not ret:
-                    print("Error: argument is not a number or project name '%s'" % id)
+                    print("Error: argument is not a number or project name '{}'".format(id))
                     continue
                 # fi
             # fi
@@ -1171,62 +1161,62 @@ def ProjDele(authentication, base_url, vargs):
                 # fi
             # rof
             if not found:
-                print("Could not get information for project name %s" % id)
+                print("Could not get information for project name {}".format(id))
                 continue
             # fi
         # fi
 
         # A project id number if here.
-        (rt, r) = send_delete(base_url, authentication, 'datamovement/projects/%s' % id)
+        (rt, r) = send_delete(base_url, authentication, 'datamovement/projects/{}'.format(id))
         if not rt:
             continue
         # fi
         ret = True
-        print('Project %s deleted.' % id)
+        print('Project {} deleted.'.format(id))
     # rof
     return ret
 # End of ProjDele
 #-----------------------------------------------------------------------------
 def ProjectHelp(project_words):
     print("Project subtypes possible:")
-    print("  {}".format(project_words))
+    print('  ' + ' '.join(sorted(project_words)))
 # End of ProjectHelp
 #-----------------------------------------------------------------------------
-# NOTDONEYET - 'updated', 'edit'
-
 def process_proj(subtype, t_args, authentication, base_url):
     # Create or New mean the same thing.
     list_proj = unique_dict_array(tab_words["projects"])
 
     ret = False
     if subtype is None:                 # No subtype, print out projects.
-        ret = ProjList(authentication, base_url, t_args, True)
-    elif subtype.lower() in list_proj['list']:
-        ret = ProjList(authentication, base_url, t_args, True)
-
-    elif (subtype.lower() in list_proj['create'] or subtype.lower() in list_proj['new'] or
-            subtype.lower() in list_proj['add']):
-        ret = ProjCreate(authentication, base_url, t_args)
-    elif subtype.lower() in list_proj['delete']:
-        ret = ProjDele(authentication, base_url, t_args)
-    elif subtype.lower() in list_proj['help'] or subtype[0] == '?':
-        ProjectHelp(tab_words["projects"])
-        ret = False
-    else:
-        print("No project with subtype", subtype, "t_args =", t_args)
-        ProjectHelp(tab_words["projects"])
-        ret = False
+        return ProjList(authentication, base_url, t_args, True)
     # fi
-    return ret
+    if subtype.lower() in list_proj['list']:
+        return ProjList(authentication, base_url, t_args, True)
+    # fi
+    if subtype.lower() in list_proj['create']:
+        return ProjCreate(authentication, base_url, t_args)
+    # fi
+    if subtype.lower() in list_proj['delete']:
+        return ProjDele(authentication, base_url, t_args)
+    # fi
+    if subtype.lower() in list_proj['help'] or subtype[0] == '?':
+        ProjectHelp(tab_words["projects"])
+    else:
+        print("No project with subtype '{}' -- t_args={}".format(subtype, t_args))
+        ProjectHelp(tab_words["projects"])
+    # fi
+    return False
 # End of process_proj
-#-----------------------------------------------------------------------------
-def StorageAssetsDevices(authentication, base_url, vargs):
+#=============================================================================
+def StorageAssetsDevices_List(authentication, base_url, vargs):
     if not args.brief:
         print('...')
+    # fi
     (rt, r) = send_get(authentication, base_url, 'storage/assets/devices')
     if not rt:
         if not args.brief:
             print('Could not get information on storage devices')
+        # fi
         return False
     # fi
 
@@ -1234,29 +1224,64 @@ def StorageAssetsDevices(authentication, base_url, vargs):
     if storagedevices['deviceassets'] == []:
         if not args.brief:
             print('No storage devices present.')
-    else:
-        if not args.brief:
-            print('Storage Devices:')
+        # fi
+        return False
+    # fi
+
+    if args.brief:
         for s in storagedevices['deviceassets']:
-            if not vargs:
-                print("name='{}'  id={}  online={}  protocolid={}".format(s['name'], s['id'], s['online'], s['protocolid']))
-            else:
-                if s['name'] in vargs or s['id'] in vargs:
-                    print("name='{}'  id={}  online={}  protocolid={}".format(s['name'], s['id'], s['online'], s['protocolid']))
-                # fi
+            if not vargs or s['name'] in vargs or str(s['id']) in vargs:
+                print("{} {} {} '{}'".format(s['id'], s['protocolid'], s['online'], s['name']))
             # fi
         # rof
+        return True
     # fi
+
+    print('Storage Devices:')
+    for s in storagedevices['deviceassets']:
+        if not vargs or s['name'] in vargs or str(s['id']) in vargs:
+            print("id={} protocolid={} online={} name='{}'".format(
+                  s['id'], s['protocolid'], s['online'], s['name']))
+        # fi
+    # rof
     return True
+# End of StorageAssetsDevices_List
+#-----------------------------------------------------------------------------
+def StorageAssetsDevicesHelp(storage_assets_devices_words):
+    print("Storage Devices subtypes possible:")
+    print('  ' + ' '.join(sorted(storage_assets_devices_words)))
+# End of StorageAssetsDevicesHelp
+#-----------------------------------------------------------------------------
+def StorageAssetsDevices(authentication, base_url, t_args):
+    if not t_args or not t_args[0]:
+        StorageAssetsDevices_List(authentication, base_url, None)
+        return True
+    # fi
+    subtype = t_args[0].lower()
+    storagedevices = unique_dict_array(tab_words["storage"]["devices"])
+    if subtype in storagedevices['list']:
+        StorageAssetsDevices_List(authentication, base_url, t_args[1:])
+        return True
+    # fi
+    if subtype in storagedevices['help'] or subtype[0] == '?':
+        StorageAssetsDevicesHelp(tab_words["storage"]["devices"])
+        return True
+    # fi
+    print("No storage devices with subtype '{}' -- t_args={}".format(subtype, t_args[1:]))
+    StorageAssetsDevicesHelp(tab_words["storage"]["devices"])
+    return False
 # End of StorageAssetsDevices
 #-----------------------------------------------------------------------------
-def StorageAssetsFiles(authentication, base_url, vargs):
+#-----------------------------------------------------------------------------
+def StorageAssetsFiles_List(authentication, base_url, vargs):
     if not args.brief:
         print('...')
+    # fi
     (rt, r) = send_get(authentication, base_url, 'storage/assets/files')
     if not rt:
         if not args.brief:
             print('Could not get information on storage files')
+        # fi
         return False
     # fi
 
@@ -1264,62 +1289,497 @@ def StorageAssetsFiles(authentication, base_url, vargs):
     if storagefiles['fileassets'] == []:
         if not args.brief:
             print('No storage files present.')
-    else:
-        if not args.brief:
-            print('Storage Files:')
+        # fi
+        return False
+    # fi
+
+    if args.brief:
         for s in storagefiles['fileassets']:
-            if not vargs:
-                print("name='{}'  id={}  online={}  protocolid={}  type='{}'  share='{}'".format(
-                      s['name'], s['id'], s['online'], s['protocolid'],
-                      s['definition']['type'], s['definition']['share']))
-            else:
-                if s['name'] in vargs or str(s['id']) in vargs:
-                    print("name='{}'  id={}  online={}  protocolid={}  type='{}'  share='{}'".format(
-                          s['name'], s['id'], s['online'], s['protocolid'],
-                          s['definition']['type'], s['definition']['share']))
-                # fi
+            if not vargs or s['name'] in vargs or str(s['id']) in vargs:
+                d = s["definition"]
+                print("{} {} {} '{}' '{}' '{}'".format(
+                      s['id'], s['protocolid'], s['online'], d['type'], s['name'], d['share']))
             # fi
         # rof
+        return True
     # fi
+
+    print('Storage Files:')
+    for s in storagefiles['fileassets']:
+        if not vargs or s['name'] in vargs or str(s['id']) in vargs:
+            d = s["definition"]
+            print("id={} protocolid={} online={} type='{}' name='{}' share='{}'".format(
+                  s['id'], s['protocolid'], s['online'], d['type'], s['name'], d['share']))
+            # fi
+        # fi
+    # rof
     return True
+# End of StorageAssetsFiles_List
+#-----------------------------------------------------------------------------
+def StorageAssetsFilesHelp(storage_assets_files_words):
+    print("Storage Files subtypes possible:")
+    print('  ' + ' '.join(sorted(storage_assets_files_words)))
+# End of StorageAssetsFilesHelp
+#-----------------------------------------------------------------------------
+def StorageAssetsFiles(authentication, base_url, t_args):
+    if not t_args or not t_args[0]:
+        StorageAssetsFiles_List(authentication, base_url, None)
+        return True
+    # fi
+    subtype = t_args[0].lower()
+    storagefiles = unique_dict_array(tab_words["storage"]["files"])
+    if subtype in storagefiles['list']:
+        StorageAssetsFiles_List(authentication, base_url, t_args[1:])
+        return True
+    # fi
+    if subtype in storagefiles['create']:
+        print("StorageAssetsFiles NOTDONEYET - create")
+        return False
+    # fi
+    if subtype in storagefiles['delete']:
+        print("StorageAssetsFiles NOTDONEYET - delete")
+        return False
+    # fi
+    if subtype in storagefiles['help'] or subtype[0] == '?':
+        StorageAssetsFilesHelp(tab_words["storage"]["files"])
+        return True
+    # fi
+    print("No storage files with subtype '{}' -- t_args={}".format(subtype, t_args[1:]))
+    StorageAssetsFilesHelp(tab_words["storage"]["files"])
+    return False
 # End of StorageAssetsFiles
+#-----------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
+def StorageProtocols_List(authentication, base_url, vargs):
+    (rt, r) = send_get(authentication, base_url, 'storage/protocols')
+    if not rt:
+        if not args.brief:
+            print('Could not get information on storage protocols')
+        # fi
+        return False
+    # fi
+
+    storageprotocols = r.json()
+    if storageprotocols['protocols'] == []:
+        if not args.brief:
+            print('No storage protocols present.')
+        # fi
+        return False
+    # fi
+
+    if args.brief:
+        for s in storageprotocols['protocols']:
+            if not vargs or s['name'] in vargs or str(s['id']) in vargs:
+                d = s["definition"]
+                print("{} {} '{}' '{}' '{}' '{}' '{}'".format(
+                      s['id'], s['systemid'], d['type'], d['host'], d['username'], s['name'], s['message']))
+            # fi
+        # rof
+        return True
+    # fi
+
+    print('Storage Protocols:')
+    for s in storageprotocols['protocols']:
+        if not vargs or s['name'] in vargs or str(s['id']) in vargs:
+            d = s["definition"]
+            print("id={} systemid={} type='{}' host='{}' username='{}' name='{}' message='{}'".format(
+                  s['id'], s['systemid'], d['type'], d['host'], d['username'], s['name'], s['message']))
+        # fi
+    # rof
+    return True
+# End of StorageProtocols_List
+#-----------------------------------------------------------------------------
+def StorageProtocols_Delete(authentication, base_url, vargs):
+    if not vargs or not vargs[0]:
+        print("Error - no storage protocols available to delete")
+        return False
+    # fi
+    (ret, storageprotocolslist) = send_get(authentication, base_url, 'storage/protocols')
+    if not ret:
+        print("Error: Error from send_get storage/protocols request")
+        return False
+    # fi
+    for id in vargs:
+        if not id:
+            continue
+        # fi
+        if id.isdigit():
+            found = False
+            for protocol in storageprotocolslist.json()['protocols']:
+                if str(protocol['id']) == id:
+                    id = protocol['id']
+                    name = protocol['name']
+                    found = True
+                    break
+                # fi
+            # rof
+            if not found:
+                print("Could not get information for storage protocol id {}".format(id))
+                return False
+            # fi
+        else:
+            found = False
+            for protocol in storageprotocolslist.json()['protocols']:
+                if protocol['name'] == id:
+                    id = protocol['id']
+                    name = protocol['name']
+                    found = True
+                    break
+                # fi
+            # rof
+            if not found:
+                print("Could not get information for storage protocol name {}".format(id))
+                return False
+            # fi
+        # fi
+
+        # A protocol id number if here.
+        (rt, r) = send_delete(base_url, authentication, 'storage/protocols/{}'.format(id))
+        if not rt:
+            continue
+        # fi
+        print("Storage Protocol {} '{}' deleted.".format(id,name))
+    # rof
+    return True
+# End of StorageProtocols_Delete
+#-----------------------------------------------------------------------------
+def StorageProtocols_Create(authentication, base_url, vargs):
+    if (not vargs or not vargs[0] or not vargs[1] or len(vargs) < 4 or
+        ((vargs[1] == 'SMB' or vargs[1] == 'NFS') and len(vargs) != 6)): 
+        print("Must have at least 4 (SCSI) or 6 arguments to create:")
+        print("   systemID SMB HostIP Username Password Name_For_Storage_Group")
+        print("   systemID NFS HostIP Username Password Name_For_Storage_Group")
+        print("   systemID SCSI Name_For_Storage_Group TargetWWN [TargetWWN...]")
+        print("example: storage protocols create 43 SMB 172.22.14.116 'AD/Parsec.Backup' 'Cobra!Indigo' 'Something SMB'")
+        return False
+    # fi
+
+    if vargs[1] == 'SCSI':
+        print("SCSI system protocols creation NOTDONEYET")
+        return False
+    # fi
+
+    if not vargs[0].isdigit():
+        (rt, r) = send_get(authentication, base_url, 'storage/systems')
+        if not rt:
+            if not args.brief:
+                print('Could not get information for storage systems to find a name.')
+            # fi
+            return False
+        # fi
+        storagesystems = r.json()
+        if storagesystems['systems'] == []:
+            if not args.brief:
+                print('Could not get information for storage systems to find a name, no storage systems.')
+            # fi
+            return False
+        # fi
+        systemid = ''
+        for s in storagesystems['systems']:
+            if s['name'] == vargs[0]:
+                systemid = s['id']
+                break;
+            # fi
+        # rof
+        if systemid == '':
+            print("Could not find storage system name '{}'".format(vargs[0]))
+            return False
+        # fi
+    else:
+        systemid = int(vargs[0])
+    # fi
+    type = vargs[1]
+    ip = vargs[2]
+    username = vargs[3]
+    password = vargs[4]
+    storage_name = vargs[5]
+
+    # Create SMB protocol.
+    info = { 'definition':
+               {
+                 "host": ip,
+                 "type": type,
+                 "username": username,
+                 "password": password
+               },
+             'name': storage_name,
+             'systemid': systemid
+           }
+
+    if not args.brief:
+        print('...')
+    (rt, r) = send_post_json(base_url, authentication, 'storage/protocols', info, 200)
+    if not rt:
+        return False
+    # fi
+    print("Storage Protocol Created {} - '{}'".format(r.json()['id'], r.json()['name']))
+    return True
+# End of StorageProtocols_Create
+#-----------------------------------------------------------------------------
+def StorageProtocolsHelp(storage_protocols_words):
+    print("Storage Protocols subtypes possible:")
+    print('  ' + ' '.join(sorted(storage_protocols_words)))
+# End of StorageProtocolsHelp
+#-----------------------------------------------------------------------------
+def StorageProtocols(authentication, base_url, t_args):
+    if not t_args or not t_args[0]:
+        StorageProtocols_List(authentication, base_url, None)
+        return True
+    # fi
+    subtype = t_args[0].lower()
+    storageprotocol = unique_dict_array(tab_words["storage"]["protocols"])
+    if subtype in storageprotocol['list']:
+        StorageProtocols_List(authentication, base_url, t_args[1:])
+        return True
+    # fi
+    if subtype in storageprotocol['create']:
+        return StorageProtocols_Create(authentication, base_url, t_args[1:])
+    # fi
+    if subtype in storageprotocol['delete']:
+        return StorageProtocols_Delete(authentication, base_url, t_args[1:])
+    # fi
+    if subtype in storageprotocol['help'] or subtype[0] == '?':
+        StorageProtocolsHelp(tab_words["storage"]["protocols"])
+        return True
+    # fi
+    print("No storage protocol with subtype '{}' -- t_args={}".format(subtype, t_args[1:]))
+    StorageProtocolsHelp(tab_words["storage"]["protocols"])
+    return False
+# End of StorageProtocols
+#-----------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
+def StorageSystems_List(authentication, base_url, vargs):
+    (rt, r) = send_get(authentication, base_url, 'storage/systems')
+    if not rt:
+        if not args.brief:
+            print('Could not get information for storage systems')
+        # fi
+        return False
+    # fi
+
+    storagesystems = r.json()
+    if storagesystems['systems'] == []:
+        if not args.brief:
+            print('No storage systems present.')
+        # fi
+        return False
+    # fi
+
+    if args.brief:
+        for s in storagesystems['systems']:
+            if not vargs or s['name'] in vargs or str(s['id']) in vargs:
+                print("{} '{}'".format(s['id'], s['name']))
+            # fi
+        # rof
+        return True
+    # fi
+
+    print('Storage Systems:')
+    for s in storagesystems['systems']:
+        if not vargs or s['name'] in vargs or str(s['id']) in vargs:
+            print("id={} name='{}'".format(s['id'], s['name']))
+        # fi
+    # rof
+    return True
+# End of StorageSystems_List
+#-----------------------------------------------------------------------------
+def StorageSystems_Delete(authentication, base_url, vargs):
+    if not vargs or not vargs[0]:
+        print("Error - nothing to delete")
+        return False
+    # fi
+    (ret, storagesystemslist) = send_get(authentication, base_url, 'storage/systems')
+    if not ret:
+        print("Error: Error from send_get storage/systems request")
+        return False
+    # fi
+    for id in vargs:
+        if not id:
+            continue
+        # fi
+        if id.isdigit():
+            found = False
+            for system in storagesystemslist.json()['systems']:
+                if str(system['id']) == id:
+                    id = system['id']
+                    name = system['name']
+                    found = True
+                    break
+                # fi
+            # rof
+            if not found:
+                print("Could not get information for system id {}".format(id))
+                return False
+            # fi
+        else:
+            found = False
+            for system in storagesystemslist.json()['systems']:
+                if system['name'] == id:
+                    id = system['id']
+                    name = system['name']
+                    found = True
+                    break
+                # fi
+            # rof
+            if not found:
+                print("Could not get information for system name {}".format(id))
+                return False
+            # fi
+        # fi
+
+        # A system id number if here.
+        (rt, r) = send_delete(base_url, authentication, 'storage/systems/{}'.format(id))
+        if not rt:
+            continue
+        # fi
+        print("Storage Systems {} '{}' deleted.".format(id,name))
+    # rof
+    return True
+# End of StorageSystems_Delete
+#-----------------------------------------------------------------------------
+def StorageSystems_Create(authentication, base_url, vargs):
+    if (not vargs or not vargs[0]) or len(vargs) != 1:
+        print("Must have exactly one argument to Storage Systems Create:")
+        print("  storage system create Name_For_Storage_System")
+        print("example: storage system create 'Some Storage System for SMB'")
+        return False
+    # fi
+
+    storage_system_name = vargs[0]
+
+    # Create SMB protocol.
+    info = { 'name': storage_system_name }
+
+    if not args.brief:
+        print('...')
+    (rt, r) = send_post_json(base_url, authentication, 'storage/systems', info, 200)
+    if not rt:
+        return False
+    # fi
+    print("Storage System Created {} - '{}'".format(r.json()['id'], r.json()['name']))
+    return True
+# End of StorageSystems_Create
+#-----------------------------------------------------------------------------
+def StorageSystemsHelp(storage_systems_words):
+    print("Storage Systems subtypes possible:")
+    print('  ' + ' '.join(sorted(storage_systems_words)))
+# End of StorageSystemsHelp
+#-----------------------------------------------------------------------------
+def StorageSystems(authentication, base_url, t_args):
+    if not t_args or not t_args[0]:
+        StorageSystems_List(authentication, base_url, None)
+        return True
+    # fi
+    subtype = t_args[0].lower()
+    storagesystems = unique_dict_array(tab_words["storage"]["systems"])
+    if subtype in storagesystems['list']:
+        StorageSystems_List(authentication, base_url, t_args[1:])
+        return True
+    # fi
+    if subtype in storagesystems['create']:
+        return StorageSystems_Create(authentication, base_url, t_args[1:])
+    # fi
+    if subtype in storagesystems['delete']:
+        return StorageSystems_Delete(authentication, base_url, t_args[1:])
+    # fi
+    if subtype in storagesystems['help'] or subtype[0] == '?':
+        StorageSystemsHelp(tab_words["storage"]["systems"])
+        return True
+    # fi
+    print("No storage systems with subtype '{}' -- t_args={}".format(subtype, t_args[1:]))
+    StorageSystemsHelp(tab_words["storage"]["systems"])
+    return False
+# End of StorageSystems
+#-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 def StorageHelp(storage_words):
     print("Storage subtypes possible:")
-    print("  {}".format(storage_words))
+    print('  ' + ' '.join(sorted(storage_words)))
 # End of StorageHelp
 #-----------------------------------------------------------------------------
+# To do:
+# Makefile
+#   Remove everything.
+#       GET /storage/protocols      Get all hosts
+#           foreach i (above): DELETE /storage/protocols/$i
+#       GET /storage/systems        Get all named groups.
+#           foreach j (above): DELETE /storage/systems/$j
+
+#   add SMB for 172.22.14.116   does all SMB files on this.
+#	= 172.22.12.140		SMB-Server-2008.ad.parsec.lab
+#	  172.22.12.143		SMB-Server-2012.ad.parsec.lab
+#	  172.22.12.144		SMB-Server-2016.ad.parsec.lab
+#	  172.22.12.112		SMB-Server-2019.ad.parsec.lab
+#	  172.22.14.116		NetApp @ 172.22.14.116 - 7mode
+#	  172.22.13.100		Isilon @ 172.22.13.100
+#	  172.22.15.113		NetApp @ 172.22.15.113 - 9.
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#   POST /storage/systems
+#       Parameter:
+#       {
+#         "name": "SMB 172.22.14.116"
+#       }
+#   Response body
+#       {
+#         "id": 43,                         <-----------
+#         "name": "SMB 172.22.14.116"
+#       }
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#   POST /storage/protocols
+#       Parameter:
+#       {
+#         "definition": {
+#           "host": "172.22.14.116",
+#           "type": "SMB"
+#           "username": "AD/Parsec.Backup",
+#           "password": "Cobra!Indigo"
+#         },
+#         "name": "netapp 172.22.14.116",
+#         "systemid": 43,
+#         "targets": []
+#       }
+#       Response body
+#       {
+#         "definition": {
+#           "host": "172.22.14.116",
+#           "type": "SMB",
+#           "username": "AD/Parsec.Backup"
+#         },
+#         "id": 1,                          <-----------
+#         "message": null,
+#         "name": "netapp 172.22.14.116",
+#         "scaninprogress": false,
+#         "systemid": 43
+#       }
+#-----------------------------------------------------------------------------
 def process_storage(subtype, t_args, authentication, base_url):
-    #-- storage_words = ['list', 'assets', 'files', 'systems', 'help']
     list_storage = unique_dict_array(tab_words["storage"])
 
     ret = False
     if subtype is None or subtype.lower() in list_storage['list']:
         ret = StorageAssetsDevices(authentication, base_url, t_args)
         ret = StorageAssetsFiles(authentication, base_url, t_args)
-    elif subtype.lower() in list_storage['devices'] or subtype.lower() in list_storage['fc']:
+    elif subtype.lower() in list_storage['devices']:
         ret = StorageAssetsDevices(authentication, base_url, t_args)
-    elif (subtype.lower() in list_storage['files'] or subtype.lower() in list_storage['nfs'] or
-            subtype.lower() in list_storage['smb']):
+    elif (subtype.lower() in list_storage['files']):
         ret = StorageAssetsFiles(authentication, base_url, t_args)
-#    elif subtype.lower() in list_storage['systems']:
-#        ret = StorageSystems(authentication, base_url, t_args)
+    elif subtype.lower() in list_storage['protocols']:
+        ret = StorageProtocols(authentication, base_url, t_args)
+    elif subtype.lower() in list_storage['systems']:
+        ret = StorageSystems(authentication, base_url, t_args)
     elif subtype.lower() in list_storage['help'] or subtype[0] == '?':
-        print("process_storage #9")
-        StorageHelp(storage_words)
-        print("process_storage #10")
+        StorageHelp(tab_words["storage"])
         ret = False
     else:
-        print("No storage with subtype", subtype, "t_args =", t_args)
-        StorageHelp(storage_words)
+        print("No storage with subtype '{}' -- t_args={}".format(subtype, t_args))
+        StorageHelp(list(tab_words["storage"].keys()))
         ret = False
     # fi
     return ret
 # End of process_storage
-#-----------------------------------------------------------------------------
+#=============================================================================
 # Parse and process line.
 def process_line(t, authentication, base_url):
-
     if len(t) == 0:
         command = subtype = t_args = None
     elif len(t) == 1:
@@ -1427,11 +1887,11 @@ def main():
                 try:
                     t = shlex.split(line)
                 except ValueError as ex:
-                    print("Parsing error in line '%s'" % line)
+                    print("Parsing error in line '{}'".format(line))
                     print("    ", str(ex))
                     continue
                 except:
-                    print("Parsing error in line '%s'" % line)
+                    print("Parsing error in line '{}'".format(line))
                     print("    ", sys.exc_info()[0])
                     continue
                 # yrt
