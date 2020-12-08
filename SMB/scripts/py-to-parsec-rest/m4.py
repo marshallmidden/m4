@@ -2,7 +2,11 @@
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 #
 # NOTDONEYET - storage
+#    print("    storage protocols create 44 NFS NOTDONEYET")
+#    print("    storage protocols delete NOTDONEYET  # Delete a protocolid for files/devices.")
 # NOTDONEYET - projects 'update', 'edit'
+#    print("    projects create 44 NFS NOTDONEYET")
+#    print("    projects create 45 SCSI NOTDONEYET")
 # NOTDONEYET - jobs 'stat'
 # NOTDONEYET - 'schedules'
 # NOTDONEYET - 'fast3'
@@ -119,22 +123,23 @@ tab_words = {
               'history':   [],      # No arguments
               'sleep':     [],      # A number of seconds to sleep.
               'example':   [],      # Example of how to do things.
-              'brief':     ['', 'on', 'enabled',
+              'brief':     ['on', 'enabled',
                             'off', 'disabled',
                             'help', '?'],
-              'jobs':      ['', 'list', 'create', 'delete', 'edit', 'run', 'start',
+              'jobs':      ['list', 'create', 'delete', 'edit', 'run', 'start',
                             'stop', 'verify', 'help', '?'],
-              'projects' : ['', 'list', 'create', 'delete', 'help', '?'],
-              'storage':   {'':'',
+              'projects' : ['list', 'create', 'delete', 'help', '?'],
+              'storage':   {
                             'list': ['devices', 'files', 'protocols', 'systems'],
                             'devices': ["list", "help", '?'],
-                            'files': ["create", "delete", "list", "help", '?'],
+                            'files': ["list", "help", '?'],
+                            #         "create", "delete"
                             'protocols': ["create", "delete", "list", "help", '?'],
                             'systems': ["create", "delete", "list", "help", '?'],
                             'help':'', '?':''
                             },
-              'help':      ['', 'example', 'projects', 'jobs', 'quit', 'exit', 'history', 'sleep', 'brief', 'storage'],
-              '?':         ['', 'example', 'projects', 'jobs', 'quit', 'exit', 'history', 'sleep', 'brief', 'storage']
+              'help':      ['example', 'projects', 'jobs', 'quit', 'exit', 'history', 'sleep', 'brief', 'storage'],
+              '?':         ['example', 'projects', 'jobs', 'quit', 'exit', 'history', 'sleep', 'brief', 'storage']
             }
 #-----------------------------------------------------------------------------
 # Note: trailing spaces are words that take arguments, split_for_unique ignores them.
@@ -251,7 +256,7 @@ class dnsCompleter:
         # yrt
         return response
     # End of complete
-# End of dnsCompleter
+# End of class dnsCompleter
 #=============================================================================
 def parse_args():
     global args
@@ -549,30 +554,36 @@ def print_help_jobs_create():
     print("                                         #   named 'p_name', moving src URI to dst URI.")
     print("    j c 26 nfs://10.0.0.7/vol/v1 nfs://10.0.0.9/vol/v2 'v1->v2'")
     print("    job cr 26 cifs://10.7.7.7/V1 cifs://10.8.8.8/V2 'mySMB'")
+    return
 # End of print_help_jobs_create
 #-----------------------------------------------------------------------------
 def print_help_jobs_delete():
     print("    jobs delete ID/name [ID/name...]     # Delete job(s) by ID or name.")
     print("    jobs delete 44 mySMB                 # Delete job #44 and one named mySMB.")
+    return
 # End of print_help_jobs_delete
 #-----------------------------------------------------------------------------
 def print_help_jobs_start():
     print("    jobs start ID/name [ID/name...]      # Same as 'run'")
     print("    jobs run ID/name [ID/name...]        # Run job(s) by ID or name.")
+    return
 # End of print_help_jobs_start
 #-----------------------------------------------------------------------------
 def print_help_jobs_stop():
     print("    jobs stop ID/name [ID/name...]       # Stop job(s) by ID or name.")
+    return
 # End of print_help_jobs_stop
 #-----------------------------------------------------------------------------
 def print_help_jobs_edit():
     print("    jobs edit ID/name {name=value}       # Useful for remote -- untested recently.")
     print("    jobs edit 57 dst.remoteverifier=...")
     print("    j e 58 src.remoteverifier=...")
+    return
 # End of print_help_jobs_edit
 #-----------------------------------------------------------------------------
 def print_help_jobs_verify():
     print("    job verify ID/name [ID/name...]      # Start verify of job(s) by ID or name.")
+    return
 # End of print_help_jobs_verify
 #-----------------------------------------------------------------------------
 def print_help_jobs_all():
@@ -692,17 +703,17 @@ def print_help_storage_files():
 def print_help_storage_protocols():
     print("    storage protocols                    # List all storage protocols (storage list protocols).")
     print("    storage protocols list               # List all storage protocols (storage list protocols).")
-    print("    storage protocols create 43 SMB 172.22.14.116 'AD/Parsec.Backup' 'Cobra!Indigo' 'Something SMB'")
+    print("    storage protocols create 43 SMB 172.22.14.116 'AD/LoginName' 'BlueSnake' 'SomethingSMB'")
     print("    storage protocols create 44 NFS NOTDONEYET")
-    print("    storage protocols delete NOTDONEYET  # Delete a protocolid for files/devices.")
+    print("    storage protocols delete ID/name...  # Delete a protocolid for files/devices.")
     return
 # End of print_help_storage_files
 #-----------------------------------------------------------------------------
 def print_help_storage_systems():
     print("    storage systems                      # List all storage systems (storage list systems).")
     print("    storage systems list                 # List all storage system (storage list system).")
-    print("    storage systems create NOTDONEYET    # Create a system for files/devices.")
-    print("    storage systems delete NOTDONEYET    # Delete a system for files/devices.")
+    print("    storage systems create ID/name...    # Create a system for files/devices.")
+    print("    storage systems delete ID/name...    # Delete a system for files/devices.")
     return
 # End of print_help_storage_systems
 #-----------------------------------------------------------------------------
@@ -752,8 +763,8 @@ def print_help_example():
     print('  Add Storage Systems')
     print('    ./m4.py storage systems create SMB_stuff')
     print('       Storage System Created 50 - "SMB_stuff"')
-    print('    ./m4.py storage protocols create 50 SMB 172.22.14.116 "AD/Parsec.Backup" "Cobra!Indigo" "Something SMB"')
-    print('       Storage Protocol Created 22 - "Something SMB"')
+    print('    ./m4.py storage protocols create 50 SMB 172.22.14.116 "AD/LoginName" "BlueSnake" "SomethingSMB"')
+    print('       Storage Protocol Created 22 - "SomethingSMB"')
     print('  Create projects and jobs.')
     print('    PN="Scripted SMB project for na116 v1 to na116 v2"')
     print('    JN="job to copy na116 v1 to na116 v1"')
@@ -796,7 +807,8 @@ def print_all_help():
 # End of print_all_help
 #-----------------------------------------------------------------------------
 def Help(subtype, first_list, vargs):
-    #-- print(__doc__)
+    commands = tab_words
+    print("Commands possible:", ', '.join(sorted(commands)))
     if (first_list is None or subtype is None or subtype == '' or
         subtype[0] == '?' or subtype in first_list['help']):
         return print_all_help()
@@ -1347,20 +1359,11 @@ def JobEdit(authentication, base_url, vargs):
     return False
 # End of JobEdit
 #-----------------------------------------------------------------------------
-def JobDisable(authentication, base_url, vargs):
-    print("Job Disable is not written.")
-    return False
-# End of JobDisable
-#-----------------------------------------------------------------------------
-def JobEnable(authentication, base_url, vargs):
-    print("Job Enable is not written.")
-    return False
-# End of JobEnable
-#-----------------------------------------------------------------------------
-def JobHelp(job_words):
-#NOTDONEYET
-    print("Job subtypes possible:")
-    print('  ' + ' '.join(sorted(job_words)))
+def JobHelp():
+    job_words = tab_words["jobs"]
+    print("Job subtypes possible:", ', '.join(sorted(job_words)))
+    print_help_jobs_all()
+    return
 # End of JobHelp
 #-----------------------------------------------------------------------------
 # Second argument is 'list', 'dele', 'run', 'verify', 'stop', 'start'.
@@ -1394,11 +1397,11 @@ def process_job(subtype, t_args, authentication, base_url):
         return JobVerify(authentication, base_url, t_args)
     # fi
     if subtype.lower() in list_job['help'] or subtype[0] == '?':
-        JobHelp(tab_words["jobs"])
+        JobHelp()
         return False
     # fi
     print("No job with subtype '{}' -- t_args={}".format(subtype, t_args))
-    JobHelp(tab_words["jobs"])
+    JobHelp()
     return False
 # End of process_job
 #=============================================================================
@@ -1490,10 +1493,11 @@ def ProjDele(authentication, base_url, vargs):
     return ret
 # End of ProjDele
 #-----------------------------------------------------------------------------
-def ProjectHelp(project_words):
-#NOTDONEYET
-    print("Project subtypes possible:")
-    print('  ' + ' '.join(sorted(project_words)))
+def ProjectHelp():
+    project_words = tab_words["projects"]
+    print("Project subtypes possible:", ', '.join(sorted(project_words)))
+    print_help_projects_all()
+    return
 # End of ProjectHelp
 #-----------------------------------------------------------------------------
 def process_proj(subtype, t_args, authentication, base_url):
@@ -1514,10 +1518,10 @@ def process_proj(subtype, t_args, authentication, base_url):
         return ProjDele(authentication, base_url, t_args)
     # fi
     if subtype.lower() in list_proj['help'] or subtype[0] == '?':
-        ProjectHelp(tab_words["projects"])
+        ProjectHelp()
     else:
         print("No project with subtype '{}' -- t_args={}".format(subtype, t_args))
-        ProjectHelp(tab_words["projects"])
+        ProjectHelp()
     # fi
     return False
 # End of process_proj
@@ -1561,10 +1565,11 @@ def StorageAssetsDevices_List(authentication, base_url, vargs):
     return True
 # End of StorageAssetsDevices_List
 #-----------------------------------------------------------------------------
-def StorageAssetsDevicesHelp(storage_assets_devices_words):
-#NOTDONEYET
-    print("Storage Devices subtypes possible:")
-    print('  ' + ' '.join(sorted(storage_assets_devices_words)))
+def StorageAssetsDevicesHelp():
+    storage_assets_devices_words = tab_words["storage"]["devices"]
+    print("Storage Devices subtypes possible:", ', '.join(sorted(storage_assets_devices_words)))
+    print_help_storage_devices()
+    return
 # End of StorageAssetsDevicesHelp
 #-----------------------------------------------------------------------------
 def StorageAssetsDevices(authentication, base_url, t_args):
@@ -1579,11 +1584,11 @@ def StorageAssetsDevices(authentication, base_url, t_args):
         return True
     # fi
     if subtype in storagedevices['help'] or subtype[0] == '?':
-        StorageAssetsDevicesHelp(tab_words["storage"]["devices"])
+        StorageAssetsDevicesHelp()
         return True
     # fi
     print("No storage devices with subtype '{}' -- t_args={}".format(subtype, t_args[1:]))
-    StorageAssetsDevicesHelp(tab_words["storage"]["devices"])
+    StorageAssetsDevicesHelp()
     return False
 # End of StorageAssetsDevices
 #-----------------------------------------------------------------------------
@@ -1631,10 +1636,11 @@ def StorageAssetsFiles_List(authentication, base_url, vargs):
     return True
 # End of StorageAssetsFiles_List
 #-----------------------------------------------------------------------------
-def StorageAssetsFilesHelp(storage_assets_files_words):
-#NOTDONEYET
-    print("Storage Files subtypes possible:")
-    print('  ' + ' '.join(sorted(storage_assets_files_words)))
+def StorageAssetsFilesHelp():
+    storage_assets_files_words = tab_words["storage"]["files"]
+    print("Storage Files subtypes possible:", ', '.join(sorted(storage_assets_files_words)))
+    print_help_storage_files()
+    return
 # End of StorageAssetsFilesHelp
 #-----------------------------------------------------------------------------
 def StorageAssetsFiles(authentication, base_url, t_args):
@@ -1648,20 +1654,20 @@ def StorageAssetsFiles(authentication, base_url, t_args):
         StorageAssetsFiles_List(authentication, base_url, t_args[1:])
         return True
     # fi
-    if subtype in storagefiles['create']:
-        print("StorageAssetsFiles NOTDONEYET - create")
-        return False
-    # fi
-    if subtype in storagefiles['delete']:
-        print("StorageAssetsFiles NOTDONEYET - delete")
-        return False
-    # fi
+#--    if subtype in storagefiles['create']:
+#--        print("StorageAssetsFiles NOTDONEYET - create")
+#--        return False
+#--    # fi
+#--    if subtype in storagefiles['delete']:
+#--        print("StorageAssetsFiles NOTDONEYET - delete")
+#--        return False
+#--    # fi
     if subtype in storagefiles['help'] or subtype[0] == '?':
-        StorageAssetsFilesHelp(tab_words["storage"]["files"])
+        StorageAssetsFilesHelp()
         return True
     # fi
     print("No storage files with subtype '{}' -- t_args={}".format(subtype, t_args[1:]))
-    StorageAssetsFilesHelp(tab_words["storage"]["files"])
+    StorageAssetsFilesHelp()
     return False
 # End of StorageAssetsFiles
 #-----------------------------------------------------------------------------
@@ -1766,7 +1772,7 @@ def StorageProtocols_Create(authentication, base_url, vargs):
         print("   systemID SMB HostIP Username Password Name_For_Storage_Group")
         print("   systemID NFS HostIP Username Password Name_For_Storage_Group")
         print("   systemID SCSI Name_For_Storage_Group TargetWWN [TargetWWN...]")
-        print("example: storage protocols create 43 SMB 172.22.14.116 'AD/Parsec.Backup' 'Cobra!Indigo' 'Something SMB'")
+        print("example: storage protocols create 43 SMB 172.22.14.116 'AD/LoginName' 'BlueSnake' 'SomethingSMB'")
         return False
     # fi
 
@@ -1832,10 +1838,11 @@ def StorageProtocols_Create(authentication, base_url, vargs):
     return True
 # End of StorageProtocols_Create
 #-----------------------------------------------------------------------------
-def StorageProtocolsHelp(storage_protocols_words):
-#NOTDONEYET
-    print("Storage Protocols subtypes possible:")
-    print('  ' + ' '.join(sorted(storage_protocols_words)))
+def StorageProtocolsHelp():
+    storage_protocols_words = tab_words["storage"]["protocols"]
+    print("Storage Protocols subtypes possible:", ', '.join(sorted(storage_protocols_words)))
+    print_help_storage_protocols()
+    return
 # End of StorageProtocolsHelp
 #-----------------------------------------------------------------------------
 def StorageProtocols(authentication, base_url, t_args):
@@ -1856,11 +1863,11 @@ def StorageProtocols(authentication, base_url, t_args):
         return StorageProtocols_Delete(authentication, base_url, t_args[1:])
     # fi
     if subtype in storageprotocol['help'] or subtype[0] == '?':
-        StorageProtocolsHelp(tab_words["storage"]["protocols"])
+        StorageProtocolsHelp()
         return True
     # fi
     print("No storage protocol with subtype '{}' -- t_args={}".format(subtype, t_args[1:]))
-    StorageProtocolsHelp(tab_words["storage"]["protocols"])
+    StorageProtocolsHelp()
     return False
 # End of StorageProtocols
 #-----------------------------------------------------------------------------
@@ -1977,11 +1984,11 @@ def StorageSystems_Create(authentication, base_url, vargs):
     return True
 # End of StorageSystems_Create
 #-----------------------------------------------------------------------------
-def StorageSystemsHelp(storage_systems_words):
-#NOTDONEYET
-    print("Storage Systems subtypes possible:")
-    print('  ' + ' '.join(sorted(storage_systems_words)))
+def StorageSystemsHelp():
+    storage_systems_words = tab_words["storage"]["systems"]
+    print("Storage Systems subtypes possible:", ', '.join(sorted(storage_systems_words)))
     print_help_storage_systems()
+    return
 # End of StorageSystemsHelp
 #-----------------------------------------------------------------------------
 def StorageSystems(authentication, base_url, t_args):
@@ -1990,6 +1997,7 @@ def StorageSystems(authentication, base_url, t_args):
         return True
     # fi
     subtype = t_args[0].lower()
+    vargs = t_args[1:]
     storagesystems = unique_dict_array(tab_words["storage"]["systems"])
     if subtype in storagesystems['list']:
         StorageSystems_List(authentication, base_url, t_args[1:])
@@ -2002,75 +2010,21 @@ def StorageSystems(authentication, base_url, t_args):
         return StorageSystems_Delete(authentication, base_url, t_args[1:])
     # fi
     if subtype in storagesystems['help'] or subtype[0] == '?':
-        StorageSystemsHelp(tab_words["storage"]["systems"])
+        StorageSystemsHelp()
         return True
     # fi
     print("No storage systems with subtype '{}' -- t_args={}".format(subtype, t_args[1:]))
-    StorageSystemsHelp(tab_words["storage"]["systems"])
+    StorageSystemsHelp()
     return False
 # End of StorageSystems
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
-def StorageHelp(storage_words):
-    print("Storage subtypes possible:")
-    print('  ' + ' '.join(sorted(storage_words)))
+def StorageHelp():
+    storage_words = tab_words["storage"]
+    print("Storage subtypes possible:", ', '.join(sorted(storage_words)))
     print_help_storage_all()
+    return
 # End of StorageHelp
-#-----------------------------------------------------------------------------
-# To do:
-# Makefile
-#   Remove everything.
-#       GET /storage/protocols      Get all hosts
-#           foreach i (above): DELETE /storage/protocols/$i
-#       GET /storage/systems        Get all named groups.
-#           foreach j (above): DELETE /storage/systems/$j
-
-#   add SMB for 172.22.14.116   does all SMB files on this.
-#	= 172.22.12.140		SMB-Server-2008.ad.parsec.lab
-#	  172.22.12.143		SMB-Server-2012.ad.parsec.lab
-#	  172.22.12.144		SMB-Server-2016.ad.parsec.lab
-#	  172.22.12.112		SMB-Server-2019.ad.parsec.lab
-#	  172.22.14.116		NetApp @ 172.22.14.116 - 7mode
-#	  172.22.13.100		Isilon @ 172.22.13.100
-#	  172.22.15.113		NetApp @ 172.22.15.113 - 9.
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-#   POST /storage/systems
-#       Parameter:
-#       {
-#         "name": "SMB 172.22.14.116"
-#       }
-#   Response body
-#       {
-#         "id": 43,                         <-----------
-#         "name": "SMB 172.22.14.116"
-#       }
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-#   POST /storage/protocols
-#       Parameter:
-#       {
-#         "definition": {
-#           "host": "172.22.14.116",
-#           "type": "SMB"
-#           "username": "AD/Parsec.Backup",
-#           "password": "Cobra!Indigo"
-#         },
-#         "name": "netapp 172.22.14.116",
-#         "systemid": 43,
-#         "targets": []
-#       }
-#       Response body
-#       {
-#         "definition": {
-#           "host": "172.22.14.116",
-#           "type": "SMB",
-#           "username": "AD/Parsec.Backup"
-#         },
-#         "id": 1,                          <-----------
-#         "message": null,
-#         "name": "netapp 172.22.14.116",
-#         "scaninprogress": false,
-#         "systemid": 43
-#       }
 #-----------------------------------------------------------------------------
 def process_storage(subtype, t_args, authentication, base_url):
     list_storage = unique_dict_array(tab_words["storage"])
@@ -2093,7 +2047,7 @@ def process_storage(subtype, t_args, authentication, base_url):
             ret += StorageSystems_List(authentication, base_url, t_args[1:])
         else:
             print("No storage list with t_args={}".format(t_args))
-            StorageHelp(list(tab_words["storage"]["list"]))
+            StorageHelp()
             ret = False
         return ret
             
@@ -2106,11 +2060,11 @@ def process_storage(subtype, t_args, authentication, base_url):
     if subtype.lower() in list_storage['systems']:
         return StorageSystems(authentication, base_url, t_args)
     if subtype.lower() in list_storage['help'] or subtype[0] == '?':
-        StorageHelp(tab_words["storage"])
+        StorageHelp()
         return False
 
     print("No storage with subtype '{}' -- t_args={}".format(subtype, t_args))
-    StorageHelp(list(tab_words["storage"].keys()))
+    StorageHelp()
     return False
 # End of process_storage
 #=============================================================================
@@ -2245,10 +2199,12 @@ def main():
             sys.exit(1)
         # yrt
     # elihw
+    return
 # End of main
 #-----------------------------------------------------------------------------
 if __name__ == '__main__':
     main()
+#fi
 #-----------------------------------------------------------------------------
 exit(0)
 #-----------------------------------------------------------------------------
