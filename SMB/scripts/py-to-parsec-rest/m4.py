@@ -128,7 +128,12 @@ tab_words = {
                             'help', '?'],
               'jobs':      ['list', 'create', 'delete', 'edit', 'run', 'start',
                             'stop', 'verify', 'help', '?'],
-              'projects' : ['list', 'create', 'delete', 'help', '?'],
+              'projects' : {
+                            'list': ['?', 'help'],
+                            'create': ['?', 'help'],
+                            'delete': ['?', 'help'],
+                            'help':'', '?':''
+                           },
               'storage':   {
                             'list': ['devices', 'files', 'protocols', 'systems'],
                             'devices': ["list", "help", '?'],
@@ -137,7 +142,7 @@ tab_words = {
                             'protocols': ["create", "delete", "list", "help", '?'],
                             'systems': ["create", "delete", "list", "help", '?'],
                             'help':'', '?':''
-                            },
+                           },
               'help':      ['example', 'projects', 'jobs', 'quit', 'exit', 'history', 'sleep', 'brief', 'storage'],
               '?':         ['example', 'projects', 'jobs', 'quit', 'exit', 'history', 'sleep', 'brief', 'storage']
             }
@@ -632,7 +637,7 @@ def print_help_projects_list():
 # End of print_help_projects_list
 #-----------------------------------------------------------------------------
 def print_help_projects_delete():
-    print("    projects delete id/name [ID/name...] # Delete project(s) by ID or name.")
+    print("    projects delete ID/name [ID/name...] # Delete project(s) by ID or name.")
     return
 # End of print_help_projects_delete
 #-----------------------------------------------------------------------------
@@ -1408,11 +1413,17 @@ def process_job(subtype, t_args, authentication, base_url):
 def ProjCreate(authentication, base_url, vargs):
     if not vargs or not vargs[0]:
         print("Must have 3 arguments to create:")
-        print("   project create projectname [ sourceSMBvers [ destinationSMBvers ] ]")
+        print("    projects create projectname [ sourceSMBvers [ destinationSMBvers ] ]")
+        print_help_projects_create()
         return False
     # fi
 
     if len(vargs) == 1:
+        he = unique_dict_array({'help':''})
+        if vargs[0] in he['help']:
+            print_help_projects_create()
+            return True
+        # fi
         projname = vargs[0]
         srcvers = None
         dstvers = None
@@ -1426,7 +1437,8 @@ def ProjCreate(authentication, base_url, vargs):
         dstvers = vargs[2]
     else:
         print("Must have 3 arguments to create (not {}):".format(len(vargs)))
-        print("   project create projectname [ sourceSMBvers [ destinationSMBvers ] ]")
+        print("    projects create projectname [ sourceSMBvers [ destinationSMBvers ] ]")
+        print_help_projects_create()
         return False
     # fi
 
@@ -1453,6 +1465,11 @@ def ProjCreate(authentication, base_url, vargs):
 # End of ProjCreate
 #-----------------------------------------------------------------------------
 def ProjDele(authentication, base_url, vargs):
+    he = unique_dict_array({'help':''})
+    if vargs is None or vargs[0] is None or vargs[0] == '' or vargs[0] in he['help']:
+        print_help_projects_delete()
+        return True
+    # fi
     ret = False
     projlist = None
     for id in vargs:
