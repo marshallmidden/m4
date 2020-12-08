@@ -1,8 +1,6 @@
 #!/usr/bin/python3
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 #
-# NOTDONEYET -   job disable jobid ["name"] [id]     # Disable job(s) by ID or name.
-# NOTDONEYET -   job enable jobid ["name"] [id]      # Enable job(s) by ID or name.
 # NOTDONEYET - storage
 # NOTDONEYET - projects 'update', 'edit'
 # NOTDONEYET - jobs 'stat'
@@ -38,10 +36,9 @@ Synopsis:
     jobs                                # Easier to remember than "job". :)
 
     job create "hi" src dst "job name"  # Create job attached to project "hi",
-                                          moving src to dst, named "job name".
-
+                                        #    moving src to dst, named "job name".
     job create projid src_uri dest_uri "job name" src_vers dst_vers
-                                        # Alternative name for "job create".
+                                        # project id number, or project name.
 
     job edit jobid {name=value}         # Useful for remote -- untested recently.
 
@@ -52,7 +49,7 @@ Synopsis:
     proj dele "name of project" [id]    # Delete project by name or ID.
     proj create "name of project" src_vers dst_vers
                                         # Create project with provided name.
-                                          with source SMB version, and destination.
+                                        #    with source SMB version, and destination.
     projects                            # Easier to remember than proj. :)
 
 Examples:
@@ -62,26 +59,26 @@ Examples:
     sleep 240
     job dele 59
 
-    project create "MyMigrations" "1.0" "2.0"       # source share uses SMB version 1.0
-    project create "MyMigrations" "1.0" ""          # default dst to 3.1.1 - Linux default.
-    p c "MyMigrations" "1.0" "default"              # If you want to see the argument default.
+    project create "MySMB" "1.0" "2.0"  # source share uses SMB version 1.0
+    project create "MySMB" "1.0" ""     # default dst to 3.1.1 - Linux default.
+    p c "MySMB" "1.0" "default"         # If you want to see the argument default.
     job create 26 cifs://172.22.14.107/m4_v1 cifs://172.22.14.107/m4_v2 "mySMB"
     job c 26 nfs://172.22.14.54/vol/m4_v1 parsec://m4_139/ "myNFS"
     job n 26 parsec://m4_139/ nfs://172.22.14.54/vol/m4_v2 "myRemote"
     job edit 57 edit dst.remoteverifier=...
     j e 58 edit src.remoteverifier=...
     j r 57
-    j p 19                                          # See all jobs for project 19.
+    p l 19                              # See all jobs for project 19.
 
-    ./m4.py --parsec IpAddr --user My --passwd Mine pro l "MyMigrations" 33 44
+    ./m4.py --parsec IpAddr --user My --passwd Mine pro l "MySMB" 33 44
     export pxDEV=IpAddr pxUSER=My pxPASS=Mine ; ./m4.py jobs l 20 21 22 "myNFS"
 
 Environment Variables:
     The following environment variables may be set to avoid using the --parsec,
     --user and --passwd command line options:
         pxDEV   hostname or IP address of Parsec appliance
-        pxUSER  user name of the account you want to authenticate to
-        pxPASS  password for the account you want to authenticate to
+        pxUSER  user name of the account you wish to authenticate to
+        pxPASS  password for the account you wish to authenticate to
 '''
 #-----------------------------------------------------------------------------
 import argparse
@@ -116,23 +113,28 @@ password='Cobra!Indigo'
 # For the completer - the list of words.
 # Note: trailing spaces are words that take arguments, split_for_unique ignores them. 
 # NOTE: lower case.
-tab_words = { 'projects' : ['', 'list', 'create', 'delete', 'help'],
-              'jobs':      ['', 'list', 'create', 'delete', 'edit', 'run', 'start',
-                            'stop', 'verify', 'disable', 'enable', 'help'],
-              'quit':      [],      # No arguments
+tab_words = { 
               'exit':      [],      # No arguments
-              'help':      [],      # No arguments
+              'quit':      [],      # No arguments
               'history':   [],      # No arguments
               'sleep':     [],      # A number of seconds to sleep.
+              'example':   [],      # Example of how to do things.
               'brief':     ['', 'on', 'enabled',
-                            'off', 'disabled'],
+                            'off', 'disabled',
+                            'help', '?'],
+              'jobs':      ['', 'list', 'create', 'delete', 'edit', 'run', 'start',
+                            'stop', 'verify', 'help', '?'],
+              'projects' : ['', 'list', 'create', 'delete', 'help', '?'],
               'storage':   {'':'',
-                            'list': '',
-                            'devices': ["list", "help"],
-                            'files': ["create", "delete", "list", "help"],
-                            'protocols': ["create", "delete", "list", "help"],
-                            'systems': ["create", "delete", "list", "help"],
-                            'help':''},
+                            'list': ['devices', 'files', 'protocols', 'systems'],
+                            'devices': ["list", "help", '?'],
+                            'files': ["create", "delete", "list", "help", '?'],
+                            'protocols': ["create", "delete", "list", "help", '?'],
+                            'systems': ["create", "delete", "list", "help", '?'],
+                            'help':'', '?':''
+                            },
+              'help':      ['', 'example', 'projects', 'jobs', 'quit', 'exit', 'history', 'sleep', 'brief', 'storage'],
+              '?':         ['', 'example', 'projects', 'jobs', 'quit', 'exit', 'history', 'sleep', 'brief', 'storage']
             }
 #-----------------------------------------------------------------------------
 # Note: trailing spaces are words that take arguments, split_for_unique ignores them.
@@ -452,7 +454,7 @@ def ProjList(authentication, base_url, vargs, display):
                 if not args.brief:
                     print('%(id)4d: message: %(message)s    name "%(name)s"' % proj)
                 else:
-                    print('%(id)4d' % proj)
+                    print('%(id)d' % proj)
                 # fi
             # fi
         # rof
@@ -497,9 +499,325 @@ def ProjList(authentication, base_url, vargs, display):
     return ret
 # End of ProjList
 #=============================================================================
-def Help():
-    print(__doc__)
-    return True
+def print_help_exit():
+    print("Exit script when in commannd line input mode.")
+    print("  Examples:")
+    print("    exit                                 # Exit script with value 0")
+    print("    exit N                               # Exit script with value N")
+    return
+# End of print_help_exit
+#-----------------------------------------------------------------------------
+def print_help_history():
+    print("List history of previous successful commands.")
+    print("  Example:")
+    print("    history")
+    print("      1: projects")
+    print("      2: jobs")
+    print("      3: storage files")
+    print("      4: storage devices")
+    print("      5: storage protocols")
+    print("      6: storage systems")
+    return
+# End of print_help_history
+#-----------------------------------------------------------------------------
+def print_help_sleep():
+    print("Sleep for a bit, then continue executing.")
+    print("  Examples:")
+    print("    sleep                                # Sleep (ignored without value).")
+    print("    sleep N                              # Sleep for number of seconds provided.")
+    return
+# End of print_help_sleep
+#-----------------------------------------------------------------------------
+def print_help_brief():
+    print("Enable brief(er) output, or back to full output.")
+    print("  Examples:")
+    print("    brief on                             # jobs and projects have little output.")
+    print("    brief off                            # jobs and projects have full output.")
+    print("    brief enabled                        # Same as on.")
+    print("    brief disabled                       # Same as off.")
+    print("    brief                                # Default to little output (on/enabled).")
+    return
+# End of print_help_brief
+#-----------------------------------------------------------------------------
+def print_help_jobs_list():
+    print("    jobs list                            # List all jobs.")
+    print("    jobs list [ID/name...]               # List specific job(s) by ID or name.")
+# End of print_help_jobs_list
+#-----------------------------------------------------------------------------
+def print_help_jobs_create():
+    print("    jobs create p_name src dst job_name  # Create job named 'job_name', attached to project")
+    print("                                         #   named 'p_name', moving src URI to dst URI.")
+    print("    j c 26 nfs://10.0.0.7/vol/v1 nfs://10.0.0.9/vol/v2 'v1->v2'")
+    print("    job cr 26 cifs://10.7.7.7/V1 cifs://10.8.8.8/V2 'mySMB'")
+# End of print_help_jobs_create
+#-----------------------------------------------------------------------------
+def print_help_jobs_delete():
+    print("    jobs delete ID/name [ID/name...]     # Delete job(s) by ID or name.")
+    print("    jobs delete 44 mySMB                 # Delete job #44 and one named mySMB.")
+# End of print_help_jobs_delete
+#-----------------------------------------------------------------------------
+def print_help_jobs_start():
+    print("    jobs start ID/name [ID/name...]      # Same as 'run'")
+    print("    jobs run ID/name [ID/name...]        # Run job(s) by ID or name.")
+# End of print_help_jobs_start
+#-----------------------------------------------------------------------------
+def print_help_jobs_stop():
+    print("    jobs stop ID/name [ID/name...]       # Stop job(s) by ID or name.")
+# End of print_help_jobs_stop
+#-----------------------------------------------------------------------------
+def print_help_jobs_edit():
+    print("    jobs edit ID/name {name=value}       # Useful for remote -- untested recently.")
+    print("    jobs edit 57 dst.remoteverifier=...")
+    print("    j e 58 src.remoteverifier=...")
+# End of print_help_jobs_edit
+#-----------------------------------------------------------------------------
+def print_help_jobs_verify():
+    print("    job verify ID/name [ID/name...]      # Start verify of job(s) by ID or name.")
+# End of print_help_jobs_verify
+#-----------------------------------------------------------------------------
+def print_help_jobs_all():
+    print("List, create, delete, start, stop, edit, or verify a job.")
+    print("  Examples:")
+    print("    jobs                                 # Default to 'jobs list' (all jobs stuff).")
+    print("    j                                    # Abbreviation and default to 'list'.")
+    print_help_jobs_list()
+    print_help_jobs_create()
+    print_help_jobs_delete()
+    print_help_jobs_start()
+    print_help_jobs_stop()
+    print_help_jobs_edit()
+    print_help_jobs_verify()
+    return
+# End of print_help_jobs_all
+#-----------------------------------------------------------------------------
+def print_help_jobs(vargs):
+    first_list = unique_dict_array(tab_words["jobs"])
+    if vargs is None or vargs[0] == '':
+        return print_help_jobs_all()
+    subtype = vargs[0]
+    if subtype in first_list['list']:
+        return print_help_jobs_list()
+    if subtype in first_list['create']:
+        return print_help_jobs_create()
+    if subtype in first_list['delete']:
+        return print_help_jobs_delete()
+    if subtype in first_list['start'] or subtype in first_list['run']:
+        return print_help_jobs_start()
+    if subtype in first_list['stop']:
+        return print_help_jobs_stop()
+    if subtype in first_list['edit']:
+        return print_help_jobs_edit()
+    if subtype in first_list['verify']:
+        return print_help_jobs_verify()
+    print("No help for jobs '{}'.".format(subtype))
+    return print_help_jobs_all()
+# End of print_help_jobs
+#-----------------------------------------------------------------------------
+def print_help_projects_list():
+    print("    projects list                        # List all projects.")
+    print("    projects list ID/name [...]          # List projects by ID or name.")
+    print("    p l 19                               # List all jobs with project 19.")
+    return
+# End of print_help_projects_list
+#-----------------------------------------------------------------------------
+def print_help_projects_delete():
+    print("    projects delete id/name [ID/name...] # Delete project(s) by ID or name.")
+    return
+# End of print_help_projects_delete
+#-----------------------------------------------------------------------------
+def print_help_projects_create():
+    print("    p c pname src_vers dst_vers          # Create project named 'pname', with source SMB version")
+    print("    pr create 'MySMB' '1.0' '2.0'        # source share uses SMB version 1.0, dst=2.0.")
+    print("    proj create 'MySMB' '1.0' ''         # default dst to 3.1.1 - Linux default.")
+    print("    p c 'MySMB' '1.0' 'default'          # If you wish to see the argument default.")
+    print("    proj create 'name of project' src_vers dst_vers")
+    print("                                         # Create project with provided name.")
+    print("                                         #    with source SMB version, and destination.")
+    print("    project create 'MySMB' '1.0' '2.0'   # source share uses SMB version 1.0")
+    print("    project create 'MySMB' '1.0' ''      # default dst to 3.1.1 - Linux default.")
+    print("    p c 'MySMB' '1.0' 'default'          # If you want to see the argument default (above).")
+    print("    projects create 44 NFS NOTDONEYET")
+    print("    projects create 45 SCSI NOTDONEYET")
+    return
+# End of print_help_projects_create
+#-----------------------------------------------------------------------------
+def print_help_projects_all():
+    print("List/create/delete project:")
+    print("  Examples:")
+    print("    projects                             # Default to 'projects list' (all project stuff).")
+    print_help_projects_list()
+    print_help_projects_delete()
+    print_help_projects_create()
+    return
+# End of print_help_projects_all
+#-----------------------------------------------------------------------------
+def print_help_projects(vargs):
+    first_list = unique_dict_array(tab_words["projects"])
+    if vargs is None or vargs[0] == '':
+        return print_help_projects_all()
+    subtype = vargs[0]
+    if subtype in first_list['list']:
+        return print_help_projects_list()
+    if subtype in first_list['delete']:
+        return print_help_projects_delete()
+    if subtype in first_list['create']:
+        return print_help_projects_create()
+    print("No help for project '{}'.".format(subtype))
+    return print_help_projects_all()
+# End of print_help_projects
+#-----------------------------------------------------------------------------
+def print_help_storage_list():
+    print("    storage list                         # List all storage devices, files, protocols, systems.")
+    print("    storage list devices                 # List all storage devices (storage/assets/devices).")
+    print("    storage list files                   # List all storage files (storage/assets/files).")
+    print("    storage list protocols               # List all storage protocols (storage/protocols).")
+    print("    storage list systems                 # List all storage systems (storage/systems).")
+    return
+# End of print_help_storage_list
+#-----------------------------------------------------------------------------
+def print_help_storage_devices():
+    print("    storage devices                      # List all storage devices (storage list devices).")
+    print("    storage devices list                 # List all storage devices (storage list devices).")
+    return
+# End of print_help_storage_devices
+#-----------------------------------------------------------------------------
+def print_help_storage_files():
+    print("    storage files                        # List all storage files (storage list files).")
+    print("    storage files list                   # List all storage files (storage list files).")
+#    print("    storage files create NOTDONEYET      # Create a storage file -- hidden.")
+#    print("    storage files delete NOTDONEYET      # Delete a storage file.")
+    return
+# End of print_help_storage_files
+#-----------------------------------------------------------------------------
+def print_help_storage_protocols():
+    print("    storage protocols                    # List all storage protocols (storage list protocols).")
+    print("    storage protocols list               # List all storage protocols (storage list protocols).")
+    print("    storage protocols create 43 SMB 172.22.14.116 'AD/Parsec.Backup' 'Cobra!Indigo' 'Something SMB'")
+    print("    storage protocols create 44 NFS NOTDONEYET")
+    print("    storage protocols delete NOTDONEYET  # Delete a protocolid for files/devices.")
+    return
+# End of print_help_storage_files
+#-----------------------------------------------------------------------------
+def print_help_storage_systems():
+    print("    storage systems                      # List all storage systems (storage list systems).")
+    print("    storage systems list                 # List all storage system (storage list system).")
+    print("    storage systems create NOTDONEYET    # Create a system for files/devices.")
+    print("    storage systems delete NOTDONEYET    # Delete a system for files/devices.")
+    return
+# End of print_help_storage_systems
+#-----------------------------------------------------------------------------
+def print_help_storage_all():
+    print("List/create/delete storage: devices, files, protocols, or systems.")
+    print("  Examples:")
+    print("    storage                              # Default to 'storage list' (all storage stuff).")
+    print_help_storage_list()
+    print_help_storage_devices()
+    print_help_storage_files()
+    print_help_storage_protocols()
+    print_help_storage_systems()
+    return
+# End of print_help_storage_all
+#-----------------------------------------------------------------------------
+def print_help_storage(vargs):
+    first_list = unique_dict_array(tab_words["storage"])
+    if vargs is None or vargs[0] == '':
+        return print_help_storage_all()
+    subtype = vargs[0]
+    if subtype in first_list['list']:
+        return print_help_storage_list()
+    if subtype in first_list['devices']:
+        return print_help_storage_devices()
+    if subtype in first_list['files']:
+        return print_help_storage_files()
+    if subtype in first_list['protocols']:
+        return print_help_storage_protocols()
+    if subtype in first_list['systems']:
+        return print_help_storage_systems()
+    print("No help for storage '{}'.".format(subtype))
+    return print_help_storage_all()
+# End of print_help_storage
+#-----------------------------------------------------------------------------
+def print_help_example():
+    print('Example to do an SMB migration from "v1" to "v2":')
+    print('  Get all jobs, stop them, then delete them.')
+    print('    J=`./m4.py --brief jobs list`')
+    print('    ./m4.py jobs stop $J')
+    print('    ./m4.py jobs delete $J')
+    print('  Get all projects, then delete them.')
+    print('    P=`./m4.py --brief projects list`')
+    print('    ./m4.py proj delete ${P}')
+    print('  -NOTDONEYET-- Get all storage files - delete each.')
+    print('  -NOTDONEYET-- Get all storage protocols - delete each.')
+    print('  -NOTDONEYET-- Get all storage systems - delete each.')
+    print('  Add Storage Systems')
+    print('    ./m4.py storage systems create SMB_stuff')
+    print('       Storage System Created 50 - "SMB_stuff"')
+    print('    ./m4.py storage protocols create 50 SMB 172.22.14.116 "AD/Parsec.Backup" "Cobra!Indigo" "Something SMB"')
+    print('       Storage Protocol Created 22 - "Something SMB"')
+    print('  Create projects and jobs.')
+    print('    PN="Scripted SMB project for na116 v1 to na116 v2"')
+    print('    JN="job to copy na116 v1 to na116 v1"')
+    print('  Create the project - note SMB version 2.0 source and destination.')
+    print('     ./m4.py p c "${PN}" 2.0 2.0')
+    print('        Project Created 512')
+    print('  Create a job for doing the migration.')
+    print('     ./m4.py jobs create "${PN}" cifs://172.22.14.116/v1 cifs://172.22.14.116/v2 "${JN}"')
+    print('        Job ID: 596')
+    print('  Run the job for doing the migration.')
+    print('     ./m4.py jobs run "${JN}"')
+    return
+# End of print_help_example
+#-----------------------------------------------------------------------------
+def print_all_help():
+    print("")
+    print("Stand-alone CLI for Parsec appliance - uses REST interface.")
+    print("Note: Commands may be abbreviated to uniqueness. Example: 'j l' for 'job list'.")
+    print("")
+    print("Synopsis:")
+    print_help_exit()
+    print_help_history()
+    print_help_sleep()
+    print_help_brief()
+    print_help_jobs_all()
+    print_help_projects_all()
+    print_help_storage_all()
+    print_help_example()
+    print("")
+    print("Needed arguments/Environment variables:")
+    print("    ./m4.py --parsec IpAddr --user My --passwd Mine pro l 'MySMB' 33 44")
+    print("    export pxDEV=IpAddr pxUSER=My pxPASS=Mine ; ./m4.py jobs l 20 21 22 'myNFS'")
+    print("Environment Variables:")
+    print("  The following environment variables may be set to avoid using the --parsec,")
+    print("  --user and --passwd command line options:")
+    print("    pxDEV      hostname or IP address of Parsec appliance")
+    print("    pxUSER     user name of the account you wish to authenticate to")
+    print("    pxPASS     password for the account you wish to authenticate to")
+    return
+# End of print_all_help
+#-----------------------------------------------------------------------------
+def Help(subtype, first_list, vargs):
+    #-- print(__doc__)
+    if (first_list is None or subtype is None or subtype == '' or
+        subtype[0] == '?' or subtype in first_list['help']):
+        return print_all_help()
+    if subtype in first_list['exit'] or subtype in first_list['quit']:
+        return print_help_exit()
+    if subtype in first_list['history']:
+        return print_help_history()
+    if subtype in first_list['sleep']:
+        return print_help_sleep()
+    if subtype in first_list['brief']:
+        return print_help_brief()
+    if subtype in first_list['jobs']:
+        return print_help_jobs(vargs)
+    if subtype in first_list['projects']:
+        return print_help_projects(vargs)
+    if subtype in first_list['example']:
+        return print_help_example()
+    if subtype in first_list['storage']:
+        return print_help_storage(vargs)
+    print("No help for command '{}'".format(subtype))
+    return print_all_help()
 # End of Help
 #=============================================================================
 def Exit(subtype):
@@ -711,7 +1029,7 @@ def JobList(authentication, base_url, vargs):
         if args.brief:
             if results['jobs'] != []:
                 for job in results['jobs']:
-                    print('%(id)4d' % job)
+                    print('%(id)d' % job)
                 # rof
             # fi
             return True
@@ -1040,11 +1358,12 @@ def JobEnable(authentication, base_url, vargs):
 # End of JobEnable
 #-----------------------------------------------------------------------------
 def JobHelp(job_words):
+#NOTDONEYET
     print("Job subtypes possible:")
     print('  ' + ' '.join(sorted(job_words)))
 # End of JobHelp
 #-----------------------------------------------------------------------------
-# Second argument is 'list', 'dele', 'run', 'verify', 'stop', 'start', 'disable', 'enable'.
+# Second argument is 'list', 'dele', 'run', 'verify', 'stop', 'start'.
 
 def process_job(subtype, t_args, authentication, base_url):
     list_job = unique_dict_array(tab_words["jobs"])
@@ -1073,12 +1392,6 @@ def process_job(subtype, t_args, authentication, base_url):
     # fi
     if subtype.lower() in list_job['verify']:
         return JobVerify(authentication, base_url, t_args)
-    # fi
-    if subtype.lower() in list_job['disable']:
-        return JobDisable(authentication, base_url, t_args)
-    # fi
-    if subtype.lower() in list_job['enable']:
-        return JobEnable(authentication, base_url, t_args)
     # fi
     if subtype.lower() in list_job['help'] or subtype[0] == '?':
         JobHelp(tab_words["jobs"])
@@ -1178,6 +1491,7 @@ def ProjDele(authentication, base_url, vargs):
 # End of ProjDele
 #-----------------------------------------------------------------------------
 def ProjectHelp(project_words):
+#NOTDONEYET
     print("Project subtypes possible:")
     print('  ' + ' '.join(sorted(project_words)))
 # End of ProjectHelp
@@ -1248,6 +1562,7 @@ def StorageAssetsDevices_List(authentication, base_url, vargs):
 # End of StorageAssetsDevices_List
 #-----------------------------------------------------------------------------
 def StorageAssetsDevicesHelp(storage_assets_devices_words):
+#NOTDONEYET
     print("Storage Devices subtypes possible:")
     print('  ' + ' '.join(sorted(storage_assets_devices_words)))
 # End of StorageAssetsDevicesHelp
@@ -1317,6 +1632,7 @@ def StorageAssetsFiles_List(authentication, base_url, vargs):
 # End of StorageAssetsFiles_List
 #-----------------------------------------------------------------------------
 def StorageAssetsFilesHelp(storage_assets_files_words):
+#NOTDONEYET
     print("Storage Files subtypes possible:")
     print('  ' + ' '.join(sorted(storage_assets_files_words)))
 # End of StorageAssetsFilesHelp
@@ -1517,6 +1833,7 @@ def StorageProtocols_Create(authentication, base_url, vargs):
 # End of StorageProtocols_Create
 #-----------------------------------------------------------------------------
 def StorageProtocolsHelp(storage_protocols_words):
+#NOTDONEYET
     print("Storage Protocols subtypes possible:")
     print('  ' + ' '.join(sorted(storage_protocols_words)))
 # End of StorageProtocolsHelp
@@ -1661,8 +1978,10 @@ def StorageSystems_Create(authentication, base_url, vargs):
 # End of StorageSystems_Create
 #-----------------------------------------------------------------------------
 def StorageSystemsHelp(storage_systems_words):
+#NOTDONEYET
     print("Storage Systems subtypes possible:")
     print('  ' + ' '.join(sorted(storage_systems_words)))
+    print_help_storage_systems()
 # End of StorageSystemsHelp
 #-----------------------------------------------------------------------------
 def StorageSystems(authentication, base_url, t_args):
@@ -1695,6 +2014,7 @@ def StorageSystems(authentication, base_url, t_args):
 def StorageHelp(storage_words):
     print("Storage subtypes possible:")
     print('  ' + ' '.join(sorted(storage_words)))
+    print_help_storage_all()
 # End of StorageHelp
 #-----------------------------------------------------------------------------
 # To do:
@@ -1755,27 +2075,43 @@ def StorageHelp(storage_words):
 def process_storage(subtype, t_args, authentication, base_url):
     list_storage = unique_dict_array(tab_words["storage"])
 
-    ret = False
     if subtype is None or subtype.lower() in list_storage['list']:
-        ret = StorageAssetsDevices(authentication, base_url, t_args)
-        ret = StorageAssetsFiles(authentication, base_url, t_args)
-    elif subtype.lower() in list_storage['devices']:
-        ret = StorageAssetsDevices(authentication, base_url, t_args)
-    elif (subtype.lower() in list_storage['files']):
-        ret = StorageAssetsFiles(authentication, base_url, t_args)
-    elif subtype.lower() in list_storage['protocols']:
-        ret = StorageProtocols(authentication, base_url, t_args)
-    elif subtype.lower() in list_storage['systems']:
-        ret = StorageSystems(authentication, base_url, t_args)
-    elif subtype.lower() in list_storage['help'] or subtype[0] == '?':
+        ret = False
+        if t_args is None or t_args[0] == '':
+            # Do all.
+            ret = StorageAssetsDevices(authentication, base_url, t_args)
+            ret += StorageAssetsFiles(authentication, base_url, t_args)
+            ret += StorageProtocols(authentication, base_url, t_args)
+            ret += StorageSystems(authentication, base_url, t_args)
+        elif t_args[0].lower() in list_storage['devices']:
+            ret = StorageAssetsDevices_List(authentication, base_url, t_args[1:])
+        elif t_args[0].lower() in list_storage['files']:
+            ret += StorageAssetsFiles_List(authentication, base_url, t_args[1:])
+        elif t_args[0].lower() in list_storage['protocols']:
+            ret += StorageProtocols_List(authentication, base_url, t_args[1:])
+        elif t_args[0].lower() in list_storage['systems']:
+            ret += StorageSystems_List(authentication, base_url, t_args[1:])
+        else:
+            print("No storage list with t_args={}".format(t_args))
+            StorageHelp(list(tab_words["storage"]["list"]))
+            ret = False
+        return ret
+            
+    if subtype.lower() in list_storage['devices']:
+        return StorageAssetsDevices(authentication, base_url, t_args)
+    if (subtype.lower() in list_storage['files']):
+        return StorageAssetsFiles(authentication, base_url, t_args)
+    if subtype.lower() in list_storage['protocols']:
+        return StorageProtocols(authentication, base_url, t_args)
+    if subtype.lower() in list_storage['systems']:
+        return StorageSystems(authentication, base_url, t_args)
+    if subtype.lower() in list_storage['help'] or subtype[0] == '?':
         StorageHelp(tab_words["storage"])
-        ret = False
-    else:
-        print("No storage with subtype '{}' -- t_args={}".format(subtype, t_args))
-        StorageHelp(list(tab_words["storage"].keys()))
-        ret = False
-    # fi
-    return ret
+        return False
+
+    print("No storage with subtype '{}' -- t_args={}".format(subtype, t_args))
+    StorageHelp(list(tab_words["storage"].keys()))
+    return False
 # End of process_storage
 #=============================================================================
 # Parse and process line.
@@ -1810,17 +2146,17 @@ def process_line(t, authentication, base_url):
         ret = process_storage(subtype, t_args, authentication, base_url)
     elif command in first_list['exit'] or command in first_list['quit']:
         ret = Exit(subtype)
-    elif command in first_list['help'] or command[0] == '?':
-        ret = Help()
     elif command in first_list['history']:
         ret = History()
     elif command in first_list['sleep']:
         ret = Sleep(subtype)
     elif command in first_list['brief']:
         ret = Brief(subtype)
+    elif command in first_list['help'] or command[0] == '?':
+        ret = Help(subtype, first_list, t_args)
     else:
         print("Unrecognized command, or not unique", t)
-        Help()
+        Help(subtype, None, None)
         ret = False
     # fi
 
