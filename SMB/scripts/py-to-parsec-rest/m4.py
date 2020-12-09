@@ -6,7 +6,6 @@
 # NOTDONEYET - projects create 45 SCSI NOTDONEYET
 # NOTDONEYET - projects update
 # NOTDONEYET - storage files create NOTDONEYET      # Create a storage file -- hidden.
-# NOTDONEYET - storage protocols create xx NFS -- NOTDONEYET
 # NOTDONEYET - storage protocols create NOTDONEYET SCSI
 # NOTDONEYET - jobs edit jobid {...} - not tested, cleaned up, etc.
 # NOTDONEYET - jobs stat
@@ -708,8 +707,9 @@ def print_help_storage_files():
 def print_help_storage_protocols():
     print("    storage protocols                    # List all storage protocols (storage list protocols).")
     print("    storage protocols list               # List all storage protocols (storage list protocols).")
+    print("    storage protocols create SystemStorageID SMB IP 'UserName' 'Password' 'NameForProtocolid'")
     print("    storage protocols create 43 SMB 172.22.14.116 'AD/LoginName' 'BlueSnake' 'SomethingSMB'")
-    print("    storage protocols create 44 NFS NOTDONEYET")
+    print("    storage protocols create 44 NFS 172.22.14.103 'SomethingNFS'")
     print("    storage protocols delete ID/name...  # Delete a protocolid for files/devices.")
     return
 # End of print_help_storage_files
@@ -776,6 +776,10 @@ def print_help_example():
     print('         Storage System Created 50 - "SMB_stuff"')
     print('      ./m4.py storage protocols create 50 SMB 172.22.14.116 "AD/LoginName" "BlueSnake" "SomethingSMB"')
     print('         Storage Protocol Created 22 - "SomethingSMB"')
+    print('      ./m4.py storage systems create NFS_stuff')
+    print('         Storage System Created 51 - "NFS_stuff"')
+    print('      ./m4.py storage protocols create 51 NFS 172.22.13.103 "SomethingNFS"')
+    print('         Storage Protocol Created 23 - "SomethingNFS"')
     print('  Create projects and jobs.')
     print('      PN="Scripted SMB project for na116 v1 to na116 v2"')
     print('      JN="job to copy na116 v1 to na116 v1"')
@@ -1652,8 +1656,12 @@ def StorageAssetsFiles_List(authentication, base_url, vargs):
     for s in storagefiles['fileassets']:
         if not vargs or s['name'] in vargs or str(s['id']) in vargs:
             d = s["definition"]
-            print("id={} protocolid={} online={} type='{}' name='{}' share='{}'".format(
-                  s['id'], s['protocolid'], s['online'], d['type'], s['name'], d['share']))
+            if d['type'] == 'SMB':
+                print("id={} protocolid={} online={} type='{}' name='{}' share='{}'".format(
+                      s['id'], s['protocolid'], s['online'], d['type'], s['name'], d['share']))
+            elif d['type'] == 'NFS':
+                print("id={} protocolid={} online={} type='{}' name='{}' export='{}'".format(
+                      s['id'], s['protocolid'], s['online'], d['type'], s['name'], d['export']))
             # fi
         # fi
     # rof
@@ -1783,8 +1791,16 @@ def StorageProtocols_List(authentication, base_url, vargs):
     for s in storageprotocols['protocols']:
         if not vargs or s['name'] in vargs or str(s['id']) in vargs:
             d = s["definition"]
-            print("id={} systemid={} type='{}' host='{}' username='{}' name='{}' message='{}'".format(
-                  s['id'], s['systemid'], d['type'], d['host'], d['username'], s['name'], s['message']))
+            if d['type'] == 'SMB':
+                print("id={} systemid={} type='{}' host='{}' username='{}' name='{}' message='{}'".format(
+                      s['id'], s['systemid'], d['type'], d['host'], d['username'], s['name'], s['message']))
+            elif d['type'] == 'NFS':
+                print("id={} systemid={} type='{}' host='{}' name='{}' message='{}'".format(
+                      s['id'], s['systemid'], d['type'], d['host'], s['name'], s['message']))
+            else:
+                print("NOTDONEYET-fix: id={} systemid={} type='{}' name='{}' message='{}'".format(
+                      s['id'], s['systemid'], d['type'], s['name'], s['message']))
+            # fi
         # fi
     # rof
     return True
@@ -1845,17 +1861,25 @@ def StorageProtocols_Delete(authentication, base_url, vargs):
 # End of StorageProtocols_Delete
 #-----------------------------------------------------------------------------
 def StorageProtocols_Create(authentication, base_url, vargs):
-    if (not vargs or not vargs[0] or not vargs[1] or len(vargs) < 4 or
-        ((vargs[1] == 'SMB' or vargs[1] == 'NFS') and len(vargs) != 6)): 
-        print("Must have at least 4 (SCSI) or 6 arguments to create:")
-        print("   systemID SMB HostIP Username Password Name_For_Storage_Group")
-        print("   systemID NFS HostIP Username Password Name_For_Storage_Group")
-        print("   systemID SCSI Name_For_Storage_Group TargetWWN [TargetWWN...]")
-        print("example: storage protocols create 43 SMB 172.22.14.116 'AD/LoginName' 'BlueSnake' 'SomethingSMB'")
+    if not vargs or not vargs[0] or not vargs[1]:
+        print("Not enough arguments to create storage protocol:")
+        print_help_storage_protocols()
         return False
     # fi
-
-    if vargs[1] == 'SCSI':
+    type = vargs[1].upper()
+    if type == 'SMB' and len(vargs) != 6: 
+        print("Must have at least 6 arguments to create SMB:")
+        print("   storage protocols create systemID SMB HostIP Username Password Name_For_Storage_Group")
+        print_help_storage_protocols()
+        return False
+    # fi
+    if type == 'NFS' and len(vargs) != 4: 
+        print("Must have at least 6 arguments to create NFS:")
+        print("   storage protocols create systemID NFS HostIP Name_For_Storage_Group")
+        print_help_storage_protocols()
+        return False
+    # fi
+    if type == 'SCSI':
         print("SCSI system protocols creation NOTDONEYET")
         return False
     # fi
@@ -1889,26 +1913,44 @@ def StorageProtocols_Create(authentication, base_url, vargs):
     else:
         systemid = int(vargs[0])
     # fi
-    type = vargs[1]
     ip = vargs[2]
-    username = vargs[3]
-    password = vargs[4]
-    storage_name = vargs[5]
-
-    # Create SMB protocol.
-    info = { 'definition':
-               {
-                 "host": ip,
-                 "type": type,
-                 "username": username,
-                 "password": password
-               },
-             'name': storage_name,
-             'systemid': systemid
-           }
-
+    if type == 'SMB':
+        username = vargs[3]
+        password = vargs[4]
+        storage_name = vargs[5]
+        # Create SMB protocol.
+        info = { 'definition':
+                   {
+                     "host": ip,
+                     "type": type,
+                     "username": username,
+                     "password": password
+                   },
+                 'name': storage_name,
+                 'systemid': systemid
+               }
+    elif type == 'NFS':
+        storage_name = vargs[3]
+        # Create NFS protocol.
+        info = { 'definition':
+                   {
+                     "host": ip,
+                     "type": type,
+                   },
+                 'name': storage_name,
+                 'systemid': systemid
+               }
+    # fi
+    elif type == 'SCSI':
+        print("SCSI system protocols creation NOTDONEYET")
+        return False
+    else:
+        print("Type {} system protocols creation -- NOTDONEYET".format(type))
+        return False
+    #fi
     if not args.brief:
         print('...')
+    #fi
     (rt, r) = send_post_json(base_url, authentication, 'storage/protocols', info, 200)
     if not rt:
         return False
