@@ -3,7 +3,6 @@
 #
 # NOTDONEYET - storage
 #    print("    storage protocols create 44 NFS NOTDONEYET")
-#    print("    storage protocols delete NOTDONEYET  # Delete a protocolid for files/devices.")
 # NOTDONEYET - projects 'update', 'edit'
 #    print("    projects create 44 NFS NOTDONEYET")
 #    print("    projects create 45 SCSI NOTDONEYET")
@@ -137,8 +136,7 @@ tab_words = {
               'storage':   {
                             'list': ['devices', 'files', 'protocols', 'systems'],
                             'devices': ["list", "help", '?'],
-                            'files': ["list", "help", '?'],
-                            #         "create", "delete"
+                            'files': ["list", "help", '?', "create", "delete"],
                             'protocols': ["create", "delete", "list", "help", '?'],
                             'systems': ["create", "delete", "list", "help", '?'],
                             'help':'', '?':''
@@ -700,8 +698,8 @@ def print_help_storage_devices():
 def print_help_storage_files():
     print("    storage files                        # List all storage files (storage list files).")
     print("    storage files list                   # List all storage files (storage list files).")
-#    print("    storage files create NOTDONEYET      # Create a storage file -- hidden.")
-#    print("    storage files delete NOTDONEYET      # Delete a storage file.")
+    print("    storage files create NOTDONEYET      # Create a storage file -- hidden.")
+    print("    storage files delete ID/name...      # Delete a storage file.")
     return
 # End of print_help_storage_files
 #-----------------------------------------------------------------------------
@@ -756,23 +754,29 @@ def print_help_storage(vargs):
 def print_help_example():
     print('Example to do an SMB migration from "v1" to "v2":')
     print('  Get all jobs, stop them, then delete them.')
-    print('    J=`./m4.py --brief jobs list`')
-    print('    ./m4.py jobs stop $J')
-    print('    ./m4.py jobs delete $J')
+    print('      J=`./m4.py --brief jobs list`')
+    print('      ./m4.py jobs stop $J')
+    print('      ./m4.py jobs delete $J')
     print('  Get all projects, then delete them.')
-    print('    P=`./m4.py --brief projects list`')
-    print('    ./m4.py proj delete ${P}')
-    print('  -NOTDONEYET-- Get all storage files - delete each.')
-    print('  -NOTDONEYET-- Get all storage protocols - delete each.')
-    print('  -NOTDONEYET-- Get all storage systems - delete each.')
+    print('      P=`./m4.py --brief projects list`')
+    print('      ./m4.py proj delete ${P}')
+    print('  Get all storage files, then delete them.')
+    print("      SF=`./m4.py --brief storage files | awk '{print $1}'`")
+    print('      ./m4.py storage files delete ${SF}')
+    print('  Get all storage protocols, then delete them.')
+    print("      SP=`./m4.py --brief storage protocols | awk '{print $1}'`")
+    print('      ./m4.py storage protocols delete ${SP}')
+    print('  Get all storage systems, then delete them.')
+    print("      SS=`./m4.py --brief storage systems | awk '{print $1}'`")
+    print('      ./m4.py storage systems delete ${SS}')
     print('  Add Storage Systems')
-    print('    ./m4.py storage systems create SMB_stuff')
-    print('       Storage System Created 50 - "SMB_stuff"')
-    print('    ./m4.py storage protocols create 50 SMB 172.22.14.116 "AD/LoginName" "BlueSnake" "SomethingSMB"')
-    print('       Storage Protocol Created 22 - "SomethingSMB"')
+    print('      ./m4.py storage systems create SMB_stuff')
+    print('         Storage System Created 50 - "SMB_stuff"')
+    print('      ./m4.py storage protocols create 50 SMB 172.22.14.116 "AD/LoginName" "BlueSnake" "SomethingSMB"')
+    print('         Storage Protocol Created 22 - "SomethingSMB"')
     print('  Create projects and jobs.')
-    print('    PN="Scripted SMB project for na116 v1 to na116 v2"')
-    print('    JN="job to copy na116 v1 to na116 v1"')
+    print('      PN="Scripted SMB project for na116 v1 to na116 v2"')
+    print('      JN="job to copy na116 v1 to na116 v1"')
     print('  Create the project - note SMB version 2.0 source and destination.')
     print('     ./m4.py p c "${PN}" 2.0 2.0')
     print('        Project Created 512')
@@ -834,7 +838,8 @@ def Help(subtype, first_list, vargs):
     if subtype in first_list['storage']:
         return print_help_storage(vargs)
     print("No help for command '{}'".format(subtype))
-    return print_all_help()
+    # return print_all_help()
+    return
 # End of Help
 #=============================================================================
 def Exit(subtype):
@@ -1660,6 +1665,62 @@ def StorageAssetsFilesHelp():
     return
 # End of StorageAssetsFilesHelp
 #-----------------------------------------------------------------------------
+def StorageFiles_Delete(authentication, base_url, vargs):
+    if not vargs or not vargs[0]:
+        print("Error - no storage files available to delete")
+        return False
+    # fi
+    (ret, storagefileslist) = send_get(authentication, base_url, 'storage/assets/files')
+    if not ret:
+        print("Error: Error from send_get storage/files request")
+        return False
+    # fi
+    print("type(storagefileslist.json())={} storagefileslist.json()={}".format(type(storagefileslist.json()),storagefileslist.json()))
+    for id in vargs:
+        if not id:
+            continue
+        # fi
+        if id.isdigit():
+            found = False
+            for file in storagefileslist.json()['fileassets']:
+                if str(file['id']) == id:
+                    id = file['id']
+                    name = file['name']
+                    found = True
+                    break
+                # fi
+            # rof
+            if not found:
+                print("Could not get information for storage file id {}".format(id))
+                return False
+            # fi
+        else:
+            found = False
+            for file in storagefileslist.json()['fileassets']:
+                if file['name'] == id:
+                    id = file['id']
+                    name = file['name']
+                    found = True
+                    break
+                # fi
+            # rof
+            if not found:
+                print("Could not get information for storage file name {}".format(id))
+                return False
+            # fi
+        # fi
+
+        # A file id number if here.
+        (rt, r) = send_delete(base_url, authentication, 'storage/assets/files/{}'.format(id))
+        if not rt:
+            continue
+        # fi
+        print("Storage File {} '{}' deleted.".format(id,name))
+    # rof
+    return True
+# End of StorageFiles_Delete
+#-----------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
 def StorageAssetsFiles(authentication, base_url, t_args):
     if not t_args or not t_args[0]:
         StorageAssetsFiles_List(authentication, base_url, None)
@@ -1671,14 +1732,13 @@ def StorageAssetsFiles(authentication, base_url, t_args):
         StorageAssetsFiles_List(authentication, base_url, t_args[1:])
         return True
     # fi
-#--    if subtype in storagefiles['create']:
-#--        print("StorageAssetsFiles NOTDONEYET - create")
-#--        return False
-#--    # fi
-#--    if subtype in storagefiles['delete']:
-#--        print("StorageAssetsFiles NOTDONEYET - delete")
-#--        return False
-#--    # fi
+    if subtype in storagefiles['create']:
+        print("StorageAssetsFiles NOTDONEYET - create")
+        return False
+    # fi
+    if subtype in storagefiles['delete']:
+        return StorageFiles_Delete(authentication, base_url, t_args[1:])
+    # fi
     if subtype in storagefiles['help'] or subtype[0] == '?':
         StorageAssetsFilesHelp()
         return True
@@ -2107,31 +2167,29 @@ def process_line(t, authentication, base_url):
 
     # Try to process command.
     if command is None:                 # Ignore nothing given.
-        ret = False
-        pass
-    elif command in first_list['projects']:
-        ret = process_proj(subtype, t_args, authentication, base_url)
-    elif command in first_list['jobs']:
-        ret = process_job(subtype, t_args, authentication, base_url)
-    elif command in first_list['storage']:
-        ret = process_storage(subtype, t_args, authentication, base_url)
-    elif command in first_list['exit'] or command in first_list['quit']:
-        ret = Exit(subtype)
-    elif command in first_list['history']:
-        ret = History()
-    elif command in first_list['sleep']:
-        ret = Sleep(subtype)
-    elif command in first_list['brief']:
-        ret = Brief(subtype)
-    elif command in first_list['help'] or command[0] == '?':
-        ret = Help(subtype, first_list, t_args)
-    else:
-        print("Unrecognized command, or not unique", t)
-        Help(subtype, None, None)
-        ret = False
-    # fi
+        return False
+    if command in first_list['projects']:
+        return process_proj(subtype, t_args, authentication, base_url)
+    if command in first_list['jobs']:
+        return process_job(subtype, t_args, authentication, base_url)
+    if command in first_list['storage']:
+        return process_storage(subtype, t_args, authentication, base_url)
+    if command in first_list['exit'] or command in first_list['quit']:
+        return Exit(subtype)
+    if command in first_list['history']:
+        return History()
+    if command in first_list['sleep']:
+        return Sleep(subtype)
+    if command in first_list['brief']:
+        return Brief(subtype)
+    if command in first_list['help'] or command[0] == '?':
+        return Help(subtype, first_list, t_args)
+    if command in first_list['example']:
+        return print_help_example()
 
-    return(ret)
+    print("Unrecognized command, or not unique", t)
+    Help(subtype, None, None)
+    return False
 # End of process_line
 #-----------------------------------------------------------------------------
 # Main program follows.
