@@ -1,16 +1,18 @@
 #!/usr/bin/python3
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 #
-# NOTDONEYET - storage
-#    print("    storage protocols create 44 NFS NOTDONEYET")
-# NOTDONEYET - projects 'update', 'edit'
-#    print("    projects create 44 NFS NOTDONEYET")
-#    print("    projects create 45 SCSI NOTDONEYET")
-# NOTDONEYET - jobs 'stat'
-# NOTDONEYET - 'schedules'
-# NOTDONEYET - 'fast3'
+# NOTDONEYET - projects edit
+# NOTDONEYET - projects create 44 NFS NOTDONEYET
+# NOTDONEYET - projects create 45 SCSI NOTDONEYET
+# NOTDONEYET - projects update
+# NOTDONEYET - storage files create NOTDONEYET      # Create a storage file -- hidden.
+# NOTDONEYET - storage protocols create xx NFS -- NOTDONEYET
+# NOTDONEYET - storage protocols create NOTDONEYET SCSI
+# NOTDONEYET - jobs edit jobid {...} - not tested, cleaned up, etc.
+# NOTDONEYET - jobs stat
+# NOTDONEYET - fast3
+# NOTDONEYET - schedules
 # NOTDONEYET - Fibre Channel "devices" -> protocolid -> systemid
-
 '''
 2020-04-01 Modified from something Joel had and something William provided ...
 
