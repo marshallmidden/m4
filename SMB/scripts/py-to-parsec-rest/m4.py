@@ -1,7 +1,6 @@
 #!/usr/bin/python3
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 #
-# NOTDONEYET - --one-line   - job, project, ...
 # NOTDONEYET - Fibre Channel "devices" -> protocolid -> systemid
 # NOTDONEYET - iSCSI
 
@@ -1581,9 +1580,9 @@ def ProjDele(authentication, base_url, vargs):
         # fi
         ret = True
         if args.brief or args.one_line:
-            print('{}'.format(r.json()['id']))
+            print('{}'.format(id))
         else:
-            print('Project Deleted {}'.format(r.json()['id']))
+            print('Project Deleted {}'.format(id))
         # fi
     # rof
     return ret
