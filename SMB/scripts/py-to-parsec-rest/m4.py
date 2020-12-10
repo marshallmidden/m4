@@ -1110,17 +1110,18 @@ def _printJob(job):
     global projMap
 
     job['proj'] = projMap[job['projectid']]
-    print('%(id)4d: Status %(status)-8s   projectid %(projectid)s    project name "%(proj)s"' % job)
+    print("%(id)4d: Status %(status)-8s   projectid %(projectid)s    project name '%(proj)s'" % job)
     mess = ''
     if 'message' in job:
         if job['message']:
             mess = job['message']
         # fi
     # fi
-    print('      state: %(state)s    name: "%(name)s"' % job)
-    print('      src: "{}"'.format(_jobURL(job['source'])))
-    print('      dst: "{}"'.format(_jobURL(job['destination'])))
-    print("      message: '{}'".format(mess))
+    print("      State: %(state)s    name: '%(name)s'" % job)
+    print("      src: '{}'".format(_jobURL(job['source'])))
+    print("      dst: '{}'".format(_jobURL(job['destination'])))
+    print("      Message: '{}'".format(mess))
+    print("      Warnings: {}   Errors: {}   Start: '{}'   Stop: '{}'".format(job['warnings'], job['errors'], job['start'], job['end']))
     return
 # End of _printJob
 #=============================================================================
