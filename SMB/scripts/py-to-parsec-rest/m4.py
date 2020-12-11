@@ -1,14 +1,23 @@
 #!/usr/bin/python3
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
-#
+#-----------------------------------------------------------------------------
 # NOTDONEYET - Fibre Channel "devices" -> protocolid -> systemid
 # NOTDONEYET - iSCSI
 
+# + MIGRATIONS
+# * MIGRATIONS_CLEANUP
+# * MIGRATIONS_FC
+#   NOTDONEYET - MIGRATIONS_iSCSI
+#   NOTDONEYET - MIGRATIONS_SMB
+#   NOTDONEYET - MIGRATIONS_NFS
+
 # NOTDONEYET - storage files create NOTDONEYET      # Create a storage file -- hidden.
-#            - storage files delete NOTDONEYET      # Verify deleting a hidden storage file.
+#            - storage files delete NOTDONEYET      # Verify deleting a hidden storage file works.
 # NOTDONEYET - jobs edit jobid {...} - not tested, cleaned up, etc.
+# NOTDONEYET - job enable/disable flag.
 # NOTDONEYET - fast3
 # NOTDONEYET - schedules
+#-----------------------------------------------------------------------------
 '''
 2020-04-01 Modified from something Joel had and something William provided ...
 
@@ -1169,12 +1178,13 @@ def JobList(authentication, base_url, vargs):
         return True
     # fi
 
-    ret = False
+    ret = True
     for jid in vargs:
         if not jid.isdigit():
             # If not a number, then a name.
             (rt, joblist) = send_get(authentication, base_url, 'datamovement/jobs')
             if not rt:
+                ret = False
                 continue
             # fi
             found = False
@@ -1186,26 +1196,44 @@ def JobList(authentication, base_url, vargs):
             # rof
             if not found:
                 print('Could not get information on job name "{}"'.format(jid))
+                ret = False
             # fi
-            continue
-        # fi
-        # Must be a number if here
-        (rt, r) = send_get(authentication, base_url, 'datamovement/jobs/{}'.format(jid))
-        if not rt:
-            continue
-        # fi
-        results = r.json()
-        if results['status'] == 404:
-            print('No job {0} present.'.format(jid))
         else:
-            ret = True
-            if not args.brief and not args.one_line:
-                print('Job {}:'.format(jid))
-            print_job_output(results)
+            # Must be a number if here
+            (rt, r) = send_get(authentication, base_url, 'datamovement/jobs/{}'.format(jid))
+            if not rt:
+                ret = False
+                continue
+            # fi
+            results = r.json()
+            if results['status'] == 404:
+                print('No job {0} present.'.format(jid))
+                ret = False
+            else:
+                if not args.brief and not args.one_line:
+                    print('Job {}:'.format(jid))
+                # fi
+                print_job_output(results)
+            # fi
         # fi
     # rof
     return ret
 # End of JobList
+#-----------------------------------------------------------------------------
+def delete_jobid(base_url, authentication, jobid):
+    global args
+
+    (rt, r) = send_delete(base_url, authentication, 'datamovement/jobs/{}'.format(jobid))
+    if not rt:
+        return False
+    # fi
+    if args.brief or args.one_line:
+        print('{}'.format(jobid))
+    else:
+        print('Job Delete {}'.format(jobid))
+    # fi
+    return True
+# End of delete_jobid
 #-----------------------------------------------------------------------------
 def JobDele(authentication, base_url, vargs):
     global args
@@ -1214,41 +1242,51 @@ def JobDele(authentication, base_url, vargs):
         print("Error - no jobs given to delete")
         return False
     # fi
-    ret = False
+    ret = True
     for id in vargs:
         if not id.isdigit():
             # If not a number, then a name.
             (rt, joblist) = send_get(authentication, base_url, 'datamovement/jobs')
             if not rt:
+                ret = False
                 continue
             # fi
             found = False
             for job in joblist.json()['jobs']:
                 if job['name'] == id:
-                    id =  job['id']
                     found = True
-                    break
+                    if not delete_jobid(base_url, authentication, job['id']):
+                        ret = False
+                    # fi
                 # fi
             # rof
             if not found:
                 print('Could not get information on job name "{}"'.format(id))
-                continue
+                ret = False
+            # fi
+        else:
+            if not delete_jobid(base_url, authentication, id):
+                ret = False
             # fi
         # fi
-        # If name, "id" changed.
-        (rt, r) = send_delete(base_url, authentication, 'datamovement/jobs/{}'.format(id))
-        if not rt:
-            continue
-        # fi
-        if args.brief or args.one_line:
-            print('{}'.format(id))
-        else:
-            print('Job Delete {}'.format(id))
-        # fi
-        ret = True
     # rof
     return ret
 # End of JobDele
+#-----------------------------------------------------------------------------
+def run_jobid(base_url, authentication, jobid):
+    global args
+
+    (rt, r) = send_post(base_url, authentication, 'datamovement/jobs/{}/start?verify=false'.format(jobid), 202)
+    if not rt:
+        return False
+    # fi
+    if args.brief or args.one_line:
+        print('{}'.format(jobid))
+    else:
+        print('Job Run {}'.format(jobid))
+    # fi
+    return True
+# End of run_jobid
 #-----------------------------------------------------------------------------
 def JobRun(authentication, base_url, vargs):
     global args
@@ -1257,41 +1295,51 @@ def JobRun(authentication, base_url, vargs):
         print("Error - no jobs given to run")
         return False
     # fi
-    ret = False
+    ret = True
     for id in vargs:
         if not id.isdigit():
             # If not a number, then a name.
             (rt, joblist) = send_get(authentication, base_url, 'datamovement/jobs')
             if not rt:
+                ret = False
                 continue
             # fi
             found = False
             for job in joblist.json()['jobs']:
                 if job['name'] == id:
-                    id =  job['id']
                     found = True
-                    break
+                    if not run_jobid(base_url, authentication, job['id']):
+                        ret = False
+                    # fi
                 # fi
             # rof
             if not found:
                 print('Could not get information on job name "{}"'.format(id))
-                continue
+                ret = False
+            # fi
+        else:
+            if not run_jobid(base_url, authentication, id):
+                ret = False
             # fi
         # fi
-        # If name, "id" changed.
-        (rt, r) = send_post(base_url, authentication, 'datamovement/jobs/{}/start?verify=false'.format(id), 202)
-        if not rt:
-            continue
-        # fi
-        if args.brief or args.one_line:
-            print('{}'.format(id))
-        else:
-            print('Job Run {}'.format(id))
-        # fi
-        ret = True
     # rof
     return ret
 # End of JobRun
+#-----------------------------------------------------------------------------
+def verify_jobid(base_url, authentication, jobid):
+    global args
+
+    (rt, r) = send_post(base_url, authentication, 'datamovement/jobs/{}/start?verify=false'.format(jobid), 202)
+    if not rt:
+        return False
+    # fi
+    if args.brief or args.one_line:
+        print('{}'.format(jobid))
+    else:
+        print('Job Verify {}'.format(jobid))
+    # fi
+    return True
+# End of verify_jobid
 #-----------------------------------------------------------------------------
 def JobVerify(authentication, base_url, vargs):
     global args
@@ -1300,41 +1348,51 @@ def JobVerify(authentication, base_url, vargs):
         print("Error - no jobs given to verify")
         return False
     # fi
-    ret = False
+    ret = True
     for id in vargs:
         if not id.isdigit():
             # If not a number, then a name.
             (rt, joblist) = send_get(authentication, base_url, 'datamovement/jobs')
             if not rt:
+                ret = False
                 continue
             # fi
             found = False
             for job in joblist.json()['jobs']:
                 if job['name'] == id:
-                    id =  job['id']
                     found = True
-                    break
+                    if not verify_jobid(base_url, authentication, job['id']):
+                        ret = False
+                    # fi
                 # fi
             # rof
             if not found:
                 print('Could not get information on job name "{}"'.format(id))
-                continue
+                ret = False
+            # fi
+        else:
+            if not verify_jobid(base_url, authentication, id):
+                ret = False
             # fi
         # fi
-        # If name, "id" changed.
-        (rt, r) = send_post(base_url, authentication, 'datamovement/jobs/{}/start?verify=true'.format(id), 202)
-        if not rt:
-            continue
-        # fi
-        if args.brief or args.one_line:
-            print('{}'.format(id))
-        else:
-            print('Job Verify {}'.format(id))
-        # fi
-        ret = True
     # rof
     return ret
 # End of JobVerify
+#-----------------------------------------------------------------------------
+def stop_jobid(base_url, authentication, jobid):
+    global args
+
+    (rt,r) = send_post(base_url, authentication, 'datamovement/jobs/{}/stop'.format(jobid), 202)
+    if not rt:
+        return False
+    # fi
+    if args.brief or args.one_line:
+        print('{}'.format(jobid))
+    else:
+        print('Job Stop {}'.format(jobid))
+    # fi
+    return True
+# End of stop_jobid
 #-----------------------------------------------------------------------------
 def JobStop(authentication, base_url, vargs):
     global args
@@ -1343,38 +1401,33 @@ def JobStop(authentication, base_url, vargs):
         print("Error - no jobs given to delete")
         return False
     # fi
-    ret = False
+    ret = True
     for id in vargs:
         if not id.isdigit():
             # If not a number, then a name.
             (rt, joblist) = send_get(authentication, base_url, 'datamovement/jobs')
             if not rt:
+                ret = False
                 continue
             # if
             found = False
             for job in joblist.json()['jobs']:
                 if job['name'] == id:
-                    id =  job['id']
                     found = True
-                    break
-                # if
+                    if not stop_jobid(base_url, authentication, job['id']):
+                        ret = False
+                    # fi
+                # fi
             # rof
             if not found:
                 print('Could not get information on job name "{}"'.format(id))
-                continue
+                ret = False
+            # fi
+        else:
+            if not stop_jobid(base_url, authentication, id):
+                ret = False
             # fi
         # fi
-        # If name, "id" changed.
-        (rt,r) = send_post(base_url, authentication, 'datamovement/jobs/{}/stop'.format(id), 202)
-        if not rt:
-            continue
-        # fi
-        if args.brief or args.one_line:
-            print('{}'.format(id))
-        else:
-            print('Job Stop {}'.format(id))
-        # fi
-        ret = True
     # rof
     return ret
 # End of JobStop
