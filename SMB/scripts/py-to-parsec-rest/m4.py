@@ -1,12 +1,13 @@
 #!/usr/bin/python3
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 #-----------------------------------------------------------------------------
+#+  NOTDONEYET - MIGRATIONS_FC
 # NOTDONEYET - Fibre Channel "devices" -> protocolid -> systemid
 # NOTDONEYET - iSCSI
 
 # + MIGRATIONS
 # * MIGRATIONS_CLEANUP
-# * MIGRATIONS_FC
+# + MIGRATIONS_FC
 #   NOTDONEYET - MIGRATIONS_iSCSI
 #   NOTDONEYET - MIGRATIONS_SMB
 #   NOTDONEYET - MIGRATIONS_NFS
@@ -686,7 +687,8 @@ def print_help_projects_create():
     print("    project create 'MySMB' '1.0' ''      # default dst to 3.1.1 - Linux default.")
     print("    p c 'MySMB' '1.0' 'default'          # If you want to see the argument default (above).")
     print("    projects create 44 NFS")             # No need for SMB version arguments.
-    print("    projects create 45 SCSI")            # No need for SMB version arguments.
+    print("    projects create 45 iSCSI")           # No need for SMB version arguments.
+    print("    projects create 46 FC")              # No need for SMB version arguments.
     return
 # End of print_help_projects_create
 #-----------------------------------------------------------------------------
@@ -744,6 +746,8 @@ def print_help_storage_protocols():
     print("    storage protocols create SystemStorageID SMB IP 'UserName' 'Password' 'NameForProtocolid'")
     print("    storage protocols create 43 SMB 172.22.14.116 'AD/LoginName' 'BlueSnake' 'SomethingSMB'")
     print("    storage protocols create 44 NFS 172.22.14.103 'SomethingNFS'")
+    print("    storage protocols create 45 iSCSI 192.168.14.103 'SomethingiSCSI'")
+    print("    storage protocols create 46 FC 'SomethingFC'")
     print("    storage protocols delete ID/name...  # Delete a protocolid for files/devices.")
     return
 # End of print_help_storage_files
@@ -817,36 +821,47 @@ def print_help_example():
     print("      SPNFS=`./m4.py --brief storage protocols create ${SSNFS} NFS 172.22.13.103 SomethingNFS | awk '{print $1}'`")
     print("  #      Storage Protocol Created 23 - 'SomethingNFS'    # if not --brief")
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-    print("      SSSCSI=`./m4.py --brief storage systems create SCSI_stuff | awk '{print $1}'`")
-    print("  #      Storage System Created 52 - 'SCSI_stuff'        # if not --brief")
-    print("      SPSCSI=`./m4.py --brief storage protocols create ${SSCSI} SCSI SomethingSCSI | awk '{print $1}'")
-    print("  #      Storage System Created 24 - 'SomethingSCSI'     # if not --brief")
+    print("      SSiSCSI=`./m4.py --brief storage systems create iSCSI_stuff | awk '{print $1}'`")
+    print("  #      Storage System Created 52 - 'iSCSI_stuff'          # if not --brief")
+    print("      SPiSCSI=`./m4.py --brief storage protocols create ${SSiSCSI} iSCSI SomethingiSCSI | awk '{print $1}'")
+    print("  #      Storage System Created 24 - 'SomethingiSCSI'     # if not --brief")
+    # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    print("      SSFC=`./m4.py --brief storage systems create FC_stuff | awk '{print $1}'`")
+    print("  #      Storage System Created 53 - 'FC_stuff'          # if not --brief")
+    print("      SPFC=`./m4.py --brief storage protocols create ${SSFC} FC SomethingFC | awk '{print $1}'")
+    print("  #      Storage System Created 25 - 'SomethingFC'     # if not --brief")
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     print('  # Create projects and jobs.')
     print('      PNSMB="Scripted SMB project for na116 v1 to na116 v2"')
     print('      JNSMB="job to copy na116 v1 to na116 v1"')
     print('      PNNFS="Scripted NFS project for 172.22.13.103 v1 to 172.22.13.103 v2"')
     print('      JNNFS="job to copy 172.22.13.103 v1 to 172.22.13.103 v1"')
-    print('      PNSCSI="Scripted SCSI project for 10g to 10g"')
-    print('      JNSCSI="job to copy FC 10g to FC 10g"')
+    print('      PNFC="Scripted FC project for 10g to 10g"')
+    print('      JNFC="job to copy FC 10g to FC 10g"')
+    print('      PNiSCSI="Scripted iSCSI project for 10g to 10g"')
+    print('      JNiSCSI="job to copy iSCSI 10g to iSCSI 10g"')
     print('  # Create the project - note SMB version 2.0 source and destination.')
     print('     ./m4.py p c "${PNSMB}" 2.0 2.0')
     print('  #     Project Created 512')
     print('     ./m4.py p c "${PNNFS}"')
     print('  #     Project Created 513')
-    print('     ./m4.py p c "${PNSCSI}"')
-    print('  #     Project Created 513')
+    print('     ./m4.py p c "${PNFCI}"')
+    print('  #     Project Created 514')
+    print('     ./m4.py p c "${PNiSCSI}"')
+    print('  #     Project Created 515')
     print('  # Create a job for doing the migration.')
     print('     ./m4.py jobs create "${PNSMB}" cifs://172.22.14.116/v1 cifs://172.22.14.116/v2 "${JNSMB}"')
     print('  #     Job ID: 596')
     print('     ./m4.py jobs create "${PNNFS}" nfs://172.22.14.54/v1 nfs://172.22.14.54/v2 "${JNNFS}"')
     print('  #     Job ID: 597')
-    print('     ./m4.py jobs create "${PNSCSI}" block://25eb8ab90056482af6c9ce9009399e675 block://21ab345f355a8287b6c9ce9009399e675 "${JNSCSI}"')
+    print('     ./m4.py jobs create "${PNFC}" block://25eb8ab90056482af6c9ce9009399e675 block://21ab345f355a8287b6c9ce9009399e675 "${JNFC}"')
+    print('     ./m4.py jobs create "${PNiSCSI}" block://25eb8ab90056482af6c9ce9009399e675 block://21ab345f355a8287b6c9ce9009399e675 "${JNiSCSI}"')
     print('  #     Job ID: 598')
     print('  # Run the jobs for doing the migration.')
     print('     ./m4.py jobs run "${JNSMB}"')
     print('     ./m4.py jobs run "${JNNFS}"')
-    print('     ./m4.py jobs run "${JNSCSI}"')
+    print('     ./m4.py jobs run "${JNFC}"')
+    print('     ./m4.py jobs run "${JNiSCSI}"')
     return
 # End of print_help_example
 #-----------------------------------------------------------------------------
@@ -1006,7 +1021,7 @@ def _parseJobURI(uri):
     # fi
 
     # BLOCK - FC or iSCSI
-    m = re.match('^block://(\w+)/*$', uri)
+    m = re.match('^block://(\w+)/*$', uri) or re.match('^fc://(\w+)/*$', uri) or re.match('^iscsi://(\w+)/*$', uri) 
     if m:
         return (True, {'type':'BLOCK', 'serialnumber':m.group(1)})
     # fi
@@ -1593,6 +1608,10 @@ def ProjCreate(authentication, base_url, vargs):
 def ProjDele(authentication, base_url, vargs):
     global args
 
+    if not vargs or not vargs[0]:
+        print("Error - no projects given to delete")
+        return False
+    # fi
     he = unique_dict_array({'help':''})
     if vargs is None or vargs[0] is None or vargs[0] == '' or vargs[0] in he['help']:
         print_help_projects_delete()
@@ -2061,8 +2080,13 @@ def StorageProtocols_Create(authentication, base_url, vargs):
         print_help_storage_protocols()
         return False
     # fi
-    if type == 'SCSI' and len(vargs) != 3:
-        print("SCSI system protocols create systemID SCSI Name_For_Storage_Group")
+    if type == 'FC' and len(vargs) != 3:
+        print("FC system protocols create systemID FC Name_For_Storage_Group")
+        print_help_storage_protocols()
+        return False
+    # fi
+    if type == 'ISCSI' and len(vargs) != 4:
+        print("iSCSI system protocols create systemID iSCSI HostIP Name_For_Storage_Group")
         print_help_storage_protocols()
         return False
     # fi
@@ -2125,13 +2149,25 @@ def StorageProtocols_Create(authentication, base_url, vargs):
                  'systemid': systemid
                }
     # fi
-    elif type == 'SCSI':
+    elif type == 'FC':
         storage_name = vargs[2]
-        # Create SCSCI protocol.
+        # Create FC protocol.
         info = { 'definition':
                    {
                      "host": None,
-                     "type": type,
+                     "type": "SCSI",
+                   },
+                 'name': storage_name,
+                 'systemid': systemid
+               }
+    elif type == 'ISCSI':
+        ip = vargs[2]
+        storage_name = vargs[3]
+        # Create iSCSI protocol.
+        info = { 'definition':
+                   {
+                     "host": ip,
+                     "type": "SCSI",
                    },
                  'name': storage_name,
                  'systemid': systemid
