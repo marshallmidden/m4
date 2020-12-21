@@ -226,4 +226,42 @@ of the operating system: memory allocation, process allocation, device
 input and output, etc.
 ```
 
+# ----------------------------------------------------------------------------
+
+## Install new kernel v5.10.1
+
+Kernel v5.10.1 (probably anything newer than v5.5 needs a newer gcc
+(version 10.2.0 is good) and new rpmbuild, which needs more packages.
+Default is for gcc 4.8.5 with redhat 7.5, and 8.x.y for centos 8.1.
+
+The following documents how to get new gmp, mpfr, mpc, binutils before
+putting in the new gcc -- which uses those compiled with old gcc for the
+first steps of installing the new gcc -- which itself is a three step process.
+
+```
+    cd new-gcc-10.2.0+friends
+    ./00-new-a-gcc+tools
+    cd ..
+```
+
+Now to use the new tools:
+
+```
+    prepath () {
+	case ":$PATH:" in
+	  *":$1:"*) :;;         # in the middle
+	  "$1:"*) :;;           # at the end
+	  *":$1") :;;           # at the beginning
+	  "$1") :;;             # if only one
+	  *) PATH=$1:$PATH;;
+	esac
+    }
+    prepath ~/new-a/bin
+    which gcc                   # should be ~/root/new-a/bin/gcc
+    gcc --version               # gcc (GCC) 10.2.0
+    make kb                     # creates rpm files
+    make all                    # installs into /boot
+    vi +20 /boot/efi/EFI/redhat/grub.cfg     # change 1 to 0
+    reboot
+```
 
