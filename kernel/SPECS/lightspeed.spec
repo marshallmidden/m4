@@ -4,7 +4,7 @@
 
 Summary: The Linux kernel
 
-# Light specification file. 2020-11-18
+# Light specification file. 2020-12-19
 %define buildid .lightspeed
 
 # For a kernel released for public testing, released_kernel should be 1.
@@ -13,8 +13,8 @@ Summary: The Linux kernel
 
 %global distro_build 693
 
-%define rpmversion 5.9.8
-%define pkgrelease 2020.11.18
+%define rpmversion 5.10.1
+%define pkgrelease 2020.12.19
 
 %define pkg_release %{pkgrelease}%{?buildid}
 
@@ -238,36 +238,6 @@ Summary: The Linux kernel
 %endif
 
 #
-# Three sets of minimum package version requirements in the form of Conflicts:
-# to versions below the minimum
-#
-
-#
-# First the general kernel 2.6 required versions as per
-# Documentation/Changes
-#
-%define kernel_dot_org_conflicts  ppp < 2.4.3-3, isdn4k-utils < 3.2-32, nfs-utils < 1.0.7-12, e2fsprogs < 1.37-4, util-linux < 2.12, jfsutils < 1.1.7-2, reiserfs-utils < 3.6.19-2, xfsprogs < 2.6.13-4, procps < 3.2.5-6.3, oprofile < 0.9.1-2, device-mapper-libs < 1.02.63-2, mdadm < 3.2.1-5
-
-#
-# Then a series of requirements that are distribution specific, either
-# because we add patches for something, or the older versions have
-# problems with the newer kernel or lack certain things that make
-# integration in the distro harder than needed.
-#
-%define package_conflicts initscripts < 7.23, udev < 063-6, iptables < 1.3.2-1, ipw2200-firmware < 2.4, iwl4965-firmware < 228.57.2, selinux-policy-targeted < 1.25.3-14, squashfs-tools < 4.0, wireless-tools < 29-3, xfsprogs < 4.3.0, kmod < 20-9, kexec-tools < 2.0.14-3
-
-# We moved the drm include files into kernel-headers, make sure there's
-# a recent enough libdrm-devel on the system that doesn't have those.
-%define kernel_headers_conflicts libdrm-devel < 2.4.0-0.15
-
-#
-# Packages that need to be installed before the kernel is, because the %%post
-# scripts use them.
-#
-%define kernel_prereq  fileutils, module-init-tools >= 3.16-2, initscripts >= 8.11.1-1, grubby >= 8.28-2
-%define initrd_prereq  dracut >= 033-502
-
-#
 # This macro does requires, provides, conflicts, obsoletes for a kernel package.
 #	%%kernel_reqprovconf <subpackage>
 # It uses any kernel_<subpackage>_conflicts and kernel_<subpackage>_obsoletes
@@ -280,17 +250,6 @@ Provides: kernel-drm = 4.3.0\
 Provides: kernel-drm-nouveau = 16\
 Provides: kernel-modeset = 1\
 Provides: kernel-uname-r = %{KVRA}%{?1:.%{1}}\
-Requires(pre): %{kernel_prereq}\
-Requires(pre): %{initrd_prereq}\
-Requires(pre): linux-firmware >= 20170606-55\
-Requires(post): %{_sbindir}/new-kernel-pkg\
-Requires(post): system-release\
-Requires(preun): %{_sbindir}/new-kernel-pkg\
-Conflicts: %{kernel_dot_org_conflicts}\
-Conflicts: %{package_conflicts}\
-%{expand:%%{?kernel%{?1:_%{1}}_conflicts:Conflicts: %%{kernel%{?1:_%{1}}_conflicts}}}\
-%{expand:%%{?kernel%{?1:_%{1}}_obsoletes:Obsoletes: %%{kernel%{?1:_%{1}}_obsoletes}}}\
-%{expand:%%{?kernel%{?1:_%{1}}_provides:Provides: %%{kernel%{?1:_%{1}}_provides}}}\
 # We can't let RPM do the dependencies automatic because it'll then pick up\
 # a correct but undesirable perl dependency from the module headers which\
 # isn't required for the kernel proper to function\
@@ -314,42 +273,12 @@ ExclusiveOS: Linux
 #
 # List the packages used during the kernel build
 #
-BuildRequires: module-init-tools, patch >= 2.5.4, bash >= 2.03, sh-utils, tar
-BuildRequires: xz, findutils, gzip, m4, perl, make >= 3.78, diffutils, gawk
-BuildRequires: gcc >= 3.4.2, binutils >= 2.25, redhat-rpm-config >= 9.1.0-55
-BuildRequires: hostname, net-tools, bc
-BuildRequires: xmlto, asciidoc
-BuildRequires: openssl
-BuildRequires: hmaccalc
-BuildRequires: newt-devel, perl(ExtUtils::Embed)
-%ifarch x86_64
-BuildRequires: pesign >= 0.109-4
-%endif
-%if %{with_sparse}
-BuildRequires: sparse >= 0.4.1
-%endif
-%if %{with_perf}
-BuildRequires: elfutils-devel zlib-devel binutils-devel bison
-BuildRequires: audit-libs-devel
-BuildRequires: java-devel
-%ifnarch s390 s390x
-BuildRequires: numactl-devel
-%endif
-%endif
-%if %{with_tools}
-BuildRequires: pciutils-devel gettext ncurses-devel
-%endif
 %if %{with_debuginfo}
 # Fancy new debuginfo generation introduced in Fedora 8/RHEL 6.
 # The -r flag to find-debuginfo.sh invokes eu-strip --reloc-debug-sections
 # which reduces the number of relocations in kernel module .ko.debug files and
 # was introduced with rpm 4.9 and elfutils 0.153.
-BuildRequires: rpm-build >= 4.9.0-1, elfutils >= 0.153-1
 %define debuginfo_args --strict-build-id -r
-%endif
-%ifarch s390x
-# required for zfcpdump
-BuildRequires: glibc-static
 %endif
 
 Source0: linux-%{rpmversion}.tar.xz
@@ -408,6 +337,7 @@ Source9999: lastcommit.stat
 
 # LightSpeed kernel patches. Very order dependent. Replace module first.
 # Numbered as BASIC (or Fortran) program -- leaving room for additions.
+PATCH40001: patch-3.40001-no-bashcompletion-cpupower
 PATCH40003: patch-3.40003-rpm-debugedit-no-trailing-slashes
 PATCH40010: patch-3.40010-qla2xxx-target-initiator
 PATCH40011: patch-3.40011-less-console-output
@@ -464,7 +394,6 @@ glibc package.
 %package bootwrapper
 Summary: Boot wrapper files for generating combined kernel + initrd images
 Group: Development/System
-Requires: gzip binutils
 %description bootwrapper
 Kernel-bootwrapper contains the wrapper code which makes bootable "zImage"
 files combining both kernel and initial ramdisk.
@@ -488,7 +417,6 @@ of the Linux kernel.
 %package -n perf-debuginfo
 Summary: Debug information for package perf
 Group: Development/Debug
-Requires: %{name}-debuginfo-common-%{_target_cpu} = %{version}-%{release}
 AutoReqProv: no
 %description -n perf-debuginfo
 This package provides debug information for the perf package.
@@ -512,7 +440,6 @@ to manipulate perf events.
 %package -n python-perf-debuginfo
 Summary: Debug information for package perf python bindings
 Group: Development/Debug
-Requires: %{name}-debuginfo-common-%{_target_cpu} = %{version}-%{release}
 AutoReqProv: no
 %description -n python-perf-debuginfo
 This package provides debug information for the perf python bindings.
@@ -536,7 +463,6 @@ Provides:  cpufrequtils = 1:009-0.6.p1
 Obsoletes: cpufreq-utils < 1:009-0.6.p1
 Obsoletes: cpufrequtils < 1:009-0.6.p1
 Obsoletes: cpuspeed < 1:2.0
-Requires: kernel-tools-libs = %{version}-%{release}
 %description -n kernel-tools
 This package contains the tools/ directory from the kernel source
 and the supporting documentation.
@@ -553,10 +479,8 @@ from the kernel source.
 Summary: Assortment of tools for the Linux kernel
 Group: Development/System
 License: GPLv2
-Requires: kernel-tools = %{version}-%{release}
 Provides:  cpupowerutils-devel = 1:009-0.6.p1
 Obsoletes: cpupowerutils-devel < 1:009-0.6.p1
-Requires: kernel-tools-libs = %{version}-%{release}
 Provides: kernel-tools-devel
 %description -n kernel-tools-libs-devel
 This package contains the development files for the tools/ directory from
@@ -565,7 +489,6 @@ the kernel source.
 %package -n kernel-tools-debuginfo
 Summary: Debug information for package kernel-tools
 Group: Development/Debug
-Requires: %{name}-debuginfo-common-%{_target_cpu} = %{version}-%{release}
 AutoReqProv: no
 %description -n kernel-tools-debuginfo
 This package provides debug information for package kernel-tools.
@@ -604,7 +527,6 @@ external Linux kernel modules, and a yum plugin to aid enforcement.
 %package %{?1:%{1}-}debuginfo\
 Summary: Debug information for package %{name}%{?1:-%{1}}\
 Group: Development/Debug\
-Requires: %{name}-debuginfo-common-%{_target_cpu} = %{version}-%{release}\
 Provides: %{name}%{?1:-%{1}}-debuginfo-%{_target_cpu} = %{version}-%{release}\
 AutoReqProv: no\
 %description -n %{name}%{?1:-%{1}}-debuginfo\
@@ -625,8 +547,6 @@ Provides: kernel%{?1:-%{1}}-devel-%{_target_cpu} = %{version}-%{release}\
 Provides: kernel-devel-%{_target_cpu} = %{version}-%{release}%{?1:.%{1}}\
 Provides: kernel-devel-uname-r = %{KVRA}%{?1:.%{1}}\
 AutoReqProv: no\
-Requires(pre): /usr/bin/find\
-Requires: perl\
 %description -n kernel%{?variant}%{?1:-%{1}}-devel\
 This package provides kernel headers and makefiles sufficient to build modules\
 against the %{?2:%{2} }kernel package.\
@@ -735,6 +655,7 @@ cd linux-%{KVRA}
 cp $RPM_SOURCE_DIR/kernel-%{version}-*.config .
 
 # Start of LightSpeed kernel patches being applied.
+ApplyOptionalPatch patch-3.40001-no-bashcompletion-cpupower
 ApplyOptionalPatch patch-3.40003-rpm-debugedit-no-trailing-slashes
 ApplyOptionalPatch patch-3.40010-qla2xxx-target-initiator
 ApplyOptionalPatch patch-3.40011-less-console-output
@@ -910,10 +831,10 @@ BuildKernel() {
       cp arch/$Arch/boot/zImage.stub $RPM_BUILD_ROOT/%{image_install_path}/zImage.stub-$KernelVer || :
     fi
 # EFI SecureBoot signing, x86_64-only
-%ifarch x86_64
-    %pesign -s -i $KernelImage -o $KernelImage.signed -a %{SOURCE13} -c %{SOURCE14} -n %{pesign_name}
-    mv $KernelImage.signed $KernelImage
-%endif
+# %ifarch x86_64
+    # %pesign -s -i $KernelImage -o $KernelImage.signed -a %{SOURCE13} -c %{SOURCE14} -n %{pesign_name}
+    # mv $KernelImage.signed $KernelImage
+# %endif
     $CopyKernel $KernelImage $RPM_BUILD_ROOT/%{image_install_path}/$InstallName-$KernelVer
     chmod 755 $RPM_BUILD_ROOT/%{image_install_path}/$InstallName-$KernelVer
 
@@ -1143,25 +1064,8 @@ BuildKernel %make_target %kernel_image kdump
 %ifarch %{cpupowerarchs}
 # cpupower
 # make sure version-gen.sh is executable.
-#-- chmod +x tools/power/cpupower/utils/version-gen.sh
 make %{?cross_opts} %{?_smp_mflags} -C tools/power/cpupower CPUFREQ_BENCH=false
-#-- %ifarch x86_64
-#--     pushd tools/power/cpupower/debug/x86_64
-#--     make %{?_smp_mflags} centrino-decode powernow-k8-decode
-#--     popd
-#-- %endif
-#-- %ifarch x86_64
-#--    pushd tools/power/x86/x86_energy_perf_policy/
-#--    make
-#--    popd
-#--    pushd tools/power/x86/turbostat
-#--    make
-#--    popd
-#-- %endif
 %endif
-#-- pushd tools
-#-- make tmon
-#-- popd
 %endif
 
 %if %{with_doc}
@@ -1285,7 +1189,7 @@ find $RPM_BUILD_ROOT/usr/include \( -name .install -o -name .check -o -name ..in
 
 %if %{with_kernel_abi_whitelists}
 # kabi directory
-INSTALL_KABI_PATH=$RPM_BUILD_ROOT/lib/modules/
+INSTALL_KABI_PATH=$RPM_BUILD_ROOT/lib/modules
 mkdir -p $INSTALL_KABI_PATH
 
 # install kabi releases directories
@@ -1305,37 +1209,6 @@ rm -f $RPM_BUILD_ROOT/%{_bindir}/trace
 %{perf_make} DESTDIR=$RPM_BUILD_ROOT try-install-man || %{doc_build_fail}
 %endif
 
-#-- %if %{with_tools}
-#-- %ifarch %{cpupowerarchs}
-#-- make -C tools/power/cpupower DESTDIR=$RPM_BUILD_ROOT libdir=%{_libdir} mandir=%{_mandir} CPUFREQ_BENCH=false install
-#-- rm -f %{buildroot}%{_libdir}/*.{a,la}
-#-- %find_lang cpupower
-#-- mv cpupower.lang ../
-#-- %ifarch x86_64
-#--     pushd tools/power/cpupower/debug/x86_64
-#--     install -m755 centrino-decode %{buildroot}%{_bindir}/centrino-decode
-#--     install -m755 powernow-k8-decode %{buildroot}%{_bindir}/powernow-k8-decode
-#--     popd
-#-- %endif
-#-- chmod 0755 %{buildroot}%{_libdir}/libcpupower.so*
-#-- mkdir -p %{buildroot}%{_unitdir} %{buildroot}%{_sysconfdir}/sysconfig
-#-- install -m644 %{SOURCE2000} %{buildroot}%{_unitdir}/cpupower.service
-#-- install -m644 %{SOURCE2001} %{buildroot}%{_sysconfdir}/sysconfig/cpupower
-#-- %ifarch %{ix86} x86_64
-#--    mkdir -p %{buildroot}%{_mandir}/man8
-#--    pushd tools/power/x86/x86_energy_perf_policy
-#--    make DESTDIR=%{buildroot} install
-#--    popd
-#--    pushd tools/power/x86/turbostat
-#--    make DESTDIR=%{buildroot} install
-#--    popd
-#-- %endif
-#-- pushd tools/thermal/tmon
-#-- make INSTALL_ROOT=%{buildroot} install
-#-- popd
-#-- %endif
-#-- 
-#-- %endif
 
 %if %{with_bootwrapper}
 make %{?cross_opts} ARCH=%{hdrarch} DESTDIR=$RPM_BUILD_ROOT bootwrapper_install WRAPPER_OBJDIR=%{_libdir}/kernel-wrapper WRAPPER_DTSDIR=%{_libdir}/kernel-wrapper/dts
@@ -1529,44 +1402,16 @@ fi
 %endif
 
 %if %{with_tools}
-#-- %files -n kernel-tools -f cpupower.lang
 %files -n kernel-tools
 %defattr(-,root,root)
-#-- %ifarch %{cpupowerarchs}
-#-- %{_bindir}/cpupower
-#-- %ifarch x86_64
-#-- %{_bindir}/centrino-decode
-#-- %{_bindir}/powernow-k8-decode
-#-- %endif
-#-- %{_unitdir}/cpupower.service
-#-- %{_mandir}/man[1-8]/cpupower*
-#-- %config(noreplace) %{_sysconfdir}/sysconfig/cpupower
-#-- %ifarch %{ix86} x86_64
-#-- %{_bindir}/x86_energy_perf_policy
-#-- %{_mandir}/man8/x86_energy_perf_policy*
-#-- %{_bindir}/turbostat
-#-- %{_mandir}/man8/turbostat*
-#-- %endif
-#-- %endif
-#-- %{_bindir}/tmon
 %if %{with_debuginfo}
 %files -f kernel-tools-debuginfo.list -n kernel-tools-debuginfo
 #TODO: crvaale quick hack to get around debug files not being owned by other debuginfo parts
-/usr/lib/debug/
+/usr/lib/debug
 %defattr(-,root,root)
 %endif
 
-#-- %ifarch %{cpupowerarchs}
-#-- %files -n kernel-tools-libs
-#-- %defattr(-,root,root)
-#-- %{_libdir}/libcpupower.so.0
-#-- %{_libdir}/libcpupower.so.0.0.1
 
-#-- %files -n kernel-tools-libs-devel
-#-- %defattr(-,root,root)
-#-- %{_libdir}/libcpupower.so
-#-- %{_includedir}/cpufreq.h
-#-- %endif
 
 %endif
 
@@ -1626,6 +1471,12 @@ fi
 %kernel_variant_files %{with_kdump} kdump
 
 %changelog
+* Fri Nov 20 2020 Marshall Midden
+- [kernel] rhel-kernel: Kernel v5.10-rc4, use gcc-10.0.2.
+
+* Thu Nov 19 2020 Marshall Midden
+- [kernel] rhel-kernel: Kernel v5.9.9, use gcc-10.0.2.
+
 * Thu Nov 19 2020 Marshall Midden
 - [kernel] rhel-kernel: Kernel v5.9.8 with patches updated, use gcc-10.0.2.
 

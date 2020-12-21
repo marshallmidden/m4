@@ -26,6 +26,7 @@ kernel:
 	  --without up        \
 	  --without perf      \
 	  --without debug     \
+	  --without debuginfo \
 	  lightspeed.spec     \
 	)
 	touch SUCCESS
@@ -41,6 +42,7 @@ kprep:
 	    --without up        \
 	    --without perf      \
 	    --without debug     \
+	    --without debuginfo \
 	    lightspeed.spec     \
 	)
 	touch SUCCESS
@@ -58,6 +60,7 @@ kb:	kb-clean
 	    --without up        \
 	    --without perf      \
 	    --without debug     \
+	    --without debuginfo \
 	    ${WORKSPACE}/SPECS/lightspeed.spec
 	echo "build complete"
 #-----------------------------------------------------------------------------
@@ -75,6 +78,7 @@ prep:	kb-clean
 	    --without up        \
 	    --without perf      \
 	    --without debug     \
+	    --without debuginfo \
 	    ${WORKSPACE}/SPECS/lightspeed.spec
 	echo "kernel src expanded, patched, and cleaned"
 #-----------------------------------------------------------------------------
