@@ -1,0 +1,2781 @@
+#!/usr/bin/python3 -B
+# vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
+#-----------------------------------------------------------------------------
+# TODO:
+# 1) Select clef=treble or clef=bass by where notes min and max notes are located.
+#       # NOTDONEYET - add ' clef=bass'  (after the number)
+#-----------------------------------------------------------------------------
+# Commands not done.
+#   print_error("NOTDONEYET - do_debug", line)
+#   print_error("NOTDONEYET - do_decode", line)
+#   print_error("NOTDONEYET - do_delay", line)
+#   print_error("NOTDONEYET - do_else", line)
+#   print_error("NOTDONEYET - do_endif", line)
+#   print_error("NOTDONEYET - do_endm", line)
+#   print_error("NOTDONEYET - do_flat", line)
+#   print_error("NOTDONEYET - do_goto", line)
+#   print_error("NOTDONEYET - do_if", line)
+#   print_error("NOTDONEYET - do_macro", line)
+#   print_error("NOTDONEYET - do_marker", line)
+#   print_error("NOTDONEYET - do_natural", line)
+#   print_error("NOTDONEYET - do_percus", line)
+#   print_error("NOTDONEYET - do_pitch", line)
+#   print_error("NOTDONEYET - do_putd", line)
+#   print_error("NOTDONEYET - do_randp", line)
+#   print_error("NOTDONEYET - do_randu", line)
+#   print_error("NOTDONEYET - do_setperm", line)
+#   print_error("NOTDONEYET - do_sharp", line)
+#   print_error("NOTDONEYET - do_slide", line)
+#   print_error("NOTDONEYET - do_temper", line)
+#   print_error("NOTDONEYET - process_putd", line)
+#-----------------------------------------------------------------------------
+# Note processing:
+#   print_error("NOTDONEYET - doing sequence type note", line)
+#       NOTE: not used in any music I have seen (fgrep).
+#   print_error("NOTDONEYET - doing gsw_operand type of note", line)
+#-----------------------------------------------------------------------------
+# Note: New addition: second arguments on "voice" command is MIDI instruments.
+# %%MIDI program 6 % Harpsichord
+# %%MIDI program 57 % Trombone
+# %%MIDI program 56 % Trumpet
+# %%MIDI program 40 % Violin
+#       voice   4       57,56,40,6
+#-----------------------------------------------------------------------------
+# clef    bass,treble,treble,treble
+#-----------------------------------------------------------------------------
+# Suggest "cis 4" to get same instrument for "voice 1" as one for "voice 4".
+#-----------------------------------------------------------------------------
+# flats -> key:     B,E,A,D,G,C,F -- always this order. 2nd to last is Key-flat.
+# sharps -> key:    F,C,G,D,A,E,B -- always this order. 2nd to last key Key-sharp.
+#             vv - is key to use.
+# 7 sharps is C# major or A# minor. f+,c+,g+,d+,a+,e+,b+
+# 6 sharps is F# major or D# minor. f+,c+,g+,d+,a+,e+
+# 5 sharps is B major or G# minor.  f+,c+,g+,d+,a+
+# 4 sharps is E major or C# minor.  f+,c+,g+,d+
+# 3 sharps is A major or F# minor.  f+,c+,g+
+# 2 sharps is D major or B minor.   f+,c+
+# 1 sharp  is G major or E minor.   f+
+# None     is C major or A minor.
+# 1 flat   is F major or D minor.   b-
+# 2 flats  is B- major or G minor.  b-,e-
+# 3 flats  is E- major or C minor.  b-,e-,a-
+# 4 flats  is A- major or F minor.  b-,e-,a-,d-
+# 5 flats  is D- major or B- minor. b-,e-,a-,d-,g-
+# 6 flats  is G- major or E- minor. b-,e-,a-,d-,g-,c-
+# 7 flats  is C- major or A- minor. b-,e-,a-,d-,g-,c-,f-
+#-----------------------------------------------------------------------------
+# ABC header:
+#     X: 1
+#     ...
+#     T: title
+#     ...
+#     K: C
+# Empty lines separate tunes, headers (X: ... K:), and free text
+# Line-breaks (new-lines, line feeds, carriage returns, end-of-lines) aids readability and breaks long lines.
+#   Music code: end of lines means end of typeset sheet music score (lines). Use backslash to for continuation.
+#   	It continues through information fields, comments, and stylesheet directives.
+# Information fields continue with +: at start of next line.
+# ..............................................................................
+#         V:1
+#         a b cd
+#     is the same as:
+#         [V:1] a b cd
+#     Can use [M:9/8]
+# K: Key			K:G, K:Dm, K:AMix
+# L: Unit Note Length 	L:1/4, L:1/8
+# M: Meter		M:3/4, M:4/4		Note present means free - no checking.
+# Q: Tempo		Q:1/4=120
+# T: Title		T:Name Of Song, whatever
+# V: Voice		V:4 clef=bass		<----
+# W: words		W: lyrics printed after the end of the tune
+# w: words		w: lyrics printed aligned with the notes of tune
+# ..............................................................................
+# clef's can be on V: and K: lines
+# 	treble	Treble
+# 	bass	Bass
+# 	bass3	Baritone
+# 	tenor	Tenor
+# 	alto	Alto
+# 	alto2	Mezzosoprano
+# 	alto1	Soprano
+# 	perc
+# 	none
+#-----------------------------------------------------------------------------
+# Pass 1
+# Need the order of the measures.
+# In a measure, want everything for that measure -- so that goto it works.
+# Start with measure -1, and the default setup?
+# Key, volume, note length, tempo
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#   Rests are lowercase z. Length follows.
+#   Uppercase denote bottom octave (C = middle C on treble stave).
+#   Comma after the letter means down an octave.
+#   Apostrophe after the letter means up an octave. Multiple ' go up, as ,'s go down.
+#   Lowercase letters are next octave above uppercase. four c's: "C, C c c' "
+#   ^C = C sharp. _B = B flat. ^^ = double sharp. The equals (=) naturalizes it.
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#   Number after note changes duration. Number times default. B2=B twice as long therefore 1/4 because 1/2.
+#   / means shorten, default is 2 or "/2".
+#   > after a note, multiplying by 3/2 and removing from 2nd note. I.e. c8>c8 -> c8.c16 (dot means 1/16 extra)
+#   < after a note, multiplying by 1/2 and adding rest on 2nd note. I.e. c8<c8 -> c16c8. means 1/16th extra
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#   print("   C,,     C,   c     c'   c''   z")
+#             ++      +    -    --    n     r
+#   print("   ^^C,,   ^C,  _c   __c'  =c''  z")
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+# Have to think about the time ... if using simple ... then make "L: 1/64", and do multiples via:
+#   2 = 32, 3 = 32d, 4 = 16, 6 = 16d, 8 = 8, 12 = 8d, 16 = 4, 24 = 4d, 32 = 2, 48 = 2d, 64 = 1, 96 = 1d, 128=2
+# Trills, grace notes, staccato, and triplets, and ... *hmmm*
+# staccato = .              (3.a.b.c = triplet staccato         (before note
+# T = trill
+# H = fermata
+# . = staccato mark
+# The order of abc constructs for a note is:
+# <grace notes>, <chord symbols>, <annotations>/<decorations> (e.g. Irish roll, staccato marker or up/downbow),
+#    ... <accidentals>, <note>, <octave>, <note length>, i.e. ~^c'3 or even "Gm7"v.=G,2.
+#                                                           irish roll, c (down one, up one),
+# syntax (p:q:r which means 'put p notes into the time of q for the next r notes'. If q is not given,
+# it defaults as above. If r is not given, it defaults to p.
+# For example, (3 is equivalent to (3:: or (3:2 , which in turn are equivalent to (3:2:3, whereas (3::2 is
+# equivalent to (3:2:2.
+# This can be useful to include notes of different lengths within a tuplet, for example (3:2:2 G4c2 or
+# (3:2:4 G2A2Bc. It also describes more precisely how the simple syntax works in cases like (3 D2E2F2 or even
+# (3 D3EF2. The number written over the tuplet is p.
+# Spaces that appear between the tuplet specifier and the following notes are to be ignored.
+
+# tie is minus (-) between two notes.   i.e. C-C3/2
+# NOTE: 3 times normal note length divided by 2.  Or C-.C2
+# Each tie symbol, -, should come immediately after a note group but may be followed by a space,
+# i.e. =G,2- . Open and close chord delimiters, [ and ], should enclose entire note sequences (except for
+# chord symbols), e.g.
+
+# NOTE: spaces between notes means to not connect the notes when printed.
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#-----------------------------------------------------------------------------
+import os
+import re
+import readline
+import shlex
+import sys
+
+from fractions import Fraction
+#-----------------------------------------------------------------------------
+import calculate
+
+import inspect
+#++ print(inspect.currentframe().f_code.co_name, '#0', file=sys.stderr)
+#-----------------------------------------------------------------------------
+MAXVOICES = 32
+NUMBER_BARS_PER_STAFF = 4
+# NUMBER_BARS_PER_STAFF = 1
+
+# When getting note, various things found:
+global sequence_note
+sequence_note = 2
+global trill_note
+trill_note = 1
+global normal_note
+normal_note = 0
+global freqency_note
+freqency_note = -1
+global gsw_operand
+gsw_operand = -2
+
+global allkeys
+allkeys = [ 'c','d','e','f','g','a','b',
+            'cn','dn','en','fn','gn','an','bn',
+            'c-','d-','e-','f-','g-','a-','b-',
+            'c--','d--','e--','f--','g--','a--','b--',
+            'c+','d+','e+','f+','g+','a+','b+',
+            'c++','d++','e++','f++','g++','a++','b++' ]
+global accidentals
+accidentals = { '':'', 'n':'=', '-':'_', '+':'^', '--':'__', '++':'^^' }
+
+global legal_notes
+legal_notes =   {
+       '1/64': 0.015625,
+      '3/128': 0.0234375,
+       '1/32': 0.03125,
+       '3/64': 0.046875,
+      '7/128': 0.0546875,
+       '1/16': 0.0625,
+       '3/32': 0.09375,
+       '7/64': 0.109375,
+     '15/128': 0.1171875,
+        '1/8': 0.125,
+       '3/16': 0.1875,
+       '7/32': 0.21875,
+      '15/64': 0.234375,
+     '31/128': 0.2421875,
+        '1/4': 0.25,
+        '3/8': 0.375,
+       '7/16': 0.4375,
+      '15/32': 0.46875,
+      '31/64': 0.484375,
+     '63/128': 0.4921875,
+        '1/2': 0.5,
+        '3/4': 0.75,
+        '7/8': 0.875,
+      '15/16': 0.9375,
+      '31/32': 0.96875,
+      '63/64': 0.984375,
+    '127/128': 0.9921875,
+          '1': 1.0,
+        '3/2': 1.5,
+        '7/4': 1.75,
+       '15/8': 1.875,
+      '31/16': 1.9375,
+      '63/32': 1.96875,
+     '127/64': 1.984375,
+    '255/128': 1.9921875,
+          '2': 2.0,
+          '3': 3.0,
+        '7/2': 3.5,
+       '15/4': 3.75,
+       '31/8': 3.875,
+      '63/16': 3.9375,
+     '127/32': 3.96875,
+     '255/64': 3.984375,
+    '511/128': 3.9921875,
+       }
+
+global legal_floating
+legal_floating = dict((y,x) for x,y in legal_notes.items())
+global legal_floating_times
+legal_floating_times = sorted(legal_notes.values())
+
+#-----------------------------------------------------------------------------
+global errors_happened
+errors_happened = 0                 # system exit, 0 = okay, 1 = errors happened
+
+global linecount
+linecount = 0
+
+# names to replace in text
+global macros                       # macros and it's arguments.
+macros   = { }                      # { 'macro_name' : [ 'text', 'arg1', 'arg2', 'arg3'] }
+
+global putds                        # "micro" and it's replacement/substitution.
+putds    = { }                      # dictionary of from:to
+
+global gotos                        # gotos and it's arguments.
+gotos = []
+
+global meas                         # measure names.
+meas = []
+global measure_on                   # The measure/unit are we are working on.
+measure_on = ''                     # Default to none. This means we are in the header section.
+global bars                         # number of bars per staff
+bars = NUMBER_BARS_PER_STAFF        # for abc notation, put new line in output, which ends staff.
+
+global voices                       # number of voices
+voices = 1
+global maxusedvoices                # maximum used voice number
+maxusedvoices = 0
+global cis                          # if cis active, non-zero.
+cis = 0
+global vl                           # volume levels
+vl = { }                            # vl[voice][m] = volumelevel
+vl[1] = { }                         # vl[voice][m] = volumelevel
+vl[1][''] = 7                       # vl[voice][m] = volumelevel
+global vinstrument,clef
+clef = { }                          # no clef specified [measure][voice].
+vinstrument = { }                   # no instruments specified [measure][voice].
+clef[0] = { }                       # blank measure.
+vinstrument[''] = {}                # blank measure.
+for i in range(0, MAXVOICES):       # This is used as [1] .. [MAXVOICES]
+    vinstrument[''][i+1] = 0        # No instrument. (measure, voice)
+    clef[i+1] = {}
+    clef[i+1][''] = ''              # No clef.       (voice, measure)
+# rof
+global oct                          # default octave
+oct = { 1 : 0 }
+global acc, acc_v_init              # Last accidental on a note in measure.
+acc_v_init = { 'C':'', 'D':'', 'E':'', 'F':'', 'G':'', 'A':'', 'B':''}
+acc = { '': {''}}                   # voice: {notes:'+'/-/n}
+
+global time                         # set default note length (time)
+time = { 1 : 0 }
+global mlth                         # measure length dictionary
+mlth = { 1 : { measure_on: 0} }     # nothing in measure working on -- voice 1.
+global tlth                         # #or 60ths/voice
+tlth = { 1 : 0 }                    # 60ths of a second in a voice -- nothing in measure working on.
+global bufs
+bufs = { 1 : {} }
+
+global lstac,lgrace,lpause
+lstac = lgrace = lpause = 4         # starting staccato, grace note, lpause as 4/60th of a second
+
+global iftest                       # check if after if or else.
+iftest = -1                         # if, else or endif
+global ifdepth                      # level of if/else/endif
+ifdepth = 0
+
+global header
+header = (  "X:1\n" +               # Song number 1 in the output file.
+            "M:none\n" )            # No meter supposedly means don't check.
+global meter
+meter = 'none'
+measure_meter = { '': 'none'}       # Each measure change can have a different meter.
+
+global key
+key = "C"                           # Default to key of C.
+                                    # At the end of header, print out the key - then follows notes.
+
+global tempo_speed                  # beats per minute
+tempo_speed = 150.0
+global default_note_length          # length of a beat (note)
+default_note_length = { '': 1.0 / 4.0 } # before a measure.
+
+#-----------------------------------------------------------------------------
+def print_error(strg, line):
+    global linecount
+    global errors_happened
+
+    errors_happened = 1             # When exiting, do 1 instead of 0
+
+    print("ERROR -", strg, file=sys.stderr)
+    print("  Line {} - {}".format(linecount, line), file=sys.stderr)
+# End of print_error
+
+#-----------------------------------------------------------------------------
+def print_warning(strg, line):
+    global linecount
+
+    print("WARNING -", strg, file=sys.stderr)
+    print("  Line {} - {}".format(linecount, line), file=sys.stderr)
+# End of print_warning
+
+#-----------------------------------------------------------------------------
+def get_time_stak(timeofnote, line):
+    global default_note_length          # length of a beat (note)
+    global legal_floating
+    global legal_floating_times
+    global measure_on
+
+    if timeofnote <= 0.0:
+        print_error("timeofnote '{}' negative -- cannot play a note backwards.".format(timeofnote), line)
+        return {}, False
+    # fi
+    lengthl = []
+    lengthf = []
+    t = timeofnote
+    for i in reversed(range(len(legal_floating_times))):
+        f = legal_floating_times[i]
+        while True:
+            if f > t:
+                break
+            # fi
+            v = f / default_note_length[measure_on]
+            v = str(Fraction(v).limit_denominator(256))
+            if v[0:2] == '1/':
+                v = v[1:]
+            # fi
+            lengthl.append(v)
+            lengthf.append(f)
+            t = t - f
+            if t <= 0:                  # This isn't needed, but makes me more comfortable.
+                break
+            # fi
+        # elihw
+    # rof
+    if t > 0:
+        print_warning("timeofnote={} -> {} has left-over of t={}".format(timeofnote,lengthl,t), line)
+    # fi
+    if not lengthl or len(lengthl) == 0:
+        print_error("timeofnote '{}' not able to return a usable fraction".format(timeofnote), line)
+        return {}, False
+    # fi
+    return lengthl, lengthf, True
+# End of get_time_stak
+
+#-----------------------------------------------------------------------------
+def default_note_text_fraction(m):
+    global default_note_length
+
+    l = str(Fraction(default_note_length[m]).limit_denominator(256))
+    if l not in legal_notes:
+        print_warning("#1 Time fraction '{}' is not a printable note. ({})".format(default_note_length[m],l), line)
+    # fi
+    return(l)
+# End of default_note_text_fraction
+
+#-----------------------------------------------------------------------------
+def new_voice_initialize(voice, m):
+    global vl                           # volume levels
+    global vinstrument
+    global oct                          # default octave
+    global time                         # set default note length (time)
+    global mlth                         # measure length dictionary
+    global tlth                         # #or 60ths/voice
+    global bufs
+    global acc, acc_v_init              # Last accidental on a note in measure.
+
+    if voice not in vl:
+        vl[voice] = { }                 # Dictionary
+    if voice not in oct:
+        oct[voice] = 0                  # last octave starts at zero
+    if voice not in time:
+        time[voice] = 0                 # last time starts at zero
+    if voice not in mlth:
+        mlth[voice] = {}
+    if voice not in tlth:
+        tlth[voice] = 0                 # #or 60ths/voice
+    if voice not in bufs:
+        bufs[voice] = {}
+    # fi
+    if m not in vl[voice]:
+        vl[voice][m] = 7       # start volume out at maximum
+    if m not in vinstrument:
+        vinstrument[m] = {}
+    # fi
+    if voice not in vinstrument[m]:
+        vinstrument[m][voice] = 0
+    if m not in mlth[voice]:
+        mlth[voice][m] = 0     # measure length dictionary
+    # fi
+    if voice not in acc:
+        acc[voice] =  {k: v for k, v in acc_v_init.items()}
+    # fi
+# End of new_voice_initialize
+
+#-----------------------------------------------------------------------------
+# volume unique per measure.
+
+# Set volume levels.
+def get_volume_level(m, voice):
+    global vl                           # volume levels
+
+    vlprint = { 0: '+ppp+',
+                1: '+pp+',
+                2: '+p+',
+                3: '+mp+',
+                4: '+mf+',
+                5: '+f+',
+                6: '+ff+',
+                7: '+fff+',
+              }
+    new_voice_initialize(voice, m)
+    j = vl[voice][m]                    # volume level for this voice/measure
+    return vlprint[j]
+# End of get_volume_level
+
+#-----------------------------------------------------------------------------
+def rests_in_empty_measure_voices(m, voice):
+    global vl                               # volume levels
+    global vinstrument
+    global measure_meter
+    global meas
+    global meter
+    global measure_on
+
+    if m in bufs[voice]:                    # Already present, then of right length.
+        return
+    # fi
+    # No text for this voice, create rests to fill it out.
+    l = 0
+    for i in range(1, len(vl)+1):
+        if m in mlth[i]:
+            l = max(mlth[i][m], l)
+        # fi
+    # rof
+    if m in mlth[voice]:
+        l = l - mlth[voice][m]              # All measure lengths with voices are the same.
+    # fi
+    if m not in bufs[voice]:
+        bufs[voice][m] = ''
+    # fi
+    # Put out rests.
+    if l <= 0:                              # if nothing to do.
+        return
+    # fi
+    txt = ''
+    lengthl, lengthf, ifokay = get_time_stak(l, 'pass2')
+    for i in range(len(lengthl)):
+        txt = txt + ' z' + lengthl[i]       # entry in array
+    # rof
+    if txt == '':
+        print_error('% no music for voice {} in measure {}'.format(voice,m), 'pass2')
+        return
+    # fi
+    if m not in bufs[voice]:
+        print_error("rests_in_empty_measure_voices - m={} not in bufs[m,voice]", 'pass2')
+    # fi
+    bufs[voice][m] = bufs[voice][m] + txt   # Append the sleeps.
+    return
+# End of rests_in_empty_measure_voices
+
+#-----------------------------------------------------------------------------
+def print_measure(m, voice, l_meter, l_dl, l_clef, l_instrument, l_vl, l_txt):
+    global bufs
+    global vl
+    global default_note_length
+    global measure_meter
+    global meter
+    global clef
+
+    if voice not in bufs:
+        return "ERROR - bufs voice dictionary is hosed.", '', '', '', ''
+    # fi
+    pr = ''
+    # if first measure, and doing voice, output V:# line.
+    if m == meas[0] or (m in clef[voice] and l_clef != clef[voice][m]):
+        if l_txt != '':
+            pr = '\n'
+        # fi
+        pr = pr + "V:{}".format(voice)
+        if m in clef[voice]:
+            if clef[voice][m] != l_clef:
+                l_clef = clef[voice][m]
+                pr = pr + ' clef={}'.format(l_clef)
+            # fi
+        # fi
+        pr = pr + '\n'
+    # fi
+    if voice not in vinstrument[m]:
+        vinstrument[m][voice] = 0
+    # fi
+    if len(vinstrument[m]) >= voice and vinstrument[m][voice] != 0:
+        if l_instrument != vinstrument[m][voice]:
+            l_instrument = vinstrument[m][voice]
+            if l_txt != '':
+                pr = '\\'
+            #?? # fi
+            #-- if pr == '':
+                pr = pr + '\n'
+            # fi
+            pr = pr + "%%MIDI program {}\n".format(l_instrument)
+        # fi
+    # fi
+    # if default note length != last one
+    if l_dl != default_note_text_fraction(m):
+        l_dl = default_note_text_fraction(m)
+        pr = pr + "[L:{}]".format(l_dl)
+    # fi
+    # if meter != last one
+    if l_meter != measure_meter[m]:
+        l_meter = measure_meter[m]
+        pr = pr + "[M:{}]".format(l_meter)
+    # fi
+    v_vl = get_volume_level(m, voice)
+    if v_vl != l_vl:
+        pr = pr + v_vl
+        l_vl = v_vl
+    # fi
+    pr = l_txt + pr + bufs[voice][m] + ' |'
+    return pr, l_meter, l_dl, l_clef, l_instrument, l_vl
+# end of print_measure
+
+#-----------------------------------------------------------------------------
+def do_pass2():
+    global vl                               # volume levels
+    global meas                             # measures
+    global measure_on
+    global bars                             # number of bars per staff
+
+    # Fix errors for nothing in file.
+    if not measure_on or measure_on == '':  # if first measure, put out header
+        print_header()
+    # fi
+
+    # Fix other voices before continuing to process.
+    fill_voice_mlth("do_pass2")             # Need to make measure for other voices up to here "mlth".
+
+    # First get the empty measures to have rests of appropriate length.
+    # All measures have all voices with same length -- even if some are rests.
+    for i in range(0, len(meas)):
+        m = meas[i]
+        for voice in range(1, len(vl) +1):
+            rests_in_empty_measure_voices(m, voice)
+        # rof
+    # rof
+
+    for voice in range(1,len(vl) + 1):
+        print("% --- voice", voice, ' ---')
+        l_meter = l_dl = l_clef = l_instrument = l_vl = ''
+        print_line = ''
+        for i in range(0, len(meas)):
+            m = meas[i]
+            if (i % bars) == 0:                # Zero-th one is ''.
+                if print_line != '':
+                    print_line = print_line + '\n'
+                # fi
+                print(print_line + "% measure {}".format(m))
+                print_line = ''
+            # fi
+            print_line, l_meter, l_dl, l_clef, l_instrument, l_vl = print_measure(m, voice,
+                        l_meter, l_dl, l_clef, l_instrument, l_vl, print_line)
+        # rof
+        if print_line != '':
+            print_line = print_line + ']'
+            print(print_line)
+        # fi
+    # fi
+    sys.exit(errors_happened)
+# End of do_pass2
+
+#-----------------------------------------------------------------------------
+# Get a line. Put it in "line" and return it.
+def get_line():
+    global linecount
+
+    while True:
+        try:
+            if sys.stdin.isatty():
+                if sys.platform == 'darwin':
+                    input('input> ')
+                    line = readline.get_line_buffer()
+                else:
+                    line = input('input> ')
+                # fi
+            else:
+                line = sys.stdin.readline()
+            # fi
+            if line is None or line == '':
+                sys.exit(errors_happened)
+            # fi
+            linecount = linecount + 1
+            if line:
+                # delete anything from $$ onwards.
+                line = re.sub('[$][$].*$', '', line)
+                # ignore leading and trailing spaces.
+                line = line.strip()
+                # Convert ' followed by something as a "shift".  '; = :   'a = A
+                return line
+            # fi
+        except EOFError:
+            print("Read gave EOF", file=sys.stderr)
+        except SystemExit:
+            print("Read gave system exit", file=sys.stderr)
+        except KeyboardInterrupt:
+            print("Read got keyboard interrupt", file=sys.stderr)
+        except:
+            print("Read got a processing error", file=sys.stderr)
+            print("    ", sys.exc_info()[0], sys.exc_info, file=sys.stderr)
+        # yrt
+        break
+    # elihw
+    do_pass2()
+    sys.exit(errors_happened)
+# End of get_line
+
+#-----------------------------------------------------------------------------
+def split_line(line):
+    t = None
+    if line:
+        # Split line on spaces, then process line.
+        while True:
+            t = line.split(' ', 1)
+            if t and t[0] and len(t) == 2 and t[1]:
+                t[1] = t[1].strip()
+            # fi
+            if t and t[0] == '.':
+                # If command == '.' toss '.'
+                if len(t) == 2 and t[1]:
+                    line = t[1]
+                else:
+                    t = None
+                    line = None
+                    break
+                # fi
+                continue
+            # fi
+            break
+        # elihw
+    # fi
+    return(t, line)
+# End of split_line
+
+#-----------------------------------------------------------------------------
+def get_list_sep_rem(string):
+    strg = sep = rem = ''
+    for i in range(0, len(string)):
+        c = string[i]                       # Character in string
+        if c.isalpha():                     # [a-zA-Z]
+            if i != 0 and strg.replace('.','',1).isdigit():    # number followed by letter, stop.
+                sep = None
+                rem = string[i:]            # the rest of the string, including this character.
+                break;
+            # fi
+            strg = strg + c
+        elif c.isdigit() or c == '.':       # current is a digit, see if rest are.
+            if strg or strg == '':
+                strg = strg + c
+                continue
+            elif strg.isdigit():             # number followed by number, good.
+                strg = strg + c
+                continue
+            elif strg.replace('.','',1).isdigit() and c.isdigit():   # floating number followed by number, good.
+                strg = strg + c
+                continue
+            else:
+                print_error("Two periods in a number not allowed", string)
+                return None, None, None
+            # fi
+        else:
+            sep = c
+            rem = string[i+1:]              # the rest of the string, including this character.
+            break;
+        # fi
+    # rof
+    return(strg, sep, rem)
+# End of get_list_sep_rem
+
+#-----------------------------------------------------------------------------
+# Calculate values here.
+# Returns:
+#   value   -- So far computed value
+#   type_error -- type of error
+
+def is_float(strg):
+    tree = calculate.parse(strg)            # parse the string
+
+    if tree is not None and len(tree) == 2:
+        if tree[0] is not None and tree[0].startswith('ERROR'):
+            sexpr = tree[0]
+            return strg, sexpr
+        # fi
+        if tree[1] == '.':
+            return strg, "bad input to calculator"
+        # fi
+        try:
+            sexpr = float(tree[1])
+            return sexpr, None
+        except:
+            return strg, "bad input to calculator"
+    # fi
+    return None, None
+# End of is_float
+
+#-----------------------------------------------------------------------------
+def put_on_bufs(onvoice, abc_note, timeofnote):
+    global tlth
+    global mlth
+    global measure_on
+    global bufs
+    global legal_notes
+
+    tlth[onvoice] = tlth[onvoice] + timeofnote
+    if measure_on not in mlth[onvoice]:
+        mlth[onvoice][measure_on] = 0
+    # fi
+    mlth[onvoice][measure_on] = mlth[onvoice][measure_on] + timeofnote
+
+    if onvoice not in bufs:
+        bufs[onvoice] = {}
+    # fi
+    if measure_on not in bufs[onvoice]:
+        bufs[onvoice][measure_on] = abc_note
+        return
+    # fi
+    if type(bufs[onvoice][measure_on]) is int:
+        bufs[onvoice][measure_on] = str(bufs[onvoice][measure_on])
+    # fi
+    if type(abc_note) is int:
+        abc_note = str(abc_note)
+    # fi
+    bufs[onvoice][measure_on] = bufs[onvoice][measure_on] + ' ' + abc_note
+    return
+# End of put_on_bufs
+
+#-----------------------------------------------------------------------------
+def instak(onvoice, thenote, timeofnote, append_tie, line):
+    lengthl, lengthf, ifokay = get_time_stak(timeofnote, line)
+    if not ifokay:                      # if time is error
+        return
+    # fi
+    if type(thenote) is not str:
+        raise RuntimeError('what is up with thenote')
+    # fi
+    j = 1
+    for l in lengthl:
+        if j != len(lengthl) and thenote != 'z':
+            abc_note = thenote + l + '-'
+        else:
+            abc_note = thenote + l + append_tie
+        # fi
+        q = lengthf[j-1]
+        put_on_bufs(onvoice, abc_note, q)
+        j = j + 1
+    # rof
+# End of instak
+
+#-----------------------------------------------------------------------------
+# Make all voices match with rests, etc. The ones we have are now to be processed.
+# Need to make measure for all known voices up to here "mlth". (Add rests.)
+def fill_voice_mlth(line):
+    global measure_on
+    global vl
+    global mlth
+    global tlth
+    global voices
+    global default_note_length          # length of a beat (note)
+
+    t = 0
+    m = 0
+    for i in range(1, len(vl)+1):
+        t = max(tlth[i], t)
+        if measure_on not in mlth[i]:
+            mlth[i][measure_on] = 0
+        # fi
+        m = max(mlth[i][measure_on], m)
+    # rof
+
+    # Put out rests for smaller in measure.
+    for i in range(1, len(vl)+1):
+        l = m - mlth[i][measure_on]     # time short
+        if l > 0 :                      # if short, need a rest.
+            instak(i, 'z', l , '', line)
+        # fi
+        tlth[i] = t                     # Total for voice is now max of all.
+    # rof
+# End of fill_voice_mlth
+
+#-----------------------------------------------------------------------------
+# Separate arguments for argument.
+def arglist(wline, line):
+    newline = []
+    # break into arguments.
+    newstr = ''
+    np = 0                              # ()
+    nb = 0                              # []
+    nc = 0                              # {}
+    for c in wline:
+        if c == ',' and np == 0 and nb == 0 and nc == 0:    # we want to split on commas
+            newline.append(newstr)
+            newstr = ''
+        else:
+            newstr = newstr + c
+            if c == '(':
+                np = np + 1
+            elif c == ')':
+                if np == 0:
+                    print_error("too many right parenthesis", line)
+                    return ''
+                # fi
+                np = np - 1
+            elif c == '[':
+                nb = nb + 1
+            elif c == ']':
+                if nb == 0:
+                    print_error("too many right brackets", line)
+                    return ''
+                # fi
+                nb = nb - 1
+            elif c == '{':
+                nc = nc + 1
+            elif c == '}':
+                if nc == 0:
+                    print_error("too many right curly braces", line)
+                    return ''
+                # fi
+                nc = nc - 1
+            # fi
+        # fi
+    # rof
+    if np != 0:
+        print_error("too many left (by {}) parenthesis".format(np), line)
+        return ''
+    if nb != 0:
+        print_error("too many left (by {}) brackets".format(nb), line)
+        return ''
+    if nc != 0:
+        print_error("too many left (by {}) curly braces".format(nc), line)
+        return ''
+    newline.append(newstr)
+    newstr = ''
+
+    return newline
+# End of arglist
+
+#-----------------------------------------------------------------------------
+# change -- rename existing command or copy.
+#         change  measure to unit   $$ or:
+#         change  command measure to unit
+
+def do_change(t_args, line):
+    if t_args is None or len(t_args) == 0:
+        print_error("change does not have three or four arguments.", line)
+        return
+    # fi
+    t_args = t_args[0].split(' ')
+    if t_args is None or len(t_args) < 3 or len(t_args) > 4:
+        print_error("change -- there is not three or four arguments.", line)
+        return
+    # fi
+    if len(t_args) == 4:
+        if t_args[0] != 'command' or t_args[2] != 'to':
+            print_error("change -- command is not first argument of four and to is not third.", line)
+            return
+        # fi
+        t_args = t_args[1:]
+    elif len(t_args) == 3:
+        if t_args[1] != 'to':
+            print_error("change -- to is not second argument.", line)
+            return
+        # fi
+    # fi
+    old = t_args[0]
+    new = t_args[2]
+    # make sure new name does not exist already. -- error
+    if new in commands:
+        if commands[new] == commands[old]:
+            return
+        # fi
+        print_error("copy new name already exists as different command.", line)
+    elif new in macros:
+        print_error("change new name already exists as macro.", line)
+        return
+    if old not in commands:
+        print_error("change old name does not exist.", line)
+        return
+    # fi
+    commands[new] = commands[old]
+    del commands[old]
+# End of do_change
+
+#-----------------------------------------------------------------------------
+# copy -- make another name for existing name/copy, replace existing with warning.
+#         copy    measure to unit   $$ or:
+#         copy    command measure to unit
+def do_copy(t_args, line):
+    if t_args is None or len(t_args) == 0:
+        print_error("copy does not have three or four arguments.", line)
+        return
+    # fi
+    t_args = t_args[0].split(' ')
+    if t_args is None or len(t_args) < 3 or len(t_args) > 4:
+        print_error("copy - there is not three or four arguments.", line)
+        return
+    # fi
+    if len(t_args) == 4:
+        if t_args[0] != 'command' or t_args[2] != 'to':
+            print_error("copy - command is not first argument of four and to is not third.", line)
+            return
+        # fi
+        t_args = t_args[1:]
+    elif len(t_args) == 3:
+        if t_args[1] != 'to':
+            print_error("copy - to is not second argument.", line)
+            return
+        # fi
+    # fi
+    old = t_args[0]
+    new = t_args[2]
+    # make sure new name does not exist already. -- error
+    if new in commands:
+        if commands[new] == commands[old]:
+            return
+        # fi
+        print_error("copy new name already exists as different command.", line)
+    elif new in macros:
+        print_error("copy new name already exists as macro.", line)
+        return
+    if old not in commands:
+        print_error("copy old name does not exist.", line)
+        return
+    # fi
+    commands[new] = commands[old]
+# End of do_copy
+
+#-----------------------------------------------------------------------------
+#   title promenade     $$ Gives a title to the song, multiple allowed.
+def do_title(t_args, line):
+    global header
+
+    if t_args is None or len(t_args) == 0:
+        print_warning("Title does not have any text.", line)
+        header = header + "T:\n"
+        return
+    # fi
+    # T: Title of tune        (can have multiple)
+    t = line.split(' ', 1)
+    if not t or len(t) < 2:
+        #-- print_error("title needs some text.", line)
+        t = [ ' ', ' ' ]
+    # fi
+
+    header = header + "T:{}\n".format(t[1])
+# End of do_title
+
+#-----------------------------------------------------------------------------
+#   tempo  150,4        $$ Number of notes of given length in a minute.
+#   tempo  30           $$ Number of frames (1/57.1429 seconds) per whole note.
+def do_tempo(t_args, line):
+    global tempo_speed                  # beats per minute
+    global default_note_length          # length of a beat (note)
+    global header
+    global measure_on
+
+    if t_args is None or len(t_args) == 0:
+        print_error("tempo does not have one or two arguments.", line)
+        return
+    # fi
+    t_args = t_args[0].split(',')
+    if t_args is None or len(t_args) == 0 or len(t_args) > 2:
+        print_error("tempo - there is not one or two arguments.", line)
+        return
+    # fi
+    #   value   -- So far computed value
+    #   type_error -- type of error
+    f1, type_error = is_float(t_args[0])
+    if type_error is not None:
+        print_error("tempo does not have first argument as a floating number. {}".format(type_error), line)
+        return
+    # fi
+    if f1 is None:
+        print_error("tempo does not have first argument as a floating number.", line)
+        return
+    # fi
+    if len(t_args) == 1:
+        x = round(f1 / 60.0)
+        default_note_length[measure_on] = 1.0               # whole note
+        tempo_speed = x
+        return
+    # fi
+    f2, type_error = is_float(t_args[1])
+    if type_error is not None:
+        return
+    # fi
+    if f2 is None:
+        print_error("tempo does not have second argument as a floating number.", line)
+        return
+    # fi
+    default_note_length[measure_on] = (1.0 / f2)            # whole note
+    tempo_speed = round(f1)
+    return
+# End of do_tempo
+#-----------------------------------------------------------------------------
+def do_cstopnow(t_args, line):
+    do_pass2()
+    sys.exit(errors_happened)
+# End of do_cstopnow
+
+#-----------------------------------------------------------------------------
+#   cstart              restart compiling.      (like #if 0 ... #endif // 0)
+def do_cstart(t_args, line):
+    print_warning("WARNING - cstart command without a cstop ({}, {})".format(t_args, line), file=sys.stderr)
+# End of do_cstart
+
+#-----------------------------------------------------------------------------
+#   cstop               stop till cstart or cstop* found.
+def do_cstop(t_args, line):
+    # Read until cstart found (or end of file)
+    while True:
+        line = get_line()
+        t, line = split_line(line)
+        if line:
+            if t and t[0]:
+                if t[0] in commands:
+                    if commands[t[0]] == do_cstart:
+                        return
+                    # fi
+                    if commands[t[0]] == do_cstopnow:
+                        do_cstopnow(t_args, line)
+                    # fi
+                # fi
+            # fi
+        # fi
+    # elihw
+# End of do_cstop
+
+#-----------------------------------------------------------------------------
+# TODO LAST
+def do_endm(t_args, line):
+    print_error("NOTDONEYET - do_endm", line)
+# End of do_endm
+
+#-----------------------------------------------------------------------------
+# TODO LAST
+#   macro name,arg1,arg2,...,argn
+#     body of macro
+#   endm
+#         Changes arg1 to passed in usage.
+#   name  first,second arg,something    # example 3 arguments - spaces allowed.
+#
+# Macros must not be existing commands -- replace existing macro with warning.
+def do_macro(t_args, line):
+    if t_args is None or len(t_args) == 0:
+        print_error("macro command does not have any arguments.", line)
+        return
+    # fi
+    if t_args[0]  in commands:
+        print_error("macro would replace existing command",line)
+        return
+    # fi
+    print_error("NOTDONEYET - do_macro", line)
+# End of do_macro
+
+#-----------------------------------------------------------------------------
+# TODO LAST
+# putd ... if already existing, replace with warning.
+#     putd   /cmajor/c,e,g/
+#     =cmajor,b           # c,e,g,b       Note: do multiple putd's on this line.
+def do_putd(t_args, line):
+    print_error("NOTDONEYET - do_putd", line)
+# End of do_putd
+
+#-----------------------------------------------------------------------------
+# TODO LAST
+def process_putd(line):
+    print_error("NOTDONEYET - process_putd", line)
+    return ''                           # Ignore putd for now.
+# End of process_putd
+
+#-----------------------------------------------------------------------------
+# TODO LAST
+def do_endif(t_args, line):
+    print_error("NOTDONEYET - do_endif", line)
+# End of do_endif
+
+#-----------------------------------------------------------------------------
+# TODO LAST
+def do_else(t_args, line):
+    print_error("NOTDONEYET - do_else", line)
+# End of do_else
+
+#-----------------------------------------------------------------------------
+# TODO LAST
+#   if/else/endif
+def do_if(t_args, line):
+    print_error("NOTDONEYET - do_if", line)
+# End of do_if
+
+#-----------------------------------------------------------------------------
+# TODO LAST
+#   marker              ignore
+def do_marker(t_args, line):
+    print_error("NOTDONEYET - do_marker", line)
+# End of do_marker
+
+#-----------------------------------------------------------------------------
+# TODO LAST
+#   debug               ignore
+def do_debug(t_args, line):
+    print_error("NOTDONEYET - do_debug", line)
+# End of do_debug
+
+#-----------------------------------------------------------------------------
+# TODO LAST
+#   randp   m1          Assigned from last setperm.
+def do_randp(t_args, line):
+    print_error("NOTDONEYET - do_randp", line)
+# End of do_randp
+
+#-----------------------------------------------------------------------------
+# TODO LAST
+#   setperm 44          Semi random numbers between 1 and 55, without duplication.
+def do_setperm(t_args, line):
+    print_error("NOTDONEYET - do_setperm", line)
+# End of do_setperm
+
+#-----------------------------------------------------------------------------
+# TODO LAST
+#   randu   m1,10       $$ random number 1 <= m1 <= 10
+def do_randu(t_args, line):
+    print_error("NOTDONEYET - do_randu", line)
+# End of do_randu
+
+#-----------------------------------------------------------------------------
+# TODO LAST
+#   percus              does things with slide projector.
+def do_percus(t_args, line):
+    print_error("NOTDONEYET - do_percus", line)
+# End of do_percus
+
+#-----------------------------------------------------------------------------
+# TODO LAST
+#   delay 15            delay in 1/60ths of a second. Like a fermate.  15=1/4th of a second
+def do_delay(t_args, line):
+    print_error("NOTDONEYET - do_delay", line)
+# End of do_delay
+
+#-----------------------------------------------------------------------------
+# TODO LAST
+#   slide  from,to,length     Glissando - only can be used after voice 1 or cis n command.
+def do_slide(t_args, line):
+    print_error("NOTDONEYET - do_slide", line)
+# End of do_slide
+
+#-----------------------------------------------------------------------------
+# TODO LAST
+#   pitch -2            sets semitones lower
+def do_pitch(t_args, line):
+    print_error("NOTDONEYET - do_pitch", line)
+# End of do_pitch
+
+#-----------------------------------------------------------------------------
+# TODO LAST
+#   temper a            sets just intonation in the key.
+def do_temper(t_args, line):
+    print_error("NOTDONEYET - do_temper", line)
+# End of do_temper
+
+#-----------------------------------------------------------------------------
+# TODO LAST
+#   sharp   f
+def do_sharp(t_args, line):
+    print_error("NOTDONEYET - do_sharp", line)
+# End of do_sharp
+
+#-----------------------------------------------------------------------------
+# TODO LAST
+#   flat    b,e         flat/sharp are cumulative -- double flats, etc.
+def do_flat(t_args, line):
+    print_error("NOTDONEYET - do_flat", line)
+# End of do_flat
+
+#-----------------------------------------------------------------------------
+# TODO LAST
+#   natural c           undo any flat/sharp.
+def do_natural(t_args, line):
+    print_error("NOTDONEYET - do_natural", line)
+# End of do_natural
+
+#-----------------------------------------------------------------------------
+# TODO FOURTH
+#   goto    6.5,x,8,2,... $$ repeat and/or skip.  "x" = continue, forwards, backwards, max 8 args.
+#                       counter is number of times reached.
+def do_goto(t_args, line):
+    print_error("NOTDONEYET - do_goto", line)
+# End of do_goto
+
+#-----------------------------------------------------------------------------
+def to_abc_note(note_number):
+    o = int(note_number / 12)                           # get octave
+    n = note_number - (o * 12)                          # note is remainder
+    octaves = { 0:',,,', 1:',,', 2:',', 3:'', 4:'', 5:"'", 6:"''", 7:"'''", 8:"'''" }
+    notes = { 0:'a', 1:'^a', 2:'b', 3:'c', 4:'^c', 5:'d', 6:'^d', 7:'e', 8:'f', 9:'^f', 10:'g', 11:'^g' }
+    n = notes[n]
+    if o <= 3:                                          # uppercase letter
+        n = n.upper()
+    else:                                               # lowercase letter
+        n = n.lower()
+    # fi
+    o = octaves[o]
+    thenote = n + o
+    return thenote
+# End of to_abc_note
+
+#-----------------------------------------------------------------------------
+# TODO
+#   decode  m1,3c+      $$ note number for 3c+ into m1
+# Use to_abc_note above?  I am thinking like is_floating('wargs[0] = {}'.format(note_number))
+def do_decode(t_args, line):
+    if t_args is None or len(t_args) == 0:
+        print_error("decode command does not have any arguments.", line)
+        return
+    # fi
+    print_error("NOTDONEYET - do_decode", line)
+# End of do_decode
+
+#-----------------------------------------------------------------------------
+def do_clef(t_args, line):
+    global clef
+    global measure_on
+
+    if t_args is None or len(t_args) <= 0 or t_args[0] == '':
+        print_error("clef does not have an argument", line)
+        return
+    # fi
+
+    wargs = arglist(t_args[0], line)
+    if not wargs or len(wargs) < 1:
+        print_error("no clef selection arguments", line)
+        return
+    # fi
+    for i in range(0, len(wargs)):
+        clef[i+1][measure_on] = wargs[i].strip()   # No checking.
+    # rof
+# End of do_bars
+
+#-----------------------------------------------------------------------------
+def do_bars(t_args, line):
+    global bars
+
+    if t_args is None or len(t_args) <= 0 or t_args[0] == '':
+        print_error("bars does not have an expression to process", line)
+        return
+    # fi
+
+    m = t_args[0]
+
+    f, type_error = is_float(m)
+    if type_error is not None:
+        return
+    # fi
+    if f is None:
+        print_error("bars argument as a calculation did not return a value", line)
+        return
+    # fi
+    bars = round(f)
+    # fi
+# End of do_bars
+
+#-----------------------------------------------------------------------------
+def do_meter(t_args, line):
+    global meter
+    global measure_meter
+    global measure_on
+
+    if t_args is None or len(t_args) <= 0 or t_args[0] == '':
+        print_error("meter does not have an expression to process", line)
+        return
+    # fi
+
+    m = t_args[0]
+
+    f, type_error = is_float(m)
+    if type_error is not None:
+        return
+    # fi
+    if f is None:
+        print_error("meter argument as a calculation did not return a value", line)
+        return
+    # fi
+    meter = m
+    measure_meter[measure_on] = m                       # Save text for meter.
+    # fi
+# End of do_meter
+
+#-----------------------------------------------------------------------------
+#   calc m1=10          variables m1 to m9.  m(m2)=m9/5   # floating point.
+#               Note: special variables stac, grace, frames, pause
+def do_calc(t_args, line):
+    if t_args is None or len(t_args) <= 0:
+        print_error("calc does not have an expression to process", line)
+        return
+    # fi
+    f, type_error = is_float(t_args[0])
+    if type_error is not None:
+        return
+    # fi
+    if f is None:
+        print_error("calculate did not return a value", line)
+        return
+    # fi
+    return
+# End of do_calc
+
+#-----------------------------------------------------------------------------
+#   key   a             key of a major.
+def do_key(t_args, line):
+    global key
+
+    if t_args is None or len(t_args) != 1:
+        print_error("key command needs one argument", line)
+        return
+    # fi
+    k = t_args[0]
+    k = k.upper()
+    k = k.replace('-', 'b')             # Does multiple --.
+    k = k.replace('+', '#')             # Does multiple ++.
+    k = k.replace('n', '=')             # Does multiple ++.
+
+    fill_voice_mlth(line)               # Need to make measure for other voices up to here "mlth".
+
+    key = k
+# End of do_key
+
+#-----------------------------------------------------------------------------
+#   cis   2             $$ only voice 2 follows. sets volume too.
+def do_cis(t_args, line):
+    global voices, cis                  # number of voices, cis ...
+    global vl                           # volume levels
+    global vinstrument
+    global oct                          # default octave
+    global time                         # set default note length (time)
+    global mlth                         # measure length dictionary
+    global tlth                         # #or 60ths/voice
+    global bufs
+    global measure_on
+
+    if t_args is None or len(t_args) != 1:
+        print_error("cis does not have one or two arguments.", line)
+        return
+    # fi
+
+    vargs = t_args[0].split()
+
+    f1, type_error = is_float(vargs[0])
+    if type_error is not None:
+        return
+    # fi
+    if f1 is None:
+        print_error("cis does not have first argument as a number.", line)
+        return
+    # fi
+    f1 = round(f1)
+    if f1 < 1  or f1 > MAXVOICES:       # If out of range.
+        print_error("number of cis must between 1 and {} inclusive. Not ({})".format(MAXVOICES, f1), line)
+        return
+    # fi
+
+    voices = f1                         # Max voices.
+    cis = f1                            # Doing just one voice from now on.
+
+    for i in range(1, cis + 1):
+        new_voice_initialize(i, measure_on)
+    # rof
+
+    # If there is a second argument, choose instrument for the voice.
+    if len(vargs) > 1:
+        vinstrument[measure_on][cis] = vargs[1]   # No checking.
+        # rof
+    # fi
+
+    fill_voice_mlth(line)               # Need to make measure for all voices up to here "mlth".
+# End of do_cis
+
+#-----------------------------------------------------------------------------
+#   volume  4,7,5                       $$ for 3 voices; mf and fff, and a touch louder.
+#       The volume is a number between 0 and 7;
+#       Caution: you should use only volumes 5 through 7
+def do_volume(t_args, line):
+    global vl                           # volume levels
+    global vinstrument
+    global oct                          # default octave
+    global time                         # set default note length (time)
+    global mlth                         # measure length dictionary
+    global tlth                         # #or 60ths/voice
+    global bufs
+    global measure_on
+
+    if t_args is None or len(t_args) == 0:
+        print_error("volume needs at least one argument", line)
+        return
+    # fi
+    wline = t_args[0]
+    # Get rid of all white spoce.
+    wline = ''.join(wline.split())
+    wargs = arglist(wline, line)
+
+    if len(wargs) == 0 or len(wargs) > MAXVOICES:
+        print_error("volume needs from one to {} arguments".format(MAXVOICES), line)
+        return
+    # fi
+
+    for i in range(1, len(wargs)+1):
+        v, type_error = is_float(wargs[i - 1])
+        if type_error is not None:
+            print_error("volume did not get have a floating number. {}".format(type_error), line)
+            return
+        # fi
+        if v is None:
+            print_error("volume does not have argument as a number.", line)
+            return
+        # fi
+        v = round(v)
+        if v < 0:                       # If error or bad value
+            print_error("volume for voice {} not good {}, making it zero.".format(i,v), line)
+            v = 0
+        elif v > 7:                     # If error or bad value
+            print_error("volume {} for voice {} not good, making it 7.".format(v,i), line)
+            v = 7
+        # fi
+        if not i in vl:
+            new_voice_initialize(i, measure_on)
+        # fi
+        vl[i][measure_on] = v           # Change volume for voice.
+    # rof
+# End of do_volume
+
+#-----------------------------------------------------------------------------
+def do_set_voices(f1, line):
+    global voices                       # number of voices
+    global vl                           # volume levels
+    global oct                          # default octave
+    global time                         # set default note length (time)
+    global mlth                         # measure length dictionary
+    global tlth                         # #or 60ths/voice
+    global bufs
+    global measure_on
+
+    voices = f1                         # Max voices.
+    for i in range(1, voices+1):
+        new_voice_initialize(i, measure_on)
+    # rof
+# End of do_set_voices
+
+#-----------------------------------------------------------------------------
+#   voice 4                             $$ number of voices from now onwards.   sets volume too. Default 4?
+#   voice 4   50,60,70,80               $$ Set the instruments %%MIDI program 50 ...
+def do_voice(t_args, line):
+    global cis                          # non-zero if doing one voice only.
+    global vinstrument
+    global measure_on
+
+    if t_args is None or len(t_args) != 1:
+        print_error("voice does not have one argument.", line)
+        return
+    # fi
+
+    vargs = t_args[0].split()
+    f1, type_error = is_float(vargs[0])
+    if type_error is not None:
+        return
+    # fi
+    if f1 is None:
+        print_error("voice does not have first argument as a number.", line)
+        return
+    # fi
+    f1 = round(f1)
+    if f1 < 1  or f1 > MAXVOICES:       # If out of range.
+        print_error("number of voices must between 1 and {} inclusive. Not ({})".format(MAXVOICES, f1), line)
+        return
+    # fi
+
+    do_set_voices(f1, line)
+
+    fill_voice_mlth(line)               # Need to make measure for other voices up to here "mlth".
+
+    # If there are more arguments, choose instruments for the voices.
+    if len(vargs) > 1:
+        wargs = arglist(vargs[1], line)
+        if not wargs or len(wargs) < 1:
+            print_error("no instrument selection arguments on voice line", line)
+            return
+        # fi
+        for i in range(0, len(wargs)):
+            vinstrument[measure_on][i+1] = wargs[i]   # No checking.
+        # rof
+    # fi
+
+    cis = 0                             # No longer doing just one voice.
+# End of do_voice
+
+#-----------------------------------------------------------------------------
+def print_header():
+    global header
+    global key
+    global tempo_speed
+
+    # Must be a fraction.
+    fdnl = default_note_text_fraction('')
+    header = header + "L:{}\n".format(fdnl)
+    header = header + "Q:{}={}\n".format(fdnl, tempo_speed)
+    header = header + "K:{}".format(key)       # no \n, added when printed.
+
+    print(header)
+    return
+# End of print_header
+
+#-----------------------------------------------------------------------------
+#   measure 6.5         $$ need not be integers
+def do_measure(t_args, line):
+    global measure_on
+    global meas
+    global vl
+    global default_note_length
+    global vinstrument
+    global acc, acc_v_init                  # Last accidental on a note in measure.
+
+    if not measure_on or measure_on == '':  # if first measure, put out header
+        print_header()
+    # fi
+
+    fill_voice_mlth(line)                   # Need to make measure for other voices up to here "mlth".
+
+    if t_args is None or len(t_args) != 1:
+        print_error("Measure missing argument.", line)
+        return
+    # fi
+    if t_args[0] in meas:
+        print_error("Measure already exists.", line)
+        return
+    # fi
+
+    # Last note length ... continue to this measure, until it changes.
+    last_m = measure_on
+    measure_on = str(t_args[0])
+    meas.append(measure_on)
+    for i in range(1, len(vl)+1):
+        if measure_on not in vinstrument:
+            vinstrument[measure_on] = {}
+        # fi
+        if i not in vl:
+            vl[i] = {}
+        # fi
+        for j in vl:
+            if j not in clef:
+                clef[j] = {}
+            # fi
+            if last_m not in clef[j]:
+                for k in reversed(range(0, len(meas)-1)):
+                    if meas[k] in clef[j]:
+                        nc = clef[j][meas[k]]
+                        break
+                    # fi
+                # rof
+            else:
+                nc = clef[j][last_m]
+            # fi
+            clef[j][measure_on] = nc
+        # rof
+        new_voice_initialize(i, measure_on)
+        if measure_on not in vl[i]:
+            vl[i][measure_on] = 7
+        # fi
+        mlth[i][measure_on] = 0
+        # last instrument continues - might change shortly.
+        vinstrument[measure_on][i] = vinstrument[last_m][i]
+        vl[i][measure_on] = vl[i][last_m]
+        acc[i] =  {k: v for k, v in acc_v_init.items()}
+    # rof
+    # default note length continues with current - might change shortly.
+    default_note_length[measure_on] = default_note_length[last_m]
+    measure_meter[measure_on] = meter       # Each measure change can have a different meter.
+# End of do_measure
+
+#-----------------------------------------------------------------------------
+# dictionary commandname : routine. execute via(?): globals()['do_cstopnow'](t_args, line)
+commands = {
+             'bars'    : do_bars,
+             'calc'    : do_calc,
+             'change'  : do_change,
+             'cis'     : do_cis,
+             'clef'    : do_clef,
+             'copy'    : do_copy,
+             'cstart'  : do_cstart,
+             'cstop'   : do_cstop,
+             'cstop*'  : do_cstopnow,
+             'debug'   : do_debug,
+             'decode'  : do_decode,
+             'delay'   : do_delay,
+             'else'    : do_else,
+             'end'     : do_cstopnow,
+             'endif'   : do_endif,
+             'endm'    : do_endm,
+             'flat'    : do_flat,
+             'goto'    : do_goto,
+             'if'      : do_if,
+             'key'     : do_key,
+             'macro'   : do_macro,
+             'marker'  : do_marker,
+             'measure' : do_measure,
+             'unit'    : do_measure,
+             'meter'   : do_meter,
+             'natural' : do_natural,
+             'percus'  : do_percus,
+             'pitch'   : do_pitch,
+             'putd'    : do_putd,
+             'randu'   : do_randu,
+             'randp'   : do_randp,
+             'setperm' : do_setperm,
+             'sharp'   : do_sharp,
+             'slide'   : do_slide,
+             'start'   : do_cstart,
+             'stop'    : do_cstop,
+             'stop*'   : do_cstopnow,
+             'tempo'   : do_tempo,
+             'temper'  : do_temper,
+             'title'   : do_title,
+             'voice'   : do_voice,
+             'volume'  : do_volume,
+             # '.' -- handled specially.
+           }
+
+#-----------------------------------------------------------------------------
+# For plato calc command processing :)
+# w=1,h=2,q=4,e=8,th=+0k        # for plato calc command
+# s=(1),d=(1),b=(1),t=(1)       # for plato calc command
+# m1, m2, m3, m4, m5, m6, m7, m8, m9
+# freq(A) = 968000/A
+# nearest(A)      = round(ln(A/27.5)*12/0.693147)
+# framlth = 60*(20/21)          # frames per second
+# tempo(a,b)      = 60*framlth*b*[1./a]
+# min2(a,b)       = (a+b-abs(a-b))/2      $$ by Dan Sleator
+# min4(l,a,b,d)   = min2(min2(l,a),min2(b,d))
+# max2(a,b)       = (a+b+abs(a-b))/2      $$ note, no < or > ops
+# max4(l,a,b,d)   = max2(max2(l,a),max2(b,d))
+#-----------------------------------------------------------------------------
+# Notes and comma for separating voices.
+# Length of note in 1/60ths of a second.   r[1]    = 1/57.1429 frames per second
+# Length of notes as floating number.      (0.25)  = 1/4 = quarter note.
+# variable: pause = break between two identical notes, or "broken notes".
+# Note: variables in () and [].
+#-----------------------------------------------------------------------------
+# rests
+# Notes: 3c4,4c4,r2     $$ 3 voices, last is a rest.
+#        3a8,,4c8       $$ voice 2 is still playing
+# ONALM
+# O = octave. default to most recently used for this voice. from 1 to 8.  Middle C = octave 3.
+# N = note itself a through g. Probably allow upper or lower case. :) "r" = rest.
+# A = Default to normal key value. accidental -> +, -, ++, --, n. Do not carry to next note. (n=natural)
+# L = Default to most recently used for this voice. note length. Like 16 for sixteenth note. Can do 16th.
+#       w, h, q -> whole, half, quarter.
+#       3(4) -> 3 notes in the time of a quarter note. (triplets)
+#       (.25) -> 1/4 note.
+#       [12] -> number of output frames ... 1/57.1429 of a second.
+#   Example:    4b-3(4)         $$ beginning of a triplet
+# M = modifier. Normal note. Any combination: d = dotted, s=staccato, b = broken by pause from next, t = tie.
+#   3a16t           $$ lengthens previous by 1/16th ... must be same note.
+
+# Special note forms (replace O and N):  (13) - note number. [440] = frequency in Hz. {317} GSW - ignore.
+#     t(3a,3g,7)4  = ON,ON,number,LM   - example, 7 notes, quarter note length.
+#        NOTE: in 60ths of a second, be careful using it.
+#     s4(4a,b,a,g) = sLM(ONA,ONA,...)  - play all notes as grace notes, length of staccato, LM=length
+#               last note lasts until LM (quarter note in example) is reached.
+#-----------------------------------------------------------------------------
+
+# return:
+#       therest (for time)
+#       thenote         Convert to abc format for note, octave.
+#       typenote:       -2 gsw oprnd, -1 freq, 0 note, 1 trill, 2 sequence
+
+def getnote(note_to_decode, voice, line):
+    global sequence_note
+    global trill_note
+    global normal_note
+    global freqency_note
+    global gsw_operand
+    global oct                                  # default octave
+    global accidentals
+    global allkeys
+    global acc                                  # Last accidental on a note in measure.
+
+    temp3 = 0                                   # character pointer
+    thenote = 0                                 # return error value (0 = good, and 0).
+    typenote = normal_note                      # return normal note
+    if note_to_decode == '0':
+        return '', thenote, typenote
+    # fi
+    if not note_to_decode or note_to_decode == '':
+        return '', 0, typenote
+    # fi
+    if note_to_decode[0] == '{' or note_to_decode[0] == '[' or note_to_decode[0] == '(':
+        if note_to_decode[0] == '{':            # gsw oprnd     { }
+            typenote = gsw_operand              # set gsw-opnd flag
+        elif note_to_decode[0] == '[':                  # frequency     [ ]
+            typenote = freqency_note            # set freq flag
+        # fi
+        work3 = 1
+        #  must balance parens since note is followed by time
+        #  [440]4
+        # balance parens
+        for temp2 in range(temp3 + 1, len(note_to_decode)):
+            work4 = note_to_decode[temp2]
+            if work4 == '(' or work4 == '[':
+                work3 = work3 + 1               # count ('s
+            elif work4 == ')' or work4 == ']':
+                work3 = work3 - 1               # subtract  )'s
+                if work3 < 1:
+                    temp3 = temp2 + 1           # temp2 has last matched )
+                    therest = note_to_decode[temp3:]
+                    note_to_decode = note_to_decode[0:temp3]
+                    thenote, type_error = is_float(note_to_decode)
+                    if type_error is not None:
+                        return therest, thenote, type_error
+                    # fi
+                    if thenote is None:
+                        print_error("Note is not legal '{}', computation failed".format(note_to_decode), line)
+                        return therest, thenote, type_error
+                    # fi
+                    thenote = round(thenote)
+                    if typenote == freqency_note:  # if freq calculate it
+                        thenote = freq(thenote)
+                    # fi
+                    # get ready for time computation
+                    return therest, thenote, typenote
+                # fi
+            # fi
+        # rof
+        print_error("Note is not legal '{}', unbalanced parenthesis".format(note_to_decode), line)
+        return '', None, normal_note
+    # fi
+    if note_to_decode[0] in [ '0', '1', '2', '3', '4', '5', '6', '7', '8' ]:    # check octave
+        oct[voice] = int(note_to_decode[0])                                     # save octave
+        temp3 = temp3 + 1
+    # fi
+    if len(note_to_decode) <= temp3 or note_to_decode[temp3] is None:
+        print_error("no note_to_decode '{}' temp3={} len(note_to_decode)={}".format(note_to_decode,temp3, len(note_to_decode)), line)
+        return '', None, normal_note
+    # fi
+    temp2 = note_to_decode[temp3]
+    if temp2 not in [ 'a', 'b', 'c', 'd', 'e', 'f', 'g' ]:      # if not note -- reset, etc.
+        if note_to_decode[0] == 's':            # check for sequence
+            if note_to_decode[1] != '(':        # if time given
+                #       from, from_character, to, to_character, optionallength
+                note_to_decode = note_to_decode[0:]
+                sc = note_to_decode.find('(')
+                if sc < 0:
+                    print_error("Sequence is not legal '{}' no parenthesis ".format(note_to_decode), line)
+                    return '', None, normal_note
+                # fi
+                time(note_to_decode, voice, line)   # get the time
+                therest = note_to_decode[sc:]
+            else:
+                thenote = -1                    # set flag for no time given
+                therest = note_to_decode[2:]
+            # fi
+            typenote = sequence_note            # set flag for sequence
+            print_error("NOTDONEYET - Sequence '{}'".format(note_to_decode), line)
+            return therest, thenote, typenote
+        elif note_to_decode[0] == 't':          # check for trill
+            if note_to_decode[1] != '(':        # check for parenthesis
+                print_error("Note is not legal '{}', no parenthesis".format(note_to_decode), line)
+                return '', None, normal_note
+            # fi
+            if typenote == trill_note:
+                print_error("Note is not legal '{}' double trill".format(note_to_decode), line)
+                return '', None, normal_note
+            # fi
+            return note_to_decode[2:], '', trill_note
+        elif note_to_decode[0] == 'r':          # check for rest
+            # Rest follows.
+            thenote = 'z'                       # Convert to abc format rest.
+            temp3 = temp3 + 1
+            # get ready for time computation
+            therest = note_to_decode[temp3:]
+            return therest, thenote, typenote
+        else:
+            print_error("Note is not legal '{}' unknown".format(note_to_decode), line)
+            return '', None, normal_note
+        # fi
+    # fi
+    work = ''
+    temp3 = temp3 + 1
+    if len(note_to_decode) <= temp3:
+        temp4 = ''
+    else:
+        temp4 = note_to_decode[temp3]
+    # fi
+    if temp4 == 'n':                            # natural special
+        temp3 = temp3 + 1
+        work = temp2 + temp4                    # construct  dn
+        if work not in allkeys:
+            print_error("Note is not legal '{}' not good decode={}  n".format(note_to_decode,work), line)
+            return '', None, normal_note
+        # fi
+        therest = note_to_decode[temp3:]
+        thenote = work                          # return text note.
+    elif temp4 == '+' or temp4 == '-':          # check special note
+        work = temp2 + temp4                    # construct  d+ or d-
+        temp3 = temp3 + 1
+        if len(note_to_decode) <= temp3:
+            temp4 = ''
+        else:
+            temp4 = note_to_decode[temp3]
+        # fi
+        if temp4 == '+' or temp4 == '-':        # check special note
+            work = work + temp4                 # construct  d++ or d--
+            temp3 = temp3 + 1
+        # fi
+        if work not in allkeys:
+            print_error("Note is not legal '{}' not good decode={} +/-".format(note_to_decode,work), line)
+            return '', None, normal_note
+        # fi
+        therest = note_to_decode[temp3:]
+        thenote = work                          # return text note.
+    else:
+        work = temp2 + work
+        if work not in allkeys:
+            print_error("Note is not legal '{}' uh-ish {}".format(note_to_decode,work), line)
+            return '', None, normal_note
+        # fi
+        thenote = work                          # return text note.
+    # fi
+
+    #   thenote             Convert to abc format for note, octave.
+    n = thenote[0]
+    if len(thenote) > 1:
+        a = thenote[1:]
+        if a not in accidentals:
+            print_error("sharp/flat/natural is not legal '{}'".format(a), line)
+            return '', None, normal_note
+        # fi
+        A = accidentals[a]
+    else:
+        A = a = ''
+    # fi
+    octaves = { 0:',,,', 1:',,', 2:',', 3:'', 4:'', 5:"'", 6:"''", 7:"'''", 8:"'''" }
+    o = oct[voice]
+    if o not in octaves:
+        print_error("Note is not legal '{}' oct strange {}".format(note_to_decode,o), line)
+        return '', None, normal_note
+    # fi
+    if a not in accidentals:
+        print_error("Note is not legal '{}' accidentals strange {}".format(note_to_decode,a), line)
+        return '', None, normal_note
+    # fi
+    n = n.upper()
+    if a == '' and acc[voice][n] != '':
+        # Check if default from last potential problem.
+        print_warning("previous note '{}' voice {} in measure {} was '{}' and this note is default - FIXING".format(n,voice,measure_on,acc[voice][n]),line)
+        a = acc[voice][n]
+        A = accidentals[a]
+    # fi
+    acc[voice][n] = a                                   # save for next note for voice.
+
+    o = oct[voice]
+    if o <= 3:                                          # uppercase letter
+        n = n.upper()
+    else:                                               # lowercase letter
+        n = n.lower()
+    # fi
+    thenote = A + n + octaves[o]
+    therest = note_to_decode[temp3:]
+    return therest, thenote, typenote
+# End of getnote
+
+#-----------------------------------------------------------------------------
+# compute time
+# Returns:
+#   timeofnote      computed length in 60ths
+#   accidentals     -4 marcato, -2 tied, -1 stac, 0 normal
+#   number_dots     Number of "dots".
+
+def get_time(therest, line):
+    global tempo_speed                  # beats per minute
+
+    work4 = 0
+    vwork = 0
+    if therest and not therest[0].isalpha():    # if not a note or modifier (computable)
+        vwork, type_error = is_float(therest)
+        # errorrest = everything after value -- if error occurs.
+        # vwork = value calculated before error (even if not error).
+        # type_error = message of error type.
+        if type_error is not None:
+            print_error(type_error, line)
+            return 0, None, None                # ???
+        # fi
+        if vwork is None:
+            vwork = 0
+        # fi
+    # fi
+    if vwork == 0:
+        work = 0                                # No time given
+    else:
+        if therest[0]  == "[":                  # number of 1/60ths
+            work = (1.0/64.0) * vwork           # Number of 64th notes
+        elif therest[0]  == "(":                # (.25) = 1/4 note (or like "4")
+            work = vwork
+        else:
+            work = 1.0 / vwork
+        # fi
+    # fi
+    work4 = 0                                   # No incidentals yet.
+    bit_from_character = { 's': -1, 't': -2, 'b': -4, 'd': -8 }
+    number_dots = 0
+    if therest and therest != '':
+        for i in reversed(range(0, len(therest))):
+            temp4 = therest[i]
+            # temp4 = [temp4 == "s"] + 2*[temp4 == "t"] + 4*[temp4 == "b"] + 8*[temp4 == "d"]
+            if temp4 not in bit_from_character:
+                break
+            # fi
+            temp4 = bit_from_character[temp4]
+            if temp4 < 0 and temp4 > -8:
+                work4 = work4 | (-temp4)
+            else:
+                number_dots = number_dots + 1
+            # fi
+        # rof
+    # fi
+    return work, -work4, number_dots
+# End of get_time
+
+#-----------------------------------------------------------------------------
+def do_tie(onvoice, vnumber, line):
+    global measure_on                   # The measure we are on.
+    global meas                         # volume levels
+
+    if vnumber is not None:
+        return '-'
+    # fi
+    m = measure_on
+    if m not in bufs[onvoice] or bufs[onvoice][m] == '':
+        # Do measure before.
+        w = len(meas) - 1               # current measure number in array.
+        if w == 0:
+            print_error("no previous measure to tie note to.", line)
+            return ''
+        else:
+            m = meas[w-1]
+        # fi
+    # fi
+    bufs[onvoice][m] = bufs[onvoice][m] + '-'
+    return ''
+# End of do_tie
+
+#-----------------------------------------------------------------------------
+# Parse and process possible notes line.
+# All have ,'s as separators.
+# old way is: voice1,voice2,voice3,voice4   -- 3c4, 3e4, 3g4, 4c4
+# new way: v#:3c4,d,e,f,g,a,b,4c
+# Both have measure terminate them.
+
+#-- unit notego
+def process_notes(t_args, line):
+    global voices                       # number of voices
+    global cis                          # if cis active, non-zero.
+    global time                         # set default note length (time) dictionary
+    global measure_on                   # The measure we are on.
+    global sequence_note
+    global trill_note
+    global normal_note
+    global freqency_note
+    global gsw_operand
+
+    if not measure_on or measure_on == '':  # no measure yet
+        print_error("no measure processed yet - must have one before notes.", line)
+        return
+    # fi
+    # Get rid of all white spoce.
+    wline = ''.join(line.split())
+    wargs = arglist(wline, line)
+    if not wargs or len(wargs) < 1:
+        print_error("no arguments on note line", line)
+        return
+    # fi
+
+    # Check if 'v#' or 'v(#)'
+    vnumber = None
+    if wargs[0]:
+        if (wargs[0])[0] == 'v':
+            s1 = (wargs[0])[1:]
+            sc = s1.find(':')
+            if sc < 0:
+                print_error("A 'v' needs a number followed by a colon -- colon is missing", line)
+                return
+            if sc == 0:
+                print_error("A 'v' needs a number followed by a colon -- number is missing", line)
+                return
+            s1 = s1[0:sc]
+
+            f1, type_error = is_float(s1)
+            if type_error is not None:
+                return
+            # fi
+            if f1 is None:
+                print_error("voice number is not a number.", line)
+                return
+            # fi
+            f1 = round(f1)
+            if f1 < 1  or f1 > MAXVOICES:       # If out of range.
+                print_error("voice number must be between 1 and {} inclusive. Not ({})".format(MAXVOICES, f1), line)
+                return
+            # fi
+            do_set_voices(f1, line)
+            cis = f1
+            wargs[0] = (wargs[0])[sc+2:]
+            if wargs[0] == '' and len(wargs) > 1:
+                print_error("Cannot have a blank argument after v{}".format(cis), line)
+                return
+            # fi
+            vnumber = 0
+        # fi
+    # fi
+
+    if cis == 0:                        # if not doing only one voice continuously for a while...
+        if len(wargs) > voices:
+            print_error("too many arguments ({}), greater than voices (>{})".format(len(wargs), voices), line)
+            return
+        # fi
+        #-- print("Check if rests needed - line={}".format(line),file=sys.stderr)
+        #-- print("      wargs={}".format(wargs),file=sys.stderr)
+        #-- print("      tlth={}".format(tlth),file=sys.stderr)
+        #-- print("      mlth={}".format(mlth),file=sys.stderr)
+        measlth = 0
+        for i in range(0, len(wargs)):
+            #-- print("#1 wargs[{}]='{}'".format(i,wargs[i]),file=sys.stderr)
+            if wargs[i] != '':
+                measlth = max(measlth, mlth[i+1][measure_on])
+            # fi
+        # rof
+        #-- print("measlth={}".format(measlth), file=sys.stderr)
+        for i in range(0, len(wargs)):
+            #-- print("#2 wargs[{}]='{}'".format(i,wargs[i]),file=sys.stderr)
+            if wargs[i] != '':
+                l = measlth - mlth[i+1][measure_on]
+                if l > 0:
+                    #-- print("#3 l={} adding rest".format(l), file=sys.stderr)
+                    instak(i+1, 'z', l, '', line)
+                # fi
+            # fi
+        # rof
+
+    # fi
+#............................................................................
+    # Decode and stack the notes.
+    loopstart = 1 if cis == 0 else cis
+    for onvoice in range(loopstart, voices + 1):
+        while True:
+            if cis == 0 and len(wargs) < onvoice:
+                print_error("Not enough arguments on note line - want {}, have {}".format(onvoice,wargs), line)
+                return
+            # fi
+            if vnumber is None:
+                temp1 = wargs[onvoice - loopstart]          # loopstart fixes "cis" being used.
+            else:
+                if vnumber >= len(wargs):
+                    break
+                # fi
+                temp1 = wargs[vnumber] 
+            # fi
+            therest, thenote, typenote = getnote(temp1, onvoice, line) # get next note
+            if thenote is None:
+                print_error("no note? therest='{}' thenote='{}' typenote='{}'".format(therest,thenote,typenote), line)
+                break
+            # fi
+
+            if type(thenote) is int:
+                if thenote == 0:                        # return nothing, ignore.
+                    break
+                # fi
+                thenote = to_abc_note(thenote)                              # Convert number to abc text.
+            # fi
+            if typenote == trill_note:
+                therest, thenote, typenote = getnote(therest, onvoice, line)
+                if thenote is None or thenote == 0:
+                    print_error("trill is not legal, no first note", line)
+                    return
+                # fi
+
+                if typenote == gsw_operand:                                 # 2**16 gsw opnd
+                    quotes = thenote - (1 << 16)
+                else:
+                    quotes = thenote
+                # fi
+                if therest is None or therest == '' or therest[0] != ',':
+                    print_error("trill is not legal, no comma after first note", line)
+                    return
+                # fi
+                therest = therest[1:]                                       # comma removed
+                therest, thenote, typenote = getnote(therest, onvoice, line)  # get second note
+                if thenote == 0:
+                    print_error("trill is not legal, second note missing", line)
+                    return
+                # fi
+                if typenote == gsw_operand:                                 # 2**16 gsw opnd
+                    quotes1 = thenote - (1 << 16)
+                    print_error("trill is not legal, first note not correct", line)
+                    return
+                elif typenote == freqency_note or typenote == trill_note or typenote == sequence_note:
+                    print_error("trill is not legal, first note not correct", line)
+                    return
+                # fi
+                quotes1 = thenote
+
+                if therest is None or therest == '':
+                    print_error("trill is not legal, missing number of notes", line)
+                    return
+                # fi
+                if therest is None or therest == '' or therest[0] != ',':
+                    print_error("trill is not legal, no comma after second note", line)
+                # fi
+                therest = therest[1:]                                       # comma removed
+                np = temp1 = 0
+                f = therest.find(')')
+                if f < 0:
+                    print_error("trill is not legal, missing closing parenthesis", line)
+                    return
+                # fi
+                num = therest[0:f]
+                if len(therest) <= f:
+                    print_error("trill is not legal, missing length after parenthesis", line)
+                    return
+                # fi
+                therest = therest[f+1:]
+                np, type_error = is_float(num)
+                if np is None or np == 0 or type_error is not None:
+                    print_error("trill is not legal, number of notes to play", line)
+                    return
+                # fi
+
+                timeofnote, accidentals, number_dots = get_time(therest, line)
+                if accidentals is None or accidentals < 0 or number_dots is None:
+                    print_error("trill is not legal", line)
+                    return
+                # fi
+                if timeofnote == 0:
+                    timeofnote = time[onvoice]
+                # fi
+                if number_dots != 0:
+                    p = timeofnote / 2.0
+                    for i in range(1,number_dots+1):
+                        timeofnote = timeofnote + p
+                        p = p / 2.0
+                    # rof
+                # fi
+                time[onvoice] = timeofnote
+
+    #   t(3a,3g,7)4 =>  '(7:4:2 3a3g'
+    #   s2(4a,b,a,g,c) => '(4:2:5 4abagc'
+
+                # vwork = float(timeofnote) / float(np)
+
+                # t(quotes, quotes1, np)lengthl
+                lengthl, lengthf, ifokay = get_time_stak(timeofnote, line)
+                if not ifokay or len(lengthl) != 1:         # if time is error
+                    print_warning("trill/sequence time must be a printable note length, not '{}'".format(lengthl),line)
+                    t = 0
+                    for l in range(0,len(lengthl)):
+                        t = t + lengthf[l]
+                    # fi
+                    lengthf = [ t ]
+                    print_warning("trill/sequence time remade '{}'".format(lengthf),line)
+                # fi
+
+                l = str(Fraction(lengthf[0]).limit_denominator(256))
+                where = l.find('/')
+                lth = '1'
+                if where > 0:                               # / in fraction
+                    numerator = l[0:where]
+                    if numerator != '1':
+                        lth = numerator
+                        l = '1' + l[where:]
+                    # fi
+                # fi
+                if l not in legal_notes:
+                    print_warning("#1 Time fraction '{}' is not a printable note. ({})".format(default_note_length[m],l), line)
+                # fi
+                abc_note = "[L:{}]".format(l)
+                abc_note = abc_note + '(' + str(int(np)) + ':' + lth + ':' + str(int(np))
+                for i in range(0, int(np)):
+                    if (i % 2) == 0:
+                        abc_note = abc_note + quotes
+                    else:
+                        abc_note = abc_note + quotes1
+                    # fi
+                # rof
+                l_dl = default_note_text_fraction(measure_on)
+                abc_note = abc_note + "[L:{}]".format(l_dl)
+                put_on_bufs(onvoice, abc_note, lengthf[0])
+                break
+            elif typenote == sequence_note:
+                print_error("NOTDONEYET - doing sequence type note", line)
+                break
+            elif thenote == 0:                               # if nothing to do
+                break
+            # fi
+
+            timeofnote, accidentals, number_dots = get_time(therest, line)
+            if accidentals is None or number_dots is None:
+                print_error("Error getting time for note", line)
+                return
+            # fi
+            # accidentals = -4 marcato, -2 tied, -1 stac, 0 normal
+            #    bits are $union$'ed together for multiple modifiers (then negated).
+            # number_dots  are how many "d" (dotted) were found.
+            if timeofnote is None or timeofnote == 0:
+                if number_dots != 0:
+                    print_error("cannot have dotted syntax on a default note length.", line)
+                    return
+                # fi
+                timeofnote = time[onvoice]
+            # fi
+            if number_dots != 0:
+                p = timeofnote / 2.0
+                for i in range(1,number_dots+1):
+                    timeofnote = timeofnote + p
+                    p = p / 2.0
+                # rof
+            # fi
+            time[onvoice] = timeofnote
+
+            if typenote == gsw_operand:
+                print_error("NOTDONEYET - doing gsw_operand type of note", line)
+                return
+            # fi
+
+            # accidentals = -4 marcato, -2 tied, -1 stac, 0 normal
+            append_tie = ''
+            if accidentals < -6:                          # 1ts
+                #                                           # break before next note - done automatically.
+                thenote = '.' + thenote                     # . before the note for staccato
+                append_tie = do_tie(onvoice, vnumber, line)
+            elif accidentals == -6:                         # 1tm
+                #                                           # break before next note - done automatically.
+                append_tie = do_tie(onvoice, vnumber, line)
+            elif accidentals == -5:                         # marc and 1stac
+                #                                           # break before next note - done automatically.
+                thenote = '.' + thenote                     # . before the note for staccato
+            elif accidentals == -4:                         # 1marc
+                pass  #                                     # break before next note - done automatically.
+            elif accidentals == -3:                         # 1ts
+                thenote = '.' + thenote                     # . before the note for staccato
+                append_tie = do_tie(onvoice, vnumber, line)
+            elif accidentals == -2:                         # 1tied
+                append_tie = do_tie(onvoice, vnumber, line)
+            elif accidentals == -1:                         # 1stac
+                thenote = '.' + thenote                     # . before the note for staccato
+            # elif accidentals == None or accidentals == 0:
+            #    Nothing to do.
+            # fi
+            instak(onvoice, thenote, timeofnote, append_tie, line)
+            if vnumber is None:
+                break                                       # normal old way.
+            else:
+                vnumber = vnumber + 1
+            # fi
+        # elihw
+    # rof
+    return
+# End of process_notes
+
+#=============================================================================
+# Parse and process line.
+def process_line(t, line):
+    if not t or len(t) == 0:
+        return
+    elif len(t) == 1:
+        command = t[0]
+        t_args = None
+    else:
+        command = t[0]
+        t_args = t[1:]
+    # fi
+    # Try to process command.
+    if command is None:                 # Ignore nothing given.
+        return
+    # fi
+    if command in commands:
+        try:
+            r = commands[command]
+        except:
+            print_error("not found processing routine for command {}", command)
+            print("    ", sys.exc_info()[0], sys.exc_info, file=sys.stderr)
+        # fi
+        r(t_args, line)
+        return
+    # fi
+    process_notes(t,line)
+    return
+# End of process_line
+
+#-----------------------------------------------------------------------------
+# Main program follows.
+def main():
+    while True:
+        line = get_line()
+        if line:
+            # Split line on spaces, then process line.
+            while True:
+                t = line.split(' ', 1)
+                if t and t[0] and len(t) == 2 and t[1]:
+                    t[1] = t[1].strip()
+                # fi
+                if t and t[0] == '.':
+                    # If command == '.' toss '.'
+                    if len(t) == 2 and t[1]:
+                        line = t[1]
+                    else:
+                        t = None
+                        line = None
+                        break
+                    # fi
+                    continue
+                # fi
+                if line and line[0] == '=':
+                    line = process_putd(line)
+                    continue
+                break
+            # elihw
+
+            if t and t[0]:
+                # If command == '*' ignore.
+                if t[0] != '*' and line[0] != '*' and t[0] != '#' and line[0] != '#':
+                    process_line(t, line)
+                # fi
+            # fi
+        # fi
+    # elihw
+    return
+# End of main
+
+#-----------------------------------------------------------------------------
+if __name__ == '__main__':
+    calculate.cexp_parser()                                     # initialize parser
+    main()
+# fi
+#-----------------------------------------------------------------------------
+exit(errors_happened)
+#-----------------------------------------------------------------------------
+# End of file musicomp2abc
+#-----------------------------------------------------------------------------
+
+# Header:
+# * X:          Reference number (think which track on CD, etc.).       First
+# * T: Title of tune             (can have multiple)
+#   C: Composer of song
+#   M: meter    6/8              default common or "M: C"
+#   L: 1/4                       length of default note (quarter)
+#   K: key      C or D or ...                                           Last
+#
+#   Notes: follow Header
+#       C, D, E, F, |G,A,B,C| D E F G|A B c d|e f g a|b c' d' e'|f' g' a' b'|]
+#
+#       ~A3 B3|gfe fdB|AFA B2c|dfe dcB|
+#
+#   Uppercase denote bottom octave (C = middle C on treble stave).
+#   Comma after the letter means down an octave.
+#   Apostrophe after the letter means up an octave. Multiple ' go up, as ,'s go down.
+#   Lowercase letters are next octave above uppercase. four c's: "C, C c c' "
+#   |  Vertical line means end of measure/bar -- || gives two lines.
+#   ]  means thick bar.  [|  and |] thick/thin and thin/thick.
+#   |: start of repeat. :| is end of repeat. Stop one and start another is :||: or "::".
+#   Alternate repeats "[1", "[2". If by bar line, can omit the [. "|1" means "|[1". (no spaces)
+#   To have notes with "beam"(lines together above/below) eliminate the "space".
+#
+#   Number after note changes duration. Number times default. B2=B twice as long therefore 1/4 because 1/2.
+#   / means shorten, default is 2 or "/2".
+#   > after a note, multiplying by 3/2 and removing from 2nd note. I.e. c8>c8 -> c8.c16 (dot means 1/16 extra)
+#   < after a note, multiplying by 1/2 and adding rest on 2nd note. I.e. c8<c8 -> c16c8. means 1/16th extra
+#
+#   ~ is ornament -- roll or turn as in Irish music.
+#   Default note lengths for common types of tunes: jig 1/8, reel 1/8, Schottische 1/8,
+#       Waltz 1/4, Polka 1/8, Bourree 1/8
+#   Time signagures typical: jig 6/8, reel 4/4, waltz 3/4.
+#   L: can be used in the middle to change default note length.
+#   Rests are lowercase z. Length follows.
+#   ^C = C sharp. _B = B flat. ^^ = double sharp. The equals (=) naturalizes it.
+#   G major scale: GABcde^fg            for K:C
+#   G minor scale: GA_Bcd_efg           for K:C
+#   K: automatically adds sharps or flats.      example K:G or K:Gmaj ... and K:Gm or K:Gmin
+#   Also K:Bb and K:C#   (B flat and C sharp).
+#   Other Modal keys exist: Lydian, Ionian, Mixolydian, Dorian, Aeolian, Phrygian, Locrian,
+#       HP (bagpipe - no key signature), Hp (F#,C#,G natural) on printed.
+#   K: can go in the middle of a song.   K:A =C -- A major, C natural -- F#,G#.
+#   R: = rythm. ... R:reel, R:jig, R:schottische
+#   Q: tempo    Example: Q: 120  # of default note length.  Q:1/8 = 120.
+#   Can change in the middle of a line like (KRQ):
+#       GABcdefg | [M:6/8 K:Gm] gfe dcB | AGB FED |
+#   Optional:
+#   C: composer
+#   S: source of tune.
+#   O: geographical origin
+#   N: textual notes about the tune. (anything you want, multiple of them, etc.)
+#   Z: identity of transcriber. # Z:Marshall Midden 2021-01-04
+#   W: for song words           w:  also -- difficult syntax. :)
+#   B: for book
+#   A: geographical area
+#   D: Discography -- D:New Victory Band, One More Dance And Then
+#   F: File name (http://www.lesession.co.uk/woodenflute.abc)
+#   G: Group -- used for indexing tunes in software.   G: Flute
+#   H: history
+#   I: Information -- used by some software packages.
+#   P: Yuck.  Parts.
+#
+#   grace notes {GAGDG}G2 -- they can have no time values.
+#   - minus sign between two notes of equal pitch "ties". () slurs or played legato.
+#       |DEF-|FGA| and |DEF-FGA|
+#       (DEF|GAB)
+#   Triplets -- no spaces within:
+#       Duplet:     (2GA                2 notes in the time of 3
+#       Triplet:    (3GAB               3 notes in the time of 2
+#       Quadruplet: (4GABA              4 notes in the time of 3
+#       ...       : (5GABcd             5 notes in the time of n
+#       ...       : (6GABcdc            6 notes in the time of 2
+#       ...       : (7GABcdcB           7 notes in the time of n
+#       ...       : (8GABcdcBA          8 notes in the time of 3
+#       ...       : (9GABcdcBAG         9 notes in the time of n
+#       n is 3 in compound time signatures (3/4, 3/8, 9/8 etc), and 2 in simple time signatures (C, 4/4, 2/4 etc.)
+#       More complicated forms possible. (Yuck!)
+#   [GB][Ac] [B2d2] | [Bd][Ac] [G2B2]   - multiple notes on a stem (chord/unisons)
+#   Guitar chords:  "Dm7"               -- note accidental type/bass
+#       note:       A to G
+#       accidental: # or b
+#       type:       m, min, maj, sus, dim, +, 7, 9, 11,#5, etc.
+#       / bass:     Bass note
+#   Fiddle bowing marks:  u=up-bow, v=down-bow.     v_Au=Bv^c   NOTE: flat A, natural B, sharp c.
+#   Staccato, place dot before the note.            .G.A._B.c .d2.e.d.^c
+#       H Fermata, L Accent, or emphasis, M Lower mordent (sometimes called mordent),
+#       O Coda, P Upper mordent (sometimes called Pralltriller), S Segno, T Trill
+#   or can enclose within exclamation marks (!):
+#       !+!             Pizzicato for violins, rasp for brass
+#       !0! to !5!      Fingerings
+#       !D.C.!          Da capo
+#       !D.S.!          Da segno
+#       !accent!        Accent mark over the note
+#       !breath!        Breath mark
+#       !coda!          Coda mark
+#       !crescendo(!    Start of a crescendo mark
+#       !crescendo)!    End of a crescendo mark - this is placed AFTER the last note affected
+#       !diminuendo(!   Start of a diminuendo mark
+#       !diminuendo)!   End of a diminuendo mark - this is placed AFTER the last note affected
+#       !downbow!       Down bow mark
+#       !emphasis!      The same as !accent!
+#       !fermata!       Fermata, or hold
+#       !f!, !ff!, !fff! etc.   Dynamic markings - the more f -s, the louder
+#       !fine!          Fine
+#       !invertedfermata!   Inverted fermata / hold marking
+#       !longphrase!    Vertical line on the upper part of the staff, extending 3/4 of the way down
+#       !lowermordent!  Lower mordent, a.k.a. mordent
+#       !mediumphrase!  Vertical line on the upper part of the staff, extending down to the centre line
+#       !mf!            Dynamic marking for mezzoforte ('half-loud')
+#       !mordent!       Lower mordent, a.k.a. mordent
+#       !open!          Open string, or, harmonic
+#       !p!, !pp!, !ppp!    Dynamic markings - the more p -s, the quieter
+#       !pralltriller!  Upper mordent
+#       !repeatbar!     Repeat whole of previous bar
+#       !repeatbar2!    Repeat whole of previous two bars
+#       !roll!          Roll mark
+#       !segno!         Segno
+#       !shortphrase!   Vertical line on the upper part of the staff
+#       !snap!          Snap-pizzicato mark
+#       !tenuto!        tenuto (hold note for full duration)
+#       !thumb!         Cello thumb symbol
+#       !trill!         Trill
+#       !turn!          Turn
+#       !upbow!         Up bow mark
+#       !uppermordent!  Upper mordent, a.k.a. pralltriller
+#       !wedge!         Wedge mark
+#   As with the single letter symbols, the mark is placed before the note (or first note of a group) affected.
+#       !trill!G4
+#   V: voice number     V:1     V:20
+#       M:6/8
+#       L:1/8
+#       K:G
+#       V:1
+#       B3 A3 | G6 | B3 A3 | G6 ||
+#       V:2
+#       BdB AcA | GAG D3 | BdB AcA | GAG D6 ||
+#       V:3
+#       D3 D3 | D6 | D3 D3 | D6 ||
+#   or:
+#       M:6/8
+#       L:1/8
+#       K:G
+#       [V:1] B3 A3 | G6 | B3 A3 | G6 ||
+#       [V:2] BdB AcA | GAG D3 | BdB AcA | GAG D3 ||
+#       [V:3] D3 D3 | D6 | D3 D3 | D6 ||
+#   Notes played at same time, but not a chord (two voices): AB BAG & D6 |
+#       The & has the two same length.
+#       x draws spaces (not rests).        GAB BAG & x3 G2x
+#       Normally use [] for chords.
+#   ==============================================================================
+#   General MIDI 1
+#        24 channels/voices     Alternatively 16 melodic and 8 percussive - respond to note velocity.
+#       channel 10 is percussion.
+#       multiple notes on each channel (polyphony)
+#       128 instruments sounds or "program" number  - program change message.
+#        47 percussion sounds
+#       Channel messages/controller-number: 1,7,10,11,64,100,101,121,123
+#   General MIDI 2
+#        32 channels
+#       2 percussion channels 10/11
+#     16384 variation banks - each has 128 melodic sounds. Up to individual how to use.
+#         9 Drum kits
+#   ------------------------------------------------------------------------------
+#   Put in a V: section.
+#   %%MIDI program 1 % Acoustic Grand Piano
+#   Piano
+#       1 Acoustic Grand Piano
+#       2 Bright Acoustic Piano
+#       3 Electric Grand Piano
+#       4 Honky-tonk Piano
+#       5 Electric Piano 1
+#       6 Electric Piano 2
+#       7 Harpsichord
+#       8 Clavi
+#   Chromatic Percussion
+#       9 Celesta
+#       10 Glockenspiel
+#       11 Music Box
+#       12 Vibraphone
+#       13 Marimba
+#       14 Xylophone
+#       15 Tubular Bells
+#       16 Dulcimer
+#   Organ
+#       17 Drawbar Organ
+#       18 Percussive Organ
+#       19 Rock Organ
+#       20 Church Organ
+#       21 Reed Organ
+#       22 Accordion
+#       23 Harmonica
+#       24 Tango Accordion
+#   Guitar
+#       25 Acoustic Guitar (nylon)
+#       26 Acoustic Guitar (steel)
+#       27 Electric Guitar (jazz)
+#       28 Electric Guitar (clean)
+#       29 Electric Guitar (muted)
+#       30 Overdriven Guitar
+#       31 Distortion Guitar
+#       32 Guitar Harmonics
+#   Bass
+#       33 Acoustic Bass
+#       34 Electric Bass (finger)
+#       35 Electric Bass (pick)
+#       36 Fretless Bass
+#       37 Slap Bass 1
+#       38 Slap Bass 2
+#       39 Synth Bass 1
+#       40 Synth Bass 2
+#   Strings
+#       41 Violin
+#       42 Viola
+#       43 Cello
+#       44 Contrabass
+#       45 Tremolo Strings
+#       46 Pizzicato Strings
+#       47 Orchestral Harp
+#       48 Timpani
+#   Ensemble
+#       49 String Ensemble 1
+#       50 String Ensemble 2
+#       51 Synth Strings 1
+#       52 Synth Strings 2
+#       53 Choir Aahs
+#       54 Voice Oohs
+#       55 Synth Voice
+#       56 Orchestra Hit
+#   Brass
+#       57 Trumpet
+#       58 Trombone
+#       59 Tuba
+#       60 Muted Trumpet
+#       61 French Horn
+#       62 Brass Section
+#       63 Synth Brass 1
+#       64 Synth Brass 2
+#   Reed
+#       65 Soprano Sax
+#       66 Alto Sax
+#       67 Tenor Sax
+#       68 Baritone Sax
+#       69 Oboe
+#       70 English Horn
+#       71 Bassoon
+#       72 Clarinet
+#   Pipe
+#       73 Piccolo
+#       74 Flute
+#       75 Recorder
+#       76 Pan Flute
+#       77 Blown bottle
+#       78 Shakuhachi
+#       79 Whistle
+#       80 Ocarina
+#   Synth Lead
+#       81 Lead 1 (square)
+#       82 Lead 2 (sawtooth)
+#       83 Lead 3 (calliope)
+#       84 Lead 4 (chiff)
+#       85 Lead 5 (charang)
+#       86 Lead 6 (voice)
+#       87 Lead 7 (fifths)
+#       88 Lead 8 (bass + lead)
+#   Synth Pad
+#       89 Pad 1 (new age)
+#       90 Pad 2 (warm)
+#       91 Pad 3 (polysynth)
+#       92 Pad 4 (choir)
+#       93 Pad 5 (bowed)
+#       94 Pad 6 (metallic)
+#       95 Pad 7 (halo)
+#       96 Pad 8 (sweep)
+#   Synth Effects
+#       97 FX 1 (rain)
+#       98 FX 2 (soundtrack)
+#       99 FX 3 (crystal)
+#       100 FX 4 (atmosphere)
+#       101 FX 5 (brightness)
+#       102 FX 6 (goblins)
+#       103 FX 7 (echoes)
+#       104 FX 8 (sci-fi)
+#   Ethnic
+#       105 Sitar
+#       106 Banjo
+#       107 Shamisen
+#       108 Koto
+#       109 Kalimba
+#       110 Bag pipe
+#       111 Fiddle
+#       112 Shanai
+#   Percussive
+#       113 Tinkle Bell
+#       114 Agogo
+#       115 Steel Drums
+#       116 Woodblock
+#       117 Taiko Drum
+#       118 Melodic Tom
+#       119 Synth Drum
+#       120 Reverse Cymbal
+#   Sound effects
+#       121 Guitar Fret Noise
+#       122 Breath Noise
+#       123 Seashore
+#       124 Bird Tweet
+#       125 Telephone Ring
+#       126 Helicopter
+#       127 Applause
+#       128 Gunshot
+#-----------------------------------------------------------------------------
+# timidity	000_Acoustic_Grand_Piano.pat
+# timidity	001_Acoustic_Brite_Piano.pat
+# timidity	002_Electric_Grand_Piano.pat
+# timidity	004_Electric_Piano_1_Rhodes.pat
+# timidity	005_Electric_Piano_2_Chorused_Yamaha_DX.pat
+# timidity	006_Harpsichord.pat
+# timidity	007_Clavinet.pat
+# timidity	008_Celesta.pat
+# timidity	009_Glockenspiel.pat
+# timidity	013_Xylophone.pat
+# timidity	014_Tubular_Bells.pat
+# timidity	015_Dulcimer.pat
+# timidity	016_Hammond_Organ.pat
+# timidity	019_Church_Organ.pat
+# timidity	021_Accordion.pat
+# timidity	023_Tango_Accordion.pat
+# timidity	024_Nylon_Guitar.pat
+# timidity	025_Steel_Guitar.pat
+# timidity	026_Jazz_Guitar.pat
+# timidity	027_Clean_Electric_Guitar.pat
+# timidity	028_Muted_Electric_Guitar.pat
+# timidity	029_Overdriven_Guitar.pat
+# timidity	030_Distortion_Guitar.pat
+# timidity	032_Acoustic_Bass.pat
+# timidity	033_Finger_Bass.pat
+# timidity	034_Pick_Bass.pat
+# timidity	035_Fretless_Bass.pat
+# timidity	036_Slap_Bass_1.pat
+# timidity	037_Slap_Bass_2.pat
+# timidity	038_Synth_Bass_1.pat
+# timidity	040_Violin.pat
+# timidity	042_Cello.pat
+# timidity	044_Tremolo_Strings.pat
+# timidity	045_Pizzicato_Strings.pat
+# timidity	046_Harp.pat
+# timidity	047_Timpani.pat
+# timidity	048_String_Ensemble_1_Marcato.pat
+# timidity	053_Voice_Oohs.pat
+# timidity	056_Trumpet.pat
+# timidity	057_Trombone.pat
+# timidity	058_Tuba.pat
+# timidity	059_Muted_Trumpet.pat
+# timidity	060_French_Horn.pat
+# timidity	061_Brass_Section.pat
+# timidity	064_Soprano_Sax.pat
+# timidity	065_Alto_Sax.pat
+# timidity	066_Tenor_Sax.pat
+# timidity	067_Baritone_Sax.pat
+# timidity	068_Oboe.pat
+# timidity	069_English_Horn.pat
+# timidity	070_Bassoon.pat
+# timidity	071_Clarinet.pat
+# timidity	072_Piccolo.pat
+# timidity	073_Flute.pat
+# timidity	074_Recorder.pat
+# timidity	075_Pan_Flute.pat
+# timidity	076_Bottle_Blow.pat
+# timidity	079_Ocarina.pat
+# timidity	080_Square_Wave.pat
+# timidity	084_Charang.pat
+# timidity	088_New_Age.pat
+# timidity	094_Halo_Pad.pat
+# timidity	095_Sweep_Pad.pat
+# timidity	098_Crystal.pat
+# timidity	101_Goblins--Unicorn.pat
+# timidity	102_Echo_Voice.pat
+# timidity	104_Sitar.pat
+# timidity	114_Steel_Drums.pat
+# timidity	115_Wood_Block.pat
+# timidity	120_Guitar_Fret_Noise.pat
+# timidity	122_Seashore.pat
+# timidity	125_Helicopter.pat
+#-----------------------------------------------------------------------------
