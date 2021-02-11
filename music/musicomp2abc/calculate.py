@@ -141,12 +141,10 @@ def tokenize(code):
     while code is not None and code != '':
         therest, token, kind = next_token(code)
         if (((last_kind == 'NUMBER' or last_kind == 'ID') and
-             (kind == 'NUMBER' or kind == 'ID')) or 
-
+             (kind == 'NUMBER' or kind == 'ID')) or
             ((last_kind == 'SYNTAX' and kind == 'SYNTAX') and
-             (last_token in [')',']','}'] and token in ['(','[','{'])) or
-
-            (last_kind == 'SYNTAX' and last_token in [')',']','}']  and
+             (last_token in [')', ']', '}'] and token in ['(', '[', '{'])) or
+            (last_kind == 'SYNTAX' and last_token in [')',']','}'] and
              (kind == 'ID' or kind == 'NUMBER')) ):
             # Implied multiplication between numbers and id's.
             yield ['OPER', '*']
@@ -296,7 +294,7 @@ def unary_eval(args):
         return [ "ERROR - unary_eval args={}".format(args), None ]
     # fi
     if type(args[0]) == SymbolDesc and type(args[1]) != SymbolDesc:
-        op = args[0].symbol 
+        op = args[0].symbol
         arg1 = get_value(args[1])
         if arg1 is None:
             return [ "ERROR - Argument2 is None arg1='{}'".format(arg1), None ]
@@ -857,14 +855,14 @@ def f_print(arg):
 #-- def f_pal(arg):
 #--     return [ 'NUMBER', 12345.67890 ]
 #-- # End of f_pal
-#-- 
+#--
 #-----------------------------------------------------------------------------
 global functions
 functions = {
 #...............................................................................
     'm': f_m,                           # Array of m1, m2, m3, ...
 #...............................................................................
-    'freq': f_freq,         'nearest': f_nearest, 
+    'freq': f_freq,         'nearest': f_nearest,
 #...............................................................................
     'abs': f_abs,           'arctan': f_arctan,             'cos': f_cos,
     'exp': f_exp,           'frac': f_frac,                 'int': f_int,
@@ -973,7 +971,7 @@ def get_line():
 # Parse and process line.
 def process_line(t, line):
     wline = ''.join(line.split())
-    if wline == 'quit':
+    if wline == 'quit' or wline == 'exit':
         sys.exit(0)
     # fi
 
