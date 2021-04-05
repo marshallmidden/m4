@@ -25,3 +25,7 @@ all: ${SONGS_ps} ${SONGS_mid} ${SONGS_abc}
 clean:
 	rm -f *.mid *.ps *.abc *.stderr
 #-----------------------------------------------------------------------------
+.PHONY: tags ctags
+tags ctags:
+	ctags --language-force=python ${MUSICOMP2ABC}
+#-----------------------------------------------------------------------------
