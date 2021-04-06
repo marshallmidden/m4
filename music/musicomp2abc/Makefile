@@ -23,7 +23,7 @@ all: ${SONGS_ps} ${SONGS_mid} ${SONGS_abc}
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -f *.mid *.ps *.abc *.stderr
+	rm -f *.mid *.ps *.abc *.stderr tags ctags
 #-----------------------------------------------------------------------------
 .PHONY: tags ctags
 tags ctags:
