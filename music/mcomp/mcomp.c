@@ -25,7 +25,7 @@ static char     original_termios_gotten = 0;
 /* The 4 is for quarternotes in MIDI (for tempo). */
 #define XUNIT           (int)(division * 4.0 / SHORTNOTEPRINT)
 /* Number of midi ticks per bar/measure. */
-#define TICKSPERBAR     (4.0 * division * meter_n / meter_d)
+#define TICKSPERBAR     (int)(4.0 * division * meter_n / meter_d)
 /* ------------------------------------------------------------------------ */
 #define MINSTUFF    654321
 /* ------------------------------------------------------------------------ */
@@ -60,7 +60,7 @@ static void restore_original_termios(void)
     }
     original_termios.c_lflag |= ICANON;
     original_termios.c_lflag |= ECHO;
-    original_termios_gotten = 0;	/* Make sure no fatal loop. */
+    original_termios_gotten = 0;        /* Make sure no fatal loop. */
     if (tcsetattr(0, TCSADRAIN, &original_termios) < 0)
     {
         exit_perror("tcsetattr ICANON");
@@ -89,7 +89,7 @@ static void get_original_termios(void)
         if (tcgetattr(0, &original_termios) < 0)
         {
             perror("tcgetattr()");
-	    return;
+            return;
         }
         original_termios_gotten = 1;
 
@@ -134,7 +134,7 @@ static int fractionsthird[MAXFRAC3];            /* Ticks for 2^x notes divide by
 struct time_signature
 {
     struct time_signature *tsnext;              /* Next in link. */
-    long            time;                       /* time that signature changes. */
+    long            timesig_time;               /* time that signature changes. */
     int             numer;
     int             denom;
 };
@@ -147,7 +147,7 @@ static int          keysig = 0;                 /* -6 to 6 sharps */
 struct tempo_signature
 {
     struct tempo_signature *temponext;  /* Next in link. */
-    long            time;               /* time that signature changes. */
+    long            tempo_time;         /* time that signature changes. */
     long            tempo;
 };
 static struct tempo_signature *tempo_signature_start = NULL;
@@ -158,7 +158,7 @@ static long     tempo = 500000;         /* Default tempo 120 beats/minute for a 
 struct bars_location
 {
     struct bars_location *barsnext;     /* Next in link. */
-    long            time;               /* time that signature changes. */
+    long            bar_time;           /* time that signature changes. */
     int             bar_number;
 };
 static struct bars_location *bars_location_start = NULL;
@@ -370,7 +370,7 @@ static void metaevent(long currtime, char *m, int type)
                 long p_tempo = to32bit(0, m[0], m[1], m[2]);
                 ts = checkmalloc(sizeof(*ts));
                 ts->temponext = NULL;
-                ts->time = currtime;
+                ts->tempo_time = currtime;
                 ts->tempo = p_tempo;
                 if (tempo_signature_start == NULL)
                 {
@@ -395,7 +395,7 @@ static void metaevent(long currtime, char *m, int type)
                 }
                 for (ts = time_signature_start; ts != NULL; ts = ts->tsnext)
                 {
-                    if (ts->time == currtime)
+                    if (ts->timesig_time == currtime)
                     {
                         /* Replace first with latest one seen. */
                         if (ts->numer != numer || ts->denom != denom)   /* No difference. */
@@ -407,17 +407,17 @@ static void metaevent(long currtime, char *m, int type)
                             }
                             else
                             {
-                                fprintf(stderr, "%ld meter changing multiple times in same place: from(%d/%d) to (%d/%d)\n", ts->time, ts->numer, ts->denom, numer, denom);
+                                fprintf(stderr, "%ld meter changing multiple times in same place: from(%d/%d) to (%d/%d)\n", ts->timesig_time, ts->numer, ts->denom, numer, denom);
                             }
                         }
                         return;
                     }
                     /* if after this and before next, insert into place. */
-                    if (ts->tsnext != NULL && currtime > ts->time && currtime < ts->tsnext->time)
+                    if (ts->tsnext != NULL && currtime > ts->timesig_time && currtime < ts->tsnext->timesig_time)
                     {
                         struct time_signature *nts = checkmalloc(sizeof(*ts));
                         nts->tsnext = ts->tsnext;
-                        nts->time = currtime;
+                        nts->timesig_time = currtime;
                         nts->numer = numer;
                         nts->denom = denom;
                         ts->tsnext = nts;
@@ -427,7 +427,7 @@ static void metaevent(long currtime, char *m, int type)
                 /* Put at end of list. */
                 ts = checkmalloc(sizeof(*ts));
                 ts->tsnext = NULL;
-                ts->time = currtime;
+                ts->timesig_time = currtime;
                 ts->numer = numer;
                 ts->denom = denom;
                 if (time_signature_start == NULL)
@@ -644,7 +644,7 @@ static void readtracks(void)
                     t = 0;
                 }
                 chanmessage(trackno, currtime, &playing, status, c1, t);
-                continue;;
+                continue;
             }
 
             switch (c)
@@ -1049,15 +1049,15 @@ static void fix_note_start_stop_time(void)
     for (struct time_signature *ts = time_signature_start; ts != NULL; ts= ts->tsnext)
     {
         /* Fix time, round down. */
-        long j = (ts->time + k) / f;
-        ts->time = j * f;
+        long j = (ts->timesig_time + k) / f;
+        ts->timesig_time = j * f;
     }
     /* Fix tempo signatures. */
     for (struct tempo_signature *tp = tempo_signature_start; tp != NULL; tp= tp->temponext)
     {
         /* Fix time, round down. */
-        long j = (tp->time + k) / f;
-        tp->time = j * f;
+        long j = (tp->tempo_time + k) / f;
+        tp->tempo_time = j * f;
     }
 }   /* End of fix_note_start_stop_time */
 
@@ -1596,7 +1596,7 @@ static void printtrack(int p_trackno)
     meter_n = 4;                                    /* meter numerator */
     meter_d = 4;                                    /* meter denominator */
     /* Get the first time signature (last in list for this time). */
-    while (ts != NULL && ts->time <= now)
+    while (ts != NULL && ts->timesig_time <= now)
     {
         meter_n = ts->numer;
         meter_d = ts->denom;
@@ -1609,7 +1609,7 @@ static void printtrack(int p_trackno)
     {
         if (tickspernotes == 0)
         {
-            if (bars != NULL && bars->time <= now)
+            if (bars != NULL && bars->bar_time <= now)
             {
                 if (bars->bar_number != (barcount+1))
                 {
@@ -1621,12 +1621,13 @@ static void printtrack(int p_trackno)
             }
             else
             {
+                fprintf(stderr, "bars->bar_time(%ld) <= now(%ld)\n", bars->bar_time, now);
                 fprintf(stderr, "Beyond the last measure, but no bars?\n");
                 printtr(p_trackno, tickspernotes, barcount, now, i, "bars not correct", 0);
                 mc_exit(1);
             }
             /* Get the first time signature (last in list for this time). */
-            if (ts != NULL && ts->time <= now)
+            while (ts != NULL && ts->timesig_time <= now)
             {
                 meter_n = ts->numer;
                 meter_d = ts->denom;
@@ -1752,7 +1753,7 @@ static void put_in_rests_before(int i, struct voice_notes *running, long from)
         {
             break;
         }
-        if (from >= bars->barsnext->time)
+        if (from >= bars->barsnext->bar_time)
         {
             continue;
         }
@@ -1764,13 +1765,13 @@ static void put_in_rests_before(int i, struct voice_notes *running, long from)
         long ntlth;
         long n;
         long st;
-        if (till <= bars->time)     
+        if (till <= bars->bar_time)     
         {
             break;                              /* If done. */
         }
         if (bars->barsnext != NULL)
         {
-            ntlth = bars->barsnext->time;       /* If in middle of bars. */
+            ntlth = bars->barsnext->bar_time;   /* If in middle of bars. */
         }
         else
         {
@@ -1780,18 +1781,18 @@ static void put_in_rests_before(int i, struct voice_notes *running, long from)
         {
             ntlth = till;
         }
-        if (ntlth == bars->time)                /* Should have been handled with break above. */
+        if (ntlth == bars->bar_time)            /* Should have been handled with break above. */
         {
             return;
         }
-        /* ntlth = end of rest, bars->time = start of rest. */
-        if (from > bars->time)
+        /* ntlth = end of rest, bars->bar_time = start of rest. */
+        if (from > bars->bar_time)
         {
             st = from;                          /* Long note goes from from through bars. */
         }
         else
         {
-            st = bars->time;
+            st = bars->bar_time;
         }
         ntlth = ntlth - st;
         while (ntlth > 0)
@@ -1846,7 +1847,7 @@ static void put_in_rests_after(struct voice_notes *running)
         {
             break;
         }
-        if (from > bars->barsnext->time)
+        if (from > bars->barsnext->bar_time)
         {
             continue;
         }
@@ -1858,27 +1859,27 @@ static void put_in_rests_after(struct voice_notes *running)
         long n;
         long st;
 
-        if (bars->barsnext != NULL && from > bars->barsnext->time)
+        if (bars->barsnext != NULL && from > bars->barsnext->bar_time)
         {
             continue;
         }
         if (bars->barsnext != NULL)
         {
-            ntlth = bars->barsnext->time;           /* max time of note to fit in this bar. */
+            ntlth = bars->barsnext->bar_time;       /* max time of note to fit in this bar. */
         }
         else
         {
             /* use maxtracktime for end of song. */
             ntlth = maxtracktime;                   /* note goes to end of max of tracks. */
         }
-        /* ntlth = end of rest, bars->time = start of rest. */
-        if (from > bars->time)
+        /* ntlth = end of rest, bars->bar_time = start of rest. */
+        if (from > bars->bar_time)
         {
             st = from;                              /* Long note goes from from through bars. */
         }
         else
         {
-            st = bars->time;
+            st = bars->bar_time;
         }
         /* ntlth = end of rest, st = start of rest. */
         ntlth = ntlth - st;
@@ -2003,10 +2004,10 @@ static void print_v_mc(void)
         }
 
         /* First any bars needed. */
-        while (b != NULL && b->time <= f + extra)
+        while (b != NULL && b->bar_time <= f + extra)
         {
-            printf("measure %d      $$ time %ld  f=%ld   delta=%ld\n", b->bar_number, b->time, f, b->time - last_bar_time);
-            last_bar_time = b->time;
+            printf("measure %d      $$ time %ld  f=%ld   delta=%ld\n", b->bar_number, b->bar_time, f, b->bar_time - last_bar_time);
+            last_bar_time = b->bar_time;
             if (b->bar_number == 1)
             {
                 /* Print out center voice number. */
@@ -2020,18 +2021,18 @@ static void print_v_mc(void)
             b = b->barsnext;
         }
         /* Second any time signatures needed. */
-        while (ts != NULL && ts->time <= f + extra)
+        while (ts != NULL && ts->timesig_time <= f + extra)
         {
             if (meter_n != ts->numer || meter_d != ts->denom)   /* Only print out if it changes. */
             {
                 printf("meter   %d/%d\n", ts->numer, ts->denom);
-                meter_n = ts->numer;;
-                meter_d = ts->denom;;
-                ts = ts->tsnext;
+                meter_n = ts->numer;
+                meter_d = ts->denom;
             }
+            ts = ts->tsnext;
         }
         /* Third any tempo's needed. */
-        while (tpo != NULL && tpo->time <= f + extra)
+        while (tpo != NULL && tpo->tempo_time <= f + extra)
         {
             if (tempo != tpo->tempo)                            /* Only print out if it changes. */
             {
@@ -2194,7 +2195,7 @@ static void print_h_mc(void)
         }
 
         /* First any bars needed. */
-        while (b != NULL && b->time <= f + extra)
+        while (b != NULL && b->bar_time <= f + extra)
         {
             for (int j = 1; j < MC_MAXVOICE; j++)
             {
@@ -2204,12 +2205,12 @@ static void print_h_mc(void)
                     v[j][0] = '\0';
                 }
             }
-            printf("measure %d      $$ time %ld  f=%ld   delta=%ld\n", b->bar_number, b->time, f, b->time - last_bar_time);
-            last_bar_time = b->time;
+            printf("measure %d      $$ bar_time %ld  f=%ld   delta=%ld\n", b->bar_number, b->bar_time, f, b->bar_time - last_bar_time);
+            last_bar_time = b->bar_time;
             b = b->barsnext;
         }
         /* Second any time signatures needed. */
-        while (ts != NULL && ts->time <= f + extra)
+        while (ts != NULL && ts->timesig_time <= f + extra)
         {
             for (int j = 1; j < MC_MAXVOICE; j++)
             {
@@ -2222,13 +2223,13 @@ static void print_h_mc(void)
             if (meter_n != ts->numer || meter_d != ts->denom)   /* Only print out if it changes. */
             {
                 printf("meter   %d/%d\n", ts->numer, ts->denom);
-                meter_n = ts->numer;;
-                meter_d = ts->denom;;
-                ts = ts->tsnext;
+                meter_n = ts->numer;
+                meter_d = ts->denom;
             }
+            ts = ts->tsnext;
         }
         /* Third any tempo's needed. */
-        while (tpo != NULL && tpo->time <= f + extra)
+        while (tpo != NULL && tpo->tempo_time <= f + extra)
         {
             for (int j = 1; j < MC_MAXVOICE; j++)
             {
@@ -2348,14 +2349,14 @@ static void check_time_ordering(void)
     first = 0;
     for (struct tempo_signature *t = tempo_signature_start; t != NULL; t = t->temponext)
     {
-      if (first > t->time)
+      if (first > t->tempo_time)
       {
-        fprintf(stderr, "tempo time out of positional order %ld > %ld\n", first, t->time);
+        fprintf(stderr, "tempo time out of positional order %ld > %ld\n", first, t->tempo_time);
         flag = TRUE;
       }
       else
       {
-        first = t->time;
+        first = t->tempo_time;
       }
     }
 
@@ -2363,14 +2364,14 @@ static void check_time_ordering(void)
     first = 0;
     for (struct time_signature *t = time_signature_start; t != NULL; t = t->tsnext)
     {
-      if (first > t->time)
+      if (first > t->timesig_time)
       {
-        fprintf(stderr, "time signature out of positional order %ld > %ld\n", first, t->time);
+        fprintf(stderr, "time signature out of positional order %ld > %ld\n", first, t->timesig_time);
         flag = TRUE;
       }
       else
       {
-        first = t->time;
+        first = t->timesig_time;
       }
     }
 
@@ -2428,8 +2429,9 @@ static void create_bars(void)
         /* Have the measure for this area. */
         struct bars_location *newbar = checkmalloc(sizeof(*newbar));
         newbar->barsnext = NULL;
-        newbar->time = now;
+        newbar->bar_time = now;
         newbar->bar_number = bar_number;
+fprintf(stderr, "create_bars now=%ld bar_numer=%ld ", now, bar_number);
         if (bars_location_start == NULL)
         {
             bars_location_start = newbar;
@@ -2443,17 +2445,17 @@ static void create_bars(void)
 
         /* Do tempo before time signature, so that they stick together. :) */
         /* Check for tempo signature at this point -- slightly before or slightly after. */
-        while (tempo_s != NULL && bar_time_within_approx(now, tempo_s->time, TICKSPERBAR, EXTRA))
+        while (tempo_s != NULL && bar_time_within_approx(now, tempo_s->tempo_time, TICKSPERBAR, EXTRA))
         {
-            tempo_s->time = now;            /* Normalize into measure. */
+            tempo_s->tempo_time = now;      /* Normalize into measure. */
             /* Nothing to do with contents of tempo. */
             tempo_s = tempo_s->temponext;   /* Next time_signature. */
         }
 
         /* Check for time signature at this point -- slightly before or slightly after. */
-        while (time_s != NULL && bar_time_within_approx(now, time_s->time, TICKSPERBAR, EXTRA))
+        while (time_s != NULL && bar_time_within_approx(now, time_s->timesig_time, TICKSPERBAR, EXTRA))
         {
-            time_s->time = now;             /* Normalize into measure. */
+            time_s->timesig_time = now;     /* Normalize into measure. */
             meter_n = time_s->numer;        /* Adjust TICKSPERBAR variables. */
             meter_d = time_s->denom;
             time_s = time_s->tsnext;        /* Next time_signature. */
@@ -2461,8 +2463,9 @@ static void create_bars(void)
 
         /* Use possible time signature above to get to next bar. */
         now = now + TICKSPERBAR;
+fprintf(stderr, "TICKSPERBAR=%d\n", TICKSPERBAR);
         if (now > maxtracktime)
-    {
+        {
             break;
         }
     }
@@ -2621,7 +2624,7 @@ fprintf(stderr, "---------------------------------------------------------------
    
     if (vertical)
     {
-        print_v_mc();               /* vertical notes -- original musicomp format. */
+        print_v_mc();               /* vertical notes. */
     }
     else
     {
