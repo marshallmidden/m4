@@ -342,6 +342,8 @@ global bufs                         # bufs[voice][measure] = text line.
 bufs = { 1 : {} }
 global bufs_length                  # bufs_length[voice][measure][#] ... number= 0..#commas-1 above.
 bufs_length = { 1 : {} }
+global bufs_accidental              # bufs_length[voice][measure][#] ... number= 0..#commas-1 above.
+bufs_accidentals = { 1: {} }
 
 global lstac,lgrace,lpause
 lstac = lgrace = lpause = 4         # starting staccato, grace note, lpause as 4/60th of a second
@@ -462,6 +464,8 @@ def new_voice_initialize(voice, m):
     global mlth                         # measure length dictionary
     global tlth                         # #or 60ths/voice
     global bufs
+    global bufs_length
+    global bufs_accidentals
     global acc
     global acc_v_init                   # Last accidental on a note in measure.
     global acc_v_init_v_or_h            # Last accidental on a note in measure.
@@ -480,6 +484,7 @@ def new_voice_initialize(voice, m):
     if voice not in bufs:
         bufs[voice] = {}
         bufs_length[voice] = {}
+        bufs_accidentals[voice] = {}
     # fi
     if m not in vl[voice]:
         vl[voice][m] = 7                # start volume out at maximum
@@ -524,6 +529,8 @@ def rests_in_empty_measure_voices(m, voice):
     global meas
     global mlth
     global bufs
+    global bufs_length
+    global bufs_accidentals
     global args
 
     if m in bufs[voice]:                    # Already present, then of right length.
@@ -543,6 +550,7 @@ def rests_in_empty_measure_voices(m, voice):
         if args.horizontal or args.vertical:
             bufs[voice][m] = []
             bufs_length[voice][m] = []
+            bufs_accidentals[voice][m] = []
         else:
             bufs[voice][m] = ''
         # fi
@@ -566,6 +574,7 @@ def rests_in_empty_measure_voices(m, voice):
     if args.horizontal or args.vertical:
         bufs[voice][m].append('r')
         bufs_length[voice][m].append(l)
+        bufs_accidentals[voice][m].append('')
     else:
         bufs[voice][m] = bufs[voice][m] + txt   # Append the sleeps.
     # fi
@@ -769,10 +778,14 @@ def print_out_notes_v_of_h(m, print_line):
     global vl
     global bufs
     global bufs_length
+    global bufs_accidentals
 
     if args.vertical:
         txt = ''
         for voice in range(1,len(vl)+1):
+            if len(bufs[voice][m]) == 0:
+                continue
+            # fi
             txt = txt + "v{}: ".format(voice)
             for i in range(0,len(bufs[voice][m])):
                 if i != 0:
@@ -787,7 +800,7 @@ def print_out_notes_v_of_h(m, print_line):
                         lth = '(' + str(l) + ')'
                     # fi
                 # fi
-                txt = txt + bufs[voice][m][i] + lth
+                txt = txt + bufs[voice][m][i] + lth + bufs_accidentals[voice][m][i]
             # rof
             txt = txt + '\n'
         # rof
@@ -825,12 +838,13 @@ def print_out_notes_v_of_h(m, print_line):
                     j = working[voice]
                     l =  bufs_length[voice][m][j]
                     if l in legal_mc_notes:
-                        lth = "{:>3s}".format(legal_mc_notes[l])
+                        lth = "{:>3s}".format(legal_mc_notes[l] + bufs_accidentals[voice][m][j])
                     else:
                         lth = str(Fraction(l).limit_denominator(256))
                         if '/' in lth:
                             lth = '(' + str(l) + ')'
                         # fi
+                        lth = lth + bufs_accidentals[voice][m][j]
                     # fi
                     txt = txt + "{:>4s}".format(bufs[voice][m][j]) + lth
                     workingtime[voice] = workingtime[voice] + l
@@ -968,9 +982,9 @@ def get_line():
                 return line
             # fi
         except EOFError:
-            print("Read gave EOF", file=sys.stderr)
+            pass            # print("Read gave EOF", file=sys.stderr)
         except SystemExit:
-            print("Read gave system exit", file=sys.stderr)
+            pass            # print("Read gave system exit", file=sys.stderr)
         except KeyboardInterrupt:
             print("Read got keyboard interrupt", file=sys.stderr)
         except:
@@ -1072,11 +1086,13 @@ def is_float(strg):
 # End of is_float
 
 #-----------------------------------------------------------------------------
-def put_on_bufs(onvoice, abc_note, timeofnote):
+def put_on_bufs(onvoice, abc_note, timeofnote, append_tie):
     global tlth
     global mlth
     global measure_on
     global bufs
+    global bufs_length
+    global bufs_accidentals
 
     if type(abc_note) is int:
         abc_note = str(abc_note)
@@ -1090,11 +1106,13 @@ def put_on_bufs(onvoice, abc_note, timeofnote):
     if onvoice not in bufs:
         bufs[onvoice] = {}
         bufs_length[onvoice] = {}
+        bufs_accidentals[onvoice] = {}
     # fi
     if measure_on not in bufs[onvoice]:
         if args.horizontal or args.vertical:
             bufs[onvoice][measure_on] = [abc_note]
             bufs_length[onvoice][measure_on] = [timeofnote]
+            bufs_accidentals[onvoice][measure_on] = [append_tie]
         else:
             bufs[onvoice][measure_on] = abc_note
         # fi
@@ -1103,6 +1121,7 @@ def put_on_bufs(onvoice, abc_note, timeofnote):
     if args.vertical or args.horizontal:
         bufs[onvoice][measure_on].append(abc_note)
         bufs_length[onvoice][measure_on].append(timeofnote)
+        bufs_accidentals[onvoice][measure_on].append(append_tie)
     else:
         bufs[onvoice][measure_on] = bufs[onvoice][measure_on] + ' ' + abc_note
     # fi
@@ -1123,8 +1142,8 @@ def instak(onvoice, thenote, timeofnote, append_tie, line):
     j = 1
     for l in lengthl:
         if args.horizontal or args.vertical:
-            # abc_note = thenote + l + append_tie
-            abc_note = thenote + append_tie
+            # Length done elsewise, and accidentals elsewise too.
+            abc_note = thenote
         else:
             if j != len(lengthl) and thenote != 'z':
                 abc_note = thenote + l + '-'
@@ -1133,7 +1152,7 @@ def instak(onvoice, thenote, timeofnote, append_tie, line):
             # fi
         # fi
         q = lengthf[j-1]
-        put_on_bufs(onvoice, abc_note, q)
+        put_on_bufs(onvoice, abc_note, q, append_tie)
         j = j + 1
     # rof
     return
@@ -2706,11 +2725,11 @@ def process_notes(t_args, line):
                 # rof
                 l_dl = default_note_text_fraction(measure_on)
                 if args.horizontal or args.vertical:
-                    print("processnotes - NOTDONEYET #2 - horizontal or vertical", file=sys.stderr)
+                    print("processnotes - NOTDONEYET #2 - horizontal or vertical - trill", file=sys.stderr)
                     sys.exit(999)
                 # fi
                 abc_note = abc_note + "[L:{}]".format(l_dl)
-                put_on_bufs(onvoice, abc_note, lengthf[0])
+                put_on_bufs(onvoice, abc_note, lengthf[0], '')
                 break
             elif typenote == sequence_note:
                 print_error("NOTDONEYET - doing sequence type note", line)
@@ -2859,6 +2878,11 @@ def parse_args():
     parser.add_argument('rest', nargs='*',
                         help='Optional command to execute')
     args = parser.parse_args()
+
+    if (args.vertical and args.horizontal) or (args.vertical and args.abc) or (args.horizontal and args.abc):
+        print("Only may have one of --vertical, --horizontal, or --abc", file=sys.stderr)
+        sys.exit(1)
+    # fi
     return
 # End of parse_args
 
