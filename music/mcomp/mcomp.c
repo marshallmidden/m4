@@ -124,7 +124,14 @@ static char get_single_ch(void)
 
 /* ------------------------------------------------------------------------ */
 #define MAXFRAC     7
-#define MAXFRAC3    5
+#define MAXFRAC3    0
+// #define MAXFRAC3    1
+// #define MAXFRAC3    2
+// #define MAXFRAC3    3
+// #define MAXFRAC3    4
+// #define MAXFRAC3    5
+// #define MAXFRAC3    6
+// #define MAXFRAC3    7
 static int fractionsdotted[MAXFRAC];            /* Ticks for 2^x notes dotted. */
 static int fractions[MAXFRAC];                  /* Ticks for 2^x notes. */
 static int fractionsthirddotted[MAXFRAC3];      /* Ticks for 2^x notes dotted divide by 3. */
@@ -1277,24 +1284,40 @@ static int valid_note_length(int n)
     if (n >= fractionsdotted     [1]) { return (fractionsdotted     [1]); }
     if (n >= fractions           [1]) { return (fractions           [1]); }
 
+#if MAXFRAC3 > 0
     if (n >= fractionsthirddotted[0]) { return (fractionsthirddotted[0]); }
+#endif /* MAXFRAC3 > 0 */
     if (n >= fractionsdotted     [2]) { return (fractionsdotted     [2]); }
+#if MAXFRAC3 > 0
     if (n >= fractionsthird      [0]) { return (fractionsthird[0]); }
+#endif /* MAXFRAC3 > 0 */
     if (n >= fractions           [2]) { return (fractions           [2]); }
 
+#if MAXFRAC3 > 1
     if (n >= fractionsthirddotted[1]) { return (fractionsthirddotted[1]); }
+#endif /* MAXFRAC3 > 1 */
     if (n >= fractionsdotted     [3]) { return (fractionsdotted     [3]); }
+#if MAXFRAC3 > 1
     if (n >= fractionsthird      [1]) { return (fractionsthird[1]); }
+#endif /* MAXFRAC3 > 1 */
     if (n >= fractions           [3]) { return (fractions           [3]); }
 
+#if MAXFRAC3 > 2
     if (n >= fractionsthirddotted[2]) { return (fractionsthirddotted[2]); }
+#endif /* MAXFRAC3 > 2 */
     if (n >= fractionsdotted     [4]) { return (fractionsdotted     [4]); }
+#if MAXFRAC3 > 2
     if (n >= fractionsthird      [2]) { return (fractionsthird[2]); }
+#endif /* MAXFRAC3 > 2 */
     if (n >= fractions           [4]) { return (fractions           [4]); }
 
+#if MAXFRAC3 > 3
     if (n >= fractionsthirddotted[3]) { return (fractionsthirddotted[3]); }
+#endif /* MAXFRAC3 > 3 */
     if (n >= fractionsdotted     [5]) { return (fractionsdotted     [5]); }
+#if MAXFRAC3 > 3
     if (n >= fractionsthird      [3]) { return (fractionsthird[3]); }
+#endif /* MAXFRAC3 > 3 */
     if (n >= fractions           [5]) { return (fractions           [5]); }
 
 #if MAXFRAC3 > 4
@@ -2431,7 +2454,6 @@ static void create_bars(void)
         newbar->barsnext = NULL;
         newbar->bar_time = now;
         newbar->bar_number = bar_number;
-fprintf(stderr, "create_bars now=%ld bar_numer=%ld ", now, bar_number);
         if (bars_location_start == NULL)
         {
             bars_location_start = newbar;
@@ -2463,7 +2485,6 @@ fprintf(stderr, "create_bars now=%ld bar_numer=%ld ", now, bar_number);
 
         /* Use possible time signature above to get to next bar. */
         now = now + TICKSPERBAR;
-fprintf(stderr, "TICKSPERBAR=%d\n", TICKSPERBAR);
         if (now > maxtracktime)
         {
             break;
@@ -2541,21 +2562,37 @@ fprintf(stderr, "fractionsdotted     [0] = %4d  f=%3dd\n"  , fractionsdotted    
 fprintf(stderr, "fractions           [0] = %4d  f=%3d\n"   , fractions           [0], 1);
 fprintf(stderr, "fractionsdotted     [1] = %4d  f=%3dd\n"  , fractionsdotted     [1], 2);
 fprintf(stderr, "fractions           [1] = %4d  f=%3d\n"   , fractions           [1], 2);
+#if MAXFRAC3 > 0
 fprintf(stderr, "fractionsthirddotted[0] = %4d  f=%3dd/3\n", fractionsthirddotted[0], 1);
+#endif /* MAXFRAC3 > 0 */
 fprintf(stderr, "fractionsdotted     [2] = %4d  f=%3dd\n"  , fractionsdotted     [2], 4);
+#if MAXFRAC3 > 0
 fprintf(stderr, "fractionsthird      [0] = %4d  f=%3d/3\n" , fractionsthird      [0], 1);
+#endif /* MAXFRAC3 > 0 */
 fprintf(stderr, "fractions           [2] = %4d  f=%3d\n"   , fractions           [2], 4);
+#if MAXFRAC3 > 1
 fprintf(stderr, "fractionsthirddotted[1] = %4d  f=%3dd/3\n", fractionsthirddotted[1], 2);
+#endif /* MAXFRAC3 > 1 */
 fprintf(stderr, "fractionsdotted     [3] = %4d  f=%3dd\n"  , fractionsdotted     [3], 8);
+#if MAXFRAC3 > 1
 fprintf(stderr, "fractionsthird      [1] = %4d  f=%3d/3\n" , fractionsthird      [1], 2);
+#endif /* MAXFRAC3 > 1 */
 fprintf(stderr, "fractions           [3] = %4d  f=%3d\n"   , fractions           [3], 8);
+#if MAXFRAC3 > 2
 fprintf(stderr, "fractionsthirddotted[2] = %4d  f=%3dd/3\n", fractionsthirddotted[2], 4);
+#endif /* MAXFRAC3 > 2 */
 fprintf(stderr, "fractionsdotted     [4] = %4d  f=%3dd\n"  , fractionsdotted     [4], 16);
+#if MAXFRAC3 > 2
 fprintf(stderr, "fractionsthird      [2] = %4d  f=%3d/3\n" , fractionsthird      [2], 4);
+#endif /* MAXFRAC3 > 2 */
 fprintf(stderr, "fractions           [4] = %4d  f=%3d\n"   , fractions           [4], 16);
+#if MAXFRAC3 > 3
 fprintf(stderr, "fractionsthirddotted[3] = %4d  f=%3dd/3\n", fractionsthirddotted[3], 8);
+#endif /* MAXFRAC3 > 3 */
 fprintf(stderr, "fractionsdotted     [5] = %4d  f=%3dd\n"  , fractionsdotted     [5], 32);
+#if MAXFRAC3 > 3
 fprintf(stderr, "fractionsthird      [3] = %4d  f=%3d/3\n" , fractionsthird      [3], 8);
+#endif /* MAXFRAC3 > 3 */
 fprintf(stderr, "fractions           [5] = %4d  f=%3d\n"   , fractions           [5], 32);
 #if MAXFRAC3 > 4
 fprintf(stderr, "fractionsthirddotted[4] = %4d  f=%3dd/3\n", fractionsthirddotted[4], 16);
