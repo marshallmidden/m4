@@ -1,8 +1,22 @@
 #!/usr/bin/python3 -B
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
+# TODO:
 #-----------------------------------------------------------------------------
-# --midi1csv mode: the Tempo is wrong.  b6 is 4 times to fast?
-#.............................................................................
+# A) Tempo for --midi1csv does not work if the second argument is not 4.
+#-----------------------------------------------------------------------------
+# B) If number of voices is increased, the rests are not put in from the beginning.
+#-----------------------------------------------------------------------------
+# C) midi1csv mode: Need to figure out how to handle ties.
+#   ties with --vertical and --horizontal
+#   Move 'Note_off_c' forward with tie.
+#-----------------------------------------------------------------------------
+# D) staccoto
+#-----------------------------------------------------------------------------
+# 1) tempo allowed anywhere. Make notes match to there. (rest insertion)
+# 2) cresendo/decresendo anywhere. Make notes match to there. (rest insertion)
+# 3) Consider csvmidi instrument names table conversion. Allow "off-by" for +/- value.
+# 4) Instrument numbers +/- by a given value. (fluidsynth verses timidity)
+#-----------------------------------------------------------------------------
 # TODO:
 # 1) Select clef=treble or clef=bass by notes min and max notes on staff(s).
 #       # NOTDONEYET - add ' clef=bass'  (after the number)
@@ -11,6 +25,8 @@
 # 3) cresendo/decresendo anywhere. Make notes match to there. (rest insertion)
 # 4) Consider csvmidi instrument names table conversion. Allow "off-by" for +/- value.
 # 5) Instrument numbers +/- by a given value. (fluidsynth verses timidity)
+# 6) If number of voices is increased, the rests are not put in from the beginning.
+# 7) Tempo for --midi1csv does not work if the second argument is not 4.
 #-----------------------------------------------------------------------------
 # Commands not done.
 #   print_error("NOTDONEYET - do_debug", line)
@@ -87,7 +103,7 @@
 # Empty lines separate tunes, headers (X: ... K:), and free text
 # Line-breaks (new-lines, line feeds, carriage returns, end-of-lines) aids readability and breaks long lines.
 #   Music code: end of lines means end of typeset sheet music score (lines). Use backslash to for continuation.
-#   	It continues through information fields, comments, and stylesheet directives.
+#       It continues through information fields, comments, and stylesheet directives.
 # Information fields continue with +: at start of next line.
 # ..............................................................................
 #         V:1
@@ -95,25 +111,25 @@
 #     is the same as:
 #         [V:1] a b cd
 #     Can use [M:9/8]
-# K: Key			K:G, K:Dm, K:AMix
-# L: Unit Note Length 	L:1/4, L:1/8
-# M: Meter		M:3/4, M:4/4		Note present means free - no checking.
-# Q: Tempo		Q:1/4=120
-# T: Title		T:Name Of Song, whatever
-# V: Voice		V:4 clef=bass		<----
-# W: words		W: lyrics printed after the end of the tune
-# w: words		w: lyrics printed aligned with the notes of tune
+# K: Key                K:G, K:Dm, K:AMix
+# L: Unit Note Length   L:1/4, L:1/8
+# M: Meter              M:3/4, M:4/4        Note present means free - no checking.
+# Q: Tempo              Q:1/4=120
+# T: Title              T:Name Of Song, whatever
+# V: Voice              V:4 clef=bass               <----
+# W: words              W: lyrics printed after the end of the tune
+# w: words              w: lyrics printed aligned with the notes of tune
 # ..............................................................................
 # clef's can be on V: and K: lines
-# 	treble	Treble
-# 	bass	Bass
-# 	bass3	Baritone
-# 	tenor	Tenor
-# 	alto	Alto
-# 	alto2	Mezzosoprano
-# 	alto1	Soprano
-# 	perc
-# 	none
+#       treble  Treble
+#       bass    Bass
+#       bass3   Baritone
+#       tenor   Tenor
+#       alto    Alto
+#       alto2   Mezzosoprano
+#       alto1   Soprano
+#       perc
+#       none
 #-----------------------------------------------------------------------------
 # Pass 1
 # Need the order of the measures.
@@ -975,8 +991,8 @@ def print_header():
 # 1, 0, Key_signature, -2, "major"
         print('1, 0, Key_signature, {}, "major"'.format(key))
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-#       X = 60.0 / (NN / 1000000.0)
-        X = round(60.0 * (4.0 * default_note_length[''])/(tempo_speed/1000000.0))
+        X = round((60.0 * 1000000.0) / ((4.0 * default_note_length[''])) / tempo_speed)
+        print("tempo_speed={} default_note_length['']={}".format(tempo_speed, default_note_length['']),file=sys.stderr)
         print("1, 0, Tempo, {}".format(X))
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
         maxtimelth = 0
@@ -1029,7 +1045,8 @@ def print_header():
             lthworkingmeasure = lthworkingmeasure + mlth[voice][m]
         # rof
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-# NOTDONEYET -- print("x, y, Tempo, {}".format(round(60.0 * (4.0 * default_note_length[''])/(tempo_speed/1000000.0))))
+# NOTDONEYET -- X = round((60.0 * 1000000.0) / ((4.0 * default_note_length[''])) / tempo_speed)
+# NOTDONEYET -- print("x, y, Tempo, {}".format(X))
 # NOTDONEYET -- tempo associated within measure/bar.
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
         print("1, {}, End_track".format(maxtimelth))
@@ -1102,7 +1119,7 @@ def print_out_midi1csv_notes():
         lastmeter = ''
         print('{}, 0, Start_track'.format(voice+1))
         print('{}, 0, Text_t, "note track for musicomp voice {}"'.format(voice+1, voice))
-        X = round(60.0 * (4.0 * default_note_length[''])/(tempo_speed/1000000.0))
+        X = round((60.0 * 1000000.0) / ((4.0 * default_note_length[''])) / tempo_speed)
         print("{}, 0, Tempo, {}".format(voice+1, X))
         l_instrument = 0
         for m in meas:
@@ -1626,8 +1643,9 @@ def do_title(t_args, line):
         if args.vertical or args.horizontal:
             header = header + "title   \n"
         elif args.midi1csv:
-            print("do_title args.midi1csv #11", file=sys.stderr)
-            sys.exit(1)
+            #-- print("do_title args.midi1csv #11", file=sys.stderr)
+            #-- sys.exit(1)
+            pass
         else:
             header = header + "T:\n"
         # fi
@@ -1680,7 +1698,7 @@ def do_tempo(t_args, line):
         x = round(f1 / 60.0)
         default_note_length[measure_on] = 1.0               # whole note
         if tempo_speed != 150.0:
-            print_error("Multiple tempo's not handled. Last was {}, this would be {}.".format(tempo_speed,x), line)
+            print_warning("Multiple tempo's not handled. Last was {}, this would be {}.".format(tempo_speed,x), line)
         # fi
         tempo_speed = x
         return
@@ -1695,7 +1713,7 @@ def do_tempo(t_args, line):
     # fi
     default_note_length[measure_on] = (1.0 / f2)            # whole note
     if tempo_speed != 150.0:
-        print_error("Multiple tempo's not handled. Last was {}, this would be {}.".format(tempo_speed,round(f1)), line)
+        print_warning("Multiple tempo's not handled. Last was {}, this would be {}.".format(tempo_speed,round(f1)), line)
     # fi
     tempo_speed = round(f1)
     return
@@ -2579,31 +2597,71 @@ commands = {
 global note_to_midi_value
 # Does this need to take "key" into consideration when converting notes?
 note_to_midi_value = {
-   "0c":24,    "0c+":25, "0d-":25,    "0d":26,    "0d+":27, "0e-":27,    "0e":28, "0f":29,
-   "0f+":30, "0g-":30,    "0g":31,    "0g+":32, "0a-":32,    "0a":33,    "0a+":34, "0b-":34,    "0b":35,
+   "0c-":23,    "0c":24,    "0c+":25,
+   "0d-":25,    "0d":26,    "0d+":27,
+   "0e-":27,    "0e":28,    "0e+":28,
+   "0f-":28,    "0f":29,    "0f+":30,
+   "0g-":30,    "0g":31,    "0g+":32,
+   "0a-":32,    "0a":33,    "0a+":34,
+   "0b-":34,    "0b":35,    "0b+":36,
 
-   "1c":36,    "1c+":37, "1d-":37,    "1d":38,    "1d+":39, "1e-":39,    "1e":40, "1f":41,
-   "1f+":42, "1g-":42,    "1g":43,    "1g+":44, "1a-":44,    "1a":45,    "1a+":46, "1b-":46,    "1b":47,
+   "1c-":35,    "1c":36,    "1c+":37,
+   "1d-":37,    "1d":38,    "1d+":39,
+   "1e-":39,    "1e":40,    "1e+":41,
+   "1f-":40,    "1f":41,    "1f+":42,
+   "1g-":42,    "1g":43,    "1g+":44,
+   "1a-":44,    "1a":45,    "1a+":46,
+   "1b-":46,    "1b":47,    "1b+":48,
 
-   "2c":48,    "2c+":49, "2d-":49,    "2d":50,    "2d+":51, "2e-":51,    "2e":52, "2f":53,
-   "2f+":54, "2g-":54,    "2g":55,    "2g+":56, "2a-":56,    "2a":57,    "2a+":58, "2b-":58,    "2b":59,
+   "2c-":47,    "2c":48,    "2c+":49,
+   "2d-":49,    "2d":50,    "2d+":51,
+   "2e-":51,    "2e":52,    "2e+":53,
+   "2f-":52,    "2f":53,    "2f+":54,
+   "2g-":54,    "2g":55,    "2g+":56,
+   "2a-":56,    "2a":57,    "2a+":58,
+   "2b-":58,    "2b":59,    "2b+":60,
 
-   "3c":60,    "3c+":61, "3d-":61,    "3d":62,    "3d+":63, "3e-":63,    "3e":64, "3f":65,
-   "3f+":66, "3g-":66,    "3g":67,    "3g+":68, "3a-":68,    "3a":69,    "3a+":70, "3b-":70,    "3b":71,
+   "3c-":59,    "3c":60,    "3c+":61,
+   "3d-":61,    "3d":62,    "3d+":63,
+   "3e-":63,    "3e":64,    "3e+":65,
+   "3f-":64,    "3f":65,    "3f+":66,
+   "3g-":66,    "3g":67,    "3g+":68,
+   "3a-":68,    "3a":69,    "3a+":70,
+   "3b-":70,    "3b":71,    "3b+":72,
 
-   "4c":72,    "4c+":73, "4d-":73,    "4d":74,    "4d+":75, "4e-":75,    "4e":76, "4f":77,
-   "4f+":78, "4g-":78,    "4g":79,    "4g+":80, "4a-":80,    "4a":81,    "4a+":82, "4b-":82,    "4b":83,
+   "4c-":71,    "4c":72,    "4c+":73,
+   "4d-":73,    "4d":74,    "4d+":75,
+   "4e-":75,    "4e":76,    "4e+":77,
+   "4f-":76,    "4f":77,    "4f+":78,
+   "4g-":78,    "4g":79,    "4g+":80,
+   "4a-":80,    "4a":81,    "4a+":82,
+   "4b-":82,    "4b":83,    "4b+":84,
 
-   "5c":84,    "5c+":85, "5d-":85,    "5d":86,    "5d+":87, "5e-":87,    "5e":88, "5f":89,
-   "5f+":90, "5g-":90,    "5g":91,    "5g+":92, "5a-":92,    "5a":93,    "5a+":94, "5b-":94,    "5b":95,
+   "5c-":83,    "5c":84,    "5c+":85,
+   "5d-":85,    "5d":86,    "5d+":87,
+   "5e-":87,    "5e":88,    "5e+":89,
+   "5f-":88,    "5f":89,    "5f+":90,
+   "5g-":90,    "5g":91,    "5g+":92,
+   "5a-":92,    "5a":93,    "5a+":94,
+   "5b-":94,    "5b":95,    "5b+":96,
 
-   "6c":96,    "6c+":97, "6d-":97,    "6d":98,    "6d+":99, "6e-":99,    "6e":100, "6f":101,
-   "6f+":102, "6g-":102,   "6g":103,   "6g+":104, "6a-":104,   "6a":105,   "6a+":106, "6b-":106,   "6b":107,
+   "6c-":95,    "6c":96,    "6c+":97,
+   "6d-":97,    "6d":98,    "6d+":99,
+   "6e-":99,    "6e":100,   "6e+":101,
+   "6f-":100,   "6f":101,   "6f+":102,
+   "6g-":102,   "6g":103,   "6g+":104,
+   "6a-":104,   "6a":105,   "6a+":106,
+   "6b-":106,   "6b":107,   "6b+":108,
 
-   "7c":108,    "7c+":109, "7d-":109,    "7d":110,    "7d+":111, "7e-":111,    "7e":112, "7f":113,
-   "7f+":114, "7g-":114,   "7g":115,   "7g+":116, "7a-":116,   "7a":117,   "7a+":118, "7b-":118,   "7b":119,
+   "7c-":71,    "7c":108,   "7c+":109,
+   "7d-":109,   "7d":110,   "7d+":111,
+   "7e-":111,   "7e":112,   "7e+":113,
+   "7f-":112,   "7f":113,   "7f+":114,
+   "7g-":114,   "7g":115,   "7g+":116,
+   "7a-":116,   "7a":117,   "7a+":118,
+   "7b-":118,   "7b":119,   "7b+":120,
 
-   "8c":120
+   "8b-":119,   "8c":120
 };
 #-----------------------------------------------------------------------------
 # return:
@@ -3418,7 +3476,7 @@ def main():
         meter = '4/4'
     elif args.midi1csv:
         header = []
-        key = "C"                           # Default to key of C.
+        key = 0                             # Default to key of C.
         measure_meter = { '': '4/4'}        # Each measure change can have a different meter.
         meter = '4/4'
     else:
@@ -3792,76 +3850,76 @@ exit(errors_happened)
 #       127 Applause
 #       128 Gunshot
 #-----------------------------------------------------------------------------
-# timidity	000_Acoustic_Grand_Piano.pat
-# timidity	001_Acoustic_Brite_Piano.pat
-# timidity	002_Electric_Grand_Piano.pat
-# timidity	004_Electric_Piano_1_Rhodes.pat
-# timidity	005_Electric_Piano_2_Chorused_Yamaha_DX.pat
-# timidity	006_Harpsichord.pat
-# timidity	007_Clavinet.pat
-# timidity	008_Celesta.pat
-# timidity	009_Glockenspiel.pat
-# timidity	013_Xylophone.pat
-# timidity	014_Tubular_Bells.pat
-# timidity	015_Dulcimer.pat
-# timidity	016_Hammond_Organ.pat
-# timidity	019_Church_Organ.pat
-# timidity	021_Accordion.pat
-# timidity	023_Tango_Accordion.pat
-# timidity	024_Nylon_Guitar.pat
-# timidity	025_Steel_Guitar.pat
-# timidity	026_Jazz_Guitar.pat
-# timidity	027_Clean_Electric_Guitar.pat
-# timidity	028_Muted_Electric_Guitar.pat
-# timidity	029_Overdriven_Guitar.pat
-# timidity	030_Distortion_Guitar.pat
-# timidity	032_Acoustic_Bass.pat
-# timidity	033_Finger_Bass.pat
-# timidity	034_Pick_Bass.pat
-# timidity	035_Fretless_Bass.pat
-# timidity	036_Slap_Bass_1.pat
-# timidity	037_Slap_Bass_2.pat
-# timidity	038_Synth_Bass_1.pat
-# timidity	040_Violin.pat
-# timidity	042_Cello.pat
-# timidity	044_Tremolo_Strings.pat
-# timidity	045_Pizzicato_Strings.pat
-# timidity	046_Harp.pat
-# timidity	047_Timpani.pat
-# timidity	048_String_Ensemble_1_Marcato.pat
-# timidity	053_Voice_Oohs.pat
-# timidity	056_Trumpet.pat
-# timidity	057_Trombone.pat
-# timidity	058_Tuba.pat
-# timidity	059_Muted_Trumpet.pat
-# timidity	060_French_Horn.pat
-# timidity	061_Brass_Section.pat
-# timidity	064_Soprano_Sax.pat
-# timidity	065_Alto_Sax.pat
-# timidity	066_Tenor_Sax.pat
-# timidity	067_Baritone_Sax.pat
-# timidity	068_Oboe.pat
-# timidity	069_English_Horn.pat
-# timidity	070_Bassoon.pat
-# timidity	071_Clarinet.pat
-# timidity	072_Piccolo.pat
-# timidity	073_Flute.pat
-# timidity	074_Recorder.pat
-# timidity	075_Pan_Flute.pat
-# timidity	076_Bottle_Blow.pat
-# timidity	079_Ocarina.pat
-# timidity	080_Square_Wave.pat
-# timidity	084_Charang.pat
-# timidity	088_New_Age.pat
-# timidity	094_Halo_Pad.pat
-# timidity	095_Sweep_Pad.pat
-# timidity	098_Crystal.pat
-# timidity	101_Goblins--Unicorn.pat
-# timidity	102_Echo_Voice.pat
-# timidity	104_Sitar.pat
-# timidity	114_Steel_Drums.pat
-# timidity	115_Wood_Block.pat
-# timidity	120_Guitar_Fret_Noise.pat
-# timidity	122_Seashore.pat
-# timidity	125_Helicopter.pat
+# timidity      000_Acoustic_Grand_Piano.pat
+# timidity      001_Acoustic_Brite_Piano.pat
+# timidity      002_Electric_Grand_Piano.pat
+# timidity      004_Electric_Piano_1_Rhodes.pat
+# timidity      005_Electric_Piano_2_Chorused_Yamaha_DX.pat
+# timidity      006_Harpsichord.pat
+# timidity      007_Clavinet.pat
+# timidity      008_Celesta.pat
+# timidity      009_Glockenspiel.pat
+# timidity      013_Xylophone.pat
+# timidity      014_Tubular_Bells.pat
+# timidity      015_Dulcimer.pat
+# timidity      016_Hammond_Organ.pat
+# timidity      019_Church_Organ.pat
+# timidity      021_Accordion.pat
+# timidity      023_Tango_Accordion.pat
+# timidity      024_Nylon_Guitar.pat
+# timidity      025_Steel_Guitar.pat
+# timidity      026_Jazz_Guitar.pat
+# timidity      027_Clean_Electric_Guitar.pat
+# timidity      028_Muted_Electric_Guitar.pat
+# timidity      029_Overdriven_Guitar.pat
+# timidity      030_Distortion_Guitar.pat
+# timidity      032_Acoustic_Bass.pat
+# timidity      033_Finger_Bass.pat
+# timidity      034_Pick_Bass.pat
+# timidity      035_Fretless_Bass.pat
+# timidity      036_Slap_Bass_1.pat
+# timidity      037_Slap_Bass_2.pat
+# timidity      038_Synth_Bass_1.pat
+# timidity      040_Violin.pat
+# timidity      042_Cello.pat
+# timidity      044_Tremolo_Strings.pat
+# timidity      045_Pizzicato_Strings.pat
+# timidity      046_Harp.pat
+# timidity      047_Timpani.pat
+# timidity      048_String_Ensemble_1_Marcato.pat
+# timidity      053_Voice_Oohs.pat
+# timidity      056_Trumpet.pat
+# timidity      057_Trombone.pat
+# timidity      058_Tuba.pat
+# timidity      059_Muted_Trumpet.pat
+# timidity      060_French_Horn.pat
+# timidity      061_Brass_Section.pat
+# timidity      064_Soprano_Sax.pat
+# timidity      065_Alto_Sax.pat
+# timidity      066_Tenor_Sax.pat
+# timidity      067_Baritone_Sax.pat
+# timidity      068_Oboe.pat
+# timidity      069_English_Horn.pat
+# timidity      070_Bassoon.pat
+# timidity      071_Clarinet.pat
+# timidity      072_Piccolo.pat
+# timidity      073_Flute.pat
+# timidity      074_Recorder.pat
+# timidity      075_Pan_Flute.pat
+# timidity      076_Bottle_Blow.pat
+# timidity      079_Ocarina.pat
+# timidity      080_Square_Wave.pat
+# timidity      084_Charang.pat
+# timidity      088_New_Age.pat
+# timidity      094_Halo_Pad.pat
+# timidity      095_Sweep_Pad.pat
+# timidity      098_Crystal.pat
+# timidity      101_Goblins--Unicorn.pat
+# timidity      102_Echo_Voice.pat
+# timidity      104_Sitar.pat
+# timidity      114_Steel_Drums.pat
+# timidity      115_Wood_Block.pat
+# timidity      120_Guitar_Fret_Noise.pat
+# timidity      122_Seashore.pat
+# timidity      125_Helicopter.pat
 #-----------------------------------------------------------------------------
