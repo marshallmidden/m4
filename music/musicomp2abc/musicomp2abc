@@ -1,13 +1,11 @@
 #!/usr/bin/python3 -B
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
+#-----------------------------------------------------------------------------
 # TODO:
+# A) odd time notes not put out 'reasonably' for --vertical nor --horizontal output.
+#       the broken into multiple notes -- the notes are not tied. (4c6 4c6 ...)
 #-----------------------------------------------------------------------------
-# C) midi1csv mode: Need to figure out how to handle ties.
-#   ties with --vertical and --horizontal
-#   Move 'Note_off_c' forward with tie.
-#-----------------------------------------------------------------------------
-# D) staccoto
-#-----------------------------------------------------------------------------
+# TODO:
 # 1) tempo allowed anywhere. Make notes match to there. (rest insertion)
 # 2) cresendo/decresendo anywhere. Make notes match to there. (rest insertion)
 # 3) Consider csvmidi instrument names table conversion. Allow "off-by" for +/- value.
@@ -21,8 +19,7 @@
 # 3) cresendo/decresendo anywhere. Make notes match to there. (rest insertion)
 # 4) Consider csvmidi instrument names table conversion. Allow "off-by" for +/- value.
 # 5) Instrument numbers +/- by a given value. (fluidsynth verses timidity)
-# 6) If number of voices is increased, the rests are not put in from the beginning.
-# 7) Tempo for --midi1csv does not work if the second argument is not 4.
+# 6) Tempo for --midi1csv does not work if the second argument is not 4.
 #-----------------------------------------------------------------------------
 # Commands not done.
 #   print_error("NOTDONEYET - do_debug", line)
@@ -354,6 +351,8 @@ for i in range(0, MAXVOICES):       # This is used as [1] .. [MAXVOICES]
     clef[i+1] = {}
     clef[i+1][''] = 'treble'        # No clef.       (voice, measure)
 # rof
+global inst
+inst = { }                          # track using instrument by instrument.
 global oct                          # default octave
 oct = { 1 : 0 }
 global acc
@@ -376,6 +375,8 @@ global bufs_length                  # bufs_length[voice][measure][#] ... number=
 bufs_length = { 1 : {} }
 global bufs_accidental              # bufs_length[voice][measure][#] ... number= 0..#commas-1 above.
 bufs_accidentals = { 1: {} }
+global bufs_tie_next
+bufs_tie_next = { 1: '' }
 
 global lstac,lgrace,lpause
 lstac = lgrace = lpause = 4         # starting staccato, grace note, lpause as 4/60th of a second
@@ -434,7 +435,7 @@ def get_time_stak(timeofnote, line):
 
     if timeofnote <= 0.0:
         print_error("timeofnote '{}' negative or zero -- cannot play a note backwards.".format(timeofnote), line)
-        return timeofnote, 0, False
+        return timeofnote, 0, -1    # False
     # fi
     lengthl = []
     lengthf = []
@@ -476,12 +477,13 @@ def get_time_stak(timeofnote, line):
     # rof
     if t > 0:
         print_warning("timeofnote={} -> {} has left-over of t={}".format(timeofnote,lengthl,t), line)
+        return lengthl, lengthf, 1      # Problems
     # fi
     if not lengthl or len(lengthl) == 0:
         print_error("timeofnote '{}' not able to return a usable fraction - min of 1/64".format(timeofnote), line)
-        return timeofnote, 0, False
+        return timeofnote, 0, -1    # False
     # fi
-    return lengthl, lengthf, True
+    return lengthl, lengthf, 0      # True
 # End of get_time_stak
 
 #-----------------------------------------------------------------------------
@@ -507,6 +509,7 @@ def new_voice_initialize(voice, m):
     global bufs
     global bufs_length
     global bufs_accidentals
+    global bufs_tie_next
     global acc
     global acc_v_init                   # Last accidental on a note in measure.
     global acc_v_init_v_or_h            # Last accidental on a note in measure.
@@ -526,6 +529,7 @@ def new_voice_initialize(voice, m):
         bufs[voice] = {}
         bufs_length[voice] = {}
         bufs_accidentals[voice] = {}
+        bufs_tie_next[voice] = ''
     # fi
     if m not in vl[voice]:
         vl[voice][m] = 7                # start volume out at maximum
@@ -576,6 +580,7 @@ def rests_in_empty_measure_voices(m, voice):
     global bufs
     global bufs_length
     global bufs_accidentals
+    global bufs_tie_next
     global args
 
     if m in bufs[voice]:                    # Already present, then of right length.
@@ -596,6 +601,7 @@ def rests_in_empty_measure_voices(m, voice):
             bufs[voice][m] = []
             bufs_length[voice][m] = []
             bufs_accidentals[voice][m] = []
+            bufs_tie_next[voice] = ''
         else:
             bufs[voice][m] = ''
         # fi
@@ -605,10 +611,11 @@ def rests_in_empty_measure_voices(m, voice):
         return
     # fi
     txt = ''
-    lengthl, lengthf, ifokay = get_time_stak(l, 'pass2')
+    #-- print("rests_in_empty_measure_voices - moved get_time_stak()", file=sys.stderr)
     if args.horizontal or args.vertical or args.midi1csv:
         pass
     else:
+        lengthl, lengthf, ifokay = get_time_stak(l, 'pass2')
         for i in range(len(lengthl)):
             txt = txt + ' z' + lengthl[i]       # entry in array
         # rof
@@ -620,6 +627,7 @@ def rests_in_empty_measure_voices(m, voice):
     if m not in bufs[voice]:
         print_error("rests_in_empty_measure_voices - m={} not in bufs[m,voice]", 'pass2')
     # fi
+    bufs_tie_next[voice] = ''
     if args.horizontal or args.vertical:
         bufs[voice][m].append('r')
         bufs_length[voice][m].append(l)
@@ -647,7 +655,6 @@ def print_measure_abc(m, voice, l_meter, l_dl, l_clef, l_instrument, l_vl, l_txt
     if voice not in bufs:
         return "ERROR - bufs voice dictionary is hosed.", '', '', '', ''
     # fi
-    #-- pr = ''
     pr = l_txt
     # if first measure, and doing voice, output V:# line.
     if m == meas[0] or (m in clef[voice] and l_clef != clef[voice][m]):
@@ -670,8 +677,7 @@ def print_measure_abc(m, voice, l_meter, l_dl, l_clef, l_instrument, l_vl, l_txt
     if len(vinstrument[m]) >= voice and vinstrument[m][voice] != '0':
         if l_instrument != vinstrument[m][voice]:
             l_instrument = str(vinstrument[m][voice])
-            if l_pr != '':
-                pr = pr + '\\'
+            if pr != '' and pr[-1] != '\n':
                 pr = pr + '\n'
             # fi
             pr = pr + "%%MIDI program {}\n".format(l_instrument)
@@ -703,7 +709,7 @@ def print_out_abc():
     global bars                             # number of bars per staff
 
     for voice in reversed(range(1,len(vl)+1)):
-        #-- print("% --- voice", voice, ' ---')
+        print("% --- voice", voice, ' ---')
         l_meter = l_dl = l_clef = l_instrument = l_vl = ''
         print_line = ''
         for i in range(0, len(meas)):
@@ -712,7 +718,7 @@ def print_out_abc():
                 if print_line != '':
                     print_line = print_line + '\n'
                 # fi
-                #-- print(print_line + "% measure {}".format(m))
+                print(print_line + "% measure {}".format(m))
                 print_line = ''
             # fi
             print_line, l_meter, l_dl, l_clef, l_instrument, l_vl = print_measure_abc(m, voice,
@@ -963,6 +969,17 @@ def print_out_v_or_h():
 # End of print_out_v_or_h
 
 #-----------------------------------------------------------------------------
+def print_out_midi1csv_start(voiceprint):
+    print('{}, 0, Start_track'.format(voiceprint))
+#   End of print_out_midi1csv_start
+
+#-----------------------------------------------------------------------------
+def print_out_midi1csv_tempo(voiceprint):
+    X = round((60.0 * 1000000.0) / ((4.0 * default_note_length[''])) / tempo_speed)
+    print("{}, 0, Tempo, {}".format(voiceprint, X))
+# End of print_out_midi1csv_tempo
+
+#-----------------------------------------------------------------------------
 def print_header():
     global header
     global key
@@ -980,16 +997,14 @@ def print_header():
         print("0, 0, Header, 1, {}, {}".format(len(vl)+1, round(MIDICLICKSPERQUARTER)))
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # First track does all tempo's, time and key signatures, and titles.
-# 1, 0, Start_track
-        print("1, 0, Start_track")
+        print_out_midi1csv_start(1)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # 1, 0, Title_t, "promenade"
         for t in header:
             print('1, 0, Title_t, "{}"'.format(t))
         # rof
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-        X = round((60.0 * 1000000.0) / ((4.0 * default_note_length[''])) / tempo_speed)
-        print("1, 0, Tempo, {}".format(X))
+        print_out_midi1csv_tempo(1)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # 1, 0, Key_signature, -2, "major"
         print('1, 0, Key_signature, {}, "major"'.format(key))
@@ -1062,111 +1077,183 @@ def print_header():
 # End of print_header
 
 #-----------------------------------------------------------------------------
-def print_measure_midi1csv(m, voice, lthworkingmeasure, chan):
-    global bufs
-    global vl
-
-    if voice not in bufs:
-        print("ERROR - bufs voice dictionary is hosed in print_measure_midi1csv({}, {}, {})".format(m,voice,lthworkingmeasure), file=sys.stderr)
-        sys.exit(1)
-    # fi
-    v_vl = get_volume_level(m, voice)
-    lth = lthworkingmeasure
-    i = 0
-    for i in range(0,len(bufs[voice][m])):
-        n = bufs[voice][m][i]
-        l = bufs_length[voice][m][i]
-        #?? a = bufs_accidentals[voice][m][i]
-        if n != '0' and n != 0:
-            print("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lth, chan, n, v_vl))
-            print("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lth + l -1, chan, n, 0))
+# returns lastmeter printed (which this routine may do).
+def print_out_midi1csv_ts(last_bar_meter,voiceon,m_number, lthworkingmeasure):
+    m = meas[m_number]
+    if last_bar_meter != measure_meter[m]:
+        last_bar_meter = measure_meter[m]
+        l = last_bar_meter.split('/', 1)
+        numerator = l[0]
+        denominator = Log2(l[1])
+        if denominator.is_integer():
+            denominator = int(denominator)
+        else:
+            denominator = l[1]
+            print("meter denominator is not a power of two, leave as {}".format(denominator))
         # fi
-        lth = lth + l
-    # rof
-    return
-# End of print_measure_midi1csv
+        print("{}, {}, Time_signature, {}, {}, 48, 8".format(
+                voiceon+1,
+                round(lthworkingmeasure),
+                numerator, denominator))
+    # fi
+    return last_bar_meter
+# End of print_measure_midi1csv_ts
 
 #-----------------------------------------------------------------------------
-# 2, 0, Text_t, "note track"
-# 2, 0, Text_t, " --- voice 6  ---"
-# 2, 0, Text_t, " measure 1"
-# 2, 0, Time_signature, 5, 2, 30, 8
-# 2, 1, Note_on_c, 0, 67, 127
-# 2, 480, Note_off_c, 0, 67, 0
-# ...
-# 2, 2400, Time_signature, 6, 2, 72, 8
-# ...
-# 2, 5280, Time_signature, 5, 2, 30, 8
-# ...
-# 2, 7680, Text_t, " measure 4"
-# 2, 7680, Time_signature, 6, 2, 72, 8
-#...
-# 2, 66746, End_track
+# input   last_instrument_on voice, voiceon, m_number,channel,chan
+# returns channel (which may be updated).
+#         chan (which may be updated).
+#         last_instrument_on printed (which this routine may do).
+def print_out_midi1csv_instrument(last_instrument_on,voiceon,m_number,channel,chan, lthworkingmeasure):
+    global vinstrument
+    global meas
+    global inst
 
+    m = meas[m_number]
+    if voiceon not in vinstrument[m]:
+        vinstrument[m][voiceon] = '0'
+    # fi
+    if len(vinstrument[m]) >= voiceon and vinstrument[m][voiceon] != '0':
+        if last_instrument_on != vinstrument[m][voiceon]:
+            last_instrument_on = str(vinstrument[m][voiceon])
+            if last_instrument_on in inst:
+                chan = inst[last_instrument_on]
+            else:
+                chan = channel
+                inst[last_instrument_on] = chan
+                channel = channel + 1
+                if channel == 9:
+                    channel = 10
+                #fi
+            # fi
+            print('{}, {}, Program_c, {}, {}'.format(
+                    voiceon+1,
+                    lthworkingmeasure,
+                    chan,
+                    last_instrument_on))
+        # fi
+    # fi
+    return channel, chan, last_instrument_on
+# End of print_out_midi1csv_instrument
+
+#-----------------------------------------------------------------------------
+def do_possible_midi_tie(voice, m_number, i, l, lastmeter, channel, chan, l_instrument, lthworkingmeasures):
+    flag = False                                # if need do time signature and instrument.
+    m = meas[m_number]
+    n = bufs[voice][m][i]                       # Note value being tied forward to...
+    #-- print("do_possible_midi_tie(voice={} m_number={} m={} n={} i={} l={} lthworkingmeasures={})".format(voice, m_number, m, n, i, l,lthworkingmeasures),file=sys.stderr)
+    while True:
+        p = i+1                                 # Check next note for tied to this one.
+        acc = bufs_accidentals[voice][m]
+        # tie to next note in this measure
+        #-- print("  bufs[{}][{}]={}\n  bufs_lenth[{}][{}]={}".format(voice,m,bufs[voice][m], voice,m,bufs_length[voice][m]),file=sys.stderr)
+        #-- print("  l={} p={} acc={} len(acc)={}".format(l,p,acc,len(acc)),file=sys.stderr)
+        if p < len(acc):                        # If more notes in this measure
+            a = acc[p]
+            # if note is not the same.
+            if n != bufs[voice][m][p] or a != 't':
+                #-- print("    n={} bufs[{}][{}][{}]={} a={}".format(n,voice,m,p,bufs[voice][m][p],a),file=sys.stderr)
+                #-- print("    returning#1 l={} m_number={} lastmeter={} channel={} chan={} l_instrument={}".format(l,m_number, lastmeter, channel, chan, l_instrument),file=sys.stderr)
+                return l, m_number, lastmeter, channel, chan, l_instrument
+            # fi
+            if flag:
+                #-- lastmeter = print_out_midi1csv_ts(lastmeter,voice, m_number,lthworkingmeasures+l)
+                lastmeter = print_out_midi1csv_ts(lastmeter,voice, m_number,lthworkingmeasures)
+                channel, chan, l_instrument = print_out_midi1csv_instrument(l_instrument,voice,m_number,channel,chan,lthworkingmeasures)
+                flag = False
+            # fi
+            tmp = bufs_length[voice][m][p]
+            l = l + tmp
+            bufs_length[voice][m][p] = -tmp     # Mark this length is done.
+            i = p
+            continue
+        # fi
+        # Tie to next note in next measure?
+        i = -1                                  # To first of next measure.
+        m_number = m_number + 1
+        if m_number >= len(meas):
+            #-- print("    returning#2 l={} m_number={} lastmeter={} channel={} chan={} l_instrument={}".format(l,m_number, lastmeter, channel, chan, l_instrument),file=sys.stderr)
+            return l, m_number, lastmeter, channel, chan, l_instrument
+        # fi
+        #-- print("  continue#3  i={} l={} m_number={} lthworkingmeasures={}".format(i,l,m_number, lthworkingmeasures),file=sys.stderr)
+        lthworkingmeasures = lthworkingmeasures + mlth[voice][m]
+        #-- print('{}, {}, Text_t, " measure {}"'.format(voice+1, lthworkingmeasures-1, meas[m_number]))
+        m = meas[m_number]
+        flag = True                             # Need do time signature and instrument if use this.
+    # elihw
+#   End of do_possible_midi_tie
+
+#-----------------------------------------------------------------------------
 def print_out_midi1csv_notes():
-    global vl                               # volume levels
-    global meas                             # measures
-    global bars                             # number of bars per staff
+    global vl                                   # volume levels
+    global meas                                 # measures
+    global bars                                 # number of bars per staff
+    global inst
 
-    inst = { }                              # track using instrument by instrument.
-    channel = 0
-    chan = 0
-
+    channel = 0                                 # next midi instrument channel to use
+    chan = 0                                    # the midi channel using now (allows for repeated use).
     for voice in range(1,len(vl) + 1):
-        lthworkingmeasure = 0
+        if voice not in bufs:
+            print("ERROR - bufs voice dictionary is hosed (m={}, voice={}, lthworkingmeasures={})".format(m,voice,lthworkingmeasures), file=sys.stderr)
+            sys.exit(1)
+        # fi
+        #-- print("print_out_midi1csv_notes: voice={}".format(voice), file=sys.stderr)
+        #-- print("  bufs[voice]={}".format(bufs[voice]), file=sys.stderr)
+        #-- print("  bufs_length[voice]={}".format(bufs_length[voice]), file=sys.stderr)
+        #-- print("  bufs_accidentals[voice]={}".format(bufs_accidentals[voice]), file=sys.stderr)
+        lthworkingmeasures = 0
         lastmeter = ''
-        print('{}, 0, Start_track'.format(voice+1))
-        X = round((60.0 * 1000000.0) / ((4.0 * default_note_length[''])) / tempo_speed)
-        print("{}, 0, Tempo, {}".format(voice+1, X))
         l_instrument = '0'
-        for m in meas:
-            if lastmeter != measure_meter[m]:
-                lastmeter = measure_meter[m]
-                l = lastmeter.split('/', 1)
-                numerator = l[0]
-                denominator = Log2(l[1])
-                if denominator.is_integer():
-                    denominator = int(denominator)
-                else:
-                    denominator = l[1]
-                    print("meter denominator is not a power of two, leave as {}".format(denominator))
+        m_number = 0
+        print_out_midi1csv_start(voice+1)
+        print('{}, 0, Text_t, " voice {}"'.format(voice+1, voice))
+        print_out_midi1csv_tempo(voice+1)
+        lastmeter = print_out_midi1csv_ts(lastmeter,voice,m_number,lthworkingmeasures)
+        channel, chan, l_instrument = print_out_midi1csv_instrument(l_instrument,voice,m_number,channel,chan,lthworkingmeasures)
+        #-- print('{}, {}, Text_t, " measure {}"'.format(voice+1, lthworkingmeasures, meas[m_number]))
+        while m_number < len(meas):             # while there are measures left to do
+            t_num = m_number
+            m = meas[m_number]
+            v_vl = get_volume_level(m, voice)   # Starting volume of note - no changing over ties.
+            lth = lthworkingmeasures            # start of measure notes.
+            i = 0
+            if len(bufs[voice][m]) == 0:        # If nothing in measure, go to next measure.
+                m_number = m_number + 1
+                continue
+            # fi
+            while i < len(bufs[voice][m]):      # while there are notes in measure
+                l = bufs_length[voice][m][i]    # length of current note.
+                #-- print("    l={} i={} voice={} m={} lth={}".format(l,i,voice,m,lth),file=sys.stderr)
+                if l < 0:
+                    lth = lth - l
+                    i = i + 1
+                    continue;                   # previous note was tied to this.
                 # fi
-                print("{}, {}, Time_signature, {}, {}, 48, 8".format(
-                        voice+1,
-                        round(lthworkingmeasure),
-                        numerator, denominator))
-            # fi
-            if voice not in vinstrument[m]:
-                vinstrument[m][voice] = '0'
-            # fi
-            if len(vinstrument[m]) >= voice and vinstrument[m][voice] != '0':
-                if l_instrument != vinstrument[m][voice]:
-                    l_instrument = str(vinstrument[m][voice])
-                    if l_instrument in inst:
-                        chan = inst[l_instrument]
-                    else:
-                        chan = channel
-                        inst[l_instrument] = chan
-                        channel = channel + 1
-                        if channel == 9:
-                            channel = 10
-                        #fi
+                n = bufs[voice][m][i]           # note number
+                if n != '0' and n != 0:         # Only for note that plays (not rest).
+                    print("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lth, chan, n, v_vl))
+                # fi
+                tmp,m_number,lastmeter, channel, chan, l_instrument = do_possible_midi_tie(voice, m_number, i, l,lastmeter, channel, chan, l_instrument, lthworkingmeasures)
+                if n != '0' and n != 0:
+                    acc = bufs_accidentals[voice][m][i]
+                    if acc == 'ts' or acc == 's':
+                        tmp = round(tmp / 2.0)
                     # fi
-                    print('{}, {}, Program_c, {}, {}'.format(
-                            voice+1,
-                            lthworkingmeasure,
-                            chan,
-                            l_instrument))
+                    print("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, (lth + tmp - 1), chan, n, 0))
                 # fi
-            # fi
-            #-- print('{}, {}, Text_t, " measure {}"'.format(
-            #--             voice+1,
-            #--             lthworkingmeasure,
-            #--             m))
-            print_measure_midi1csv(m, voice, lthworkingmeasure, chan)
-            lthworkingmeasure = lthworkingmeasure + mlth[voice][m]
+                lth = lth + l
+                i = i + 1
+            # rof
+            while t_num < m_number:
+                #-- print("  lthworkingmeasures={} voice={} m={} mlth[voice][m]={}".format(lthworkingmeasures,voice,m,mlth[voice][m]), file=sys.stderr)
+                lthworkingmeasures = lthworkingmeasures + mlth[voice][m]
+                t_num = t_num + 1
+                if t_num < len(meas):
+                    m = meas[t_num]
+                # fi
+            # elihw
         # rof   m in meas
-        print("{}, {}, End_track".format(voice+1, lthworkingmeasure + 26))
+        print("{}, {}, End_track".format(voice+1, lthworkingmeasures + 26))
     # rof   voice in range
     return
 #   End of print_out_midi1csv_notes
@@ -1177,6 +1264,10 @@ def do_pass2():
     global meas                             # measures
     global legal_floating
     global args
+    global bufs
+    global bufs_length
+    global bufs_accidental
+    global bufs_tie_next
 
     print_header()
 
@@ -1191,6 +1282,13 @@ def do_pass2():
             rests_in_empty_measure_voices(m, voice)
         # rof
     # rof
+
+    #-- print("print_out_midi1csv_notes:", file=sys.stderr)
+    #-- print("  bufs={}".format(bufs), file=sys.stderr)
+    #-- print("  bufs_length={}".format(bufs_length), file=sys.stderr)
+    #-- print("  bufs_accidentals={}".format(bufs_accidentals), file=sys.stderr)
+    #-- print("  bufs_tie_next={}".format(bufs_tie_next), file=sys.stderr)
+    bufs_tie_next[voice] = ''
 
     if args.vertical or args.horizontal:
         print_out_v_or_h()
@@ -1357,6 +1455,7 @@ def put_on_bufs(onvoice, p_meas, abc_note, timeofnote, append_tie):
     global bufs
     global bufs_length
     global bufs_accidentals
+    global bufs_tie_next
 
     if type(abc_note) is int:
         abc_note = str(abc_note)
@@ -1371,6 +1470,7 @@ def put_on_bufs(onvoice, p_meas, abc_note, timeofnote, append_tie):
         bufs[onvoice] = {}
         bufs_length[onvoice] = {}
         bufs_accidentals[onvoice] = {}
+        bufs_tie_next[onvoice] = ''
     # fi
     if p_meas not in bufs[onvoice]:
         if args.horizontal or args.vertical:
@@ -1404,23 +1504,43 @@ def put_on_bufs(onvoice, p_meas, abc_note, timeofnote, append_tie):
 def instak(onvoice, p_meas, thenote, timeofnote, append_tie, line):
     global args
 
-    lengthl, lengthf, ifokay = get_time_stak(timeofnote, line)
-    if not ifokay:                      # if time is error
+    if args.midi1csv:
+        put_on_bufs(onvoice, p_meas, thenote, round(timeofnote * MIDICLICKSPERQUARTER * 4), append_tie)
         return
     # fi
-    #-- if type(thenote) is not str:
-    #--     raise RuntimeError('what is up with thenote')
-    #-- # fi
+
+    lengthl, lengthf, ifokay = get_time_stak(timeofnote, line)
+    if ifokay == -1:                    # if time is error
+        return
+    # fi
+
     j = 1
     q = 0
+    if args.horizontal or args.vertical:
+        if ifokay == 1:                 # Did not fit properly.
+            #-- print("instak ifokay = 1, len(lengthl)={} lengthl={} lengthf={} timeofnote={}".format(len(lengthl),lengthl,lengthf,timeofnote),file=sys.stderr)
+            q = timeofnote
+            put_on_bufs(onvoice, p_meas, thenote, q, append_tie)
+            return
+        # fi
+    # fi
+
     for l in lengthl:
-        if args.horizontal or args.vertical:
+        if args.horizontal:
             # Length done elsewise, and accidentals elsewise too.
             q = lengthf[j-1]
             put_on_bufs(onvoice, p_meas, thenote, q, append_tie)
+            append_tie = 't'
             j = j + 1
-        elif args.midi1csv:
-            q = q + l
+        elif args.vertical:
+            q = lengthf[j-1]
+            # tie goes on one before
+            if j == len(lengthl):           # last one gets passed in append_tie note.
+                put_on_bufs(onvoice, p_meas, thenote, q, append_tie)
+            elif j < len(lengthl):
+                put_on_bufs(onvoice, p_meas, thenote, q, 't')
+            # fi
+            j = j + 1
         else:
             if j != len(lengthl) and thenote != 'z':
                 abc_note = thenote + l + '-'
@@ -1432,9 +1552,6 @@ def instak(onvoice, p_meas, thenote, timeofnote, append_tie, line):
             j = j + 1
         # fi
     # rof
-    if args.midi1csv:
-        put_on_bufs(onvoice, p_meas, thenote, q, append_tie)
-    # fi
     return
 # End of instak
 
@@ -1642,12 +1759,11 @@ def do_title(t_args, line):
     global args
 
     if t_args is None or len(t_args) == 0:
-        print_warning("Title does not have any text.", line)
+        #-- print_warning("Title does not have any text.", line)
         if args.vertical or args.horizontal:
             header = header + "title   \n"
         elif args.midi1csv:
             #-- print("do_title args.midi1csv #11", file=sys.stderr)
-            #-- sys.exit(1)
             pass
         else:
             header = header + "T:\n"
@@ -2769,7 +2885,7 @@ def getnote(note_to_decode, voice, line):
                 print_error("Note is not legal '{}' double trill".format(note_to_decode), line)
                 return '', None, normal_note
             # fi
-            return note_to_decode[2:], '', trill_note
+            return note_to_decode[2:], 't(', trill_note
         elif note_to_decode[0] == 'r':          # check for rest
             # Rest follows.
             if args.horizontal or args.vertical:
@@ -3024,6 +3140,8 @@ def process_notes(t_args, line):
     global mlth                         # measure length dictionary
     global default_note_length
     global args
+    global bufs_accidentals
+    global bufs_tie_next
 
     if not measure_on or measure_on == '':  # no measure yet
         print_error("no measure processed yet - must have one before notes.", line)
@@ -3140,7 +3258,6 @@ def process_notes(t_args, line):
             # fi
             if typenote == trill_note:
                 therest, thenote, typenote = getnote(therest, onvoice, line)
-                print("RETURN#2 from getnote: therest={} thenote={} typenote={}".format(therest, thenote, typenote),file=sys.stderr)
                 if thenote is None or thenote == 0 or thenote == '':
                     print_error("trill is not legal, no first note", line)
                     return
@@ -3157,7 +3274,6 @@ def process_notes(t_args, line):
                 # fi
                 therest = therest[1:]                                       # comma removed
                 therest, thenote, typenote = getnote(therest, onvoice, line)  # get second note
-                print("RETURN#3 from getnote: therest={} thenote={} typenote={}".format(therest, thenote, typenote),file=sys.stderr)
                 if thenote is None or thenote == 0 or thenote == '':
                     print_error("trill is not legal, second note missing", line)
                     return
@@ -3171,7 +3287,6 @@ def process_notes(t_args, line):
                     return
                 # fi
                 quotes1 = thenote
-
                 if therest is None or therest == '':
                     print_error("trill is not legal, missing number of notes", line)
                     return
@@ -3197,7 +3312,6 @@ def process_notes(t_args, line):
                     print_error("trill is not legal, number of notes to play", line)
                     return
                 # fi
-
                 timeofnote, r_accidentals, number_dots = get_time(therest, line)
                 if r_accidentals is None or r_accidentals < 0 or number_dots is None:
                     print_error("trill is not legal", line)
@@ -3221,34 +3335,43 @@ def process_notes(t_args, line):
                 # vwork = float(timeofnote) / float(np)
 
                 # t(quotes, quotes1, np)lengthl
-                lengthl, lengthf, ifokay = get_time_stak(timeofnote, line)
-                if not ifokay or len(lengthl) != 1:         # if time is error
-                    print_warning("trill/sequence time must be a printable note length, not '{}'".format(lengthl),line)
-                    t = 0
-                    for l in range(0,len(lengthl)):
-                        t = t + lengthf[l]
+                if args.horizontal or args.vertical or args.midi1csv:
+                    lengthf = [ timeofnote ]
+                else:
+                    lengthl, lengthf, ifokay = get_time_stak(timeofnote, line)
+                    if not ifokay or len(lengthl) != 1:         # if time is error
+                        print_warning("trill/sequence time must be a printable note length, not '{}'".format(lengthl),line)
+                        t = 0
+                        for l in range(0,len(lengthl)):
+                            t = t + lengthf[l]
+                        # fi
+                        lengthf = [ t ]
+                        print_warning("trill/sequence time remade '{}'".format(lengthf),line)
                     # fi
-                    lengthf = [ t ]
-                    print_warning("trill/sequence time remade '{}'".format(lengthf),line)
+                    l = str(Fraction(lengthf[0]).limit_denominator(256))
+                    where = l.find('/')
+                    lth = '1'
+                    if where > 0:                               # / in fraction
+                        numerator = l[0:where]
+                        if numerator != '1':
+                            lth = numerator
+                            l = '1' + l[where:]
+                        # fi
+                    # fi
+                    if l not in legal_notes:
+                        print_warning("#1 Time fraction '{}' is not a printable note. ({})".format(lengthf[0],l), line)
+                    # fi
                 # fi
 
-                l = str(Fraction(lengthf[0]).limit_denominator(256))
-                where = l.find('/')
-                lth = '1'
-                if where > 0:                               # / in fraction
-                    numerator = l[0:where]
-                    if numerator != '1':
-                        lth = numerator
-                        l = '1' + l[where:]
-                    # fi
-                # fi
-                if l not in legal_notes:
-                    print_warning("#1 Time fraction '{}' is not a printable note. ({})".format(default_note_length[m],l), line)
-                # fi
                 if args.horizontal or args.vertical:
-                    print("processnotes - trills NOTDONEYET #1 - horizontal or vertical", file=sys.stderr)
-                    print_error("NOTDONEYET lengthf[0]={} l={}".format(lengthf[0], l), line)
-                    sys.exit(999)
+                    np = round(np)
+                    abc_note = "t({},{},{})".format(quotes,quotes1,np)
+                    put_on_bufs(onvoice, measure_on, abc_note, lengthf[0], '')
+                    if vnumber is None:
+                        break                                       # normal old way.
+                    # fi
+                    vnumber = vnumber + 1
+                    continue
                 elif args.midi1csv:
                     lthtrill = round((lengthf[0] / int(np)) * MIDICLICKSPERQUARTER * 4.0)
                     for i in range(0, int(np)):
@@ -3259,6 +3382,11 @@ def process_notes(t_args, line):
                         # fi
                         put_on_bufs(onvoice, measure_on, abc_note, lthtrill, '')
                     # rof
+                    if vnumber is None:
+                        break                                       # normal old way.
+                    # fi
+                    vnumber = vnumber + 1
+                    continue
                 else:
                     abc_note = "[L:{}]".format(l)
                     abc_note = abc_note + '(' + str(int(np)) + ':' + lth + ':' + str(int(np))
@@ -3272,8 +3400,12 @@ def process_notes(t_args, line):
                     l_dl = default_note_text_fraction(measure_on)
                     abc_note = abc_note + "[L:{}]".format(l_dl)
                     put_on_bufs(onvoice, measure_on, abc_note, lengthf[0], '')
+                    if vnumber is None:
+                        break                                       # normal old way.
+                    # fi
+                    vnumber = vnumber + 1
+                    continue
                 # fi
-                break
             elif typenote == sequence_note:
                 print_error("NOTDONEYET - doing sequence type note", line)
                 break
@@ -3310,70 +3442,58 @@ def process_notes(t_args, line):
                 return
             # fi
 
+            append_tie = bufs_tie_next[onvoice]
+            bufs_tie_next[onvoice] = ''
+            # Tied note
             # r_accidentals = -4 marcato, -2 tied, -1 stac, 0 normal
-            append_tie = ''
-            if r_accidentals < -6:                          # 1ts
-                #                                           # break before next note - done automatically.
-                if args.horizontal or args.vertical:
-                    append_tie = 'ts'
-                elif args.midi1csv:
-                    print("process_notes tie args.midi1csv #27 nothing done, ignoring", file=sys.stderr)
-                    sys.exit(1)
-                else:
-                    thenote = '.' + thenote                 # . before the note for staccato
-                    append_tie = do_tie(onvoice, vnumber, line)
+            if r_accidentals < -6 or r_accidentals in (-6, -3, -2):
+                if vnumber is not None:         # vertical input format
+                    if args.horizontal:                     # horizontal output
+                        # put tie on following note.
+                        bufs_tie_next[onvoice] = 't'
+                    elif args.midi1csv:                     # midi1csv output
+                        # put tie on following note.
+                        bufs_tie_next[onvoice] = 't'
+                    elif args.vertical:                     # vertical output
+                        append_tie = 't'
+                    else:                                   # abc output
+                        append_tie = do_tie(onvoice, vnumber, line)
+                    # fi
+                else:                           # horizontal input format
+                    if args.vertical:                       # vertical output
+                        # put tie on previous note.
+                        if measure_on not in bufs[onvoice] or bufs[onvoice][measure_on] == '':
+                            # Do measure before.
+                            w = len(meas) - 1               # current measure number in array.
+                            if w == 0:
+                                print_error("no previous measure to tie note to.", line)
+                                return ''
+                            else:
+                                m = meas[w-1]
+                            # fi
+                        else:
+                            m = measure_on
+                        # fi
+                        i = len(bufs_accidentals[onvoice][m]) - 1
+                        bufs_accidentals[onvoice][m][i] = bufs_accidentals[onvoice][m][i] + 't'
+                        append_tie = ''                     # Nothing on this note, on previous.
+                    elif args.horizontal or args.midi1csv:  # horizontal output
+                        append_tie = 't'
+                    else:                                   # abc output
+                        append_tie = do_tie(onvoice, vnumber, line)
+                    # fi
                 # fi
-            elif r_accidentals == -6:                       # 1tm
-                #                                           # break before next note - done automatically.
-                if args.horizontal or args.vertical:
-                    append_tie = 't'
-                elif args.midi1csv:
-                    print("process_notes tie args.midi1csv #28 nothing done, ignoring", file=sys.stderr)
-                else:
-                    append_tie = do_tie(onvoice, vnumber, line)
-                # fi
-            elif r_accidentals == -5:                       # marc and 1stac
-                #                                           # break before next note - done automatically.
-                if args.horizontal or args.vertical:
-                    append_tie = 's'
-                elif args.midi1csv:
-                    print("process_notes staccato args.midi1csv #29 Not Done Yet", file=sys.stderr)
-                    sys.exit(1)
-                else:
-                    thenote = '.' + thenote                     # . before the note for staccato
-                # fi
-            elif r_accidentals == -4:                       # 1marc
-                pass  #                                     # break before next note - done automatically.
-            elif r_accidentals == -3:                       # 1ts
-                if args.horizontal or args.vertical:
-                    append_tie = 'ts'
-                elif args.midi1csv:
-                    print("process_notes tie args.midi1csv #30 Not Done Yet", file=sys.stderr)
-                    sys.exit(1)
-                else:
-                    thenote = '.' + thenote                     # . before the note for staccato
-                    append_tie = do_tie(onvoice, vnumber, line)
-                # fi
-            elif r_accidentals == -2:                       # 1tied
-                if args.horizontal or args.vertical:
-                    append_tie = 't'
-                elif args.midi1csv:
-                    print("process_notes tie args.midi1csv #31 nothing done, ignoring", file=sys.stderr)
-                else:
-                    append_tie = do_tie(onvoice, vnumber, line)
-                # fi
-            elif r_accidentals == -1:                       # 1stac
-                if args.horizontal or args.vertical:
-                    append_tie = 's'
-                elif args.midi1csv:
-                    print("process_notes staccato args.midi1csv #32 Not Done Yet, Ignoring", file=sys.stderr)
-                    #-- sys.exit(1)
-                else:
-                    thenote = '.' + thenote                 # . before the note for staccato
-                # fi
-            # elif r_accidentals == None or r_accidentals == 0:
-            #    Nothing to do.
             # fi
+
+            # Staccato
+            if r_accidentals < -6 or r_accidentals in (-5, -3, -1):
+                if args.horizontal or args.vertical or args.midi1csv:
+                    append_tie = append_tie + 's'
+                else:
+                    thenote = '.' + thenote                 # . before the note for staccato
+                # fi
+            # fi
+
             instak(onvoice, measure_on, thenote, timeofnote, append_tie, line)
             if vnumber is None:
                 break                                       # normal old way.
@@ -3435,24 +3555,24 @@ def parse_args():
                         '--mid', '--mi', '--m', '--csv', '--cs', '--c', '-c', '-m', '-1',
                         action='store_true',
                         help = 'Output MIDI 1.0 music format output - default.')
-    parser.add_argument('--abc',
-                        action='store_true',
+    parser.add_argument('--abc', '-abc',
+                        action='store_const', const=1, default=0,
                         help = 'ABC music format output - default.')
     parser.add_argument('rest', nargs='*',
                         help='Optional command to execute')
     args = parser.parse_args()
 
     if args.vertical:
-        if args.horizontal or args.abc or args.midi1csv:
+        if args.horizontal or args.abc == 1 or args.midi1csv:
             print("Only may have one of --vertical, --horizontal, --abc, or --midi1", file=sys.stderr)
             sys.exit(1)
         # fi
     elif args.horizontal:
-        if args.abc or args.midi1csv:
+        if args.abc == 1 or args.midi1csv:
             print("Only may have one of --vertical, --horizontal, --abc, or --midi1", file=sys.stderr)
             sys.exit(1)
         # fi
-    elif args.abc and args.midi1csv:
+    elif args.abc == 1 and args.midi1csv:
         print("Only may have one of --vertical, --horizontal, or --abc", file=sys.stderr)
         sys.exit(1)
     # fi
