@@ -1,29 +1,30 @@
 #-----------------------------------------------------------------------------
-SONGS = promenade
-# SONGS += tv
+SONG = v-0
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ./musicomp2abc
 #-----------------------------------------------------------------------------
-SONGS_abc = ${SONGS:=.abc}
-SONGS_ps = ${SONGS:=.ps}
-SONGS_mid = ${SONGS:=1.mid}
+# SONG = promenade
+# SONG += tv
+#-- SONG_abc = ${SONG:=.abc}
+#-- SONG_ps = ${SONG:=.ps}
+# .SUFFIXES: .abc 1.mid .ps
+#-- %1.mid:	%.abc
+#-- 	abc2midi $<
+#-- %.ps:	%.abc
+#-- 	yaps $< -k
+#-- %.abc:	%
+#-- 	${MUSICOMP2ABC} $< > $@ || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: all
-all: ${SONGS_ps} ${SONGS_mid} ${SONGS_abc}
-#-----------------------------------------------------------------------------
-.SUFFIXES:			# delete the default suffixes
-.SUFFIXES: .abc 1.mid .ps
-#-----------------------------------------------------------------------------
-%1.mid:	%.abc
-	abc2midi $<
-%.ps:	%.abc
-	yaps $< -k
-%.abc:	%
-	${MUSICOMP2ABC} < $< > $@ || (rm -f $@ ; exit 1)
+all: ${SONG}.mid
+${SONG}.mid: ${SONG}.csv
+	csvmidi $< $@
+${SONG}.csv: ${SONG}
+	${MUSICOMP2ABC} --midi1csv $< > $@
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -f *.mid *.ps *.abc *.stderr tags ctags
+	rm -f *.mid *.ps *.abc *.stderr tags ctags *.csv
 #-----------------------------------------------------------------------------
 .PHONY: tags ctags
 tags ctags:
