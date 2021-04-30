@@ -4,30 +4,24 @@ use warnings;
 #-----------------------------------------------------------------------------
 my $QN = 480;				# Length in MIDI of a quarter note.
 
-my @instruments = (    44,3,44,3, 40,3,44,3);
-#+ my @instruments = (    74,74,74,74,	# 1,2,3,4	Flute
-#+ 		       69,69,69,69,	# 5,6,7,8	Oboe
-#+ 		       72,72,72,72,	# 9,10,11,12	Clarinet
-#+ 		       71,71,71,71,	# 13,14,15,16	Bassoon
-#+ 		       61,61,61,	# 17,18,19	French Horn
-#+ 		       41,41,41,	# 20,21,22	Violin
-#+ 		       41,41,41,	# 23,24,25	Violin
-#+ 		       42,42,42,	# 26,27,28	Viola
-#+ 		       43,43,		# 29,30		Cello
-#+ 		       44,44);		# 31,32		Contrabass
+#-- my @instruments = (    44,3,44,3, 40,3,44,3);
+my @instruments = (    73, 71, 70, 68, 60, 48, 40, 41, 42, 43, 44, 45);
+my @reverb      = (    52, 57, 57, 55, 62, 60, 60, 60, 60, 72, 72, 72);
+my @pan = (0, 8, 16, 32, 48, 64, 80, 96, 112, 120, 127);
+#-----------------------------------------------------------------------------
 
 my %in;
 
 my $MAXVOICES = scalar(@instruments);
+my $NUM_PAN = scalar(@pan);
 
 my $NOTELTH=$QN;
 # my $RESTLTH=$QN;
 #-- my $RESTLTH=0;
 
-#-- my $ENDTRACKS = ($NOTELTH + $RESTLTH) * $MAXVOICES;	# End of all tracks (length in MIDI for 2 quarter notes * voices);
-my $ENDTRACKS = ($NOTELTH) * $MAXVOICES;	# End of all tracks (length in MIDI for 2 quarter notes * voices);
+# End of all tracks (length in MIDI for 2 quarter notes * voices);
+my $ENDTRACKS = ($NUM_PAN) * ($NOTELTH) * ($MAXVOICES);
 
-print STDERR "MAXVOICES=$MAXVOICES\n";
 #-----------------------------------------------------------------------------
 # c c+/d- d d+/e- e f f+/g- g g+/a- a a+/b- b  c
 # 0  1    2  3    4 5  6    7  8    9  10  11 12
@@ -35,28 +29,83 @@ print STDERR "MAXVOICES=$MAXVOICES\n";
 #-- my @NOTE = ( 60-12-12-7, 60-12-12-7, 60-12-12-7, 60-12-12-7,  60-12-12-7, 60-12-12-7, 60-12-12-7, 60-12-12-7);
 my $NOTE = 60-12-12-7;
 #-----------------------------------------------------------------------------
+sub print_header($$)
+{
+    my ($nv, $qn) = @_;
+    printf STDOUT "0, 0, Header, 1, %d, %d\n", $nv, $qn;
+}   # End of print_header
+
+#-----------------------------------------------------------------------------
+sub print_track_end($$)
+{
+    my ($track, $endtrack) = @_;
+    printf STDOUT "%d, %d, End_track\n", $track, $endtrack;
+}   # End of print_track_end
+
+#-----------------------------------------------------------------------------
+sub print_track_start($$)
+{
+    my ($track, $endtrack) = @_;
+    printf STDOUT "%d, 0, Start_track\n", $track;
+    printf STDOUT "%d, 0, Tempo, 555555\n", $track;
+    printf STDOUT "%d, 0, Key_signature, -1, \"major\"\n", $track;
+}   # End of print_track_start
+
+#-----------------------------------------------------------------------------
+sub print_note_start($$$$)
+{
+    my ($track, $start, $chan, $note) = @_;
+    printf STDOUT "%d, %d, Note_on_c, %d, %d, 127\n", $track, $start, $chan, $note;
+}   # End of print_note_start
+
+#-----------------------------------------------------------------------------
+sub print_note_stop($$$$)
+{
+    my ($track, $stop, $chan, $note) = @_;
+    printf STDOUT "%d, %d, Note_off_c, %d, %d, 0\n", $track, $stop, $chan, $note;
+}   # End of print_note_stop
+
+#-----------------------------------------------------------------------------
+sub print_track($$$$$$$$)
+{
+    my ($track, $chan, $inst, $rev, $start, $stop, $note, $pan) = @_;
+    printf STDOUT "%d, %d, Program_c, %d, %d\n", $track, $start, $chan, $inst;
+    printf STDOUT "%d, %d, Control_c, %d, 121, 0\n", $track, $start, $chan;
+    printf STDOUT "%d, %d, Control_c, %d, 64, 0\n", $track, $start, $chan;
+
+#  91   Reverb Level - Affects: this is usually the reverb or delay level.
+    printf STDOUT "%d, %d, Control_c, %d, 91, %d\n", $track, $start, $chan, $rev;  # No reverb.
+#  10   Pan position   64 is center, 0 is hard left, and 127 is hard right.
+    printf STDOUT "%d, %d, Control_c, %d, 10, %d\n", $track, $start, $chan, $pan;  # where between stereo l->r.
+#   7   Volume   maximum is 127 and off.
+    printf STDOUT "%d, %d, Control_c, %d, 7, 127\n", $track, $start, $chan;	# Full volume.
+}   # End of print_track
+
+#-----------------------------------------------------------------------------
+my $track = 1;
+#-----------------------------------------------------------------------------
 # Print header
-printf STDOUT "0, 0, Header, 1, %d, %d\n", $MAXVOICES + 1, $QN;
-print STDOUT "1, 0, Start_track\n";
-print STDOUT "1, 0, Tempo, 555555\n";
-print STDOUT "1, 0, Key_signature, -1, \"major\"\n";
-printf STDOUT "1, %d, End_track\n", $ENDTRACKS;
+print_header($MAXVOICES + 1, $QN);
+print_track_start($track, $ENDTRACKS);
+print_track_end($track, $ENDTRACKS);
 #-----------------------------------------------------------------------------
 my $last_instrument = 0;
-my $track = 1;
 my $chan;
-my $start = 1;
+my $start = 0;
 my $stop = $QN;
-#-- my $v = 1;
 my $v = 0;
-for my $instr (@instruments)
+my $note = 60;
+for (my $i=0; $i < scalar(@instruments); $i = $i + 1)
 {
-    if ($instr != $last_instrument)
+    $track = $track + 1;
+    print_track_start($track, $ENDTRACKS);
+
+    if ($instruments[$i] != $last_instrument)
     {
-	$last_instrument = $instr;
-	if (defined($in{$instr}))
+	$last_instrument = $instruments[$i];
+	if (defined($in{$last_instrument}))
 	{
-	    $chan = $in{$instr};
+	    $chan = $in{$last_instrument};
 	}
 	else
 	{
@@ -72,25 +121,20 @@ for my $instr (@instruments)
 	    {
 		$chan = 0;
 	    }
-	    $in{$instr} = $chan;
+	    $in{$last_instrument} = $chan;
 	}
     }
-    $track = $track + 1;
-    printf STDOUT "%d, 0, Start_track\n", $track;
-    printf STDOUT "%d, 1, Program_c, %d, %d\n", $track, $chan, $last_instrument;
-#    printf STDOUT "%d, %d, Note_on_c, %d, %d, 127\n", $track, $start, $chan, $NOTE[$v-1];
-#    printf STDOUT "%d, %d, Note_off_c, %d, %d, 0\n", $track, $stop, $chan, $NOTE[$v-1];
-    printf STDOUT "%d, %d, Note_on_c, %d, %d, 127\n", $track, $start, $chan, $NOTE+$v;
-    printf STDOUT "%d, %d, Note_off_c, %d, %d, 0\n", $track, $stop, $chan, $NOTE+$v;
-    printf STDOUT "%d, %d, Text_t, \" --- voice %d  ---\"\n", $track, $stop, $v;
-    printf STDOUT "%d, %d, End_track\n", $track, $ENDTRACKS;
 
-    # NOTE
-    $start = $start + $NOTELTH / 3;
-    $stop = $stop + $NOTELTH / 3;
-#--    # REST
-#--    $start = $start + $RESTLTH;
-#--    $stop = $stop + $RESTLTH;
+    for my $p (@pan)
+    {
+	print_track($track, $chan, $last_instrument, $reverb[$i], $start, $stop, $note, $p);
+	print_note_start($track, $start, $chan, $note);
+	print_note_stop($track, $stop, $chan, $note);
+	$start = $start + $NOTELTH;
+	$stop = $stop + $NOTELTH;
+    }
+    print_track_end($track, $ENDTRACKS);
+
     # Next voice/track.
     $v = $v + 1
 }
