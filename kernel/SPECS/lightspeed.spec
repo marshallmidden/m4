@@ -4,7 +4,7 @@
 
 Summary: The Linux kernel
 
-# Light specification file. 2020-12-19
+# Light specification file. 2021-04-13
 %define buildid .lightspeed
 
 # For a kernel released for public testing, released_kernel should be 1.
@@ -13,8 +13,8 @@ Summary: The Linux kernel
 
 %global distro_build 693
 
-%define rpmversion 5.10.1
-%define pkgrelease 2020.12.19
+%define rpmversion 5.12.rc7
+%define pkgrelease 2021.04.13
 
 %define pkg_release %{pkgrelease}%{?buildid}
 
@@ -337,7 +337,6 @@ Source9999: lastcommit.stat
 
 # LightSpeed kernel patches. Very order dependent. Replace module first.
 # Numbered as BASIC (or Fortran) program -- leaving room for additions.
-PATCH40001: patch-3.40001-no-bashcompletion-cpupower
 PATCH40003: patch-3.40003-rpm-debugedit-no-trailing-slashes
 PATCH40010: patch-3.40010-qla2xxx-target-initiator
 PATCH40011: patch-3.40011-less-console-output
@@ -353,6 +352,7 @@ PATCH40043: patch-3.40043-reparse-attrs
 PATCH40044: patch-3.40044-disable_nobufferwrite
 PATCH40046: patch-3.40046-SMB202_mem_leak
 PATCH40050: patch-3.40050-scripts-to-python3
+PATCH40060: patch-3.40060-less-fc-iscsi-bad-messages
 
 # empty final patch to facilitate testing of kernel patches
 Patch999999: linux-kernel-test.patch
@@ -655,7 +655,6 @@ cd linux-%{KVRA}
 cp $RPM_SOURCE_DIR/kernel-%{version}-*.config .
 
 # Start of LightSpeed kernel patches being applied.
-ApplyOptionalPatch patch-3.40001-no-bashcompletion-cpupower
 ApplyOptionalPatch patch-3.40003-rpm-debugedit-no-trailing-slashes
 ApplyOptionalPatch patch-3.40010-qla2xxx-target-initiator
 ApplyOptionalPatch patch-3.40011-less-console-output
@@ -671,6 +670,7 @@ ApplyOptionalPatch patch-3.40043-reparse-attrs
 ApplyOptionalPatch patch-3.40044-disable_nobufferwrite
 ApplyOptionalPatch patch-3.40046-SMB202_mem_leak
 ApplyOptionalPatch patch-3.40050-scripts-to-python3
+ApplyOptionalPatch patch-3.40060-less-fc-iscsi-bad-messages
 
 # The empty test patch -- put LightSpeed patches before this.
 ApplyOptionalPatch linux-kernel-test.patch
@@ -1471,6 +1471,12 @@ fi
 %kernel_variant_files %{with_kdump} kdump
 
 %changelog
+* Tue Apr 13 2021 Marshall Midden
+- [kernel] rhel-kernel: Kernel v5.12.rc7, uses gcc-10.3.0
+
+* Thu Feb 18 2021 Marshall Midden
+- [kernel] rhel-kernel: Kernel v5.11.0, uses gcc-10.0.2.
+
 * Fri Nov 20 2020 Marshall Midden
 - [kernel] rhel-kernel: Kernel v5.10-rc4, use gcc-10.0.2.
 
