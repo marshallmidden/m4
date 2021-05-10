@@ -1146,9 +1146,9 @@ def print_measure_vh_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt):
         if voice in vinstrument[m]:
             t = vinstrument[m][voice]
             if n_instrument == '':
-                n_instrument = t
+                n_instrument = str(t)
             else:
-                n_instrument = n_instrument + ',' + t
+                n_instrument = n_instrument + ',' + str(t)
             # fi
         # fi
     # rof
@@ -3548,23 +3548,32 @@ def getnote(note_to_decode, voice, line):
     temp2 = note_to_decode[temp3]
     if temp2 not in [ 'a', 'b', 'c', 'd', 'e', 'f', 'g' ]:      # if not note -- reset, etc.
         if note_to_decode[0] == 's':            # check for sequence
-            if note_to_decode[1] != '(':        # if time given
-                #       from, from_character, to, to_character, optionallength
-                note_to_decode = note_to_decode[0:]
-                sc = note_to_decode.find('(')
-                if sc < 0:
-                    print_error("Sequence is not legal '{}' no parenthesis ".format(note_to_decode), line)
-                    return '', None, normal_note
-                # fi
-                time(note_to_decode, voice, line)   # get the time
-                therest = note_to_decode[sc:]
-            else:
-                thenote = -1                    # set flag for no time given
-                therest = note_to_decode[2:]
+            if note_to_decode[1] == '(':        # if time given
+                print_error("sequence does not have a number of notes before parenthesis", line)
+                return '', None, None                # ???
             # fi
+            #       from, from_character, to, to_character, optionallength
+            note_to_decode = note_to_decode[1:]
+            sc = note_to_decode.find('(')
+            if sc < 0:
+                print_error("Sequence is not legal '{}' no parenthesis ".format(note_to_decode), line)
+                return '', None, normal_note
+            # fi
+            number_in_sequence = note_to_decode[0:sc]
+            number_in_sequence, type_error = is_float(number_in_sequence)
+            if type_error is not None:
+                print_error(type_error, line)
+                return '', None, None                # ???
+            # fi
+            if number_in_sequence is None:
+                print_error("sequence does not have a number of notes before parenthesis", line)
+                return '', None, None                # ???
+            # fi
+            number_in_sequence = round(number_in_sequence)
+            #-- time(note_to_decode, voice, line)   # get the time
+            therest = note_to_decode[sc:]
             typenote = sequence_note            # set flag for sequence
-            print_error("NOTDONEYET - Sequence '{}'".format(note_to_decode), line)
-            return therest, thenote, typenote
+            return therest, number_in_sequence, typenote
         elif note_to_decode[0] == 't':          # check for trill
             if note_to_decode[1] != '(':        # check for parenthesis
                 print_error("Note is not legal '{}', no parenthesis".format(note_to_decode), line)
@@ -3935,7 +3944,7 @@ def process_notes(t_args, line):
             if type(thenote) == str and thenote == '':
                 break
             # fi
-            if type(thenote) is int:
+            if type(thenote) is int and typenote != sequence_note:
                 #-- if thenote == 0:                        # return nothing, ignore.
                 #--     break
                 #-- # fi
@@ -4019,7 +4028,6 @@ def process_notes(t_args, line):
                 time[onvoice] = timeofnote
 
     #   t(3a,3g,7)4 =>  '(7:4:2 3a3g'
-    #   s2(4a,b,a,g,c) => '(4:2:5 4abagc'
 
                 # vwork = float(timeofnote) / float(np)
 
@@ -4029,13 +4037,13 @@ def process_notes(t_args, line):
                 else:
                     lengthl, lengthf, ifokay = get_time_stak(timeofnote, line)
                     if ifokay != 0 or len(lengthl) != 1:         # if time is error
-                        print_warning("trill/sequence time must be a printable note length, not '{}'".format(lengthl),line)
+                        print_warning("trill time must be a printable note length, not '{}'".format(lengthl),line)
                         t = 0
                         for l in range(0,len(lengthl)):
                             t = t + lengthf[l]
                         # fi
                         lengthf = [ t ]
-                        print_warning("trill/sequence time remade '{}'".format(lengthf),line)
+                        print_warning("trill time remade '{}'".format(lengthf),line)
                     # fi
                     l = str(Fraction(lengthf[0]).limit_denominator(256))
                     where = l.find('/')
@@ -4048,7 +4056,7 @@ def process_notes(t_args, line):
                         # fi
                     # fi
                     if l not in legal_notes:
-                        print_warning("#1 Time fraction '{}' is not a printable note. ({})".format(lengthf[0],l), line)
+                        print_warning("#2 Time fraction '{}' is not a printable note. ({})".format(lengthf[0],l), line)
                     # fi
                 # fi
 
@@ -4096,8 +4104,118 @@ def process_notes(t_args, line):
                     continue
                 # fi
             elif typenote == sequence_note:
-                print_error("NOTDONEYET - doing sequence type note", line)
-                break
+                number_in_sequence = thenote
+                if therest[0] != '(':
+                    print_error("sequence is not legal, no parenthesis after number {}".format(number_in_sequence), line)
+                    return
+                # fi
+                therest = therest[1:]                                       # parenthesis removed
+                notes = []
+                for sn in range(0,number_in_sequence):
+                    therest, thenote, typenote = getnote(therest, onvoice, line)
+                    if thenote is None or thenote == 0 or thenote == '':
+                        print_error("sequence is not legal, no note", line)
+                        return
+                    # fi
+                    if typenote == gsw_operand:                                 # 2**16 gsw opnd
+                        quotes = thenote - (1 << 16)
+                    else:
+                        quotes = thenote
+                    # fi
+                    if sn != number_in_sequence - 1:
+                        if therest is None or therest == '' or therest[0] != ',':
+                            print_error("sequence is not legal, no comma after note", line)
+                            return
+                        # fi
+                    elif therest[0] != ')':
+                        print_error("sequence is not legal, no right parenthesis after last note", line)
+                        return
+                    # fi
+                    therest = therest[1:]                                       # parenthesis removed
+                    notes.append(quotes)
+                # rof
+                timeofnote, r_accidentals, number_dots = get_time(therest, line)
+                if r_accidentals is None or r_accidentals < 0 or number_dots is None:
+                    print_error("sequence is not legal", line)
+                    return
+                # fi
+                if timeofnote == 0:
+                    timeofnote = time[onvoice]
+                # fi
+                if number_dots != 0:
+                    p = timeofnote / 2.0
+                    for i in range(1,number_dots+1):
+                        timeofnote = timeofnote + p
+                        p = p / 2.0
+                    # rof
+                # fi
+                time[onvoice] = timeofnote
+
+                if args.horizontal or args.vertical or args.midi1csv:
+                    lengthf = [ timeofnote ]
+                else:
+                    lengthl, lengthf, ifokay = get_time_stak(timeofnote, line)
+                    if ifokay != 0 or len(lengthl) != 1:         # if time is error
+                        print_warning("sequence time must be a printable note length, not '{}'".format(lengthl),line)
+                        t = 0
+                        for l in range(0,len(lengthl)):
+                            t = t + lengthf[l]
+                        # fi
+                        lengthf = [ t ]
+                        print_warning("sequence time remade '{}'".format(lengthf),line)
+                    # fi
+                    l = str(Fraction(lengthf[0]).limit_denominator(256))
+                    print("lengthf={} l={}".format(lengthf,l), file=sys.stderr)
+                    where = l.find('/')
+                    lth = '1'
+                    if where > 0:                               # / in fraction
+                        numerator = l[0:where]
+                        if numerator != '1':
+                            lth = numerator
+                            l = '1' + l[where:]
+                        # fi
+                    # fi
+                    if l not in legal_notes:
+                        print_warning("#3 Time fraction '{}' is not a printable note. ({})".format(lengthf[0],l), line)
+                    # fi
+                # fi
+
+                if args.horizontal or args.vertical:
+                    abc_note = "s{}({})".format(number_in_sequence, ','.join(notes))
+                    put_on_bufs(onvoice, measure_on, abc_note, lengthf[0], '')
+                    if vnumber is None:
+                        break                                       # normal old way.
+                    # fi
+                    vnumber = vnumber + 1
+                    continue
+                elif args.midi1csv:
+                    lthseq = round((lengthf[0] / number_in_sequence) * MIDICLICKSPERQUARTER * 4.0)
+                    for q in notes:
+                        put_on_bufs(onvoice, measure_on, q, lthseq, '')
+                    # rof
+                    if vnumber is None:
+                        break                                       # normal old way.
+                    # fi
+                    vnumber = vnumber + 1
+                    continue
+                else:
+                    #   s5(4a,b,a,g,c)2 => '(4:2:5 4abagc'
+                    abc_note = "[L:{}]".format(l)
+                    # abc_note = abc_note + '(' + str(number_in_sequence) + ':' + l + ':' + str(number_in_sequence) + ' '
+                    abc_note = abc_note + '(' + str(number_in_sequence) + ':' + '1' + ':' + str(number_in_sequence) + ' '
+                    for q in notes:
+                        abc_note = abc_note + q
+                    # rof
+                    l_dl = default_note_text_fraction(measure_on)
+                    abc_note = abc_note + "[L:{}]".format(l_dl)
+                    print("abc_note='{}'".format(abc_note),file=sys.stderr)
+                    put_on_bufs(onvoice, measure_on, abc_note, lengthf[0], '')
+                    if vnumber is None:
+                        break                                       # normal old way.
+                    # fi
+                    vnumber = vnumber + 1
+                    continue
+                # fi
             #-- elif thenote == 0:                               # if nothing to do
             #--     break
             #-- # fi
