@@ -35,6 +35,7 @@ static char     original_termios_gotten = 0;
 /* not static, because might not be used in debugging. */
 char *nt[] = {
     "r  ",
+//    0      1      2      3      4      5      6      7      8      9
     "ooo", "ooo", "ooo", "ooo", "ooo", "ooo", "ooo", "ooo", "ooo", "ooo",
     "ooo", "ooo", "ooo", "ooo", "ooo", "ooo", "ooo", "ooo", "ooo", "ooo",
     "ooo", "ooo", "ooo", "ooo", "0c ", "0d-", "0d ", "0e-", "0e ", "0f ",
