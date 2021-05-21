@@ -1,11 +1,18 @@
 #!/usr/bin/python3 -B
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 #-----------------------------------------------------------------------------
+# vol(xxx) before a note exists in processing - sets vl[voice][measure_on].  ?
+# When instak-ing, need to put vol() change in for --horizontal, --vertical. ?
+# For ABC notation, need to have it ... probably before the note. +pp+       ?
+# For midi1csv - use bufs_vol[voice][measure].append() ... rests, notes ...  ?
+#-----------------------------------------------------------------------------
 # xpose is done for --vertical, --horizontal, and --midi1csv, but NOT abc format.
 #-----------------------------------------------------------------------------
 # TODO:
 # 1) tempo allowed anywhere. Make notes match to there. (rest insertion)
 # 2) cresendo/decresendo anywhere. Make notes match to there. (rest insertion)
+#    Volume number per note?  ABC change per note into bufs[] -- when placed onto it.
+#    Look for bufs_volume ...
 # 3) Instrument numbers +/- by a given value. (fluidsynth verses timidity)
 # 4) Select clef=treble or clef=bass by notes min and max notes on staff(s).
 #       # NOTDONEYET - add ' clef=bass'  (after the number)
@@ -18,8 +25,6 @@
 # pan        1,2 8                $$ 10 pan
 # reverb     1,2 52               $$ 91 Reverb level
 #-----------------------------------------------------------------------------
-#   7   Volume   maximum is 127 and off.
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 #  10   Pan position   64 is center, 0 is hard left, and 127 is hard right.
 #  Number: 10 (coarse) 42 (fine)
 # Where within the stereo field the device's sound will be placed (assuming that it
@@ -364,14 +369,14 @@ global legal_floating_times
 legal_floating_times = sorted(legal_notes.values())
 
 global vlprint
-vlprint = { 0: 'ppp',
-            1: 'pp',
-            2: 'p',                 # 61 = p    for 0..127      (2+1)*16-1
-            3: 'mp',
-            4: 'mf',
-            5: 'f',                 # 98 = f    for 0..127      (5+1)*16-1
-            6: 'ff',
-            7: 'fff',               #                           (7+1)*16-1
+vlprint = { 15: 'ppp',
+            31: 'pp',
+            47: 'p',                 # 61 = p    for 0..127      (2+1)*16-1
+            63: 'mp',
+            79: 'mf',
+            95: 'f',                 # 98 = f    for 0..127      (5+1)*16-1
+            111: 'ff',
+            127: 'fff',               #                           (7+1)*16-1
           }
 # ------------------------------------------------------------------------------
 global instruments
@@ -653,7 +658,7 @@ cis = 0
 global vl                           # volume levels
 vl = { }                            # vl[voice][m] = volumelevel
 vl[1] = { }                         # vl[voice][m] = volumelevel
-vl[1][''] = 7                       # vl[voice][m] = volumelevel
+vl[1][''] = 127                     # vl[voice][m] = volumelevel
 global xpose
 xpose = {}
 global xpose_new_key
@@ -871,7 +876,7 @@ def new_voice_initialize(voice, m):
         bufs_tie_next[voice] = ''
     # fi
     if m not in vl[voice]:
-        vl[voice][m] = 7                # start volume out at maximum
+        vl[voice][m] = 127              # start volume out at maximum
     if m not in vinstrument:
         vinstrument[m] = {}
         reverb[m] = {}
@@ -914,10 +919,12 @@ def get_volume_level(m, voice):
     j = vl[voice][m]                    # volume level for this voice/measure
     if args.horizontal or args.vertical:
         return j
-    elif args.midi1csv:
-        return ((j + 1) * 16) - 1
-    # else:         # ABC
     # fi
+    if args.midi1csv:
+        return j
+    # fi
+    j = int(j / 16)
+    j = (j * 16) + 15                   # convert so can do index on vlprint.
     return ('+' + vlprint[j] + '+')
 # End of get_volume_level
 
@@ -1058,6 +1065,7 @@ def print_measure_abc(m, voice, l_meter, l_dl, l_clef, l_instrument, l_vl, l_txt
         l_meter = measure_meter[m]
         pr = pr + "[M:{}]".format(l_meter)
     # fi
+# NOTDONEYET - bufs_volume? - per note - Move to bufs for abc format. .. does not l_vl input/output any more.
     v_vl = get_volume_level(m, voice)
     if v_vl != l_vl:
         pr = pr + v_vl
@@ -1075,6 +1083,7 @@ def print_out_abc():
 
     for voice in reversed(range(1,len(vl)+1)):
         print("% --- voice", voice, ' ---')
+# NOTDONEYET - bufs_volume? Get rid of l_vl.
         l_meter = l_dl = l_clef = l_instrument = l_vl = ''
         print_line = ''
         for i in range(0, len(meas)):
@@ -1086,6 +1095,7 @@ def print_out_abc():
                 print(print_line + "% measure {}".format(m))
                 print_line = ''
             # fi
+# NOTDONEYET - bufs_volume? Get rid of l_vl.
             print_line, l_meter, l_dl, l_clef, l_instrument, l_vl = print_measure_abc(m, voice,
                         l_meter, l_dl, l_clef, l_instrument, l_vl, print_line)
         # rof
@@ -1157,6 +1167,7 @@ def print_measure_vh_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt):
     pv = False
 
     for voice in range(1,len(vl)+1):
+# NOTDONEYET - bufs_volume? - per note - Move to bufs for vertical format - what about horizontal?
         t = str(get_volume_level(m, voice))
         if n_vl == '':
             n_vl = t
@@ -1165,7 +1176,7 @@ def print_measure_vh_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt):
         # fi
     # rof
     if l_vl != n_vl:
-        pr = pr + 'volume  {}\n'.format(n_vl)
+        pr = pr + 'volumes {}\n'.format(n_vl)
         pv = True
     # fi
 
@@ -1607,6 +1618,7 @@ def print_out_midi1csv_notes():
         while m_number < len(meas):             # while there are measures left to do
             t_num = m_number
             m = meas[m_number]
+# NOTDONEYET - bufs_volume? - per note - Move to bufs_volume for midi1cvs format?
             v_vl = get_volume_level(m, voice)   # Starting volume of note - no changing over ties.
             lth = lthworkingmeasures            # start of measure notes.
             i = 0
@@ -1623,6 +1635,7 @@ def print_out_midi1csv_notes():
                 # fi
                 n = bufs[voice][m][i]           # note number
                 if n != '0' and n != 0:         # Only for note that plays (not rest).
+# NOTDONEYET - bufs_volume? - per note - Move to bufs_volume for midi1cvs format?
                     print("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lth, chan, n, v_vl))
                 # fi
                 tmp,m_number,lastmeter, channel, chan, l_instrument = do_possible_midi_tie(voice, m_number, i, l,lastmeter, channel, chan, l_instrument, lthworkingmeasures)
@@ -1660,6 +1673,7 @@ def do_pass2():
     global bufs_length
     global bufs_accidental
     global bufs_tie_next
+    global vl
 
     print_header()
 
@@ -3330,15 +3344,12 @@ def do_volume_both(t_args, line, command_name):
             for j in vlprint:
                 if wargs[i - 1] == vlprint[j]:
                     v = j
-                    if command_name == 'volumes':
-                        v = ((v+1) * 16) - 1    # semi convert to 0->127 from 0->7.
-                    # fi
                     type_error = None
                     break
                 # fi
             # rof
             if type_error is not None:
-                print_error(command_name + " did not get have a floating number. {}".format(type_error), line)
+                print_error(command_name + " did not get have a number or volume name. {}".format(type_error), line)
                 return
             # fi
             # Fall through, because we found it via letters.
@@ -3351,24 +3362,24 @@ def do_volume_both(t_args, line, command_name):
         if v < 0:                       # If error or bad value
             print_error(command_name + " for voice {} not good {}, making it zero.".format(i,v), line)
             v = 0
+        # fi
         if command_name == 'volumes':
             if v > 127:                 # If error or bad value
                 print_error(command_name + " {} for voice {} not good, making it 127.".format(v,i), line)
                 v = 127
             # fi
-            v = int((v + 1)/ 16) - 1    # Semi-convert to 0 to 7.
         elif command_name == 'volume' and v > 7:    # If error or bad value
-            print_error(command_name + " {} for voice {} not good, making it 7.".format(v,i), line)
-            v = 7
-        elif command_name == 'volumes' and v > 127: # If error or bad value
-            print_error(command_name + " {} for voice {} not good, making it 127.".format(v,i), line)
+            print_error(command_name + " {} for voice {} not good, making it 7 (127 for midi).".format(v,i), line)
             v = 127
+        else:
+            v = int((v * 16) + 15)      # Convert to 0 to 127.
         # fi
         if not i in vl:
             new_voice_initialize(i, measure_on)
         # fi
         vl[i][measure_on] = v           # Change volume for voice.
     # rof
+    fill_voice_mlth(line)               # Need to make measure for other voices up to here "mlth".
     return
 # End of do_volume_both
 
@@ -3541,7 +3552,7 @@ def do_measure(t_args, line):
         # rof
         new_voice_initialize(i, measure_on)
         if measure_on not in vl[i]:
-            vl[i][measure_on] = 7
+            vl[i][measure_on] = 127
         # fi
         mlth[i][measure_on] = 0
         # last instrument continues - might change shortly.
@@ -4610,6 +4621,44 @@ def do_tie(onvoice, vnumber, line):
 # End of do_tie
 
 #-----------------------------------------------------------------------------
+# therest,newvolume = get_vol_note(temp1, line)
+def get_vol_note(temp1, line):
+    therest = temp1[4:]
+    print("therest={}".format(therest), file=sys.stderr)
+    sc = therest.find(')')
+    if sc < 0 or sc == 0:
+        print_error("A 'vol(' needs a number followed by a ')' -- ')' or number is missing", line)
+        return '', None
+    # fi
+    s1 = therest[0:sc]
+    therest = therest[sc+1:]
+    f1, type_error = is_float(s1)
+    if type_error is not None:
+        for j in vlprint:
+            if s1 == vlprint[j]:
+                f1 = j
+                type_error = None
+                break
+            # fi
+        # rof
+        if type_error is not None:
+            print_error("vol(xxx) did not get have a number or volume name. {}".format(type_error), line)
+            return '', None
+        # fi
+    # fi
+    if f1 is None:
+        print_error("volume is not a number.", line)
+        return '', None
+    # fi
+    f1 = round(f1)
+    if f1 < 1  or f1 > 127:       # If out of range.
+        print_error("volume number must be between 1 and 127 inclusive. Not ({})".format(f1), line)
+        return '', None
+    # fi
+    return therest, f1
+# End of get_vol_note
+
+#-----------------------------------------------------------------------------
 # Parse and process possible notes line.
 # All have ,'s as separators.
 # old way is: voice1,voice2,voice3,voice4   -- 3c4, 3e4, 3g4, 4c4
@@ -4644,19 +4693,21 @@ def process_notes(t_args, line):
         print_error("no arguments on note line", line)
         return
     # fi
-
+#............................................................................
     # Check if 'v#' or 'v(#)'
     vnumber = None
     if wargs[0]:
-        if (wargs[0])[0] == 'v':
+        if (wargs[0])[0] == 'v' and (wargs[0])[1] != 'o':
             s1 = (wargs[0])[1:]
             sc = s1.find(':')
             if sc < 0:
                 print_error("A 'v' needs a number followed by a colon -- colon is missing", line)
                 return
+            # fi
             if sc == 0:
                 print_error("A 'v' needs a number followed by a colon -- number is missing", line)
                 return
+            # fi
             s1 = s1[0:sc]
 
             f1, type_error = is_float(s1)
@@ -4682,7 +4733,7 @@ def process_notes(t_args, line):
             vnumber = 0
         # fi
     # fi
-
+#............................................................................
     if cis == 0:                        # if not doing only one voice continuously for a while...
         if len(wargs) > voices:
             print_error("too many arguments ({}), greater than voices (>{})".format(len(wargs), voices), line)
@@ -4708,7 +4759,6 @@ def process_notes(t_args, line):
                 # fi
             # fi
         # rof
-
     # fi
 #............................................................................
     # Decode and stack the notes.
@@ -4726,6 +4776,16 @@ def process_notes(t_args, line):
                     break
                 # fi
                 temp1 = wargs[vnumber]
+            # fi
+            if temp1[0:4] == 'vol(':
+                print("vol(", file=sys.stderr)
+                therest,newvolume = get_vol_note(temp1, line)
+                print("therest='{}'  newvolume={}".format(therest, newvolume), file=sys.stderr)
+                if newvolume is None:
+                    continue
+                # fi
+                vl[onvoice][measure_on] = newvolume
+                temp1 = therest
             # fi
             therest, thenote, typenote = getnote(temp1, onvoice, line) # get next note
             if thenote is None:
