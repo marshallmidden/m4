@@ -5,14 +5,17 @@
 # When instak-ing, need to put vol() change in for --horizontal, --vertical. ?
 # For ABC notation, need to have it ... probably before the note. +pp+       ?
 # For midi1csv - use bufs_vol[voice][measure].append() ... rests, notes ...  ?
+# NOTDONEYET - bufs_vol() #
 #-----------------------------------------------------------------------------
 # xpose is done for --vertical, --horizontal, and --midi1csv, but NOT abc format.
+# ABC format thus will "print" right, but not "play" (abc2midi) right.
+#       NOTDONEYET - so ABC format can print. NOTDONEYET - abc #
 #-----------------------------------------------------------------------------
 # TODO:
 # 1) tempo allowed anywhere. Make notes match to there. (rest insertion)
 # 2) cresendo/decresendo anywhere. Make notes match to there. (rest insertion)
 #    Volume number per note?  ABC change per note into bufs[] -- when placed onto it.
-#    Look for bufs_volume ...
+#    Look for bufs_vol ...
 # 3) Instrument numbers +/- by a given value. (fluidsynth verses timidity)
 # 4) Select clef=treble or clef=bass by notes min and max notes on staff(s).
 #       # NOTDONEYET - add ' clef=bass'  (after the number)
@@ -713,6 +716,8 @@ global bufs_accidental              # bufs_length[voice][measure][#] ... number=
 bufs_accidentals = { 1: {} }
 global bufs_tie_next
 bufs_tie_next = { 1: '' }
+global bufs_vol
+bufs_vol = { 1: {} }
 
 global lstac,lgrace,lpause
 lstac = lgrace = lpause = 4         # starting staccato, grace note, lpause as 4/60th of a second
@@ -853,6 +858,7 @@ def new_voice_initialize(voice, m):
     global bufs_length
     global bufs_accidentals
     global bufs_tie_next
+    global bufs_vol
     global acc_m
     global acc_m_xpose
     global acc_v_init                   # Last accidental on a note in measure.
@@ -874,6 +880,7 @@ def new_voice_initialize(voice, m):
         bufs_length[voice] = {}
         bufs_accidentals[voice] = {}
         bufs_tie_next[voice] = ''
+        bufs_vol[voice] = {}
     # fi
     if m not in vl[voice]:
         vl[voice][m] = 127              # start volume out at maximum
@@ -937,6 +944,7 @@ def rests_in_empty_measure_voices(m, voice):
     global bufs_length
     global bufs_accidentals
     global bufs_tie_next
+    global bufs_vol
     global args
 
     if m in bufs[voice]:                    # Already present, then of right length.
@@ -953,6 +961,7 @@ def rests_in_empty_measure_voices(m, voice):
         l = l - mlth[voice][m]              # All measure lengths with voices are the same.
     # fi
     if m not in bufs[voice]:
+        bufs_vol[voice][m] = []
         if args.horizontal or args.vertical or args.midi1csv:
             bufs[voice][m] = []
             bufs_length[voice][m] = []
@@ -962,6 +971,7 @@ def rests_in_empty_measure_voices(m, voice):
             bufs[voice][m] = ''
         # fi
     # fi
+    bufs_vol[voice][m].append(vl[voice][m])
     # Put out rests.
     if l <= 0:                              # if nothing to do.
         return
@@ -979,9 +989,6 @@ def rests_in_empty_measure_voices(m, voice):
             return
         # fi
     # fi
-    if m not in bufs[voice]:
-        print_error("rests_in_empty_measure_voices - m={} not in bufs[m,voice]", 'pass2')
-    # fi
     bufs_tie_next[voice] = ''
     if args.horizontal or args.vertical:
         bufs[voice][m].append('r')
@@ -998,7 +1005,7 @@ def rests_in_empty_measure_voices(m, voice):
 # End of rests_in_empty_measure_voices
 
 #-----------------------------------------------------------------------------
-def print_measure_abc(m, voice, l_meter, l_dl, l_clef, l_instrument, l_vl, l_txt):
+def print_measure_abc(m, voice, l_meter, l_dl, l_clef, l_instrument, l_vl, nt, l_txt):
     global bufs
     global vl
     global measure_meter
@@ -1012,6 +1019,7 @@ def print_measure_abc(m, voice, l_meter, l_dl, l_clef, l_instrument, l_vl, l_txt
     global key_name
     global key_voice
     global key_voice_abc
+    global bufs_vol
 
     if voice not in bufs:
         return "ERROR - bufs voice dictionary is hosed.", '', '', '', ''
@@ -1065,8 +1073,16 @@ def print_measure_abc(m, voice, l_meter, l_dl, l_clef, l_instrument, l_vl, l_txt
         l_meter = measure_meter[m]
         pr = pr + "[M:{}]".format(l_meter)
     # fi
-# NOTDONEYET - bufs_volume? - per note - Move to bufs for abc format. .. does not l_vl input/output any more.
-    v_vl = get_volume_level(m, voice)
+    if nt not in bufs_vol[voice][m]:
+        j = get_volume_level(m, voice)
+    else:
+        v_vl = bufs_vol[voice][m][nt]
+        j = int(v_vl / 16)
+        j = (j * 16) + 15                   # convert so can do index on vlprint.
+        j = vlprint[j]
+    # fi
+    v_vl = '+' + j + '+'
+
     if v_vl != l_vl:
         pr = pr + v_vl
         l_vl = v_vl
@@ -1083,7 +1099,6 @@ def print_out_abc():
 
     for voice in reversed(range(1,len(vl)+1)):
         print("% --- voice", voice, ' ---')
-# NOTDONEYET - bufs_volume? Get rid of l_vl.
         l_meter = l_dl = l_clef = l_instrument = l_vl = ''
         print_line = ''
         for i in range(0, len(meas)):
@@ -1095,9 +1110,8 @@ def print_out_abc():
                 print(print_line + "% measure {}".format(m))
                 print_line = ''
             # fi
-# NOTDONEYET - bufs_volume? Get rid of l_vl.
             print_line, l_meter, l_dl, l_clef, l_instrument, l_vl = print_measure_abc(m, voice,
-                        l_meter, l_dl, l_clef, l_instrument, l_vl, print_line)
+                        l_meter, l_dl, l_clef, l_instrument, l_vl, i, print_line)
         # rof
         if print_line != '':
             print_line = print_line + ']'
@@ -1167,7 +1181,7 @@ def print_measure_vh_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt):
     pv = False
 
     for voice in range(1,len(vl)+1):
-# NOTDONEYET - bufs_volume? - per note - Move to bufs for vertical format - what about horizontal?
+        new_voice_initialize(voice, m)
         t = str(get_volume_level(m, voice))
         if n_vl == '':
             n_vl = t
@@ -1211,9 +1225,11 @@ def print_out_notes_v_of_h(m, print_line):
     global vl
     global bufs
     global bufs_length
+    global bufs_vol
     global bufs_accidentals
 
     if args.vertical:
+        o_vol = vl[1][m]
         txt = ''
         for voice in range(1,len(vl)+1):
             if len(bufs[voice][m]) == 0:
@@ -1233,6 +1249,11 @@ def print_out_notes_v_of_h(m, print_line):
                         lth = '(' + str(l) + ')'
                     # fi
                 # fi
+                n_vol = bufs_vol[voice][m][i]
+                if o_vol != n_vol:
+                    txt = txt + 'vol({}) '.format(n_vol)
+                    o_vol = n_vol
+                # fi
                 txt = txt + bufs[voice][m][i] + lth + bufs_accidentals[voice][m][i]
             # rof
             txt = txt + '\n'
@@ -1241,6 +1262,10 @@ def print_out_notes_v_of_h(m, print_line):
     else:       # horizontal
         # Need to figure out voices, length of notes, and when to print next line one out.
         # I think I need one more 'bufs[voice][m]' type array -- bufs[voice][m][X] == floating length.
+        o_vol = [ 0 ]
+        for voice in range(1,len(vl)+1):
+            o_vol.append(vl[voice][m])
+        # fi
         ml = mlth[1][m]
         for i in range(1, len(vl)+1):
             if m in mlth[i]:
@@ -1270,8 +1295,15 @@ def print_out_notes_v_of_h(m, print_line):
                 if i <= now:
                     j = working[voice]
                     l =  bufs_length[voice][m][j]
+
+                    n_vol = bufs_vol[voice][m][j]
+
                     if l in legal_mc_notes:
-                        lth = "{:>3s}".format(legal_mc_notes[l] + bufs_accidentals[voice][m][j])
+                        if o_vol[voice] != n_vol:
+                            lth = "{:>1s}".format(legal_mc_notes[l] + bufs_accidentals[voice][m][j])
+                        else:
+                            lth = "{:>3s}".format(legal_mc_notes[l] + bufs_accidentals[voice][m][j])
+                        # fi
                     else:
                         lth = str(Fraction(l).limit_denominator(256))
                         if '/' in lth:
@@ -1279,7 +1311,13 @@ def print_out_notes_v_of_h(m, print_line):
                         # fi
                         lth = lth + bufs_accidentals[voice][m][j]
                     # fi
-                    txt = txt + "{:>4s}".format(bufs[voice][m][j]) + lth
+                    if o_vol[voice] != n_vol:
+                        txt = txt + 'vol({})'.format(n_vol)
+                        o_vol[voice] = n_vol
+                        txt = txt + "{:>1s}".format(bufs[voice][m][j]) + lth
+                    else:
+                        txt = txt + "{:>4s}".format(bufs[voice][m][j]) + lth
+                    # fi
                     workingtime[voice] = workingtime[voice] + l
                     working[voice] = working[voice] + 1
                 else:
@@ -1618,7 +1656,7 @@ def print_out_midi1csv_notes():
         while m_number < len(meas):             # while there are measures left to do
             t_num = m_number
             m = meas[m_number]
-# NOTDONEYET - bufs_volume? - per note - Move to bufs_volume for midi1cvs format?
+# NOTDONEYET - bufs_vol? - per note - Move to bufs_vol for midi1cvs format?
             v_vl = get_volume_level(m, voice)   # Starting volume of note - no changing over ties.
             lth = lthworkingmeasures            # start of measure notes.
             i = 0
@@ -1635,7 +1673,8 @@ def print_out_midi1csv_notes():
                 # fi
                 n = bufs[voice][m][i]           # note number
                 if n != '0' and n != 0:         # Only for note that plays (not rest).
-# NOTDONEYET - bufs_volume? - per note - Move to bufs_volume for midi1cvs format?
+# NOTDONEYET - bufs_vol? - per note - Move to bufs_vol for midi1cvs format?
+                    v_vl = bufs_vol[voice][m][i]
                     print("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lth, chan, n, v_vl))
                 # fi
                 tmp,m_number,lastmeter, channel, chan, l_instrument = do_possible_midi_tie(voice, m_number, i, l,lastmeter, channel, chan, l_instrument, lthworkingmeasures)
@@ -1669,9 +1708,6 @@ def do_pass2():
     global meas                             # measures
     global legal_floating
     global args
-    global bufs
-    global bufs_length
-    global bufs_accidental
     global bufs_tie_next
     global vl
 
@@ -1871,8 +1907,10 @@ def put_on_bufs(onvoice, p_meas, abc_note, timeofnote, append_tie):
         bufs_length[onvoice] = {}
         bufs_accidentals[onvoice] = {}
         bufs_tie_next[onvoice] = ''
+        bufs_vol[onvoice] = {}
     # fi
     if p_meas not in bufs[onvoice]:
+        bufs_vol[onvoice][p_meas] = [ vl[onvoice][p_meas] ]
         if args.horizontal or args.vertical:
             bufs[onvoice][p_meas] = [abc_note]
             bufs_length[onvoice][p_meas] = [timeofnote]
@@ -1886,6 +1924,7 @@ def put_on_bufs(onvoice, p_meas, abc_note, timeofnote, append_tie):
         # fi
         return
     # fi
+    bufs_vol[onvoice][p_meas].append( vl[onvoice][p_meas] )
     if args.vertical or args.horizontal:
         bufs[onvoice][p_meas].append(abc_note)
         bufs_length[onvoice][p_meas].append(timeofnote)
@@ -4408,6 +4447,7 @@ def getnote(note_to_decode, voice, line):
     # 1) xpose added to the note.
     # 2) xpose_new_key converted back to o/n/a
 
+    # NOTDONEYET - so ABC format can print. NOTDONEYET - abc #
     if (args.midi1csv or args.horizontal or args.vertical) and xpose[voice] != 0:      # So can print.
         jkl = str(o) + str(n) + a
         if jkl not in note_to_midi_value:
@@ -4624,7 +4664,6 @@ def do_tie(onvoice, vnumber, line):
 # therest,newvolume = get_vol_note(temp1, line)
 def get_vol_note(temp1, line):
     therest = temp1[4:]
-    print("therest={}".format(therest), file=sys.stderr)
     sc = therest.find(')')
     if sc < 0 or sc == 0:
         print_error("A 'vol(' needs a number followed by a ')' -- ')' or number is missing", line)
@@ -4778,9 +4817,7 @@ def process_notes(t_args, line):
                 temp1 = wargs[vnumber]
             # fi
             if temp1[0:4] == 'vol(':
-                print("vol(", file=sys.stderr)
                 therest,newvolume = get_vol_note(temp1, line)
-                print("therest='{}'  newvolume={}".format(therest, newvolume), file=sys.stderr)
                 if newvolume is None:
                     continue
                 # fi
