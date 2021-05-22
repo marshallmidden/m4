@@ -1,11 +1,12 @@
 #!/usr/bin/python3 -B
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 #-----------------------------------------------------------------------------
-# vol(xxx) before a note exists in processing - sets vl[voice][measure_on].  ?
-# When instak-ing, need to put vol() change in for --horizontal, --vertical. ?
-# For ABC notation, need to have it ... probably before the note. +pp+       ?
-# For midi1csv - use bufs_vol[voice][measure].append() ... rests, notes ...  ?
-# NOTDONEYET - bufs_vol() #
+# vol(xxx) before a note sets volume henceforth.
+# NOTDONEYET: For ABC notation, need to have it ... probably before the note. +pp+       ?
+#-----------------------------------------------------------------------------
+# cresc(xxx,yyy) xxx = ending volume. yyy = time (0.75 = three quarter notes).
+#   cresc_volume.append(0)
+#   cresc_time.append(0)
 #-----------------------------------------------------------------------------
 # xpose is done for --vertical, --horizontal, and --midi1csv, but NOT abc format.
 # ABC format thus will "print" right, but not "play" (abc2midi) right.
@@ -14,14 +15,12 @@
 # TODO:
 # 1) tempo allowed anywhere. Make notes match to there. (rest insertion)
 # 2) cresendo/decresendo anywhere. Make notes match to there. (rest insertion)
-#    Volume number per note?  ABC change per note into bufs[] -- when placed onto it.
-#    Look for bufs_vol ...
-# 3) Instrument numbers +/- by a given value. (fluidsynth verses timidity)
-# 4) Select clef=treble or clef=bass by notes min and max notes on staff(s).
+# 3) Volume change for ABC per note. Maybe text for all notes in measure ...
+#    or volume when put in instak?
+# 4) Instrument numbers +/- by a given value. (fluidsynth verses timidity)
+# 5) Select clef=treble or clef=bass by notes min and max notes on staff(s).
 #       # NOTDONEYET - add ' clef=bass'  (after the number)
 #       # clef can occur each measure (abc, horizontal, vertical format).
-# 5) key   voice[,voice,...]  C         <--- DO NEXT.
-#    Need per voice and per measure (?). Forward upon new measure.
 #-----------------------------------------------------------------------------
 # instrument 1,2 flute            $$ voice, name or number.
 # intensity  1,2 84               $$  7 volume
@@ -678,6 +677,9 @@ vinstrument[''] = {}                # blank measure.
 reverb[''] = {}
 pan[''] = {}
 intensity[''] = {}
+global cresc_volume, cresc_time
+cresc_volume = [ ]
+cresc_time = []
 for i in range(0, MAXVOICES):       # This is used as [1] .. [MAXVOICES]
     vinstrument[''][i+1] = 0        # No instrument. (measure, voice)
     reverb[''][i+1] = 0
@@ -687,6 +689,8 @@ for i in range(0, MAXVOICES):       # This is used as [1] .. [MAXVOICES]
     clef[i+1][''] = 'treble'        # No clef.       (voice, measure)
     xpose[i] = 0
     xpose_new_key[i] = 'c'          # No new key.
+    cresc_volume.append(0)
+    cresc_time.append(0)
 # rof
 global inst
 inst = { }                          # track using instrument by instrument.
@@ -4698,6 +4702,69 @@ def get_vol_note(temp1, line):
 # End of get_vol_note
 
 #-----------------------------------------------------------------------------
+# therest,newvolume,newtime = get_vol_note(temp1, line)
+def get_cresc(temp1, line):
+    print("get_cresc",file=sys.stderr)
+    therest = temp1[6:]
+    sc = therest.find(',')
+    if sc < 0 or sc == 0:
+        print_error("A 'cresc(' needs a number followed by a ',' -- ',' or number is missing", line)
+        return '', None, None
+    # fi
+    s1 = therest[0:sc]
+    s2 = therest[sc+1:]
+    sc = s2.find(')')
+    if sc < 0 or sc == 0:
+        print_error("A 'cresc(' needs a number followed by a ',' and ')' -- ')' or time missing", line)
+        return '', None, None
+    # fi
+    therest = s2[sc+1:]
+    s2 = s2[0:sc]
+    print("s1={} s2={} therest={}".format(s1,s2,therest),file=sys.stderr)
+    # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    f1, type_error = is_float(s1)
+    if type_error is not None:
+        for j in vlprint:
+            if s1 == vlprint[j]:
+                f1 = j
+                type_error = None
+                break
+            # fi
+        # rof
+        if type_error is not None:
+            print_error("cresc(xxx,yyy) did not get have a number or volume name. {}".format(type_error), line)
+            return '', None, None
+        # fi
+    # fi
+    if f1 is None:
+        print_error("volume is not a number.", line)
+        return '', None, None
+    # fi
+    f1 = round(f1)
+    if f1 < 1  or f1 > 127:       # If out of range.
+        print_error("volume number must be between 1 and 127 inclusive. Not ({})".format(f1), line)
+        return '', None, None
+    # fi
+    # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    f2, type_error = is_float(s2)
+    if type_error is not None:
+        print_error("cresc(xxx,yyy) did not get have a time value - {}".format(type_error), line)
+        return '', None, None
+    # fi
+    if f2 is None:
+        print_error("time value is not a number.", line)
+        return '', None, None
+    # fi
+    f2 = round(f2)
+    if f2 <= 0:                     # If out of range.
+        print_error("time value must be greater than 0. Not ({})".format(f2), line)
+        return '', None, None
+    # fi
+    # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    return therest, f1, f2
+# End of get_cresc
+
+#-----------------------------------------------------------------------------
 # Parse and process possible notes line.
 # All have ,'s as separators.
 # old way is: voice1,voice2,voice3,voice4   -- 3c4, 3e4, 3g4, 4c4
@@ -4816,14 +4883,29 @@ def process_notes(t_args, line):
                 # fi
                 temp1 = wargs[vnumber]
             # fi
-            if temp1[0:4] == 'vol(':
-                therest,newvolume = get_vol_note(temp1, line)
-                if newvolume is None:
+            while True:
+                if temp1[0:4] == 'vol(':
+                    therest,newvolume = get_vol_note(temp1, line)
+                    if newvolume is None:
+                        return
+                    # fi
+                    vl[onvoice][measure_on] = newvolume
+                    temp1 = therest
                     continue
                 # fi
-                vl[onvoice][measure_on] = newvolume
-                temp1 = therest
-            # fi
+                if temp1[0:6] == 'cresc(':
+                    # cresc(ff,5.25)    # volume to go to, 5.25 = time in floating.
+                    therest,newvolume,newtime = get_cresc(temp1, line)
+                    if newvolume is None:
+                        return
+                    # fi
+                    cresc_volume[onvoice] = newvolume
+                    cresc_time[onvoice] = newtime
+                    temp1 = therest
+                    continue
+                # fi
+                break
+            # elihw
             therest, thenote, typenote = getnote(temp1, onvoice, line) # get next note
             if thenote is None:
                 print_error("no note? therest='{}' thenote='{}' typenote='{}'".format(therest,thenote,typenote), line)
