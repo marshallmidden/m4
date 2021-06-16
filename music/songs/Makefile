@@ -76,25 +76,34 @@ SONGS += waltz-in-a-minor
 SONGS += wassailing
 SONGS += wondersong
 #-----------------------------------------------------------------------------
-SONGS_abc = ${SONGS:=.abc}
-SONGS_ps = ${SONGS:=.ps}
-SONGS_mid = ${SONGS:=1.mid}
+#-- SONGS_abc = ${SONGS:=.abc}
+#-- SONGS_ps = ${SONGS:=.ps}
+#-- SONGS_csv = ${SONGS:=.csv}
+SONGS_mid = ${SONGS:=.mid}
 #-----------------------------------------------------------------------------
 .PHONY: all
-all: ${SONGS_ps} ${SONGS_mid} ${SONGS_abc}
+#-- all: ${SONGS_ps} ${SONGS_mid} ${SONGS_abc}
+all: ${SONGS_mid}
+#-- ${SONGS_mid}: ${SONGS_csv}
 #-----------------------------------------------------------------------------
 .SUFFIXES:		# delete the default suffixes
-.SUFFIXES:  .abc 1.mid .ps
+#-- .SUFFIXES:  .abc 1.mid .ps
+#-- .SUFFIXES:  .mid .csv
+.SUFFIXES:  .mid
 #-----------------------------------------------------------------------------
-%1.mid: %.abc
-	abc2midi $<
-%.ps: %.abc
-	yaps $< -k
-%.abc: %
-	${MUSICOMP2ABC} < $< > $@ || (rm -f $@ ; exit 1)
+#-- %1.mid: %.abc
+#-- 	abc2midi $<
+%.mid: %
+	${MUSICOMP2ABC} -m < $< > $<.csv || (rm -f $@ ; exit 1)
+	csvmidi $<.csv > $@
+#-- %.ps: %.abc
+#-- 	yaps $< -k
+#-- %.abc: %
+#-- 	${MUSICOMP2ABC} < $< > $@ || (rm -f $@ ; exit 1)
+#-- %.csv: %
 #-----------------------------------------------------------------------------
-${SONGS_ps}: ${SONGS_abc}
-${SONGS_mid}: ${SONGS_abc}
+#-- ${SONGS_ps}: ${SONGS_abc}
+#-- ${SONGS_mid}: ${SONGS_abc}
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
