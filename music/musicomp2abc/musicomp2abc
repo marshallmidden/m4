@@ -29,14 +29,11 @@
 # Commands not done.
 #   print_error("NOTDONEYET - do_goto", line)           Complicated, but should do.
 #
-#   print_error("NOTDONEYET - do_if", line)
-#   print_error("NOTDONEYET - do_else", line)
-#   print_error("NOTDONEYET - do_endif", line)
-#
-#   print_error("NOTDONEYET - do_macro", line)
+#   print_error("NOTDONEYET - do_macro", line)          NOTE: arguments are not delimited when used.
 #   print_error("NOTDONEYET - do_endm", line)
-#   print_error("NOTDONEYET - do_putd", line)
-#   print_error("NOTDONEYET - process_putd", line)
+#
+#   print_error("NOTDONEYET - do_putd", line)           Not likely to do. (Not used anywhere that I see.)
+#   print_error("NOTDONEYET - process_putd", line)      Not likely to do. (Not used anywhere that I see.)
 #
 #   print_error("NOTDONEYET - do_pitch", line)          Not likely to do. I think this is xpose?
 #   print_error("NOTDONEYET - do_temper", line)         Not likely to do. No idea what this does.
@@ -688,10 +685,6 @@ errors_happened = 0                 # system exit, 0 = okay, 1 = errors happened
 global linecount
 linecount = 0
 
-# names to replace in text
-global macros                       # macros and it's arguments.
-macros   = { }                      # { 'macro_name' : [ 'text', 'arg1', 'arg2', 'arg3'] }
-
 global putds                        # "micro" and it's replacement/substitution.
 putds    = { }                      # dictionary of from:to
 
@@ -789,9 +782,27 @@ global lstac,lgrace,lpause
 lstac = lgrace = lpause = 4         # starting staccato, grace note, lpause as 4/60th of a second
 
 global iftest                       # check if after if or else.
-iftest = -1                         # if, else or endif
+iftest = { 0:-1 }                   # -1 = processing in if, 0 = skip till else,
+#                                   # 1 processing in else, 2 = skip till endif,
+#                                   # 3 = skip both if and else.
 global ifdepth                      # level of if/else/endif
 ifdepth = 0
+global cstop_processing
+cstop_processing = False            # True if after a cstop.
+
+global macro_defining               # If defining macro.
+macro_defining = None
+global macro_buffer                 # Name of macro, array of lines for macro.
+macro_buffer = { '':''}
+global macro_arguments              # Name of macro, array of arguments for macro.
+macro_arguments = { '':''}
+
+global macro_executing_depth        # If processing macro ... reading from macro buffer.
+macro_executing_depth = []          # The macro name currently working on is the last name in the array.
+global macro_executing_args         # Depth, array of arguments given to macro.
+macro_executing_args = { 0:[] }
+global macro_line                   # Depth, line in macro array.
+macro_line = { 0:0 }                # Depth, macro name
 
 global header                       # Header to print at top of file.
 
@@ -1137,9 +1148,11 @@ def print_measure_abc(m, voice, l_meter, l_dl, l_clef, l_instrument, l_vl, l_txt
     # fi
     if m == meas[0]:
         vvv = voice
-        if key_name != key_voice_abc[vvv]:
-            ky = key_voice_abc[vvv]
-            pr = pr + "[K:{}]".format(ky)
+        if vvv in key_voice_abc:
+            if key_name != key_voice_abc[vvv]:
+                ky = key_voice_abc[vvv]
+                pr = pr + "[K:{}]".format(ky)
+            # fi
         # fi
     # fi
     # if meter != last one
@@ -1773,6 +1786,11 @@ def do_pass2():
     global bufs_tie_next
     global vl
     global output_name
+    global ifdepth
+
+    if ifdepth > 0:
+        print("Inside an if block (depth={}) when end of file or cstop* reached".format(ifdepth),file=sys.stderr)
+    # fi
 
     print_header()
 
@@ -1814,6 +1832,33 @@ def get_line():
     global legal_floating
     global args
     global file_name
+    global macro_executing_depth
+    global macro_executing_args
+    global macro_line
+
+    if macro_executing_depth != []:
+        l = len(macro_executing_depth)
+        the_macro = macro_executing_depth[-1]
+        macrodepth = len(macro_executing_depth)
+        linenumber = macro_line[macrodepth]
+        lines = macro_buffer[the_macro]
+        if linenumber >= len(lines):
+            p = macro_executing_depth.pop()
+            del macro_line[l]
+            del macro_executing_args[l]
+            return ''
+        # fi
+        line = macro_buffer[the_macro][linenumber]
+        #-- print("type(the_macro)={} the_macro={} line={}".format(type(the_macro),the_macro, line), file=sys.stderr)
+        def_args = macro_arguments[the_macro]
+        rep_args = macro_executing_args[l]
+        #-- print("def_args={} rep_args={}".format(def_args,rep_args), file=sys.stderr)
+        for j in range(0, len(def_args)):
+            line = line.replace(def_args[j], rep_args[j])
+        # rof
+        macro_line[macrodepth] = linenumber + 1
+        return line
+    # fi
 
     while True:
         try:
@@ -2203,7 +2248,8 @@ def arglist(wline, line):
 #         change  command measure to unit
 
 def do_change(t_args, line):
-    global macros
+    global macro_buffer
+    global commands
 
     if t_args is None or len(t_args) == 0:
         print_error("change does not have three or four arguments.", line)
@@ -2234,7 +2280,7 @@ def do_change(t_args, line):
             return
         # fi
         print_error("copy new name already exists as different command.", line)
-    elif new in macros:
+    elif new in macro_buffer:
         print_error("change new name already exists as macro.", line)
         return
     if old not in commands:
@@ -2251,7 +2297,8 @@ def do_change(t_args, line):
 #         copy    measure to unit   $$ or:
 #         copy    command measure to unit
 def do_copy(t_args, line):
-    global macros
+    global macro_buffer
+    global commands
 
     if t_args is None or len(t_args) == 0:
         print_error("copy does not have three or four arguments.", line)
@@ -2282,7 +2329,7 @@ def do_copy(t_args, line):
             return
         # fi
         print_error("copy new name already exists as different command.", line)
-    elif new in macros:
+    elif new in macro_buffer:
         print_error("copy new name already exists as macro.", line)
         return
     if old not in commands:
@@ -2388,42 +2435,59 @@ def do_cstopnow(t_args, line):
 #-----------------------------------------------------------------------------
 #   cstart              restart compiling.      (like #if 0 ... #endif // 0)
 def do_cstart(t_args, line):
-    print_warning("WARNING - cstart command without a cstop ({})".format(t_args), line)
+    global cstop_processing
+
+    if cstop_processing:
+        print_error("Not in cstop processing and got a cstart", line)
+    # fi
+    cstop_processing = False
     return
 # End of do_cstart
 
 #-----------------------------------------------------------------------------
 #   cstop               stop till cstart or cstop* found.
 def do_cstop(t_args, line):
-    # Read until cstart found (or end of file)
-    while True:
-        line = get_line()
-        t, line = split_line(line)
-        if line:
-            if t and t[0]:
-                if t[0] in commands:
-                    if commands[t[0]] == do_cstart:
-                        return
-                    # fi
-                    if commands[t[0]] == do_cstopnow:
-                        do_cstopnow(t_args, line)
-                    # fi
-                # fi
-            # fi
-        # fi
-    # elihw
+    global commands
+    global cstop_processing
+
+    cstop_processing = True
     return
 # End of do_cstop
 
 #-----------------------------------------------------------------------------
-# TODO LAST
 def do_endm(t_args, line):
-    print_error("NOTDONEYET - do_endm", line)
+    global macro_defining
+
+    macro_defining = None
     return
 # End of do_endm
 
 #-----------------------------------------------------------------------------
-# TODO LAST
+def replace_macro(command, t_args, line):
+    global macro_defining               # If defining macro.
+    global macro_buffer                 # Name of macro, array of lines for macro.
+    global macro_arguments              # Name of macro, array of arguments for macro.
+
+    if t_args is None or len(t_args) == 0:
+        if macro_arguments[command] != []:
+            print_error("macro command does not have any arguments, but needs {}.".format(macro_arguments[command]), line)
+            return
+        # fi
+        wargs = None
+    else:
+        wargs = arglist(t_args[0], line)
+        if len(wargs) != len(macro_arguments[command]):
+            print_error("macro command has {} arguments, but needs {}.".format(wargs,macro_arguments[command]), line)
+            return
+        # fi
+    # fi
+    macro_executing_depth.append(command)
+    macrodepth = len(macro_executing_depth)
+    macro_executing_args[macrodepth] = wargs
+    macro_line[macrodepth] = 0             # First line in buffer.
+# End of replace_macro
+
+#-----------------------------------------------------------------------------
 #   macro name,arg1,arg2,...,argn
 #     body of macro
 #   endm
@@ -2432,17 +2496,50 @@ def do_endm(t_args, line):
 #
 # Macros must not be existing commands -- replace existing macro with warning.
 def do_macro(t_args, line):
+    global commands
+    global macro_defining               # If defining macro.
+    global macro_buffer                 # Name of macro, array of lines for macro.
+    global macro_arguments              # Name of macro, array of arguments for macro.
+
     if t_args is None or len(t_args) == 0:
         print_error("macro command does not have any arguments.", line)
         return
     # fi
-    if t_args[0]  in commands:
-        print_error("macro would replace existing command",line)
+
+    wargs = arglist(t_args[0], line)
+    if not wargs or len(wargs) < 1:
+        print_error("no macro name.", line)
         return
     # fi
-    print_error("NOTDONEYET - do_macro", line)
+
+    name = wargs[0]
+    args = wargs[1:]
+    if name in commands:
+        print_error("macro ({}) would replace existing command".format(name), line)
+        return
+    # fi
+    if name in macro_buffer:
+        print_warning("macro ({}) will replace existing macro".format(name), line)
+    # fi
+
+    macro_buffer[name] = []             # No lines in bujffer.
+    macro_arguments[name] = args
+    macro_defining = name
     return
 # End of do_macro
+
+#-----------------------------------------------------------------------------
+def macro_define(command, t_args, line):
+    global macro_defining               # If defining macro.
+    global macro_buffer                 # Name of macro, array of lines for macro.
+
+    if t_args and len(t_args) > 0:
+        macro_buffer[macro_defining].append(command + ' ' + ' '.join(t_args))
+    else:
+        macro_buffer[macro_defining].append(command)
+    # fi
+    return
+# End of macro_define
 
 #-----------------------------------------------------------------------------
 # TODO LAST
@@ -2462,24 +2559,78 @@ def process_putd(line):
 # End of process_putd
 
 #-----------------------------------------------------------------------------
-# TODO LAST
 def do_endif(t_args, line):
-    print_error("NOTDONEYET - do_endif", line)
+    global ifdepth
+    global iftest
+
+    if ifdepth == 0:
+        print_error("endif command while not in an if command", line)
+        return
+    # fi
+    # if iftest[ifdepth] == -1:           # already processing, handle as normal if.
+    # if iftest[ifdepth] == 0:            # skipping if, want to do else.
+    # if iftest[ifdepth] == 1:            # processing in else, want to do as normal if.
+    # if iftest[ifdepth] == 2:            # skipping in else, ignore if and else processing, want endif.
+    # if iftest[ifdepth] == 3:            # skip both if and else, want endif
+    ifdepth = ifdepth - 1
     return
 # End of do_endif
 
 #-----------------------------------------------------------------------------
-# TODO LAST
 def do_else(t_args, line):
-    print_error("NOTDONEYET - do_else", line)
+    global ifdepth
+    global iftest
+
+    if ifdepth == 0 or iftest[ifdepth] == 1 or iftest[ifdepth] == 2:
+        print_error("else command while not in an if command", line)
+        return
+    # fi
+
+    if iftest[ifdepth] == -1:           # already processing, handle as normal if.
+        iftest[ifdepth] = 2             # Switch to skipping else.
+        return
+    # fi
+    if iftest[ifdepth] == 0:            # skipping if, want to do else.
+        iftest[ifdepth] = 1             # Switch to processing else.
+        return
+    # fi
+    # if iftest[ifdepth] == 3:            # skip both if and else, want endif
+    # NOTE: do not test for if/else/endif ... second else.
     return
 # End of do_else
 
 #-----------------------------------------------------------------------------
-# TODO LAST
 #   if/else/endif
 def do_if(t_args, line):
-    print_error("NOTDONEYET - do_if", line)
+    global iftest                       # check if after if or else.
+    global ifdepth                      # level of if/else/endif
+
+    if t_args is None or len(t_args) == 0:
+        print_error("if command does not have exactly one argument.", line)
+        return
+    # fi
+    # if iftest[ifdepth] == -1:           # already processing, handle as normal if.
+    # if iftest[ifdepth] == 0:            # skipping if, want to do else.
+    # if iftest[ifdepth] == 1:            # processing in else, want to do as normal if.
+    # if iftest[ifdepth] == 2:            # skipping in else, ignore if and else processing, want endif.
+    # if iftest[ifdepth] == 3:            # skip both if and else, want endif
+    if iftest[ifdepth] == -1 or iftest[ifdepth] == 1:   # process this if normally.
+        wargs = arglist(t_args[0], line)
+        if not wargs or len(wargs) < 1:
+            print_error("no if argument.", line)
+            return
+        # fi
+        value, type_error = is_float(wargs[0])
+        if type_error is not None:
+            print_error("if unable to determine if value ({}).".format(wargs[0]), line)
+            return
+        # fi
+        value =  -1 if value < 0 or value > 0 else 0   # 0 is false, otherwise everything is true.
+    else:
+        value = 3                           # Skip both if and else.
+    # fi
+    ifdepth = ifdepth + 1
+    iftest[ifdepth] =  value
     return
 # End of do_if
 
@@ -4183,6 +4334,7 @@ def do_xpose(t_args, line):
 
 #-----------------------------------------------------------------------------
 # dictionary commandname : routine. execute via(?): globals()['do_cstopnow'](t_args, line)
+global commands
 commands = {
              'bars'    : do_bars,
              'calc'    : do_calc,
@@ -5573,6 +5725,11 @@ def process_notes(t_args, line):
 #=============================================================================
 # Parse and process line.
 def process_line(t, line):
+    global iftest                       # check if after if or else.
+    global ifdepth                      # level of if/else/endif
+    global commands
+    global cstop_processing
+
     if not t or len(t) == 0:
         return
     elif len(t) == 1:
@@ -5582,21 +5739,72 @@ def process_line(t, line):
         command = t[0]
         t_args = t[1:]
     # fi
-    # Try to process command.
-    if command is None:                 # Ignore nothing given.
-        return
-    # fi
-    if command in commands:
-        try:
-            r = commands[command]
-        except:
-            print_error("not found processing routine for command {}", command)
-            print("    ", sys.exc_info()[0], sys.exc_info, file=sys.stderr)
+
+    if cstop_processing:
+        # Read until cstart found (or end of file)
+        if command in commands:
+            if commands[command] == do_cstart:
+                do_cstart(t_args, line)
+            # fi
+            if commands[command] == do_cstopnow:
+                do_cstopnow(t_args, line)
+            # fi
         # fi
-        r(t_args, line)
+        return                          # Done with current cstop processing.
+    # fi
+
+    if macro_defining is not None:
+        if command in commands:
+            if commands[command] == do_endm:
+                do_endm(t_args, line)
+                return
+            # fi
+            if commands[command] == do_cstopnow:
+                do_cstopnow(t_args, line)
+                return
+            # fi
+        else:
+            macro_define(command, t_args, line)
+        # fi
+    # fi
         return
     # fi
-    process_notes(t,line)
+
+    # Doing if section or else section.
+    if iftest[ifdepth] == -1 or iftest[ifdepth] == 1:
+        # Try to process command.
+        if command is None:             # Ignore nothing given.
+            return
+        # fi
+        if command in macro_buffer:
+            replace_macro(command, t_args, line)
+            return                      # Henceforth get lines from macro_buffer.
+        # fi
+        if command in commands:
+            try:
+                r = commands[command]
+            except:
+                print_error("not found processing routine for command {}", command)
+                print("    ", sys.exc_info()[0], sys.exc_info, file=sys.stderr)
+            # fi
+            r(t_args, line)
+            return
+        # fi
+        process_notes(t,line)
+    else:                               # Here if false for "if" -- special else, or in else, or both.
+        if t[0] in commands:
+            if commands[t[0]] == do_cstopnow:
+                do_cstopnow(t_args, line)
+            elif commands[t[0]] == do_if:
+                do_if(t_args, line)
+            elif commands[t[0]] == do_else:
+                do_else(t_args, line)
+            elif commands[t[0]] == do_endif:
+                do_endif(t_args, line)
+            # fi
+        # fi
+        return
+    # fi
     return
 # End of process_line
 
@@ -5654,6 +5862,7 @@ def main():
     global file_name
     global output_name
     global meter
+    global cstop_processing
 
     parse_args()
     if args.vertical or args.horizontal:
@@ -5710,6 +5919,7 @@ def main():
                     # fi
                     continue
                 # fi
+
                 if line and line[0] == '=':
                     line = process_putd(line)
                     continue

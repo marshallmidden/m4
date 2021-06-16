@@ -28,5 +28,5 @@ clean:
 #-----------------------------------------------------------------------------
 .PHONY: tags ctags
 tags ctags:
-	ctags --language-force=python ${MUSICOMP2ABC}
+	ctags --language-force=python ${MUSICOMP2ABC} calculate.py
 #-----------------------------------------------------------------------------
