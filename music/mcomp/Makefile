@@ -170,6 +170,7 @@ clean:
 	rm -f A.csv A.ABC
 	rm -f B.mid
 	rm -f V.csv V.ABC
+	rm -f v.csv v.mid
 #-----------------------------------------------------------------------------
 .PHONY: tags tag ctags
 tag ctags tags:
@@ -204,8 +205,8 @@ v:
 .PHONY: a1
 a1:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.01 >a1.csv
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.01 >a1.abc
-	yaps a1.abc -o a1.ps -k
+	#-- ~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.01 >a1.abc
+	#-- yaps a1.abc -o a1.ps -k
 	csvmidi a1.csv a1.mid
 	fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a1.mid
 #-----------------------------------------------------------------------------

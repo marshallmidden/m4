@@ -30,7 +30,7 @@
 #   print_error("NOTDONEYET - do_goto", line)           Complicated, but should do.
 #
 #   print_error("NOTDONEYET - do_macro", line)          NOTE: arguments are not delimited when used.
-#   print_error("NOTDONEYET - do_endm", line)
+#   print_error("NOTDONEYET - do_endm", line)           NOTE: NEED FIND OUT WHERE/WHEN MACRO CAN BE.
 #
 #   print_error("NOTDONEYET - do_putd", line)           Not likely to do. (Not used anywhere that I see.)
 #   print_error("NOTDONEYET - process_putd", line)      Not likely to do. (Not used anywhere that I see.)
@@ -679,6 +679,7 @@ extrainfo = {
 # 11, 28928, Control_c, 10, 91, 59
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
+global args
 global errors_happened
 errors_happened = 0                 # system exit, 0 = okay, 1 = errors happened
 
@@ -1787,9 +1788,17 @@ def do_pass2():
     global vl
     global output_name
     global ifdepth
+    global macro_defining
+    global macro_executing_depth
 
     if ifdepth > 0:
-        print("Inside an if block (depth={}) when end of file or cstop* reached".format(ifdepth),file=sys.stderr)
+        print("Error inside an if block (depth={}) when end of file or cstop* reached".format(ifdepth),file=sys.stderr)
+    # fi
+    if macro_defining is not None:
+        print("Error inside defining macro {}, no endm reached.".format(macro_defining),file=sys.stderr)
+    # fi
+    if len(macro_executing_depth) > 0:
+        print("Error processing macro depth is {}.".format(macro_executing_depth),file=sys.stderr)
     # fi
 
     print_header()
@@ -1849,10 +1858,8 @@ def get_line():
             return ''
         # fi
         line = macro_buffer[the_macro][linenumber]
-        #-- print("type(the_macro)={} the_macro={} line={}".format(type(the_macro),the_macro, line), file=sys.stderr)
         def_args = macro_arguments[the_macro]
         rep_args = macro_executing_args[l]
-        #-- print("def_args={} rep_args={}".format(def_args,rep_args), file=sys.stderr)
         for j in range(0, len(def_args)):
             line = line.replace(def_args[j], rep_args[j])
         # rof
@@ -2458,13 +2465,16 @@ def do_cstop(t_args, line):
 def do_endm(t_args, line):
     global macro_defining
 
+    if macro_defining is None:
+        print_error("endm command while not defining a macro", line)
+        return
+    # fi
     macro_defining = None
     return
 # End of do_endm
 
 #-----------------------------------------------------------------------------
 def replace_macro(command, t_args, line):
-    global macro_defining               # If defining macro.
     global macro_buffer                 # Name of macro, array of lines for macro.
     global macro_arguments              # Name of macro, array of arguments for macro.
 
@@ -2639,9 +2649,18 @@ def do_marker(t_args, line):
     global file_name
     global output_name
 
+    fill_voice_mlth(line)                   # Need to make measure for other voices up to here "mlth".
+
     if t_args is None or len(t_args) == 0:
-        t_args = []
-        t_args.append('0')
+        value = '0'
+    else:
+        value, type_error = is_float(t_args[0])
+        if type_error is not None:
+            print_warning("marker unable to compute value({}) - using text string.".format(t_args[0]), line)
+            value = str(t_args[0])
+        else:
+            value = str(int(round(value)))      # Stupid python language upgrade incompatibility.
+        # fi
     # fi
 
     if args.rest and len(args.rest) >= 2:
@@ -2653,13 +2672,13 @@ def do_marker(t_args, line):
         # Can get input from terminal.
         if sys.stdin.isatty():
             if sys.platform == 'darwin':
-                input('marker ' + t_args[0])
+                input('marker ' + value + ' > ')
                 line = readline.get_line_buffer()
             else:
-                line = input('marker ' + t_args[0])
+                line = input('marker ' + value + ' > ')
             # fi
         else:
-            print('marker ' + t_args[0], file=outf)
+            print('marker ' + value + ' > ', file=outf)
             line = sys.stdin.readline()
         # fi
     # fi
@@ -2831,13 +2850,16 @@ def do_goto(t_args, line):
 
 #-----------------------------------------------------------------------------
 def to_abc_note(note_number):
-    if note_number == 0 or note_number == '0':
-        return 'r'
+    if note_number <= 0 or note_number == '0':
+        return 'z'
     # fi
     o = int(note_number / 12)                           # get octave
     n = note_number - (o * 12)                          # note is remainder
     octaves = { 0:',,,', 1:',,', 2:',', 3:'', 4:'', 5:"'", 6:"''", 7:"'''", 8:"'''" }
     notes = { 0:'a', 1:'^a', 2:'b', 3:'c', 4:'^c', 5:'d', 6:'^d', 7:'e', 8:'f', 9:'^f', 10:'g', 11:'^g' }
+    #-- if n not in notes:
+    #--     print("ERROR: to_abc_note({})  o='{}' n='{}'".format(note_number, o, n), file=sys.stderr)
+    #-- # fi
     n = notes[n]
     if o <= 3:                                          # uppercase letter
         n = n.upper()
@@ -2852,6 +2874,8 @@ def to_abc_note(note_number):
 #-----------------------------------------------------------------------------
 #   decode  m1,3c+      $$ note number for 3c+ into m1
 def do_decode(t_args, line):
+    global args
+
     if t_args is None or len(t_args) <= 0 or t_args[0] == '':
         print_error("decode command does not have any arguments.", line)
         return
@@ -2868,7 +2892,10 @@ def do_decode(t_args, line):
     saveargsm = args.midi1csv
     saveargabc = args.abc
     # Set to midi format -- so we have a value.
+    args.horizontal = False
+    args.vertical = False
     args.midi1csv = True
+    args.abc = False
 
     therest, thenote, typenote = getnote(wargs[1], 1, line)
     
@@ -2882,7 +2909,11 @@ def do_decode(t_args, line):
         print_error("decode note has extra characters '{}' after note".format(therest), line)
         return
     # fi
-    computeit = wargs[0] + '=' + str(thenote) + '+3-12-12'  # Convert from midi note to musicomp value.
+    if thenote <= 12+12-3:
+        computeit = wargs[0] + '=' + '0'                       # rest = 0
+    else:
+        computeit = wargs[0] + '=' + str(thenote) + '+3-12-12'  # Convert from midi note to musicomp value.
+    # fi
     value, type_error = is_float(computeit)
     if type_error is not None:
         print_error("decode note unable to assign value({}) to first argument({}).".format(wargs[0],thenote), line)
@@ -5250,7 +5281,7 @@ def process_notes(t_args, line):
                     if args.horizontal or args.vertical:
                         instak(i+1, measure_on, '', 'r', l, '', line, None, '')
                     elif args.midi1csv:
-                        instak(i+1, measure_on, 0, l / (MIDICLICKSPERQUARTER * 4) , '', line, None, '')
+                        instak(i+1, measure_on, '', 0, l / (MIDICLICKSPERQUARTER * 4) , '', line, None, '')
                     else:           # ABC
                         instak(i+1, measure_on, '', 'z', l, '', line, None, '')
                     # fi
@@ -5349,7 +5380,9 @@ def process_notes(t_args, line):
                 if args.vertical or args.horizontal:
                     thenote = "({})".format(thenote)        # Put back as a number.
                 elif args.midi1csv:
-                    pass
+                    if thenote < 0:
+                        thenote = 0
+                    # fi
                 else:           # ABC
                     thenote = to_abc_note(thenote)          # Convert number to abc text.
                 # fi
@@ -5757,16 +5790,14 @@ def process_line(t, line):
         if command in commands:
             if commands[command] == do_endm:
                 do_endm(t_args, line)
-                return
+                return;
             # fi
             if commands[command] == do_cstopnow:
                 do_cstopnow(t_args, line)
-                return
+                return;
             # fi
-        else:
-            macro_define(command, t_args, line)
         # fi
-    # fi
+        macro_define(command, t_args, line)
         return
     # fi
 
@@ -5923,6 +5954,7 @@ def main():
                 if line and line[0] == '=':
                     line = process_putd(line)
                     continue
+                # fi
                 break
             # elihw
 

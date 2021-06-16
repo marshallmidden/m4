@@ -125,13 +125,13 @@ static char get_single_ch(void)
 
 /* ------------------------------------------------------------------------ */
 #define MAXFRAC     7
-#define MAXFRAC3    0
+// #define MAXFRAC3    0
 // #define MAXFRAC3    1
 // #define MAXFRAC3    2
 // #define MAXFRAC3    3
 // #define MAXFRAC3    4
 // #define MAXFRAC3    5
-// #define MAXFRAC3    6
+#define MAXFRAC3    6
 // #define MAXFRAC3    7
 static int fractionsdotted[MAXFRAC];            /* Ticks for 2^x notes dotted. */
 static int fractions[MAXFRAC];                  /* Ticks for 2^x notes. */
@@ -455,7 +455,7 @@ static void metaevent(long currtime, char *m, int type)
         case 0x00:
         case 0x01:                              /* Text event */
         case 0x02:                              /* Copyright notice */
-        case 0x03:                              /* Sequence/Track name */
+        case 0x03:                              /* Sequence/Track name - Title */
         case 0x04:                              /* Instrument name */
         case 0x05:                              /* Lyric */
         case 0x06:                              /* Marker */
@@ -1690,7 +1690,7 @@ static void printtrack(int p_trackno)
         {
             step = tickspernotes;
         }
-        if (step > 1)                                   /* This tosses off-by-1 mistakes. */
+        if (step >= 1)                                   /* This tosses off-by-1 mistakes. */
         {
             nl = valid_note_length(step);
             if (nl < 0)
@@ -1720,7 +1720,7 @@ static void printtrack(int p_trackno)
 /* This routine converts midi times in ticks into seconds. The
  * else statement is needed because the formula is different for tracks
  * based on notes and tracks based on SMPTE times. */
-static void print_tempo(long ticks, long p_tempo)
+static void print_tempo(long ticks UNUSED, long p_tempo UNUSED)
 {
     float          smpte_format;
     float          smpte_resolution;
@@ -1985,6 +1985,7 @@ static void print_v_mc(void)
     int             volumechanged;
     long            last_bar_time = 0;
 
+//    printf("* HORIZONTAL\n");
     for (int j = 1; j < MC_MAXVOICE; j++)
     {
         last_volume[j] = 0;                  /* Volume off to start with. */
@@ -2175,6 +2176,7 @@ static void print_h_mc(void)
     long            last_bar_time = 0;
     char           v[MC_MAXVOICE][V_LINE_NOTES];
 
+//    printf("* HORIZONTAL\n");
     for (int j = 1; j < MC_MAXVOICE; j++)
     {
         last_volume[j] = 0;                  /* Volume off to start with. */
@@ -2252,6 +2254,7 @@ static void print_h_mc(void)
             }
             ts = ts->tsnext;
         }
+#if 0
         /* Third any tempo's needed. */
         while (tpo != NULL && tpo->tempo_time <= f + extra)
         {
@@ -2270,9 +2273,11 @@ static void print_h_mc(void)
             }
             tpo = tpo->temponext;
         }
+#endif /* 0 */
 
         /* Volume change? */
         volumechanged = 0;
+#if 0
         for (int j = 1; j <= voicecount; j++)
         {
             if (running[j])
@@ -2323,6 +2328,7 @@ static void print_h_mc(void)
             printf("\n");
             printf("voice   %d\n", voicecount);
         }
+#endif /* 0 */
 
         /* Print out all the same on one line sort of centered, others get blanks. */
         for (int j = 1; j <= voicecount; j++)
