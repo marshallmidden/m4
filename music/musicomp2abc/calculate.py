@@ -2,14 +2,14 @@
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 #-----------------------------------------------------------------------------
 # TO DO:
-#   1) Check all errors handled properly. (return None)
-#      Can fix otherwise to return error message?
-#   4) Can change functions into:
+#   1) Can change functions into:
 #      ftof()   floating input to floating output
 #      itoi()   integer(from floating) to integer   (integer input and output)
 #      ftoi()   floating to integer                 (integer on output)
 #      itof()   integer(from floating) to floating  (floating on output)
-#   6) try/except around math ?  Eliminate current? Add small limited - oor stuff?
+#   2) try/except around math ?  Eliminate current? Add small limited - oor stuff?
+#   3) Check all errors handled properly. (return None)
+#      Can fix otherwise to return error message?
 #-----------------------------------------------------------------------------
 import sys
 import readline
@@ -45,7 +45,7 @@ def next_token(string):
     # fi
     # First character processing is special.
     c = string[0]                           # Character in string
-    if re.match(r'[-+*/=$]', c):            # Possible operation
+    if re.match(r'[-+*/=$<>!]', c):         # Possible operation
         if c == '*' and len(string) >= 2:   # Possible '**'
             if string[1] == '*':
                 return string[2:], '**', 'OPER'
@@ -83,6 +83,36 @@ def next_token(string):
                 return string[1:], c, 'MISMATCH'
             # fi
             return None, c, 'MISMATCH'
+        # fi
+        if c == '=' and len(string) >= 2:   # Possible ==, =>, =<
+            if string[1] == '=':
+                return string[2:], '==', 'OPER'
+            # fi
+            if string[1] == '>':
+                return string[2:], '>=', 'OPER'
+            # fi
+            if string[1] == '<':
+                return string[2:], '<=', 'OPER'
+            # fi
+            return string[1:], '=', 'OPER'
+        # fi
+        if c == '!' and len(string) >= 2:   # Possible !=
+            if string[1] == '=':
+                return string[2:], '!=', 'OPER'
+            # fi
+            return None, c, 'MISMATCH'
+        # fi
+        if c == '<' and len(string) >= 2:   # Possible <=
+            if string[1] == '=':
+                return string[2:], '<=', 'OPER'
+            # fi
+            return string[1:], '<', 'OPER'
+        # fi
+        if c == '>' and len(string) >= 2:   # Possible <=
+            if string[1] == '=':
+                return string[2:], '>=', 'OPER'
+            # fi
+            return string[1:], '>', 'OPER'
         # fi
         # The +-(/= reach below.
         if len(string) > 1:
@@ -230,6 +260,7 @@ def compute_value(op, arg1, arg2):
     a1 = a1[1]
     a2 = a2[1]
 
+    # Math: +, -, *, /, **
     if op == '+':
         return [ 'NUMBER', a1 + a2 ]
     # fi
@@ -246,17 +277,32 @@ def compute_value(op, arg1, arg2):
         return [ 'NUMBER',  a1 ** a2 ]
     # fi
 
+    # Logical: >, >=, <=, <, ==, !=
+    if op == '<=':
+        return [ 'NUMBER', -1 if a1 <= a2 else 0 ]
+    # fi
+    if op == '>=':
+        return [ 'NUMBER',  -1 if a1 >= a2 else 0 ]
+    # fi
+    if op == '>':
+        return [ 'NUMBER',  -1 if a1 > a2 else 0 ]
+    # fi
+    if op == '<':
+        return [ 'NUMBER',  -1 if a1 < a2 else 0 ]
+    # fi
+    if op == '==':
+        return [ 'NUMBER',  -1 if a1 == a2 else 0 ]
+    # fi
+    if op == '!=':
+        return [ 'NUMBER',  -1 if a1 != a2 else 0 ]
+    # fi
+
+    # Bitwise: $cls$, $ars$, $mask$, $union$, $diff$
     if op == '$mask$':
         return [ 'NUMBER',  int(a1) & int(a2) ]
     # fi
     if op == '$union$':
         return [ 'NUMBER',  int(a1) | int(a2) ]
-    # fi
-    if op == '$and$':
-        return [ 'NUMBER',  int(a1) and int(a2) ]
-    # fi
-    if op == '$or$':
-        return [ 'NUMBER',  int(a1) or int(a2) ]
     # fi
     if op == '$cls$':
         return [ 'NUMBER',  int(a1) << int(a2) ]
@@ -265,8 +311,17 @@ def compute_value(op, arg1, arg2):
         return [ 'NUMBER',  int(a1) >> int(a2) ]
     # fi
     if op == '$diff$':
-        return [ 'NUMBER',  int(a1) ^ int(a2) ]              # xor
+        return [ 'NUMBER',  int(a1) ^ int(a2) ]             # xor
     # fi
+
+    # combination: $and$, $or$
+    if op == '$and$':
+        return [ 'NUMBER',  -1 if int(a1) == -1 and int(a2) == -1 else 0 ]
+    # fi
+    if op == '$or$':
+        return [ 'NUMBER',  -1 if int(a1) == -1 or int(a2) == -1 else 0 ]
+    # fi
+
     #-- print("ERROR - unknown operator '{}' '{}' '{}'".format(arg1, op, arg2))
     return [ "ERROR - unknown operator '{}' '{}' '{}'".format(arg1, op, arg2) , None ]
 # End of compute_value
@@ -845,6 +900,18 @@ def f_sqrt(arg):
 # End of f_sqrt
 
 #-----------------------------------------------------------------------------
+# Invert logical expression (-1 = true, 0 = false). Make anything non-zero be true.
+def f_not(arg):
+    a = float(arg)
+    if a < 0 or a > 0:
+        a = -1
+    else:
+        a = 0
+    # fi
+    return [ 'NUMBER', a ]
+# End of f_not
+
+#-----------------------------------------------------------------------------
 def f_print(arg):
     arg = float(arg)
     print(arg)
@@ -869,6 +936,8 @@ functions = {
     'log': f_log,           'ln': f_ln,                     'round': f_round,
     'sign': f_sign,         'sin': f_sin,                   'sqrt': f_sqrt,
 #...............................................................................
+    'not': f_not,
+#...............................................................................
     'print': f_print,
 #...............................................................................
 #--     'pal': f_pal,                       # For testing purposes only.
@@ -881,9 +950,9 @@ variables = {
     'e': math.e,
     'tau': math.tau,
 #   1   .   .   .   2   .   .   .   3   .   .   .   4   .   .   .   5   .   .   .
-    'pause': 4,                 # NOTE: lpause -> pause
-    'stac': 4,                  # NOTE: lstac -> stac
-    'grace': 4,                 # NOTE: lgrace -> grace
+    'pause': 4,                 # NOTE: lpause -> pause     NOTUSED
+    'stac': 4,                  # NOTE: lstac -> stac       NOTUSED
+    'grace': 4,                 # NOTE: lgrace -> grace     NOTUSED
     's': 1, 'd': 1, 'b': 1, 't': 1,
     'w': 1, 'h': 2, 'q': 4, 'e': 8,
     'sd': 1, 'td': 1, 'ds': 1, 'dt': 1,
@@ -905,15 +974,23 @@ variables = {
 #-----------------------------------------------------------------------------
 def cexp_parser():
     #                    oper,                         lprio, rprio, eval
+    # Assignment.
     register_postsymbol('=',                               5,   4)      # r to l
+    # Cominbation.
     register_postsymbol(['$or$', '$and$'],                10,  11)
+    # Logical.
+    register_postsymbol(['>','>=','<','<=','==','!='],    20,  21)
+    # Bitwise.
     register_postsymbol(['$union$', '$mask$', '$diff$',
                          '$cls$', '$ars$'],               30,  31)
+    # Math.
     register_postsymbol(['+', '-'],                       40,  41)
     register_postsymbol('/',                              50,  51)
     register_postsymbol('*',                              60,  61)
     register_postsymbol('**',                             71,  70)      # r to l
+    # Leading + or -.
     register_presymbol(['+', '-'],                        81,  80, unary_eval)  # r to l
+    # Parenthesis.
     register_postsymbol('(',                            1000,   1, open_paren_eval)
     register_postsymbol(')',                               1, 1000, close_paren_eval)
     register_postsymbol('[',                            1000,   1, open_bracket_eval)
