@@ -7,6 +7,9 @@
 # ./musicomp --horizontal song song.h   # Either v or h (or mixed) input.
 #-----------------------------------------------------------------------------
 # TODO:
+
+#-- NOTDONEYET - process macros here.
+
 # 1) tempo allowed anywhere. Make notes match to there. (rest insertion)
 #    NOTDONEYET - multiple tempos in song.
 #    Associate with measure, and put out like volume for --vertical and --horizontal.
@@ -25,12 +28,10 @@
 #    have line number and "line" of the goto for error printing.
 #       When a goto is executed more than n times, it wraps around, and begins
 #    executing the 1st branch address again.
+# 5) do_macro ... allow multiple per line via () around the macro arguments.
 #-----------------------------------------------------------------------------
 # Commands not done.
 #   print_error("NOTDONEYET - do_goto", line)           Complicated, but should do.
-#
-#   print_error("NOTDONEYET - do_macro", line)          NOTE: arguments are not delimited when used.
-#   print_error("NOTDONEYET - do_endm", line)           NOTE: NEED FIND OUT WHERE/WHEN MACRO CAN BE.
 #
 #   print_error("NOTDONEYET - do_putd", line)           Not likely to do. (Not used anywhere that I see.)
 #   print_error("NOTDONEYET - process_putd", line)      Not likely to do. (Not used anywhere that I see.)
@@ -43,9 +44,8 @@
 #   print_error("NOTDONEYET - do_natural", line)        Not likely to ever do. Use key command.
 #   print_error("NOTDONEYET - do_sharp", line)          Not likely to ever do. Use key command.
 #
-#   print_error("NOTDONEYET - do_debug", line)          Not likely to ever do.
-#   print_error("NOTDONEYET - do_delay", line)          Not likely to ever do.
-#   print_error("NOTDONEYET - do_percus", line)         Not likely to ever do.
+#   print_error("NOTDONEYET - do_debug", line)          Not likely to ever do. No debugging variables, etc.
+#   print_error("NOTDONEYET - do_percus", line)         Not likely to ever do. No slide projector to rattle.
 #-----------------------------------------------------------------------------
 # NOTDONEYET - Note processing:
 #   print_error("NOTDONEYET - doing gsw_operand type of note", line)    - Not related to MIDI.
@@ -1143,7 +1143,9 @@ def print_measure_abc(m, voice, l_meter, l_dl, l_clef, l_instrument, l_vl, l_txt
     if l_dl != default_note_text_fraction(m):
         l_dl = default_note_text_fraction(m)
         if l_dl == '1':
-            l_dl = '1/1'
+            p_dl = '1/1'
+        else:
+            p_dl = l_dl
         # fi
         pr = pr + "[L:{}]".format(l_dl)
     # fi
@@ -1724,7 +1726,7 @@ def print_out_midi1csv_notes():
         lastmeter = print_out_midi1csv_ts(lastmeter,voice,m_number,lthworkingmeasures)
         channel, chan, l_instrument = print_out_midi1csv_instrument(l_instrument,voice,m_number,channel,chan,lthworkingmeasures)
 
-        if key_name != key_voice_abc[voice]:
+        if voice in key_voice_abc and key_name != key_voice_abc[voice]:
             ky = key_voice[voice]
             print('{}, 0, Key_signature, {}, "major"'.format(voice+1, key_sig[ky]), file=output_name)
         # fi
@@ -1864,6 +1866,7 @@ def get_line():
             line = line.replace(def_args[j], rep_args[j])
         # rof
         macro_line[macrodepth] = linenumber + 1
+        line = line.replace("\t", ' ')              # tabs to spaces
         return line
     # fi
 
@@ -1891,6 +1894,7 @@ def get_line():
                 # delete anything from $$ onwards.
                 line = re.sub('[$][$].*$', '', line)
                 # ignore leading and trailing spaces.
+                line = line.replace("\t", ' ')      # tabs to spaces
                 line = line.strip()
                 # Convert ' followed by something as a "shift".  '; = :   'a = A
                 return line
@@ -2787,7 +2791,45 @@ def do_percus(t_args, line):
 # Not likely to ever do. Would do it differently for MIDI.
 #   delay 15            delay in 1/60ths of a second. Like a fermate.  15=1/4th of a second
 def do_delay(t_args, line):
-    print_error("NOTDONEYET - do_delay", line)
+    global voices                       # number of voices
+    global cis                          # if cis active, non-zero.
+    global tempo_speed
+    global default_note_length
+    global measure_on
+
+    fill_voice_mlth(line)               # Need to make measure for other voices up to here "mlth".
+
+    if t_args is None or len(t_args) <= 0 or t_args[0] == '':
+        print_error("delay command does not have any arguments.", line)
+        return
+    # fi
+    wargs = arglist(t_args[0], line)
+    if not wargs or len(wargs) < 1:
+        print_error("no delay arguments", line)
+        return
+    # fi
+    value, type_error = is_float(wargs[0])
+    if type_error is not None:
+        print_error("delay unable to compute value({}).".format(wargs[0]), line)
+        return
+    # fi
+
+    # Convert value/60.0 to note_beats/minute (tempo).
+    # tempo_speed = 120.0                 # beats per minute.
+    # default_note_length[measure_on]     # length of a beat (note)
+    # (tempo beats/minute) * (1/60.0 minutes/sec)
+    #  (tempo/60.0  beats/sec) * (1/default_note_length[measure_on] = ?_note/beats)
+    #  (tempo/(60.0*default_note_length[measure_on]) ?_note/sec)  * seconds
+    rvalue = value * tempo_speed / (60.0*default_note_length[measure_on])
+
+    loopstart = 1 if cis == 0 else cis
+    r = 'r({}/60.0)'.format(rvalue)
+    #-- r = 'r4'
+    for onvoice in range(loopstart+1, voices + 1):
+        r = r + ',r({}/60.0)'.format(rvalue)
+        #-- r = r + ',r4'
+    # rof
+    process_notes([r], r)
     return
 # End of do_delay
 
@@ -4017,15 +4059,15 @@ def do_measure(t_args, line):
         # fi
     # rof
     # default note length continues with current - might change shortly.
-    if not args.horizontal and not args.vertical:   # ABC or MIDI1CSV
-        default_note_length[measure_on] = default_note_length[last_m]
-    # fi
+    #-- if not args.horizontal and not args.vertical:   # ABC or MIDI1CSV
+    default_note_length[measure_on] = default_note_length[last_m]
+    #-- # fi
     measure_meter[measure_on] = meter       # Each measure change can have a different meter.
     return
 # End of do_measure
 
 #-----------------------------------------------------------------------------
-#   instrument 1,2 flute		$$ voices for an instrument.
+#   instrument 1,2 flute                $$ voices for an instrument.
 def do_instrument(t_args, line):
     global vinstrument
     global reverb
@@ -5310,6 +5352,11 @@ def process_notes(t_args, line):
             postnote = ''
             onenotevolume = None
             while True:
+#-- if command in macro_buffer:
+#--     replace_macro(command, t_args, line)
+#--     return                      # Henceforth get lines from macro_buffer.
+#-- # fi
+#-- NOTDONEYET - process macros here.
                 if temp1[0:4] == 'vol(':
                     therest,onenotevolume,f2,f3 = get_vol_note(temp1, line)
                     # onenotevolume for midi1csv format.
@@ -5894,6 +5941,8 @@ def main():
     global output_name
     global meter
     global cstop_processing
+    global voices
+    global measure_on
 
     parse_args()
     if args.vertical or args.horizontal:
@@ -5915,6 +5964,8 @@ def main():
         measure_meter = { '': 'none'}       # Each measure change can have a different meter.
         meter = 'none'
     # fi
+
+    new_voice_initialize(voices, measure_on)    # Set a bunch of things for voice=1 so acc_m, etc. are set.
 
     output_name = sys.stdout
     if args.rest:
