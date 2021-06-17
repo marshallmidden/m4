@@ -7,14 +7,11 @@
 # ./musicomp --horizontal song song.h   # Either v or h (or mixed) input.
 #-----------------------------------------------------------------------------
 # TODO:
-
-#-- NOTDONEYET - process macros here.
-
 # 1) tempo allowed anywhere. Make notes match to there. (rest insertion)
 #    NOTDONEYET - multiple tempos in song.
 #    Associate with measure, and put out like volume for --vertical and --horizontal.
 #    For midi, put tempo in the 1 channel.
-#    For ABC -- figure out how to do it.
+#    For ABC -- [Q:1/8=120]
 # 2) Instrument numbers +/- by a given value. (fluidsynth verses timidity)
 # 3) Select clef=treble or clef=bass by notes min and max notes on staff(s).
 #       # NOTDONEYET - add ' clef=bass'  (after the number)
@@ -28,7 +25,6 @@
 #    have line number and "line" of the goto for error printing.
 #       When a goto is executed more than n times, it wraps around, and begins
 #    executing the 1st branch address again.
-# 5) do_macro ... allow multiple per line via () around the macro arguments.
 #-----------------------------------------------------------------------------
 # Commands not done.
 #   print_error("NOTDONEYET - do_goto", line)           Complicated, but should do.
@@ -56,10 +52,65 @@
 # vol(sfp) before a note sets volume to f for that note only, and following p.
 #   vol(p) 3c4, 3d4, vol(sfp) 3e4, 3f4, 3g4
 #   (p,p,f,p,p)
-#-----------------------------------------------------------------------------
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # cresc(xxx,yyy) xxx = ending volume. yyy = time (0.75 = three quarter notes).
 # dimin(xxx,yyy) xxx = ending volume. yyy = time (0.75 = three quarter notes).
 #   Like vol(), but does a volume change from present to xxx over time yyy.
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# Macro substitution during note processing.
+# A line that looks like notes may use the macro whenever a complete note or
+# vol(), cresc(),dimin() may appear. Example follows:
+#   macro   abc,A,B,C
+#      A4, B4
+#      A8, C8
+#   endm
+#   measure 1
+#   voice 2
+#   0e4, 0g4
+#   vol(ff) abc(1c,1e,1g) abc(2e,2c,2g) 3g4, vol(sf) 3a4
+#
+# The whole line is processed, left to right -- with the new lines from the
+# macro inserted into place. NOTE: The "vol(ff)" refers to the next note in the 
+# line, but there is none, so it is tossed away. *NOTE*
+#
+# The first abc macro is done, then the second, then the two trailing notes.
+# Correctly formatted line would have put the vol(ff) before the 3g4 (which
+# would affect that note and subsequent for voice 1, but not the 2nd voice 3a4.
+# vol(sf) affects the 3a4 and puts volume back to what it was before the "sf".
+#
+# This shows that no deliminators are used in substitution of arguments (all
+# macros), and that intermixing of vertical 'v#:' format and horizontal format
+# is allowed. Convert all to one type or the other via command line arguments:
+# --horizontal or --vertical. (And it deletes macros too..., which may be useful
+# when trying to figure out what a macro really did.)
+#
+#
+# The above would then look like either:
+#   measure 1
+#   voice   2    0,0
+#   v1: 0e4, 1c4, 1c8, 2e4, 2e8, 3g4
+#   v2: 0g4, 1e4, 1g8, 2c4, 2g8, vol(sf) 3a4
+# or:
+#   voice   2    0,0
+#      0e  4,  0g  4
+#      1c  4,  1e  4
+#      1c  8,  1g  8
+#      2e  4,  2c  4
+#      2e  8,  2g  8
+#      3g  4,vol(sf) 3a  4
+#
+# If the second abc macro had been after 3g4, then there would be no second
+# note for either 3g4 line (but comma would put in a r4 -- but the 3a4 would
+# have been for voice 1 and without a second note for second voice, error!
+#
+#   vol(ff) abc(1c,1e,1g) 3g4, abc(2e,2c,2g) vol(sf) 3a4
+#
+# ./musicomp2abc --vert tv
+#   ERROR - Not enough arguments on note line - want 2, have ['vol(sf)3a4']
+#   Line 8 - vol(sf)3a4
+#
+# This shows that if not a command, spaces are eliminated for note processing.
+# By the way, the arguments on the voice line for for instruments, 0=default.
 #-----------------------------------------------------------------------------
 # xpose command is done for --vertical, --horizontal, and --midi1csv, but NOT abc format.
 # ABC format thus will "print" right, but not "play" (abc2midi) right.
@@ -791,6 +842,8 @@ ifdepth = 0
 global cstop_processing
 cstop_processing = False            # True if after a cstop.
 
+global macro_internal               # Next internal macro.
+macro_internal = 0                  # Number for internal macros (note processing internal macros).
 global macro_defining               # If defining macro.
 macro_defining = None
 global macro_buffer                 # Name of macro, array of lines for macro.
@@ -813,12 +866,14 @@ global measure_meter
 global key
 global key_name
 key_name = 'c'
+# NOTDONEYET - multiple keys in song.
 global key_voice
 global key_voice_abc
 key_voice = {}
 key_voice_abc = {}
 
 # This should really be 'where it occurs'.
+# NOTDONEYET - multiple tempos in song.
 global tempo_speed                  # beats per minute
 tempo_speed = 150.0
 global default_note_length          # length of a beat (note)
@@ -1105,7 +1160,6 @@ def print_measure_abc(m, voice, l_meter, l_dl, l_clef, l_instrument, l_vl, l_txt
     global intensity
     global args
     global key_name
-    global key_voice
     global key_voice_abc
     global bufs_vol
 
@@ -1157,6 +1211,7 @@ def print_measure_abc(m, voice, l_meter, l_dl, l_clef, l_instrument, l_vl, l_txt
     # fi
     if m == meas[0]:
         vvv = voice
+# NOTDONEYET - multiple keys in song.
         if vvv in key_voice_abc:
             if key_name != key_voice_abc[vvv]:
                 ky = key_voice_abc[vvv]
@@ -1459,13 +1514,19 @@ def print_out_midi1csv_start(voiceprint):
 #   End of print_out_midi1csv_start
 
 #-----------------------------------------------------------------------------
-def print_out_midi1csv_tempo(voiceprint):
+def print_out_midi1csv_tempo(voiceprint, time_of_tempo):
     global tempo_speed
     global default_note_length
     global output_name
 
-    X = round((60.0 * 1000000.0) / ((4.0 * default_note_length[''])) / tempo_speed)
-    print("{}, 0, Tempo, {}".format(voiceprint, X), file=output_name)
+    if time_of_tempo == 0:      # If default time
+        X = int(round((60.0 * 1000000.0) / ((4.0 * default_note_length[''])) / tempo_speed))
+    else:
+        X = 0
+        pass
+# NOTDONEYET - multiple tempos in song.
+    # fi
+    print("{}, {}, Tempo, {}".format(voiceprint, time_of_tempo, X), file=output_name)
 # End of print_out_midi1csv_tempo
 
 #-----------------------------------------------------------------------------
@@ -1486,6 +1547,7 @@ def print_header():
         header = header + "tempo   {},{}\n".format(tempo_speed, l)
         header = header + "key     {}".format(key)       # no \n, added when printed.
         for ve in range(1,len(vl) + 1):
+# NOTDONEYET - multiple keys in song.
             if ve in key_voice:
                 header = header + "\nkey     {}  {}".format(ve,key_voice[ve]) # No terminating \n.
             # fi
@@ -1502,7 +1564,7 @@ def print_header():
             print('1, 0, Title_t, "{}"'.format(t), file=output_name)
         # rof
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-        print_out_midi1csv_tempo(1)
+        print_out_midi1csv_tempo(1, 0)      # Channel number, and 0 = default tempo/time.
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # 1, 0, Key_signature, -2, "major"
         print('1, 0, Key_signature, {}, "major"'.format(key), file=output_name)
@@ -1557,6 +1619,7 @@ def print_header():
             lthworkingmeasure = lthworkingmeasure + mlth[voice][m]
         # rof
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# NOTDONEYET - multiple tempos in song.
 # NOTDONEYET -- X = round((60.0 * 1000000.0) / ((4.0 * default_note_length[''])) / tempo_speed)
 # NOTDONEYET -- print("x, y, Tempo, {}".format(X), file=output_name)
 # NOTDONEYET -- tempo associated within measure/bar.
@@ -1714,6 +1777,8 @@ def print_out_midi1csv_notes():
     global bars                                 # number of bars per staff
     global inst
     global output_name
+    global key_voice
+    global key_voice_abc
 
     channel = 0                                 # next midi instrument channel to use
     chan = 0                                    # the midi channel using now (allows for repeated use).
@@ -1728,10 +1793,11 @@ def print_out_midi1csv_notes():
         m_number = 0
         print_out_midi1csv_start(voice+1)
         print('{}, 0, Text_t, " voice {}"'.format(voice+1, voice), file=output_name)
-        print_out_midi1csv_tempo(voice+1)
+        print_out_midi1csv_tempo(voice+1, 0)
         lastmeter = print_out_midi1csv_ts(lastmeter,voice,m_number,lthworkingmeasures)
         channel, chan, l_instrument = print_out_midi1csv_instrument(l_instrument,voice,m_number,channel,chan,lthworkingmeasures)
 
+# NOTDONEYET - multiple keys in song.
         if voice in key_voice_abc and key_name != key_voice_abc[voice]:
             ky = key_voice[voice]
             print('{}, 0, Key_signature, {}, "major"'.format(voice+1, key_sig[ky]), file=output_name)
@@ -2433,6 +2499,7 @@ def do_tempo(t_args, line):
     # fi
     if len(t_args) == 1:
         x = round(f1 / 60.0)
+# NOTDONEYET - multiple tempos in song.
         default_note_length[measure_on] = 1.0               # whole note
         if tempo_speed != 150.0:
             print_warning("Multiple tempo's not handled. Last was {}, this would be {}.".format(tempo_speed,x), line)
@@ -2449,6 +2516,7 @@ def do_tempo(t_args, line):
         return
     # fi
     default_note_length[measure_on] = (1.0 / f2)            # whole note
+# NOTDONEYET - multiple tempos in song.
     if tempo_speed != 150.0:
         print_warning("Multiple tempo's not handled. Last was {}, this would be {}.".format(tempo_speed,round(f1)), line)
     # fi
@@ -2837,6 +2905,7 @@ def do_delay(t_args, line):
     # fi
 
     # Convert value/60.0 to note_beats/minute (tempo).
+# NOTDONEYET - multiple tempos in song.
     # tempo_speed = 120.0                 # beats per minute.
     # default_note_length[measure_on]     # length of a beat (note)
     # (tempo beats/minute) * (1/60.0 minutes/sec)
@@ -3715,6 +3784,7 @@ def do_key(t_args, line):
         key_name = k                        # Used in xpose, and when printing midicsv output.
         key = k
         for ve in range(0, MAXVOICES):       # This is used as [1] .. [MAXVOICES]
+# NOTDONEYET - multiple keys in song.
             key_voice[ve] = kl
             key_voice_abc[ve] = k
         # rof
@@ -3737,6 +3807,7 @@ def do_key(t_args, line):
             return
         # fi
         f1 = round(f1)
+# NOTDONEYET - multiple keys in song.
         key_voice[f1] = kl
         key_voice_abc[f1] = k
     # rof
@@ -4357,6 +4428,8 @@ def do_xpose(t_args, line):
     global xpose_new_key
     global measure_on
     global key_name
+    global key_voice
+    global key_voice_abc
 
     if t_args is None or len(t_args) != 1:
         print_error("xpose does not have arguments.", line)
@@ -4422,6 +4495,7 @@ def do_xpose(t_args, line):
         xpose_new_key[f1] = kl
         f1 = round(f1)
         xpose[f1] = x
+# NOTDONEYET - multiple keys in song.
         key_voice[f1] = kl
         key_voice_abc[f1] = k
     # rof
@@ -4872,6 +4946,7 @@ def getnote(note_to_decode, voice, line):
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     # Have o(ctave),a(ccidental),and n(ote).
     # Convert for key.
+# NOTDONEYET - multiple keys in song.
     if voice in key_voice:
         ky = key_voice[voice]
     else:
@@ -5276,6 +5351,7 @@ def process_notes(t_args, line):
     global bufs_tie_next
     global DECORATIONS
     global macro_buffer                 # Name of macro, array of lines for macro.
+    global macro_internal               # Next internal macro.
 
     if not measure_on or measure_on == '':  # no measure yet
         print_error("no measure processed yet - must have one before notes.", line)
@@ -5366,36 +5442,51 @@ def process_notes(t_args, line):
             # fi
             if vnumber is None:
                 temp1 = wargs[onvoice - loopstart]          # loopstart fixes "cis" being used.
+                rest_wargs_on_line = wargs[onvoice - loopstart +1:]
             else:
                 if vnumber >= len(wargs):
                     break
                 # fi
                 temp1 = wargs[vnumber]
+                rest_wargs_on_line = wargs[vnumber +1:]
             # fi
             prenote = ''
             postnote = ''
             onenotevolume = None
             while True:
-                found = False
                 for c in macro_buffer:
                     t = temp1[0:len(c) + 1]
                     if c != '' and c + '(' == t:
                         therest = temp1[len(c)+1:]
                         f = therest.find(')')
                         if f < 0:
-                            print_error("macro {} does not have a closing closing parenthesis".format(c), line)
+                            print_error("macro {} does not have a closing parenthesis".format(c), line)
                             return
                         # fi
                         margs = [ therest[0:f] ]
                         temp1 = therest[f+1:]
+                        # 1) Create and put in a temporary macro with no arguments for temp1
+                        #    (rest of line), if anything in temp1 (not None, nor '').
+                        # 2) Put in this macro with arguments.
+                        if temp1 is not None and temp1 != '':
+                            m_name = 'Internal_Macro_{}'.format(macro_internal)
+                            if rest_wargs_on_line == []:
+                                macro_buffer[m_name] = [ temp1 ]        # lines in bujffer.
+                            else:
+                                macro_buffer[m_name] = [ temp1 + "," + ",".join(rest_wargs_on_line) ]
+                            # fi
+                            # macro_defining = m_name               # No need, we did it.
+                            macro_arguments[m_name] = []
+                            macro_internal = macro_internal + 1     # Next internal macro.
+                            macro_executing_depth.append(m_name)    # Add in the name.
+                            macrodepth = len(macro_executing_depth) # one more to do.
+                            macro_executing_args[macrodepth] = []   # No arguments
+                            macro_line[macrodepth] = 0              # First line in buffer.
+                        # fi
                         replace_macro(c, margs, line)
-                        found = True
-                        break;
+                        return                                      # Go out and read line for macro.
                     # fi
                 # rof
-                if found:
-                    continue
-                # fi
                 if temp1[0:4] == 'vol(':
                     therest,onenotevolume,f2,f3 = get_vol_note(temp1, line)
                     # onenotevolume for midi1csv format.
