@@ -803,7 +803,7 @@ def f_freq(arg):
 #-----------------------------------------------------------------------------
 def f_nearest(arg):
     a = float(arg)
-    a = round(math.log(a / 27.5) * (12.0 / 0.693147))
+    a = int(round(math.log(a / 27.5) * (12.0 / 0.693147)))
     return [ 'NUMBER', a ]
 # End of f_nearest
 
@@ -838,7 +838,7 @@ def f_exp(arg):
 #-----------------------------------------------------------------------------
 def f_frac(arg):
     a = float(arg)
-    a = round(a) - a
+    a = int(round(a)) - a
     return [ 'NUMBER', a ]
 # End of f_frac
 
@@ -870,7 +870,7 @@ def f_ln(arg):
 #-----------------------------------------------------------------------------
 def f_round(arg):
     a = float(arg)
-    a = round(a)
+    a = int(round(a))
     return [ 'NUMBER', a ]
 # End of f_round
 
