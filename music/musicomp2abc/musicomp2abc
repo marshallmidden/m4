@@ -1,7 +1,10 @@
 #!/usr/bin/python3 -B
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 #-----------------------------------------------------------------------------
-# NOTDONEYET - multiple tempos in song.
+# Verify:
+#   key changes
+#   xpose  with and without key and number.
+#   
 #-----------------------------------------------------------------------------
 # ./musicomp --midi1csv song song.csv
 # ./musicomp song song.abc
@@ -9,17 +12,11 @@
 # ./musicomp --horizontal song song.h   # Either v or h (or mixed) input.
 #-----------------------------------------------------------------------------
 # TODO:
-# 1) tempo allowed in all measures. Make notes match to there. (rest insertion)
-# 1) key allowed any where. Make notes match to there. (rest insertion)
-#    NOTDONEYET - multiple tempos in song.
-#    Associate with measure, and put out like volume for --vertical and --horizontal.
-#    For midi, put tempo in the 1 channel.
-#    For ABC -- [Q:1/8=120]
-# 2) Instrument numbers +/- by a given value. (fluidsynth verses timidity)
-# 3) Select clef=treble or clef=bass by notes min and max notes on staff(s).
-#       # NOTDONEYET - add ' clef=bass'  (after the number)
-#       # clef can occur each measure (abc, horizontal, vertical format).
-# 4) GOTO - move variables to global, and when processing change measure, etc. and
+
+# 1) tempo changes - midi does not work right. Probably cannot have in songs without voice 1?
+#    Some error about order.
+
+# 2) GOTO - move variables to global, and when processing change measure, etc. and
 #    exiting printing routine, do the right thing(s).
 #    Need pointer to goto table indexed by measure.
 #    Processed at end of a measure, and counter. Says 'Limited to 8' (we'll do dynamic).
@@ -28,6 +25,12 @@
 #    have line number and "line" of the goto for error printing.
 #       When a goto is executed more than n times, it wraps around, and begins
 #    executing the 1st branch address again.
+
+# 3) Instrument numbers +/- by a given value. (fluidsynth verses timidity)
+
+# 4) Select clef=treble or clef=bass by notes min and max notes on staff(s).
+#       # NOTDONEYET - add ' clef=bass'  (after the number)
+#       # clef can occur each measure (abc, horizontal, vertical format).
 #-----------------------------------------------------------------------------
 # Commands not done.
 #   print_error("NOTDONEYET - do_goto", line)           Complicated, but should do.
@@ -758,35 +761,41 @@ running_vl[1][''] = 127             # running_vl[voice][m] = volumelevel
 
 global xpose
 xpose = {}
-global xpose_new_key
+global xpose_new_key                # lowercase normal musicomp usage.
 xpose_new_key = {}
 
-global vinstrument,clef,reverb,pan,intensity
+global clef
 clef = { }                          # no clef specified [measure][voice].
+clef[''] = { }
+global vinstrument
 vinstrument = { }                   # no instruments specified [measure][voice].
+global reverb
 reverb = { }                        # Reverb value for voice.
+global pan
 pan = { }                           # Pan (balance 0=left, 126=right, 64=center) for voice.
+global intensity
 intensity = { }                     # Instrument intensity (volume).
 #...
-clef[0] = { }                       # blank measure.
 vinstrument[''] = {}                # blank measure.
 reverb[''] = {}
 pan[''] = {}
 intensity[''] = {}
 
-global cresc_volume, cresc_time, cresc_direction
+global cresc_volume
 cresc_volume = [ ]
+global cresc_time
 cresc_time = []
+global cresc_direction
 cresc_direction = []
-for i in range(0, MAXVOICES):       # This is used as [1] .. [MAXVOICES]
-    vinstrument[''][i+1] = 0        # No instrument. (measure, voice)
-    reverb[''][i+1] = 0
-    pan[''][i+1] = 64
-    intensity[''][i+1] = 100
-    clef[i+1] = {}
-    clef[i+1][''] = 'treble'        # No clef.       (voice, measure)
+for i in range(1, MAXVOICES+1):       # This is used as [1] .. [MAXVOICES]
+    vinstrument[''][i] = 0        # No instrument. (measure, voice)
+    reverb[''][i] = 0
+    pan[''][i] = 64
+    intensity[''][i] = 100
+    clef[''][i] = {}
+    clef[''][i] = 'treble'        # No clef.       (voice, measure)
     xpose[i] = 0
-    xpose_new_key[i] = 'c'          # No new key.
+    xpose_new_key[i] = 'c'          # No new key.   Text!
     cresc_volume.append(0)
     cresc_time.append(0)
     cresc_direction.append(True)
@@ -795,7 +804,6 @@ global inst
 inst = { }                          # track using instrument by instrument.
 global oct                          # default octave
 oct = { 1 : 0 }
-global acc
 global acc_v_init                   # Last accidental on a note in measure.
 global acc_v_init_v_or_h            # Last accidental on a note in measure.
 acc_v_init = { 'C':'', 'D':'', 'E':'', 'F':'', 'G':'', 'A':'', 'B':''}
@@ -822,7 +830,9 @@ bufs_tie_next = { 1: '' }
 global bufs_vol
 bufs_vol = { 1: {} }
 
-global lstac,lgrace,lpause
+global lstac
+global lgrace
+global lpause
 lstac = lgrace = lpause = 4         # starting staccato, grace note, lpause as 4/60th of a second
 
 global iftest                       # check if after if or else.
@@ -859,20 +869,14 @@ global key_default
 key_default = None                  # First key applies globally, if not voice number arguments.
 global key_voice                    # Running key by measure then voice.
 key_voice = { '': {} }
-global key_voice_abc                # Running key by measure then voice.
-key_voice_abc = { '': {} }
 
 # This should really be 'where it occurs'.
-# NOTDONEYET - multiple tempos in song.
 global tempo_speed_default          # beats per minute
 tempo_speed_default = 150.0
-# NOTDONEYET - multiple tempos in song.
 global default_note_length          # length of a beat (note)
 default_note_length = { '': 1.0 / 4.0 } # before a measure.
-# NOTDONEYET - multiple tempos in song.
 global tempo_speed_now              # beats per minute for each measure.
 tempo_speed_now = { '': tempo_speed_default }
-# NOTDONEYET - multiple tempos in song.
 global tempo_now_note_length          # length of a beat (note)
 tempo_now_note_length = { '': 1.0 / 4.0 } # before a measure.
 
@@ -996,6 +1000,9 @@ def new_voice_initialize(voice, m):
     global acc_v_init_v_or_h            # Last accidental on a note in measure.
     global args
     global running_vl                   # volume levels changing thru measures.
+    global key_default
+    global key_voice
+    global clef
 
     if voice not in vl:
         vl[voice] = { }                 # Dictionary
@@ -1015,9 +1022,11 @@ def new_voice_initialize(voice, m):
         bufs_tie_next[voice] = ''
         bufs_vol[voice] = {}
     # fi
+
     if m not in vl[voice]:
         vl[voice][m] = 127              # start volume out at maximum
         running_vl[voice][m] = 127
+
     if m not in vinstrument:
         vinstrument[m] = {}
         reverb[m] = {}
@@ -1029,6 +1038,14 @@ def new_voice_initialize(voice, m):
         reverb[m][voice] = 0
         pan[m][voice] = 64
         intensity[m][voice] = 100
+
+    if m not in key_voice:
+        key_voice[m] = {}
+    # fi
+    if voice not in key_voice[m]:
+        key_voice[m][voice] = key_default
+    # fi
+
     if m not in mlth[voice]:
         mlth[voice][m] = 0              # measure length dictionary
     # fi
@@ -1044,6 +1061,24 @@ def new_voice_initialize(voice, m):
             acc_m_xpose[voice] =  {k: v for k, v in acc_v_init.items()}
         # fi
     # fi
+
+    for j in vl:
+        if m not in clef:
+            clef[m] = {}
+        # fi
+        if m not in clef or j not in clef[m]:
+            for k in reversed(range(0, len(meas)-1)):
+                mmm = meas[k]
+                if mmm in clef and j in clef[mmm]:
+                    nc = clef[mmm][j]
+                    break
+                # fi
+            # rof
+        else:
+            nc = clef[m][j]
+        # fi
+        clef[m][j] = nc
+    # rof
     return
 # End of new_voice_initialize
 
@@ -1145,9 +1180,9 @@ def rests_in_empty_measure_voices(m, voice):
 # End of rests_in_empty_measure_voices
 
 #-----------------------------------------------------------------------------
-def print_measure_abc(m, voice, l_meter, l_dl, l_clef, l_instrument, l_vl, l_txt, l_ky):
+def print_measure_abc(m, voice, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_vl, l_txt, l_ky):
     global bufs
-    global vl
+    #-- global vl
     global measure_meter
     global clef
     global meas
@@ -1155,24 +1190,23 @@ def print_measure_abc(m, voice, l_meter, l_dl, l_clef, l_instrument, l_vl, l_txt
     global reverb
     global pan
     global intensity
-    global args
-    global bufs_vol
-    global key_voice_abc                    # Running key by voice.
+    global key_voice                        # Running key by voice.
+    global tempo_speed_now
 
     if voice not in bufs:
         return "ERROR - bufs voice dictionary is hosed.", '', '', '', '', ''
     # fi
     pr = l_txt
     # if first measure, and doing voice, output V:# line.
-    if m == meas[0] or (m in clef[voice] and l_clef != clef[voice][m]):
+    if m == meas[0] or (m in clef and voice in clef[m] and l_clef != clef[m][voice]):
         if pr != '':
             pr = pr + '\n'
         # fi
         #-- pr = pr + "V:{}".format(len(vl) - voice + 1)
         pr = pr + "V:{}".format(voice)
-        if m in clef[voice]:
-            if clef[voice][m] != l_clef:
-                l_clef = clef[voice][m]
+        if m in clef and voice in clef[m]:
+            if clef[m][voice] != l_clef:
+                l_clef = clef[m][voice]
                 pr = pr + ' clef={}'.format(l_clef)
             # fi
         # fi
@@ -1194,8 +1228,8 @@ def print_measure_abc(m, voice, l_meter, l_dl, l_clef, l_instrument, l_vl, l_txt
             pr = pr + "%%MIDI program {}\n".format(l_instrument)
         # fi
     # fi
-    # if default note length != last one
 
+    # if default note length != last one
     if l_dl != default_note_text_fraction(m):
         l_dl = default_note_text_fraction(m)
         if l_dl == '1':
@@ -1205,11 +1239,16 @@ def print_measure_abc(m, voice, l_meter, l_dl, l_clef, l_instrument, l_vl, l_txt
         # fi
         pr = pr + "[L:{}]".format(l_dl)
     # fi
-    #-- if m == meas[0]:
+
+    if l_tempo != tempo_speed_now[m]:
+        l_tempo = tempo_speed_now[m]
+        pr = pr + "[Q:{}={}]".format(l_dl, l_tempo)
+    # fi
+
     vvv = voice
-    if vvv in key_voice_abc[m]:
-        if l_ky != key_voice_abc[m][vvv]:
-            ky = key_voice_abc[m][vvv]
+    if vvv in key_voice[m]:
+        if l_ky != key_voice[m][vvv]:
+            ky = key_voice[m][vvv]
             pr = pr + "[K:{}]".format(ky)
             l_ky = ky
         # fi
@@ -1228,7 +1267,7 @@ def print_measure_abc(m, voice, l_meter, l_dl, l_clef, l_instrument, l_vl, l_txt
         l_vl = v_vl
     # fi
     pr = pr + bufs[voice][m] + ' |'
-    return pr, l_meter, l_dl, l_clef, l_instrument, l_vl, l_ky
+    return pr, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_vl, l_ky
 # End of print_measure_abc
 
 #-----------------------------------------------------------------------------
@@ -1237,7 +1276,6 @@ def print_out_abc():
     global meas                             # measures
     global bars                             # number of bars per staff
     global output_name
-    global output_name
     global key_default
 
     #-- for voice in reversed(range(1,len(vl)+1)):
@@ -1245,6 +1283,7 @@ def print_out_abc():
         print("% --- voice", voice, ' ---', file=output_name)
         l_meter = l_dl = l_clef = l_instrument = l_vl = ''
         l_ky = key_default
+        l_tempo = ''
         print_line = ''
         for i in range(0, len(meas)):
             m = meas[i]
@@ -1255,8 +1294,8 @@ def print_out_abc():
                 print(print_line + "% measure {}".format(m), file=output_name)
                 print_line = ''
             # fi
-            print_line, l_meter, l_dl, l_clef, l_instrument, l_vl, l_ky = print_measure_abc(m, voice,
-                        l_meter, l_dl, l_clef, l_instrument, l_vl, print_line, l_ky)
+            print_line, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_vl, l_ky = print_measure_abc(m, voice,
+                        l_meter, l_tempo, l_dl, l_clef, l_instrument, l_vl, print_line, l_ky)
         # rof
         if print_line != '':
             print_line = print_line + ']'
@@ -1268,14 +1307,15 @@ def print_out_abc():
 
 #-----------------------------------------------------------------------------
 # input:
-#   m
-#   voice
-#   l_meter
-#   l_dl
-#   l_clef
-#   l_instrument
-#   l_vl
-#   l_txt   (print_line entry)
+#   m               The measure.
+#   l_meter         Last meter.
+#   l_clef          Last clef for voices.
+#   l_instrument    Last Instrument for voices.
+#   l_vl            Last volume array for voices.
+#   l_txt           (print_line entry)
+#   l_ky            Last key for this voice.
+#   l_tempo         Last tempo
+#   l_t_n_l         Last tempo note length.
 # returns:
 #   print_line
 #   l_meter
@@ -1283,6 +1323,9 @@ def print_out_abc():
 #   l_clef
 #   l_instrument
 #   l_vl
+#   l_ky
+#   l_tempo
+#   l_t_n_l
 
 #   measure xyz
 #   meter   x/y
@@ -1293,12 +1336,14 @@ def print_out_abc():
 #   v1: 3c4, ...
 #   vX: 3e4, ...
 
-def print_measure_vh_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l_ky):
+def print_measure_vh_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l_ky, l_tempo, l_t_n_l):
     global vl
     global measure_meter
     global clef
     global vinstrument
     global key_voice
+    global tempo_speed_now
+    global tempo_now_note_length
 
     pr = n_meter = n_clef = n_instrument = n_vl = ''
 
@@ -1311,8 +1356,8 @@ def print_measure_vh_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l_ky)
 
     n_clef = ''
     for voice in range(1,len(vl)+1):
-        if m in clef[voice]:
-            t = str(clef[voice][m])
+        if m in clef and voice in clef[m]:
+            t = str(clef[m][voice])
             if n_clef == '':
                 n_clef = t
             else:
@@ -1368,14 +1413,19 @@ def print_measure_vh_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l_ky)
         # fi
     # rof
 
-# NOTDONEYET - multiple tempos in song.
-
+    if l_tempo != tempo_speed_now[m] or l_t_n_l != tempo_now_note_length[m]:
+        l_tempo = tempo_speed_now[m]
+        l_t_n_l = tempo_now_note_length[m]
+        l = str(Fraction(1.0 / l_t_n_l).limit_denominator(256))
+        pr = pr + "tempo   {},{}\n".format(l_tempo, l)
+    # fi
+        
     pr = l_txt + pr
-    return pr, n_meter, n_clef, n_instrument, n_vl, l_ky
+    return pr, n_meter, n_clef, n_instrument, n_vl, l_ky, l_tempo, l_t_n_l
 # End of print_measure_vh_header
 
 #-----------------------------------------------------------------------------
-def print_out_notes_v_of_h(m, print_line):
+def print_out_notes_v_or_h(m, print_line):
     global args
     global vl
     global bufs
@@ -1469,7 +1519,7 @@ def print_out_notes_v_of_h(m, print_line):
         now = nextmin
     # elihw
     return print_line
-#   End of print_out_notes_v_of_h
+#   End of print_out_notes_v_or_h
 
 #-----------------------------------------------------------------------------
 # Vertical and horizontal have:
@@ -1491,6 +1541,8 @@ def print_out_v_or_h():
     global args
     global output_name
     global key_default
+    global tempo_speed_default
+    global default_note_length
 
     print("voice   {}".format(len(vl)), file=output_name)
 
@@ -1500,7 +1552,10 @@ def print_out_v_or_h():
     for voice in range(1,len(vl)+1):
         l_ky.append(key_default)
     # fi
+    l_tempo = tempo_speed_default
+    l_t_n_l = default_note_length['']
     print_line = ''
+
     for i in range(0, len(meas)):
         m = meas[i]
         if args.horizontal and m == meas[0]:
@@ -1510,10 +1565,10 @@ def print_out_v_or_h():
             # rof
             print_line = print_line + "\n"
         # fi
-        print_line, l_meter, l_clef, l_instrument, l_vl, l_ky = print_measure_vh_header(m,
-                    l_meter, l_clef, l_instrument, l_vl, print_line, l_ky)
+        print_line, l_meter, l_clef, l_instrument, l_vl, l_ky, l_tempo, l_t_n_l = print_measure_vh_header(m,
+                    l_meter, l_clef, l_instrument, l_vl, print_line, l_ky, l_tempo, l_t_n_l)
         # Print out notes for measure.
-        print_line = print_out_notes_v_of_h(m, print_line)
+        print_line = print_out_notes_v_or_h(m, print_line)
     # rof
     if print_line != '':
         print(print_line, end='', file=output_name)
@@ -1528,25 +1583,16 @@ def print_out_midi1csv_start(voiceprint):
 #   End of print_out_midi1csv_start
 
 #-----------------------------------------------------------------------------
-def print_out_midi1csv_tempo(voiceprint, time_of_tempo):
-    global tempo_speed_default
-    global default_note_length
+def print_out_midi1csv_tempo(voiceprint, t, l, time_of_tempo):
     global output_name
 
-    if time_of_tempo == 0:      # If default time
-        X = int(round((60.0 * 1000000.0) / ((4.0 * default_note_length[''])) / tempo_speed_default))
-    else:
-        X = 0
-        pass
-# NOTDONEYET - multiple tempos in song.
-    # fi
+    X = int(round((60.0 * 1000000.0) / ((4.0 * l)) / t))
     print("{}, {}, Tempo, {}".format(voiceprint, time_of_tempo, X), file=output_name)
 # End of print_out_midi1csv_tempo
 
 #-----------------------------------------------------------------------------
 def print_header():
     global header
-    global key
     global tempo_speed_default
     global default_note_length          # length of a beat (note)
     global args
@@ -1555,6 +1601,8 @@ def print_header():
     global output_name
     global key_voice
     global key_default
+    global measure_meter
+    global mlth
 
     if args.vertical or args.horizontal:
         l = str(Fraction(1.0 / default_note_length['']).limit_denominator(256))
@@ -1578,7 +1626,8 @@ def print_header():
             print('1, 0, Title_t, "{}"'.format(t), file=output_name)
         # rof
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-        print_out_midi1csv_tempo(1, 0)      # Channel number, and 0 = default tempo/time.
+        # Initial information (first zero, add 1), and time of 0 = use default tempo/time.
+        print_out_midi1csv_tempo(1, tempo_speed_default, default_note_length[''], 0)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # 1, 0, Key_signature, -2, "major"
         print('1, 0, Key_signature, {}, "major"'.format(key_default), file=output_name)
@@ -1659,6 +1708,8 @@ def print_header():
 # returns lastmeter printed (which this routine may do).
 def print_out_midi1csv_ts(last_bar_meter,voiceon,m_number, lthworkingmeasure):
     global output_name
+    global meas
+    global measure_meter
 
     m = meas[m_number]
     if last_bar_meter != measure_meter[m]:
@@ -1694,6 +1745,7 @@ def print_out_midi1csv_instrument(last_instrument_on,voiceon,m_number,channel,ch
     global inst
     global extrainfo
     global output_name
+    global mlth
 
     if m_number >= len(meas):
         return channel, chan, last_instrument_on
@@ -1745,7 +1797,13 @@ def print_out_midi1csv_instrument(last_instrument_on,voiceon,m_number,channel,ch
 
 #-----------------------------------------------------------------------------
 def do_possible_midi_tie(voice, m_number, i, l, lastmeter, channel, chan, l_instrument, lthworkingmeasures):
-    global output_name
+    #-- global output_name
+    global bufs_accidentals
+    global bufs
+    global bufs_accidentals
+    global bufs_length
+    global meas
+    global mlth
 
     flag = False                                # if need do time signature and instrument.
     m = meas[m_number]
@@ -1789,12 +1847,18 @@ def do_possible_midi_tie(voice, m_number, i, l, lastmeter, channel, chan, l_inst
 def print_out_midi1csv_notes():
     global vl                                   # volume levels
     global meas                                 # measures
-    global bars                                 # number of bars per staff
     global inst
     global output_name
-    global key_sig
     global key_voice
     global key_default
+    global tempo_speed_default
+    global default_note_length                  # length of a beat (note)
+    global tempo_speed_now                      # beats per minute for each measure.
+    global tempo_now_note_length                # length of a beat (note)
+    global bufs_accidentals
+    global bufs
+    global bufs_vol
+    global mlth
 
     channel = 0                                 # next midi instrument channel to use
     chan = 0                                    # the midi channel using now (allows for repeated use).
@@ -1810,7 +1874,9 @@ def print_out_midi1csv_notes():
         m_number = 0
         print_out_midi1csv_start(voice+1)
         print('{}, 0, Text_t, " voice {}"'.format(voice+1, voice), file=output_name)
-        print_out_midi1csv_tempo(voice+1, 0)
+        lt = tempo_speed_default
+        ll = default_note_length['']
+        print_out_midi1csv_tempo(voice+1, lt, ll, 0)
         lastmeter = print_out_midi1csv_ts(lastmeter,voice,m_number,lthworkingmeasures)
         channel, chan, l_instrument = print_out_midi1csv_instrument(l_instrument,voice,m_number,channel,chan,lthworkingmeasures)
 
@@ -1821,7 +1887,7 @@ def print_out_midi1csv_notes():
                 else:
                     ky = key_default
                 # fi
-                print('{}, 0, Key_signature, {}, "major"'.format(voice+1, key_sig[ky]), file=output_name)
+                print('{}, 0, Key_signature, {}, "major"'.format(voice+1, ky), file=output_name)
             else:
                 ky = key_default
             # fi
@@ -1845,18 +1911,23 @@ def print_out_midi1csv_notes():
             if  m in key_voice and voice in key_voice[m]:
                 n_key_voice = key_voice[m][voice] # volume level for this voice/measure
             else:
-                n_key_voice = ky                # Probably a rest, put as full volume.
+                n_key_voice = ky
             # fi
             if ky != n_key_voice:
                 ky = n_key_voice
-                print('{}, {}, Key_signature, {}, "major"'.format(voice+1,lth,key_sig[ky]), file=output_name)
+                print('{}, {}, Key_signature, {}, "major"'.format(voice+1,lth,ky), file=output_name)
+            # fi
+
+            if lt != tempo_speed_now[m] or ll != tempo_now_note_length[m]:
+                lt = tempo_speed_now[m]
+                ll = tempo_now_note_length[m]
+                print_out_midi1csv_tempo(voice+1, lt, ll, lth)
             # fi
 
             if len(bufs[voice][m]) == 0:        # If nothing in measure, go to next measure.
                 m_number = m_number + 1
                 continue
             # fi
-# NOTDONEYET - multiple tempos in song.
             while i < len(bufs[voice][m]):      # while there are notes in measure
                 l = bufs_length[voice][m][i]    # length of current note.
                 if l < 0:
@@ -1896,9 +1967,7 @@ def print_out_midi1csv_notes():
 
 #-----------------------------------------------------------------------------
 def do_pass2():
-    global measure_on
     global meas                             # measures
-    global legal_floating
     global args
     global bufs_tie_next
     global vl
@@ -1906,6 +1975,7 @@ def do_pass2():
     global ifdepth
     global macro_defining
     global macro_executing_depth
+    global errors_happened
 
     if ifdepth > 0:
         print("Error inside an if block (depth={}) when end of file or cstop* reached".format(ifdepth),file=sys.stderr)
@@ -1954,7 +2024,6 @@ def do_pass2():
 # Get a line. Put it in "line" and return it.
 def get_line():
     global linecount
-    global legal_floating
     global args
     global file_name
     global macro_executing_depth
@@ -1962,6 +2031,7 @@ def get_line():
     global macro_line
     global macro_buffer                 # Name of macro, array of lines for macro.
     global macro_arguments              # Name of macro, array of arguments for macro.
+    global errors_happened
 
     if macro_executing_depth != []:
         l = len(macro_executing_depth)
@@ -2128,6 +2198,13 @@ def put_on_bufs(onvoice, p_meas, prenote, abc_note, timeofnote, append_tie, onet
     global bufs_accidentals
     global bufs_tie_next
     global running_vl
+    global DECORATIONS
+    global args
+    global bufs_vol
+    global cresc_direction
+    global cresc_time
+    global cresc_volume
+    global vlprint
 
     if type(abc_note) is int:
         abc_note = str(abc_note)
@@ -2277,11 +2354,11 @@ def instak(onvoice, p_meas, prenote, thenote, timeofnote, append_tie, line, onen
 # Make all voices match with rests, etc. The ones we have are now to be processed.
 # Need to make measure for all known voices up to here "mlth". (Add rests.)
 def fill_voice_mlth(line):
-    global measure_on
     global vl
     global mlth
     global tlth
     global args
+    global meas
 
     maxvoice = len(vl) + 1
     for p_meas in meas:
@@ -2513,7 +2590,11 @@ def do_title(t_args, line):
 def do_tempo(t_args, line):
     global tempo_speed_default          # beats per minute
     global default_note_length          # length of a beat (note)
+    global tempo_speed_now
+    global tempo_now_note_length
     global measure_on
+    global mlth
+    global vl
 
     if t_args is None or len(t_args) == 0:
         print_error("tempo does not have one or two arguments.", line)
@@ -2524,7 +2605,17 @@ def do_tempo(t_args, line):
         print_error("tempo - there is not one or two arguments.", line)
         return
     # fi
-    #   value   -- So far computed value
+
+    fill_voice_mlth(line)                   # Need to make measure for other voices up to here "mlth".
+
+    for ve in range(1, len(vl)+1):
+        if mlth[ve][measure_on] != 0:
+            print_error("do_tempo in the middle of a measure not allowed", line)
+            return
+        # fi
+    # rof
+
+    #   f1 is value   -- So far computed value
     #   type_error -- type of error
     f1, type_error = is_float(t_args[0])
     if type_error is not None:
@@ -2537,12 +2628,12 @@ def do_tempo(t_args, line):
     # fi
     if len(t_args) == 1:
         x = int(round(f1 / 60.0))
-# NOTDONEYET - multiple tempos in song.
-        default_note_length[measure_on] = 1.0               # whole note
-        if tempo_speed_default != 150.0:
-            print_warning("Multiple tempo's not handled. Last was {}, this would be {}.".format(tempo_speed_default,x), line)
+        if measure_on == '':
+            tempo_speed_default = x
         # fi
-        tempo_speed_default = x
+        default_note_length[measure_on] = 1.0               # whole note
+        tempo_speed_now[measure_on] = x
+        tempo_now_note_length[measure_on] = 1.0
         return
     # fi
     f2, type_error = is_float(t_args[1])
@@ -2553,17 +2644,18 @@ def do_tempo(t_args, line):
         print_error("tempo does not have second argument as a floating number.", line)
         return
     # fi
-    default_note_length[measure_on] = (1.0 / f2)            # whole note
-# NOTDONEYET - multiple tempos in song.
-    if tempo_speed_default != 150.0:
-        print_warning("Multiple tempo's not handled. Last was {}, this would be {}.".format(tempo_speed_default,int(round(f1))), line)
+    if measure_on == '':
+        tempo_speed_default = int(round(f1))
     # fi
-    tempo_speed_default = int(round(f1))
+    default_note_length[measure_on] = (1.0 / f2)
+    tempo_speed_now[measure_on] = int(round(f1))
+    tempo_now_note_length[measure_on] = (1.0 / f2)
     return
 # End of do_tempo
+
 #-----------------------------------------------------------------------------
 def do_cstopnow(t_args, line):
-    global legal_floating
+    global errors_happened
 
     do_pass2()
     sys.exit(errors_happened)
@@ -2701,7 +2793,6 @@ def process_putd(line):
 #-----------------------------------------------------------------------------
 def do_endif(t_args, line):
     global ifdepth
-    global iftest
 
     if ifdepth == 0:
         print_error("endif command while not in an if command", line)
@@ -2776,8 +2867,7 @@ def do_if(t_args, line):
 
 #-----------------------------------------------------------------------------
 def do_marker(t_args, line):
-    global file_name
-    global output_name
+    global args
 
     fill_voice_mlth(line)                   # Need to make measure for other voices up to here "mlth".
 
@@ -2922,6 +3012,8 @@ def do_delay(t_args, line):
     global tempo_speed_default
     global default_note_length
     global measure_on
+    global tempo_speed_now
+    global tempo_now_note_length
 
     fill_voice_mlth(line)               # Need to make measure for other voices up to here "mlth".
 
@@ -2941,13 +3033,16 @@ def do_delay(t_args, line):
     # fi
 
     # Convert value/60.0 to note_beats/minute (tempo).
-# NOTDONEYET - multiple tempos in song.
     # tempo_speed_default = 120.0                 # beats per minute.
     # default_note_length[measure_on]     # length of a beat (note)
     # (tempo beats/minute) * (1/60.0 minutes/sec)
     #  (tempo/60.0  beats/sec) * (1/default_note_length[measure_on] = ?_note/beats)
     #  (tempo/(60.0*default_note_length[measure_on]) ?_note/sec)  * seconds
-    rvalue = value * tempo_speed_default / (60.0*default_note_length[measure_on])
+    if measure_on == '':
+        rvalue = value * tempo_speed_default / (60.0*default_note_length[measure_on])
+    else:
+        rvalue = value * tempo_speed_now[measure_on] / (60.0*tempo_now_note_length[measure_on])
+    # fi
 
     loopstart = 1 if cis == 0 else cis
     r = 'r({}/60.0)'.format(rvalue)
@@ -3106,8 +3201,8 @@ def do_clef(t_args, line):
         print_error("no clef selection arguments", line)
         return
     # fi
-    for i in range(0, len(wargs)):
-        clef[i+1][measure_on] = wargs[i].strip()   # No checking.
+    for i in range(1, len(wargs)+1):
+        clef[measure_on][i] = wargs[i-1].strip()   # No checking.
     # rof
     return
 # End of do_clef
@@ -3204,6 +3299,12 @@ def do_calc(t_args, line):
 global key_sig
 key_sig = { 'c+':7, 'f+':6, 'b':5, 'e':4, 'a':3, 'd':2, 'g':1, 'c':0,
             'f':-1, 'b-':-2, 'e-':-3, 'a-':-4, 'd-':-5, 'g-':-6, 'c-':-7 }
+
+global key_sig_int
+key_sig_int = {}
+for i in key_sig:
+    key_sig_int[key_sig[i]] = i
+# rof
 
 global key_convert
 key_convert = {
@@ -3785,7 +3886,8 @@ def do_key(t_args, line):
     global key_sig
     global key_default
     global key_voice
-    global key_voice_abc
+    global mlth
+    global vl
 
     if t_args is None or len(t_args) != 1:
         print_error("key command does not have arguments", line)
@@ -3800,22 +3902,24 @@ def do_key(t_args, line):
     k = vargs[0] if len(vargs) < 2 else vargs[1]
     k = k.lower()                           # Technically should not have to do this.
     if k not in key_sig:
-        print_error("key '{}' not recognize.".format(k), line)
+        print_error("key '{}' not recognized.".format(k), line)
         return
     # fi
     if args.vertical or args.horizontal:
-        kl = k.lower()
-        pass                                # nothing to do
+        kl = k                              # printing and used are the same.
     elif args.midi1csv:
-        kl = k.lower()
+        kl = k
         k = key_sig[k]                      # Key number extracted.
     else:                   # ABC
-        kl = k.lower()
+        kl = k
         k = k.upper()
-        k = k.replace('-', 'b')             # Does multiple --.
-        k = k.replace('+', '#')             # Does multiple ++.
-        k = k.replace('n', '=')             # Does multiple ++.
+        k = k.replace('-', 'b')             # Does multiple flats
+        k = k.replace('+', '#')             # Does multiple sharps.
+        k = k.replace('n', '=')             # Does multiple naturals.
     # fi
+    # k = value to store in key_voice, key_default, etc. -- used for printing, etc.
+    # kl = printable version of input.
+
     fill_voice_mlth(line)                   # Need to make measure for other voices up to here "mlth".
 
     for ve in range(1, len(vl)+1):
@@ -3827,11 +3931,10 @@ def do_key(t_args, line):
 
     if len(vargs) == 1:                     # One argument, all voices change.
         if measure_on == '':
-            key_default = k                    # Used in xpose, and when printing midicsv output.
+            key_default = k                 # Used in xpose, and when printing midicsv output.
         # fi
         for ve in range(1, MAXVOICES+1):
-            key_voice[measure_on][ve] = kl  # Running key by voice.
-            key_voice_abc[measure_on][ve] = k # Running key by voice.
+            key_voice[measure_on][ve] = k   # Running key by voice.
         # rof
         return
     # fi                # multiple arguments, voices first.
@@ -3852,8 +3955,7 @@ def do_key(t_args, line):
             return
         # fi
         f1 = int(round(f1))
-        key_voice[measure_on][f1] = kl      # Running key by voice.
-        key_voice_abc[measure_on][f1] = k   # Running key by voice.
+        key_voice[measure_on][f1] = k       # key by measure and voice.
     # rof
     return
 # End of do_key
@@ -3861,7 +3963,8 @@ def do_key(t_args, line):
 #-----------------------------------------------------------------------------
 #   cis   2             $$ only voice 2 follows. sets volume too.
 def do_cis(t_args, line):
-    global voices, cis                  # number of voices, cis ...
+    global voices               # number of voices
+    global cis                  # cis ...
     global vinstrument
     global reverb
     global pan
@@ -3938,6 +4041,10 @@ def do_volume_both(t_args, line, command_name):
     global measure_on
     global vlprint
     global args
+    global cresc_direction
+    global cresc_time
+    global cresc_volume
+    global running_vl
 
     if t_args is None or len(t_args) == 0:
         print_error(command_name + " needs at least one argument", line)
@@ -4121,6 +4228,7 @@ def do_measure(t_args, line):
     global pan
     global intensity
     global acc_m                            # Last accidental on a note in measure.
+    global acc_m_xpose
     global acc_v_init                       # Last accidental on a note in measure.
     global acc_v_init_v_or_h                # Last accidental on a note in measure.
     global meter
@@ -4128,6 +4236,9 @@ def do_measure(t_args, line):
     global clef
     global mlth                             # measure length dictionary
     global args
+    global key_voice
+    global tempo_now_note_length
+    global tempo_speed_now
 
     fill_voice_mlth(line)                   # Need to make measure for other voices up to here "mlth".
 
@@ -4151,27 +4262,30 @@ def do_measure(t_args, line):
             pan[measure_on] = {}
             intensity[measure_on] = {}
             key_voice[measure_on] = {}
-            key_voice_abc[measure_on] = {}
         # fi
         if i not in vl:
             vl[i] = {}
             running_vl[i] = {}
         # fi
         for j in vl:
-            if j not in clef:
-                clef[j] = {}
+            if measure_on not in clef:
+                clef[measure_on] = {}
             # fi
-            if last_m not in clef[j]:
+            if j not in clef[measure_on]:
+                clef[measure_on][j] = {}
+            # fi
+            if last_m not in clef or j not in clef[last_m]:
                 for k in reversed(range(0, len(meas)-1)):
-                    if meas[k] in clef[j]:
-                        nc = clef[j][meas[k]]
+                    mmm = meas[k]
+                    if mmm in clef and j in clef[mmm]:
+                        nc = clef[mmm][j]
                         break
                     # fi
                 # rof
             else:
-                nc = clef[j][last_m]
+                nc = clef[last_m][j]
             # fi
-            clef[j][measure_on] = nc
+            clef[measure_on][j] = nc
         # rof
         new_voice_initialize(i, measure_on)
         mlth[i][measure_on] = 0
@@ -4180,9 +4294,7 @@ def do_measure(t_args, line):
         pan[measure_on][i] = pan[last_m][i]
         reverb[measure_on][i] = reverb[last_m][i]
         intensity[measure_on][i] = intensity[last_m][i]
-        tempo_speed_now[measure_on] = tempo_speed_now[last_m]
         key_voice[measure_on][i] = key_voice[last_m][i]
-        key_voice_abc[measure_on][i] = key_voice_abc[last_m][i]
         # Carry forward.
         vl[i][measure_on] = vl[i][last_m]
         running_vl[i][measure_on] = running_vl[i][last_m]
@@ -4198,9 +4310,9 @@ def do_measure(t_args, line):
         # fi
     # rof
     # default note length continues with current - might change shortly.
-    #-- if not args.horizontal and not args.vertical:   # ABC or MIDI1CSV
     default_note_length[measure_on] = default_note_length[last_m]
-    #-- # fi
+    tempo_speed_now[measure_on] = tempo_speed_now[last_m]
+    tempo_now_note_length[measure_on] = tempo_now_note_length[last_m]
     measure_meter[measure_on] = meter       # Each measure change can have a different meter.
     return
 # End of do_measure
@@ -4291,7 +4403,6 @@ def do_reverb(t_args, line):
     global extrainfo
     global measure_on
     global vinstrument
-    global instruments
 
     if t_args is None or len(t_args) != 1:
         print_error("reverb does not have arguments.", line)
@@ -4352,7 +4463,6 @@ def do_intensity(t_args, line):
     global extrainfo
     global measure_on
     global vinstrument
-    global instruments
 
     if t_args is None or len(t_args) != 1:
         print_error("intensity does not have arguments.", line)
@@ -4413,7 +4523,6 @@ def do_pan(t_args, line):
     global extrainfo
     global measure_on
     global vinstrument
-    global instruments
 
     if t_args is None or len(t_args) != 1:
         print_error("pan does not have arguments.", line)
@@ -4439,7 +4548,7 @@ def do_pan(t_args, line):
         # fi
         p = int(round(f1))
         if p < 0 or p > 127:
-            print_error("intensity value {} not in range 0 to 127.".format(p), line)
+            print_error("pan value {} not in range 0 to 127.".format(p), line)
             return
         # fi
     # fi
@@ -4473,9 +4582,9 @@ def do_xpose(t_args, line):
     global xpose_new_key
     global measure_on
     global key_sig
+    global key_sig_int
     global key_default
     global key_voice
-    global key_voice_abc
 
     if t_args is None or len(t_args) != 1:
         print_error("xpose does not have arguments.", line)
@@ -4506,26 +4615,24 @@ def do_xpose(t_args, line):
         return
     # fi
     if len(vargs) <= 2:
-        if key_default is None:
-            kl = 'c'
-        else:
-            kl = key_default
+        k = kl = key_default
+        if args.midi1csv:
+            # Convert kl from integer to lowercase normal musicomp usage.
+            kl = key_sig_int[kl]
         # fi
     else:
-        kl = vargs[2]
+        k = kl = vargs[2]
         if kl not in key_sig:
             print_error("no key {} in key_sig({})".format(kl,keysig), line)
             return
         # fi
+        if args.midi1csv:
+            # Convert kl from normal musicomp to midi1csv format (integer).
+            k = key_sig[kl]
+        # fi
     # fi
-    if type(kl) is str:
-        k = kl.upper()
-        k = k.replace('-', 'b')             # Does multiple --.
-        k = k.replace('+', '#')             # Does multiple ++.
-        k = k.replace('n', '=')             # Does multiple ++.
-    else:
-        k = 'c'
-    # fi
+    # k is used for key_voice
+    # kl is used in getnote via xpose_new_key (musicomp text)
 
     jkl = "".join(vargs[0])
     wargs = arglist(jkl, line)
@@ -4545,8 +4652,8 @@ def do_xpose(t_args, line):
         xpose_new_key[f1] = kl
         f1 = int(round(f1))
         xpose[f1] = x
-        key_voice[measure_on][f1] = kl
-        key_voice_abc[measure_on][f1] = k
+# NOTDONEYET - keys   This doesn't make sense? Why set key_voice?  2021-06-18_21-33-56
+        key_voice[measure_on][f1] = k
     # rof
     return
 # End of do_xpose
@@ -4777,18 +4884,19 @@ def getnote(note_to_decode, voice, line):
     global accidentals
     global allkeys
     global acc_m                                # Last accidental on a note in measure.
+    global acc_m_xpose
     global measure_on
     global args
     global note_to_midi_value
     global midi_value_to_note_flat
     global midi_value_to_note_sharp
     global key_sig
+    global key_sig_int
     global key_convert
-    global xpose
-    global xpose_new_key
     global key_default
     global key_voice
-    global key_voice_abc
+    global xpose
+    global xpose_new_key
 
     temp3 = 0                                   # character pointer
     if note_to_decode == '0':
@@ -4997,26 +5105,20 @@ def getnote(note_to_decode, voice, line):
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     # Have o(ctave),a(ccidental),and n(ote).
     # Convert for key.
-    if voice in key_voice[measure_on]:
-        ky = key_voice[measure_on][voice]
-    else:
-        if key_default is None:
-            ky = 'c'
-        else:
-            ky = key_default
-        # fi
-    # fi
-    if ky.lower() not in key_convert:
-        print_error("key name='{}' not in key_convert.".format(ky.lower()), line)
-        sys.exit(1)
-    # fi
+
+    ky = key_voice[measure_on][voice]
     if args.horizontal or args.vertical:
-        thenote = "{}".format(o) + n + a
-        if thenote.lower() not in key_convert[ky]:
-            print_error("thenote='{}' not in key_convert[{}]={} dictionary.".format(thenote,ky,key_convert[ky]), line)
+        if ky not in key_sig:
+            print_error("key name='{}' not in key_sig.".format(ky), line)
             sys.exit(1)
         # fi
-        thenote = key_convert[ky.lower()][thenote]
+        thenote = "{}".format(o) + n + a
+        thenote = thenote.lower()
+        if thenote not in key_convert[ky]:
+            print_error("thenote='{}' not in key_sig={} dictionary.".format(thenote,key_sig.keys()), line)
+            sys.exit(1)
+        # fi
+        thenote = key_convert[ky][thenote]
         o = thenote[0]
         n = thenote[1].lower()
         if len(thenote) > 2:
@@ -5025,15 +5127,20 @@ def getnote(note_to_decode, voice, line):
             A = a = ''
         # fi
     elif args.midi1csv:
+        if ky not in key_sig_int:
+            print_error("key number='{}' not in key_sig_int={}".format(ky,key_sig_int.keys()), line)
+            sys.exit(1)
+        # fi
         if a != '':
             thenote = "{}".format(o) + n + a
         else:
             thenote = "{}".format(o) + n + a
-            if thenote not in key_convert[ky.lower()]:
+            ky = key_sig_int[ky]
+            if thenote not in key_convert[ky]:
                 print_error("thenote={} not in key_convert[{}] dictionary.".format(thenote,ky), line)
                 sys.exit(1)
             # fi
-            thenote = key_convert[ky.lower()][thenote]
+            thenote = key_convert[ky][thenote]
         # fi
         o = thenote[0]
         n = thenote[1].lower()
@@ -5043,10 +5150,19 @@ def getnote(note_to_decode, voice, line):
             A = a = ''
         # fi
     else:           # ABC
+        # ky = ky.lower()
+        # ky = ky.replace('b', '-')           # Does multiple flats
+        # ky = ky.replace('#', '+')           # Does multiple sharps.
+        # ky = ky.replace('=', 'n')           # Does multiple naturals.
+        # if ky not in key_sig:
+        #     print_error("key name='{}' not in key_sig.".format(ky.lower()), line)
+        #     sys.exit(1)
+        # # fi
+        # Do not convert it in ABC format.
         pass
     # fi
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-    # Have translated key of o(ctave),a(ccidental),and n(ote).
+    # Have translated key of o(ctave),a(ccidental),and n(ote). -- Original for ABC.
 
     # 1) xpose added to the note.
     # 2) xpose_new_key converted back to o/n/a
@@ -5058,7 +5174,7 @@ def getnote(note_to_decode, voice, line):
             return '', None, normal_note
         # fi
         lkj = note_to_midi_value[jkl] + xpose[voice]
-        if xpose_new_key[voice] is str and key_sig[xpose_new_key[voice]] <= 0:
+        if key_sig[xpose_new_key[voice]] <= 0:
             lkj = midi_value_to_note_flat[lkj]
         else:
             lkj = midi_value_to_note_sharp[lkj]
@@ -5075,18 +5191,10 @@ def getnote(note_to_decode, voice, line):
 
         if len(lkj) > 2:
             new_a = lkj[2]
-            if not args.horizontal and not args.vertical and not args.midi1csv: # ABC
-                new_A = accidentals[new_a]
-            else:
-                new_A = new_a
-            # fi
+            new_A = new_a
         else:
             new_a = 'n'
-            if not args.horizontal and not args.vertical and not args.midi1csv: # ABC
-                new_A = '='
-            else:
-                new_A = 'n'
-            # fi
+            new_A = 'n'
         # fi
 
         # If new_a == '', then need check with new_a == n too.
@@ -5148,6 +5256,8 @@ def getnote(note_to_decode, voice, line):
         N = new_N
         a = new_a
         A = new_A
+    # else:             # ABC format - do nothing.
+    #    pass;
     # fi
     # .............................................................................
     # Convert to right format.
@@ -5177,11 +5287,12 @@ def getnote(note_to_decode, voice, line):
         if type(k) is str:
             nthenote = key_convert[k.lower()][thenote]
         else:
-            nthenote = key_convert['c'][thenote]
+            nthenote = key_convert[key_sig_int[k]][thenote]
         # fi
         abc = note_to_midi_value[nthenote]
         thenote = abc
     else:           # ABC
+        # Do not convert it in ABC format.
         thenote = A + n + octaves[o]
     # fi
 # .............................................................................
@@ -5271,6 +5382,9 @@ def do_tie(onvoice, vnumber, line):
 #-----------------------------------------------------------------------------
 # therest,new_one_note_volume,newvolume,text_str = get_vol_note(temp1, line)
 def get_vol_note(temp1, line):
+    global S_vlprint
+    global vlprint
+
     therest = temp1[4:]
     sc = therest.find(')')
     if sc < 0 or sc == 0:
@@ -5399,13 +5513,23 @@ def process_notes(t_args, line):
     global gsw_operand
     global legal_notes
     global mlth                         # measure length dictionary
-    global default_note_length
     global args
     global bufs_accidentals
     global bufs_tie_next
+    global bufs
     global DECORATIONS
     global macro_buffer                 # Name of macro, array of lines for macro.
     global macro_internal               # Next internal macro.
+    global cresc_direction
+    global cresc_time
+    global cresc_volume
+    global macro_arguments              # Name of macro, array of arguments for macro.
+    global macro_executing_args
+    global macro_executing_depth
+    global macro_line
+    global meas
+    global running_vl
+    global vlprint
 
     if not measure_on or measure_on == '':  # no measure yet
         print_error("no measure processed yet - must have one before notes.", line)
@@ -5994,7 +6118,6 @@ def process_line(t, line):
     global commands
     global cstop_processing
     global macro_defining               # If defining macro.
-    global macro_arguments              # Name of macro, array of arguments for macro.
     global macro_buffer                 # Name of macro, array of lines for macro.
 
     if not t or len(t) == 0:
@@ -6126,10 +6249,10 @@ def main():
     global file_name
     global output_name
     global meter
-    global cstop_processing
     global voices
     global measure_on
     global key_default
+    global key_voice
 
     parse_args()
     if args.vertical or args.horizontal:
@@ -6151,8 +6274,9 @@ def main():
         measure_meter = { '': 'none'}       # Each measure change can have a different meter.
         meter = 'none'
     # fi
-    key_voice[''][1] = "c"
-    key_voice_abc[''][1] = "C"
+    for v in range(1, MAXVOICES+1):
+        key_voice[''][v] = key_default
+    # rof
 
     new_voice_initialize(voices, measure_on)    # Set a bunch of things for voice=1 so acc_m, etc. are set.
 
