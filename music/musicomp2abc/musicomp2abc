@@ -1,19 +1,14 @@
 #!/usr/bin/python3 -B
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 #-----------------------------------------------------------------------------
-# ./musicomp --midi1csv song song.csv
-# ./musicomp song song.abc
-# ./musicomp --vertical song song.v     # Either v or h (or mixed) input.
-# ./musicomp --horizontal song song.h   # Either v or h (or mixed) input.
+# ./musicomp --midi1csv song song.csv   # Output midi1csv format.
+# ./musicomp song song.abc              # Output ABC format.
+# ./musicomp --vertical song song.v     # Either v or h (or mixed) input, vertical output.
+# ./musicomp --horizontal song song.h   # Either v or h (or mixed) input, horizontal output.
 #-----------------------------------------------------------------------------
 # TODO:
 
-# 1) tempo changes - midi does not work right. Probably cannot have in songs without voice 1?
-#    Some error about order. 
-#       cd ../songs
-#       make -j 1
-
-# 2) GOTO - move variables to global, and when processing change measure, etc. and
+# 1) GOTO - move variables to global, and when processing change measure, etc. and
 #    exiting printing routine, do the right thing(s).
 #    Need pointer to goto table indexed by measure.
 #    Processed at end of a measure, and counter. Says 'Limited to 8' (we'll do dynamic).
@@ -23,9 +18,7 @@
 #       When a goto is executed more than n times, it wraps around, and begins
 #    executing the 1st branch address again.
 
-# 3) Instrument numbers +/- by a given value. (fluidsynth verses timidity)
-
-# 4) Select clef=treble or clef=bass by notes min and max notes on staff(s).
+# 2) Select clef=treble or clef=bass by notes min and max notes on staff(s).
 #       # NOTDONEYET - add ' clef=bass'  (after the number)
 #       # clef can occur each measure (abc, horizontal, vertical format).
 #-----------------------------------------------------------------------------
@@ -1575,18 +1568,150 @@ def print_out_v_or_h():
 # End of print_out_v_or_h
 
 #-----------------------------------------------------------------------------
-def print_out_midi1csv_start(voiceprint):
+def print_out_midi1csv_start(voiceon):
     global output_name
-    print('{}, 0, Start_track'.format(voiceprint), file=output_name)
+    print('{}, 0, Start_track'.format(voiceon+1), file=output_name)
 #   End of print_out_midi1csv_start
 
 #-----------------------------------------------------------------------------
-def print_out_midi1csv_tempo(voiceprint, t, l, time_of_tempo):
+def print_out_midi1csv_end(voiceon, lthworkingmeasures):
     global output_name
+    print('{}, {}, End_track'.format(voiceon+1, lthworkingmeasures + 26), file=output_name)
+#   End of print_out_midi1csv_end
+
+#-----------------------------------------------------------------------------
+# Time Signature / meter.
+# returns lastmeter printed (which this routine may update).
+def print_out_midi1csv_ts(m,voiceon,lthworkingmeasure, last_bar_meter):
+    global output_name
+    global meas
+    global measure_meter
+
+    if last_bar_meter != measure_meter[m]:
+        last_bar_meter = measure_meter[m]
+        l = last_bar_meter.split('/', 1)
+        numerator = l[0]
+        denominator = Log2(l[1])
+        if denominator.is_integer():
+            denominator = int(denominator)
+        else:
+            denominator = l[1]
+            print("meter denominator is not a power of two, leave as {}".format(denominator), file=output_name)
+        # fi
+        print("{}, {}, Time_signature, {}, {}, 48, 8".format(
+                voiceon+1,
+                int(round(lthworkingmeasure)),
+                numerator, denominator), file=output_name)
+    # fi
+    return last_bar_meter
+# End of print_out_midi1csv_ts
+
+#-----------------------------------------------------------------------------
+# input   m_number, voiceon, lthworkingmeasure, last_instrument, channel,chan
+# returns last_instrument_on printed (which this routine may update).
+#         channel (which may be updated).
+#         chan (which may be updated).
+def print_out_midi1csv_instrument(m,voiceon,lthworkingmeasure, last_instrument_on,channel,chan):
+    global vinstrument
+    global reverb
+    global pan
+    global intensity
+    global meas
+    global inst
+    global extrainfo
+    global output_name
+    global mlth
+    global args
+    global offset
+    offset = 0
+
+    if voiceon not in vinstrument[m]:
+        vinstrument[m][voiceon] = 0
+        reverb[m][voiceon] = 0
+        pan[m][voiceon] = 64
+        intensity[m][voiceon] = 100
+    # fi
+    if len(vinstrument[m]) >= voiceon and vinstrument[m][voiceon] != 0:
+        if last_instrument_on != vinstrument[m][voiceon]:
+            last_instrument_on = vinstrument[m][voiceon] + args.offset
+            if last_instrument_on in inst:
+                chan = inst[last_instrument_on]
+                if last_instrument_on < 0:
+                    last_instrument_on = 0
+                # fi
+            else:
+                chan = channel
+                inst[last_instrument_on] = chan
+                channel = channel + 1
+                if channel == 9:
+                    channel = 10
+                # fi
+            # fi
+            q = mlth[voiceon][m]
+            print('{}, {}, Program_c, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, last_instrument_on), file=output_name)
+# 73: ["flute",             52, 37, 84],
+            if last_instrument_on in extrainfo:
+                print('{}, {}, Text_t, "{}"'.format(voiceon+1, lthworkingmeasure, extrainfo[last_instrument_on][0]), file=output_name)
+
+                # 121   All Controllers Off
+                print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 121, 0), file=output_name)
+                #  64   Hold Pedal Off
+                print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 64, 0), file=output_name)
+                #   7   Volume
+                print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 7,
+                                                        intensity[m][voiceon]), file=output_name)
+                #  10   Pan position   64 is center, 0 is hard left, and 127 is hard right.
+                print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 10,
+                                                        pan[m][voiceon]), file=output_name)
+                #  91   Reverb Level
+                print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 91,
+                                                        reverb[m][voiceon]), file=output_name)
+            # fi
+        # fi
+    # fi
+    return last_instrument_on, channel, chan
+# End of print_out_midi1csv_instrument
+
+#-----------------------------------------------------------------------------
+def print_out_midi1csv_tempo(m,voiceon,lthworkingmeasure, t, l):
+    global output_name
+    global tempo_speed_default
+    global default_note_length
+    global tempo_speed_now
+    global tempo_now_note_length
+
+    if lthworkingmeasure == 0 and t != tempo_speed_default and l != default_note_length['']:
+        t = tempo_speed_default
+        l = default_note_length['']
+    elif (m in tempo_speed_now and t != tempo_speed_now[m]) or (m in tempo_now_note_length and l != tempo_now_note_length[m]):
+        t = tempo_speed_now[m]
+        l = tempo_now_note_length[m]
+    else:
+        return t, l
+    # fi
 
     X = int(round((60.0 * 1000000.0) / ((4.0 * l)) / t))
-    print("{}, {}, Tempo, {}".format(voiceprint, time_of_tempo, X), file=output_name)
+    print("{}, {}, Tempo, {}".format(voiceon+1, lthworkingmeasure, X), file=output_name)
+    return  t, l
 # End of print_out_midi1csv_tempo
+
+#-----------------------------------------------------------------------------
+def print_out_midi1csv_keysignature(m,voiceon,lthworkingmeasure, last_keysig):
+    global output_name
+    global key_default
+    global key_voice
+
+    if lthworkingmeasure == 0 and m == '':
+        last_keysig = key_default
+        print('{}, {}, Key_signature, {}, "major"'.format(voiceon+1, lthworkingmeasure, last_keysig), file=output_name)
+    else:
+        if m in key_voice and voiceon in key_voice[m] and last_keysig != key_voice[m][voiceon]:
+            last_keysig = key_voice[m][voiceon]
+            print('{}, {}, Key_signature, {}, "major"'.format(voiceon+1, lthworkingmeasure, last_keysig), file=output_name)
+        # fi
+    # fi
+    return  last_keysig
+# End of print_out_midi1csv_keysignature
 
 #-----------------------------------------------------------------------------
 def print_header():
@@ -1617,18 +1742,15 @@ def print_header():
         print("0, 0, Header, 1, {}, {}".format(len(vl)+1, int(round(MIDICLICKSPERQUARTER))), file=output_name)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # First track does all tempo's, time and key signatures, and titles.
-        print_out_midi1csv_start(1)
+        print_out_midi1csv_start(0)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # 1, 0, Title_t, "promenade"
         for t in header:
             print('1, 0, Title_t, "{}"'.format(t), file=output_name)
         # rof
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-        # Initial information (first zero, add 1), and time of 0 = use default tempo/time.
-        print_out_midi1csv_tempo(1, tempo_speed_default, default_note_length[''], 0)
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # 1, 0, Key_signature, -2, "major"
-        print('1, 0, Key_signature, {}, "major"'.format(key_default), file=output_name)
+        last_keysig = print_out_midi1csv_keysignature('' , 0, 0, '')
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
         maxtimelth = 0
         voice = 1
@@ -1661,32 +1783,17 @@ def print_header():
         # length of each measure. Index via [voice][measure].
         lthworkingmeasure = 0
         lastmeter = ''
+        lasttempospeed = ''
+        lasttempo_n_l = ''
+        last_keysig = ''
         for m in mlth[voice]:
-            if lastmeter != measure_meter[m]:
-                lastmeter = measure_meter[m]
-                l = lastmeter.split('/', 1)
-                numerator = l[0]
-                denominator = Log2(l[1])
-                if denominator.is_integer():
-                    denominator = int(denominator)
-                else:
-                    denominator = l[1]
-                    print("meter denominator is not a power of two, leave as {}".format(denominator), file=output_name)
-                # fi
-                print("1, {}, Time_signature, {}, {}, 48, 8".format(
-                        int(round(lthworkingmeasure)),
-                        numerator, denominator), file=output_name)
-            # fi
+            lastmeter = print_out_midi1csv_ts(m, 0, lthworkingmeasure, lastmeter)
+            lasttempospeed, lasttempo_n_l = print_out_midi1csv_tempo(m , 0, lthworkingmeasure, lasttempospeed, lasttempo_n_l)
+            # Do not do instruments here.
             lthworkingmeasure = lthworkingmeasure + mlth[voice][m]
         # rof
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-# Need to have the lth of each measure - to put tempo in right place.
-# NOTDONEYET - multiple tempos in song.
-# NOTDONEYET -- X = int(round((60.0 * 1000000.0) / ((4.0 * default_note_length[''])) / tempo_speed_default))
-# NOTDONEYET -- print("x, y, Tempo, {}".format(X), file=output_name)
-# NOTDONEYET -- tempo associated within measure/bar.
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-        print("1, {}, End_track".format(maxtimelth + 26), file=output_name)
+        print_out_midi1csv_end(0, lthworkingmeasure)
         return
     else:                               # ABC format
         # Must be a fraction.
@@ -1703,98 +1810,7 @@ def print_header():
 # End of print_header
 
 #-----------------------------------------------------------------------------
-# returns lastmeter printed (which this routine may do).
-def print_out_midi1csv_ts(last_bar_meter,voiceon,m_number, lthworkingmeasure):
-    global output_name
-    global meas
-    global measure_meter
-
-    m = meas[m_number]
-    if last_bar_meter != measure_meter[m]:
-        last_bar_meter = measure_meter[m]
-        l = last_bar_meter.split('/', 1)
-        numerator = l[0]
-        denominator = Log2(l[1])
-        if denominator.is_integer():
-            denominator = int(denominator)
-        else:
-            denominator = l[1]
-            print("meter denominator is not a power of two, leave as {}".format(denominator), file=output_name)
-        # fi
-        print("{}, {}, Time_signature, {}, {}, 48, 8".format(
-                voiceon+1,
-                int(round(lthworkingmeasure)),
-                numerator, denominator), file=output_name)
-    # fi
-    return last_bar_meter
-# End of print_measure_midi1csv_ts
-
-#-----------------------------------------------------------------------------
-# input   last_instrument_on voice, voiceon, m_number,channel,chan
-# returns channel (which may be updated).
-#         chan (which may be updated).
-#         last_instrument_on printed (which this routine may do).
-def print_out_midi1csv_instrument(last_instrument_on,voiceon,m_number,channel,chan, lthworkingmeasure):
-    global vinstrument
-    global reverb
-    global pan
-    global intensity
-    global meas
-    global inst
-    global extrainfo
-    global output_name
-    global mlth
-
-    if m_number >= len(meas):
-        return channel, chan, last_instrument_on
-    # fi
-    m = meas[m_number]
-    if voiceon not in vinstrument[m]:
-        vinstrument[m][voiceon] = 0
-        reverb[m][voiceon] = 0
-        pan[m][voiceon] = 64
-        intensity[m][voiceon] = 100
-    # fi
-    if len(vinstrument[m]) >= voiceon and vinstrument[m][voiceon] != 0:
-        if last_instrument_on != vinstrument[m][voiceon]:
-            last_instrument_on = vinstrument[m][voiceon]
-            if last_instrument_on in inst:
-                chan = inst[last_instrument_on]
-            else:
-                chan = channel
-                inst[last_instrument_on] = chan
-                channel = channel + 1
-                if channel == 9:
-                    channel = 10
-                # fi
-            # fi
-            q = mlth[voiceon][m]
-            print('{}, {}, Program_c, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, last_instrument_on), file=output_name)
-# 73: ["flute",             52, 37, 84],
-            if last_instrument_on in extrainfo:
-                print('{}, {}, Text_t, "{}"'.format(voiceon+1, lthworkingmeasure, extrainfo[last_instrument_on][0]), file=output_name)
-
-                # 121   All Controllers Off
-                print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 121, 0), file=output_name)
-                #  64   Hold Pedal Off
-                print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 64, 0), file=output_name)
-                #   7   Volume
-                print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 7,
-                                                        intensity[m][voiceon]), file=output_name)
-                #  10   Pan position   64 is center, 0 is hard left, and 127 is hard right.
-                print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 10,
-                                                        pan[m][voiceon]), file=output_name)
-                #  91   Reverb Level
-                print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 91,
-                                                        reverb[m][voiceon]), file=output_name)
-            # fi
-        # fi
-    # fi
-    return channel, chan, last_instrument_on
-# End of print_out_midi1csv_instrument
-
-#-----------------------------------------------------------------------------
-def do_possible_midi_tie(voice, m_number, i, l, lastmeter, channel, chan, l_instrument, lthworkingmeasures):
+def do_possible_midi_tie(m, voice, lthworkingmeasures, i, l, lastmeter, channel, chan, l_instrument, last_keysig, lasttempospeed,lasttempo_n_l):
     #-- global output_name
     global bufs_accidentals
     global bufs
@@ -1804,7 +1820,7 @@ def do_possible_midi_tie(voice, m_number, i, l, lastmeter, channel, chan, l_inst
     global mlth
 
     flag = False                                # if need do time signature and instrument.
-    m = meas[m_number]
+    m_number = meas.index(m)                    # Need to return the number.
     n = bufs[voice][m][i]                       # Note value being tied forward to...
     while True:
         p = i+1                                 # Check next note for tied to this one.
@@ -1814,12 +1830,13 @@ def do_possible_midi_tie(voice, m_number, i, l, lastmeter, channel, chan, l_inst
             a = acc_s[p]
             # if note is not the same.
             if n != bufs[voice][m][p] or a != 't':
-                return l, m_number, lastmeter, channel, chan, l_instrument
+                return l, m_number, lastmeter, channel, chan, l_instrument, last_keysig, lasttempospeed,lasttempo_n_l
             # fi
             if flag:
-                #-- lastmeter = print_out_midi1csv_ts(lastmeter,voice, m_number,lthworkingmeasures+l)
-                lastmeter = print_out_midi1csv_ts(lastmeter,voice, m_number,lthworkingmeasures)
-                channel, chan, l_instrument = print_out_midi1csv_instrument(l_instrument,voice,m_number,channel,chan,lthworkingmeasures)
+                lastmeter = print_out_midi1csv_ts(m, voice, lthworkingmeasures, lastmeter)
+                l_instrument, channel, chan = print_out_midi1csv_instrument(m,voice,lthworkingmeasures, l_instrument, channel, chan)
+                last_keysig = print_out_midi1csv_keysignature(m, voice, lthworkingmeasures, last_keysig)
+                lasttempospeed, lasttempo_n_l = print_out_midi1csv_tempo(m,voice,lthworkingmeasures, lasttempospeed,lasttempo_n_l)
                 flag = False
             # fi
             tmp = bufs_length[voice][m][p]
@@ -1832,7 +1849,7 @@ def do_possible_midi_tie(voice, m_number, i, l, lastmeter, channel, chan, l_inst
         i = -1                                  # To first of next measure.
         m_number = m_number + 1
         if m_number >= len(meas):
-            return l, m_number, lastmeter, channel, chan, l_instrument
+            return l, m_number, lastmeter, channel, chan, l_instrument, last_keysig, lasttempospeed,lasttempo_n_l
         # fi
         lthworkingmeasures = lthworkingmeasures + mlth[voice][m]
         #-- print('{}, {}, Text_t, " measure {}"'.format(voice+1, lthworkingmeasures-1, meas[m_number]), file=output_name)
@@ -1868,34 +1885,36 @@ def print_out_midi1csv_notes():
         # fi
         lthworkingmeasures = 0
         lastmeter = ''
-        l_instrument = '0'
-        m_number = 0
-        print_out_midi1csv_start(voice+1)
-        print('{}, 0, Text_t, " voice {}"'.format(voice+1, voice), file=output_name)
-        lt = tempo_speed_default
-        ll = default_note_length['']
-        print_out_midi1csv_tempo(voice+1, lt, ll, 0)
-        lastmeter = print_out_midi1csv_ts(lastmeter,voice,m_number,lthworkingmeasures)
-        channel, chan, l_instrument = print_out_midi1csv_instrument(l_instrument,voice,m_number,channel,chan,lthworkingmeasures)
-
-        if '' in key_voice:
-            if voice in key_voice['']:
-                if key_default != key_voice[''][voice]:
-                    ky = key_voice[''][voice]
-                else:
-                    ky = key_default
-                # fi
-                print('{}, 0, Key_signature, {}, "major"'.format(voice+1, ky), file=output_name)
-            else:
-                ky = key_default
-            # fi
-        else:
-            ky = key_default
+        l_instrument = 0 + args.offset
+        if l_instrument < 0:
+            l_instrument = 0
         # fi
+        m_number = 0
+        print_out_midi1csv_start(voice)
+        print('{}, 0, Text_t, " voice {}"'.format(voice+1, voice), file=output_name)
+        lt = ''
+        ll = ''
+        last_keysig = ''
+        m = ''
+
+        lastmeter = print_out_midi1csv_ts(m, voice, lthworkingmeasures, lastmeter)
+        l_instrument, channel, chan = print_out_midi1csv_instrument(m,voice,lthworkingmeasures, l_instrument, channel, chan)
+        last_keysig = print_out_midi1csv_keysignature(m,voice,lthworkingmeasures, last_keysig)
+        lt, ll = print_out_midi1csv_tempo(m,voice,lthworkingmeasures, lt,ll)
+
 
         #-- print('{}, {}, Text_t, " measure {}"'.format(voice+1, lthworkingmeasures, meas[m_number]), file=output_name)
+
+        m = meas[m_number]
+
         while m_number < len(meas):             # while there are measures left to do
             t_num = m_number
+
+            lastmeter = print_out_midi1csv_ts(m, voice, lthworkingmeasures, lastmeter)
+            l_instrument, channel, chan = print_out_midi1csv_instrument(m,voice,lthworkingmeasures, l_instrument, channel, chan)
+            last_keysig = print_out_midi1csv_keysignature(m,voice,lthworkingmeasures, last_keysig)
+            lt, ll = print_out_midi1csv_tempo(m,voice,lthworkingmeasures, lt,ll)
+
             m = meas[m_number]
             # v_vl = running_vl[voice][m]         # volume level for this voice/measure
             if voice in vl and m in vl[voice]:
@@ -1905,22 +1924,6 @@ def print_out_midi1csv_notes():
             # fi
             lth = lthworkingmeasures            # start of measure notes.
             i = 0
-
-            if  m in key_voice and voice in key_voice[m]:
-                n_key_voice = key_voice[m][voice] # volume level for this voice/measure
-            else:
-                n_key_voice = ky
-            # fi
-            if ky != n_key_voice:
-                ky = n_key_voice
-                print('{}, {}, Key_signature, {}, "major"'.format(voice+1,lth,ky), file=output_name)
-            # fi
-
-            if lt != tempo_speed_now[m] or ll != tempo_now_note_length[m]:
-                lt = tempo_speed_now[m]
-                ll = tempo_now_note_length[m]
-                print_out_midi1csv_tempo(voice+1, lt, ll, lth)
-            # fi
 
             if len(bufs[voice][m]) == 0:        # If nothing in measure, go to next measure.
                 m_number = m_number + 1
@@ -1938,7 +1941,7 @@ def print_out_midi1csv_notes():
                     v_vl = bufs_vol[voice][m][i]
                     print("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lth, chan, n, v_vl), file=output_name)
                 # fi
-                tmp,m_number,lastmeter, channel, chan, l_instrument = do_possible_midi_tie(voice, m_number, i, l,lastmeter, channel, chan, l_instrument, lthworkingmeasures)
+                tmp,m_number,lastmeter, channel, chan, l_instrument, last_keysig, lt,ll = do_possible_midi_tie(m, voice, lthworkingmeasures, i, l,lastmeter, channel, chan, l_instrument, last_keysig, lt,ll)
                 if n != '0' and n != 0:
                     acc_s = bufs_accidentals[voice][m][i]
                     if acc_s == 'ts' or acc_s == 's':
@@ -1951,14 +1954,17 @@ def print_out_midi1csv_notes():
             # rof
             while t_num < m_number:
                 lthworkingmeasures = lthworkingmeasures + mlth[voice][m]
-                channel, chan, l_instrument = print_out_midi1csv_instrument(l_instrument,voice,m_number,channel,chan,lthworkingmeasures)
+#??                 lastmeter = print_out_midi1csv_ts(m, voice, lthworkingmeasures, lastmeter)
+#??                 l_instrument, channel, chan = print_out_midi1csv_instrument(m,voice,lthworkingmeasures, l_instrument,channel,chan)
+#??                 last_keysig = print_out_midi1csv_keysignature(m,voice,lthworkingmeasures, last_keysig)
+#??                 lt, ll = print_out_midi1csv_tempo(m,voice,lthworkingmeasures, lt,ll)
                 t_num = t_num + 1
                 if t_num < len(meas):
                     m = meas[t_num]
                 # fi
             # elihw
         # rof   m in meas
-        print("{}, {}, End_track".format(voice+1, lthworkingmeasures + 26), file=output_name)
+        print_out_midi1csv_end(voice, lthworkingmeasures)
     # rof   voice in range
     return
 #   End of print_out_midi1csv_notes
@@ -3241,6 +3247,13 @@ def do_meter(t_args, line):
         return
     # fi
 
+    for ve in range(1, len(vl)+1):
+        if mlth[ve][measure_on] != 0:
+            print_error("do_meter in the middle of a measure not allowed", line)
+            return
+        # fi
+    # rof
+
     m = t_args[0]
 
     f, type_error = is_float(m)
@@ -4201,7 +4214,7 @@ def do_voice(t_args, line):
                     print_error("instrument value {} not in instrument table.".format(f1), line)
                     return
                 # fi
-                vinstrument[measure_on][i+1] = str(f1)
+                vinstrument[measure_on][i+1] = f1
                 reverb[measure_on][i+1] = 0
                 pan[measure_on][i+1] = 64
                 intensity[measure_on][i+1] = 100
@@ -4335,7 +4348,7 @@ def do_instrument(t_args, line):
     vargs = t_args[0].split()
     INST = " ".join(vargs[1:]).lower()
     if INST in instruments:
-        INST = str(instruments[INST])           # Convert to number.
+        INST = instruments[INST]        # Convert to number.
     else:
         f1, type_error = is_float(INST)
         if type_error is not None:
@@ -4350,8 +4363,15 @@ def do_instrument(t_args, line):
             print_error("instrument value {} not in instrument table.".format(f1), line)
             return
         # fi
-        INST = str(f1)
+        INST = f1
     # fi
+
+    for ve in range(1, len(vl)+1):
+        if mlth[ve][measure_on] != 0:
+            print_error("do_instrument in the middle of a measure not allowed", line)
+            return
+        # fi
+    # rof
 
     jkl = "".join(vargs[0])
     wargs = arglist(jkl, line)
@@ -4373,7 +4393,7 @@ def do_instrument(t_args, line):
             extrainfo[INST] = []
             j = None
             for k in instruments:
-                if str(instruments[k]) == INST:
+                if instruments[k] == INST:
                     j = k
                     break
                 # fi
@@ -6129,7 +6149,20 @@ def process_line(t, line):
 #-----------------------------------------------------------------------------
 def parse_args():
     global args
+    def offset_value(v):
+        if len(v) > 0:
+            if v[0] == '=':
+                v = v[1:]
+            # fi
+        # fi
+        return v
+    # End of offset_value
 
+    for indx in range(len(sys.argv) - 1):
+        if '--offset' in sys.argv[indx]:
+            sys.argv[indx + 1] = '={0}'.format(sys.argv[indx + 1])
+        # fi
+    # rof
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -6149,10 +6182,26 @@ def parse_args():
     parser.add_argument('--abc', '-abc',
                         action='store_const', const=1, default=0,
                         help = 'ABC music format output - default.')
+    parser.add_argument('--offset', default=0, action = 'store', type=offset_value,
+                        help = 'Offset for midi instruments +1, -1, -12 -- because they CAN differ for playing.')
     parser.add_argument('rest', nargs='*',
                         help='Optional command to execute')
     args = parser.parse_args()
 
+    if args.offset is not None:
+        args.offset = int(args.offset)
+    # fi
+    if args.rest is not None:
+        for indx in range(len(args.rest)):
+            if args.rest[indx][0] == '=':
+                nextargv = args.rest[indx]
+                if len(nextargv) > 0:
+                    nextargv = nextargv[1:]
+                # fi
+                args.rest[indx] = nextargv
+            # fi
+        # rof
+    # fi
     if args.vertical:
         if args.horizontal or args.abc == 1 or args.midi1csv:
             print("Only may have one of --vertical, --horizontal, --abc, or --midi1", file=sys.stderr)
