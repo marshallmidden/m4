@@ -1,30 +1,24 @@
 #!/usr/bin/python3 -B
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 #-----------------------------------------------------------------------------
+# This fails with --midi1csv: (file Q)
+# measure 1
+# v1: 2c2t
+# v1: 2c2
+# goto    1,139
+# measure 139
+#-----------------------------------------------------------------------------
 # ./musicomp --midi1csv song song.csv   # Output midi1csv format.
 # ./musicomp song song.abc              # Output ABC format.
 # ./musicomp --vertical song song.v     # Either v or h (or mixed) input, vertical output.
 # ./musicomp --horizontal song song.h   # Either v or h (or mixed) input, horizontal output.
 #-----------------------------------------------------------------------------
 # TODO:
-
-# 1) GOTO - move variables to global, and when processing change measure, etc. and
-#    exiting printing routine, do the right thing(s).
-#    Need pointer to goto table indexed by measure.
-#    Processed at end of a measure, and counter. Says 'Limited to 8' (we'll do dynamic).
-#    "x" means continue to next measure.
-#    Parsing - when finished, see that all measures exist in goto arguments, and thus must
-#    have line number and "line" of the goto for error printing.
-#       When a goto is executed more than n times, it wraps around, and begins
-#    executing the 1st branch address again.
-
-# 2) Select clef=treble or clef=bass by notes min and max notes on staff(s).
+# 1) Select clef=treble or clef=bass by notes min and max notes on staff(s).
 #       # NOTDONEYET - add ' clef=bass'  (after the number)
 #       # clef can occur each measure (abc, horizontal, vertical format).
 #-----------------------------------------------------------------------------
 # Commands not done.
-#   print_error("NOTDONEYET - do_goto", line)           Complicated, but should do.
-#
 #   print_error("NOTDONEYET - do_putd", line)           Not likely to do. (Not used anywhere that I see.)
 #   print_error("NOTDONEYET - process_putd", line)      Not likely to do. (Not used anywhere that I see.)
 #-----------------------------------------------------------------------------
@@ -323,7 +317,7 @@ def Log2(x):
 import calculate
 #-----------------------------------------------------------------------------
 #++ import inspect
-#++ print(inspect.currentframe().f_code.co_name, '#0', file=sys.stderr)
+#++ print(inspect.currentframe().f_code.co_name, '#0', file=sys.stderr, flush=True)
 #-----------------------------------------------------------------------------
 MAXVOICES = 64
 NUMBER_BARS_PER_STAFF = 4
@@ -725,8 +719,10 @@ linecount = 0
 global putds                        # "micro" and it's replacement/substitution.
 putds    = { }                      # dictionary of from:to
 
-global gotos                        # gotos and it's arguments.
-gotos = []
+global goto_table
+global goto_variables
+goto_table = { '':''}                   # first index is measure number. Value is array of measures.
+goto_variables = { '':0}               # first index is measure number. Value is number of times goto is hit.
 
 global meas                         # measure names.
 meas = []
@@ -880,8 +876,8 @@ def print_error(strg, line):
 
     errors_happened = 1             # When exiting, do 1 instead of 0
 
-    print("ERROR -", strg, file=sys.stderr)
-    print("  Line {} - {}".format(linecount, line), file=sys.stderr)
+    print("ERROR -", strg, file=sys.stderr, flush=True)
+    print("  Line {} - {}".format(linecount, line), file=sys.stderr, flush=True)
     return
 # End of print_error
 
@@ -889,8 +885,8 @@ def print_error(strg, line):
 def print_warning(strg, line):
     global linecount
 
-    print("WARNING -", strg, file=sys.stderr)
-    print("  Line {} - {}".format(linecount, line), file=sys.stderr)
+    print("WARNING -", strg, file=sys.stderr, flush=True)
+    print("  Line {} - {}".format(linecount, line), file=sys.stderr, flush=True)
     return
 # End of print_warning
 
@@ -1271,7 +1267,7 @@ def print_out_abc():
 
     #-- for voice in reversed(range(1,len(vl)+1)):
     for voice in range(1,len(vl)+1):
-        print("% --- voice", voice, ' ---', file=output_name)
+        print("% --- voice", voice, ' ---', file=output_name, flush=True)
         l_meter = l_dl = l_clef = l_instrument = l_vl = ''
         l_ky = key_default
         l_tempo = ''
@@ -1282,15 +1278,20 @@ def print_out_abc():
                 if print_line != '':
                     print_line = print_line + '\n'
                 # fi
-                print(print_line + "% measure {}".format(m), file=output_name)
+                print(print_line + "% measure {}".format(m), file=output_name, flush=True)
                 print_line = ''
             # fi
             print_line, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_vl, l_ky = print_measure_abc(m, voice,
                         l_meter, l_tempo, l_dl, l_clef, l_instrument, l_vl, print_line, l_ky)
+
+            if m in goto_table and goto_table[m] != '':
+                print("WARNING - goto in measure {} not handled.".format(m), file=sys.stderr, flush=True)
+                print_line = print_line + "\n" + '%% goto    ' + ','.join(goto_table[m]) + "\n"
+            # fi
         # rof
         if print_line != '':
             print_line = print_line + ']'
-            print(print_line, file=output_name)
+            print(print_line, file=output_name, flush=True)
         # fi
     # fi
     return
@@ -1457,11 +1458,11 @@ def print_out_notes_v_or_h(m, print_line):
     for i in range(1, len(vl)+1):
         if m in mlth[i]:
             if mlth[i][m] != ml:
-                print("voice#{} measure#{} not same length({}) as 1st({})".format(i,m,mlth[i][m],ml), file=sys.stderr)
+                print("voice#{} measure#{} not same length({}) as 1st({})".format(i,m,mlth[i][m],ml), file=sys.stderr, flush=True)
             # fi
             ml = max(mlth[i][m], ml)
         else:
-            print("voice#{} not in measure#{}".format(i,m), file=sys.stderr)
+            print("voice#{} not in measure#{}".format(i,m), file=sys.stderr, flush=True)
         # fi
     # rof
     workingtime = [ 0 ]                         # Zero is ignored.
@@ -1535,7 +1536,7 @@ def print_out_v_or_h():
     global tempo_speed_default
     global default_note_length
 
-    print("voice   {}".format(len(vl)), file=output_name)
+    print("voice   {}".format(len(vl)), file=output_name, flush=True)
 
     l_meter = ''
     l_clef = l_instrument = l_vl = []
@@ -1560,9 +1561,13 @@ def print_out_v_or_h():
                     l_meter, l_clef, l_instrument, l_vl, print_line, l_ky, l_tempo, l_t_n_l)
         # Print out notes for measure.
         print_line = print_out_notes_v_or_h(m, print_line)
+
+        if m in goto_table and goto_table[m] != '':
+            print_line = print_line + 'goto    ' + ','.join(goto_table[m]) + "\n"
+        # fi
     # rof
     if print_line != '':
-        print(print_line, end='', file=output_name)
+        print(print_line, end='', file=output_name, flush=True)
     # fi
     return
 # End of print_out_v_or_h
@@ -1570,13 +1575,13 @@ def print_out_v_or_h():
 #-----------------------------------------------------------------------------
 def print_out_midi1csv_start(voiceon):
     global output_name
-    print('{}, 0, Start_track'.format(voiceon+1), file=output_name)
+    print('{}, 0, Start_track'.format(voiceon+1), file=output_name, flush=True)
 #   End of print_out_midi1csv_start
 
 #-----------------------------------------------------------------------------
 def print_out_midi1csv_end(voiceon, lthworkingmeasures):
     global output_name
-    print('{}, {}, End_track'.format(voiceon+1, lthworkingmeasures + 26), file=output_name)
+    print('{}, {}, End_track'.format(voiceon+1, lthworkingmeasures + 26), file=output_name, flush=True)
 #   End of print_out_midi1csv_end
 
 #-----------------------------------------------------------------------------
@@ -1596,12 +1601,12 @@ def print_out_midi1csv_ts(m,voiceon,lthworkingmeasure, last_bar_meter):
             denominator = int(denominator)
         else:
             denominator = l[1]
-            print("meter denominator is not a power of two, leave as {}".format(denominator), file=output_name)
+            print("meter denominator is not a power of two, leave as {}".format(denominator), file=sys.stderr, flush=True)
         # fi
         print("{}, {}, Time_signature, {}, {}, 48, 8".format(
                 voiceon+1,
                 int(round(lthworkingmeasure)),
-                numerator, denominator), file=output_name)
+                numerator, denominator), file=output_name, flush=True)
     # fi
     return last_bar_meter
 # End of print_out_midi1csv_ts
@@ -1648,24 +1653,24 @@ def print_out_midi1csv_instrument(m,voiceon,lthworkingmeasure, last_instrument_o
                 # fi
             # fi
             q = mlth[voiceon][m]
-            print('{}, {}, Program_c, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, last_instrument_on), file=output_name)
+            print('{}, {}, Program_c, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, last_instrument_on), file=output_name, flush=True)
 # 73: ["flute",             52, 37, 84],
             if last_instrument_on in extrainfo:
-                print('{}, {}, Text_t, "{}"'.format(voiceon+1, lthworkingmeasure, extrainfo[last_instrument_on][0]), file=output_name)
+                print('{}, {}, Text_t, "{}"'.format(voiceon+1, lthworkingmeasure, extrainfo[last_instrument_on][0]), file=output_name, flush=True)
 
                 # 121   All Controllers Off
-                print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 121, 0), file=output_name)
+                print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 121, 0), file=output_name, flush=True)
                 #  64   Hold Pedal Off
-                print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 64, 0), file=output_name)
+                print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 64, 0), file=output_name, flush=True)
                 #   7   Volume
                 print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 7,
-                                                        intensity[m][voiceon]), file=output_name)
+                                                        intensity[m][voiceon]), file=output_name, flush=True)
                 #  10   Pan position   64 is center, 0 is hard left, and 127 is hard right.
                 print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 10,
-                                                        pan[m][voiceon]), file=output_name)
+                                                        pan[m][voiceon]), file=output_name, flush=True)
                 #  91   Reverb Level
                 print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 91,
-                                                        reverb[m][voiceon]), file=output_name)
+                                                        reverb[m][voiceon]), file=output_name, flush=True)
             # fi
         # fi
     # fi
@@ -1691,7 +1696,7 @@ def print_out_midi1csv_tempo(m,voiceon,lthworkingmeasure, t, l):
     # fi
 
     X = int(round((60.0 * 1000000.0) / ((4.0 * l)) / t))
-    print("{}, {}, Tempo, {}".format(voiceon+1, lthworkingmeasure, X), file=output_name)
+    print("{}, {}, Tempo, {}".format(voiceon+1, lthworkingmeasure, X), file=output_name, flush=True)
     return  t, l
 # End of print_out_midi1csv_tempo
 
@@ -1703,11 +1708,11 @@ def print_out_midi1csv_keysignature(m,voiceon,lthworkingmeasure, last_keysig):
 
     if lthworkingmeasure == 0 and m == '':
         last_keysig = key_default
-        print('{}, {}, Key_signature, {}, "major"'.format(voiceon+1, lthworkingmeasure, last_keysig), file=output_name)
+        print('{}, {}, Key_signature, {}, "major"'.format(voiceon+1, lthworkingmeasure, last_keysig), file=output_name, flush=True)
     else:
         if m in key_voice and voiceon in key_voice[m] and last_keysig != key_voice[m][voiceon]:
             last_keysig = key_voice[m][voiceon]
-            print('{}, {}, Key_signature, {}, "major"'.format(voiceon+1, lthworkingmeasure, last_keysig), file=output_name)
+            print('{}, {}, Key_signature, {}, "major"'.format(voiceon+1, lthworkingmeasure, last_keysig), file=output_name, flush=True)
         # fi
     # fi
     return  last_keysig
@@ -1739,19 +1744,21 @@ def print_header():
         # rof
     elif args.midi1csv:
 # 0, 0, Header, 1, 7, 480               # 480 = midi ticks per quarter note.
-        print("0, 0, Header, 1, {}, {}".format(len(vl)+1, int(round(MIDICLICKSPERQUARTER))), file=output_name)
+        print("0, 0, Header, 1, {}, {}".format(len(vl)+1, int(round(MIDICLICKSPERQUARTER))), file=output_name, flush=True)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # First track does all tempo's, time and key signatures, and titles.
         print_out_midi1csv_start(0)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # 1, 0, Title_t, "promenade"
         for t in header:
-            print('1, 0, Title_t, "{}"'.format(t), file=output_name)
+            print('1, 0, Title_t, "{}"'.format(t), file=output_name, flush=True)
         # rof
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # 1, 0, Key_signature, -2, "major"
         last_keysig = print_out_midi1csv_keysignature('' , 0, 0, '')
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+        # Get the voice with the most notes.
+        # Does not do goto's, but that's okay enough -- all voices should be filled.
         maxtimelth = 0
         voice = 1
         for i in tlth:
@@ -1786,16 +1793,42 @@ def print_header():
         lasttempospeed = ''
         lasttempo_n_l = ''
         last_keysig = ''
-        for m in mlth[voice]:
+
+        for v in goto_table:
+            goto_variables[v] = 0           # This voice hasn't done any goto's yet.
+        # rof
+
+        m_number = 0
+        while m_number < len(meas):
+            m = meas[m_number]
+
             lastmeter = print_out_midi1csv_ts(m, 0, lthworkingmeasure, lastmeter)
             lasttempospeed, lasttempo_n_l = print_out_midi1csv_tempo(m , 0, lthworkingmeasure, lasttempospeed, lasttempo_n_l)
             # Do not do instruments here.
             lthworkingmeasure = lthworkingmeasure + mlth[voice][m]
-        # rof
+
+            if m in goto_table:             # If goto exists, process it.
+                f = goto_variables[m]
+                g = goto_table[m][f]
+                if f >= len(goto_table[m]): # If should start over.
+                    f = 0
+                else:
+                    f = f + 1
+                # fi
+                goto_variables[m] = f
+                if g == 'x':
+                    m_number = m_number + 1
+                else:
+                    m_number = meas.index(g)
+                # fi
+            else:
+                m_number = m_number + 1
+            # fi
+        # elihw
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
         print_out_midi1csv_end(0, lthworkingmeasure)
         return
-    else:                               # ABC format
+    else:                                   # ABC format
         # Must be a fraction.
         fdnl = default_note_text_fraction('')
         if fdnl == '1':
@@ -1805,11 +1838,12 @@ def print_header():
         header = header + "Q:{}={}\n".format(fdnl, tempo_speed_default)
         header = header + "K:{}".format(key_default)       # no \n, added when printed.
     # fi
-    print(header, file=output_name)
+    print(header, file=output_name, flush=True)
     return
 # End of print_header
 
 #-----------------------------------------------------------------------------
+# l = length of note (with ties added).
 def do_possible_midi_tie(m, voice, lthworkingmeasures, i, l, lastmeter, channel, chan, l_instrument, last_keysig, lasttempospeed,lasttempo_n_l):
     #-- global output_name
     global bufs_accidentals
@@ -1839,21 +1873,32 @@ def do_possible_midi_tie(m, voice, lthworkingmeasures, i, l, lastmeter, channel,
                 lasttempospeed, lasttempo_n_l = print_out_midi1csv_tempo(m,voice,lthworkingmeasures, lasttempospeed,lasttempo_n_l)
                 flag = False
             # fi
-            tmp = bufs_length[voice][m][p]
+            tmp = abs(bufs_length[voice][m][p])
             l = l + tmp
+# PROBLEM WITH GOTOs
             bufs_length[voice][m][p] = -tmp     # Mark this length is done.
             i = p
             continue
         # fi
+
         # Tie to next note in next measure?
-        i = -1                                  # To first of next measure.
         m_number = m_number + 1
+
+        # * AH * -- goto's stop it too.
+        if m in goto_table:
+            return l, m_number, lastmeter, channel, chan, l_instrument, last_keysig, lasttempospeed,lasttempo_n_l
+        # fi
+
         if m_number >= len(meas):
             return l, m_number, lastmeter, channel, chan, l_instrument, last_keysig, lasttempospeed,lasttempo_n_l
         # fi
+        if m_number not in meas or meas[m_number] not in bufs_accidentals[voice] or len(bufs_accidentals[voice][meas[m_number]]) <= 0:
+            # No notes in next measure.
+            return l, m_number, lastmeter, channel, chan, l_instrument, last_keysig, lasttempospeed,lasttempo_n_l
+        # fi
         lthworkingmeasures = lthworkingmeasures + mlth[voice][m]
-        #-- print('{}, {}, Text_t, " measure {}"'.format(voice+1, lthworkingmeasures-1, meas[m_number]), file=output_name)
-        m = meas[m_number]
+        #-- print('{}, {}, Text_t, " measure {}"'.format(voice+1, lthworkingmeasures-1, meas[m_number]), file=output_name, flush=True)
+        i = -1                                  # To first of next measure.
         flag = True                             # Need do time signature and instrument if use this.
     # elihw
 #   End of do_possible_midi_tie
@@ -1878,9 +1923,12 @@ def print_out_midi1csv_notes():
     channel = 0                                 # next midi instrument channel to use
     chan = 0                                    # the midi channel using now (allows for repeated use).
 
+    global goto_table
+    global goto_variables
+
     for voice in range(1,len(vl) + 1):
         if voice not in bufs:
-            print("ERROR - bufs voice dictionary is hosed (m={}, voice={}, lthworkingmeasures={})".format(m,voice,lthworkingmeasures), file=sys.stderr)
+            print("ERROR - bufs voice dictionary is hosed (m={}, voice={}, lthworkingmeasures={})".format(m,voice,lthworkingmeasures), file=sys.stderr, flush=True)
             sys.exit(1)
         # fi
         lthworkingmeasures = 0
@@ -1891,7 +1939,7 @@ def print_out_midi1csv_notes():
         # fi
         m_number = 0
         print_out_midi1csv_start(voice)
-        print('{}, 0, Text_t, " voice {}"'.format(voice+1, voice), file=output_name)
+        print('{}, 0, Text_t, " voice {}"'.format(voice+1, voice), file=output_name, flush=True)
         lt = ''
         ll = ''
         last_keysig = ''
@@ -1903,9 +1951,13 @@ def print_out_midi1csv_notes():
         lt, ll = print_out_midi1csv_tempo(m,voice,lthworkingmeasures, lt,ll)
 
 
-        #-- print('{}, {}, Text_t, " measure {}"'.format(voice+1, lthworkingmeasures, meas[m_number]), file=output_name)
+        #-- print('{}, {}, Text_t, " measure {}"'.format(voice+1, lthworkingmeasures, meas[m_number]), file=output_name, flush=True)
 
         m = meas[m_number]
+
+        for v in goto_table:
+            goto_variables[v] = 0              # This voice hasn't done any goto's yet.
+        # rof
 
         while m_number < len(meas):             # while there are measures left to do
             t_num = m_number
@@ -1926,7 +1978,23 @@ def print_out_midi1csv_notes():
             i = 0
 
             if len(bufs[voice][m]) == 0:        # If nothing in measure, go to next measure.
-                m_number = m_number + 1
+                if m in goto_table:
+                    f = goto_variables[m]
+                    g = goto_table[m][f]
+                    if f >= len(goto_table[m]): # If should start over.
+                        f = 0
+                    else:
+                        f = f + 1
+                    # fi
+                    goto_variables[m] = f
+                    if g == 'x':
+                        m_number = m_number + 1
+                    else:
+                        m_number = meas.index(g)
+                    # fi
+                else:
+                    m_number = m_number + 1
+                # fi
                 continue
             # fi
             while i < len(bufs[voice][m]):      # while there are notes in measure
@@ -1939,7 +2007,7 @@ def print_out_midi1csv_notes():
                 n = bufs[voice][m][i]           # note number
                 if n != '0' and n != 0:         # Only for note that plays (not rest).
                     v_vl = bufs_vol[voice][m][i]
-                    print("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lth, chan, n, v_vl), file=output_name)
+                    print("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lth, chan, n, v_vl), file=output_name, flush=True)
                 # fi
                 tmp,m_number,lastmeter, channel, chan, l_instrument, last_keysig, lt,ll = do_possible_midi_tie(m, voice, lthworkingmeasures, i, l,lastmeter, channel, chan, l_instrument, last_keysig, lt,ll)
                 if n != '0' and n != 0:
@@ -1947,23 +2015,37 @@ def print_out_midi1csv_notes():
                     if acc_s == 'ts' or acc_s == 's':
                         tmp = int(round(tmp / 2.0))
                     # fi
-                    print("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, (lth + tmp - 1), chan, n, 0), file=output_name)
+                    print("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, (lth + tmp - 1), chan, n, 0), file=output_name, flush=True)
                 # fi
                 lth = lth + l
                 i = i + 1
-            # rof
+            # elihw
             while t_num < m_number:
                 lthworkingmeasures = lthworkingmeasures + mlth[voice][m]
-#??                 lastmeter = print_out_midi1csv_ts(m, voice, lthworkingmeasures, lastmeter)
-#??                 l_instrument, channel, chan = print_out_midi1csv_instrument(m,voice,lthworkingmeasures, l_instrument,channel,chan)
-#??                 last_keysig = print_out_midi1csv_keysignature(m,voice,lthworkingmeasures, last_keysig)
-#??                 lt, ll = print_out_midi1csv_tempo(m,voice,lthworkingmeasures, lt,ll)
-                t_num = t_num + 1
+                if m in goto_table:
+                    f = goto_variables[m]
+                    g = goto_table[m][f]
+                    if f >= len(goto_table[m]):         # If should start over.
+                        f = 0
+                    else:
+                        f = f + 1
+                    # fi
+                    goto_variables[m] = f
+                    if g == 'x':
+                        m_number = t_num + 1
+                    else:
+                        m_number = meas.index(g)
+                    # fi
+                    m = meas[m_number]
+                    break
+                else:
+                    t_num = t_num + 1
+                # fi
                 if t_num < len(meas):
                     m = meas[t_num]
                 # fi
             # elihw
-        # rof   m in meas
+        # elihw
         print_out_midi1csv_end(voice, lthworkingmeasures)
     # rof   voice in range
     return
@@ -1980,18 +2062,33 @@ def do_pass2():
     global macro_defining
     global macro_executing_depth
     global errors_happened
+    global goto_table
 
     if ifdepth > 0:
-        print("Error inside an if block (depth={}) when end of file or cstop* reached".format(ifdepth),file=sys.stderr)
+        print("Error inside an if block (depth={}) when end of file or cstop* reached".format(ifdepth),file=sys.stderr, flush=True)
     # fi
     if macro_defining is not None:
-        print("Error inside defining macro {}, no endm reached.".format(macro_defining),file=sys.stderr)
+        print("Error inside defining macro {}, no endm reached.".format(macro_defining),file=sys.stderr, flush=True)
     # fi
     if len(macro_executing_depth) > 0:
-        print("Error processing macro depth is {}.".format(macro_executing_depth),file=sys.stderr)
+        print("Error processing macro depth is {}.".format(macro_executing_depth),file=sys.stderr, flush=True)
     # fi
 
-    print_header()
+    e = False
+    for m in goto_table:                # The measures with a goto in it.
+        for g in goto_table[m]:         # The goto measures as arguments.
+            if g != 'x':                # "x" is okay, goto next measure.
+                if g not in meas:       # unknown measure ...
+                    print("Error checking goto's values, '{}' not in measures.".format(g),file=sys.stderr, flush=True)
+                    e = True            # Error occurred.
+                    errors_happened = errors_happened + 1
+                # fi
+            # fi
+        # rof
+    # rof
+    if e:
+        sys.exit(errors_happened)
+    # fi
 
     # Fix other voices before continuing to process.
     fill_voice_mlth("do_pass2")             # Need to make measure for other voices up to here "mlth".
@@ -2006,6 +2103,8 @@ def do_pass2():
         # rof
     # rof
 
+    print_header()
+
     if args.vertical or args.horizontal:
         print_out_v_or_h()
     elif args.midi1csv:
@@ -2016,9 +2115,9 @@ def do_pass2():
 
     # End of song processing.
     if args.vertical or args.horizontal:
-        print("cstop*", file=output_name)
+        print("cstop*", file=output_name, flush=True)
     elif args.midi1csv:
-        print("0, 0, End_of_file", file=output_name)
+        print("0, 0, End_of_file", file=output_name, flush=True)
     # else:     # ABC
     # fi
     sys.exit(errors_happened)
@@ -2090,14 +2189,14 @@ def get_line():
                 return line
             # fi
         except EOFError:
-            pass            # print("Read gave EOF", file=sys.stderr)
+            pass            # print("Read gave EOF", file=sys.stderr, flush=True)
         except SystemExit:
-            pass            # print("Read gave system exit", file=sys.stderr)
+            pass            # print("Read gave system exit", file=sys.stderr, flush=True)
         except KeyboardInterrupt:
-            print("Read got keyboard interrupt", file=sys.stderr)
+            print("Read got keyboard interrupt", file=sys.stderr, flush=True)
         except:
-            print("Read got a processing error", file=sys.stderr)
-            print("    ", sys.exc_info()[0], sys.exc_info, file=sys.stderr)
+            print("Read got a processing error", file=sys.stderr, flush=True)
+            print("    ", sys.exc_info()[0], sys.exc_info, file=sys.stderr, flush=True)
         # yrt
         break
     # elihw
@@ -3111,7 +3210,40 @@ def do_natural(t_args, line):
 #   goto    6.5,x,8,2,... $$ repeat and/or skip.  "x" = continue, forwards, backwards, max 8 args.
 #                       counter is number of times reached.
 def do_goto(t_args, line):
-    print_error("NOTDONEYET - do_goto", line)
+    global measure_on
+    global goto_table
+    global goto_variables
+
+    if measure_on in goto_table:
+        print_error("Second goto in measure note allowed.", line)
+        return
+    # fi
+
+    if t_args is None or len(t_args) == 0:
+        print_error("goto needs at least one argument", line)
+        return
+    # fi
+    wline = t_args[0]
+    # Get rid of all white spoce.
+    wline = ''.join(wline.split())
+    wargs = arglist(wline, line)
+
+    if len(wargs) == 0:
+        print_error("goto needs at least one argument", line)
+        return
+    # fi
+
+    g = []
+    for i in range(1, len(wargs)+1):
+        v = wargs[i - 1]
+        if v is None:
+            print_error("goto does not have argument as a measure.", line)
+            return
+        # fi
+        g.append(v)
+    # rof
+    fill_voice_mlth(line)               # Need to make measure for other voices up to here "mlth".
+    goto_table[measure_on] = g
     return
 # End of do_goto
 
@@ -6069,6 +6201,7 @@ def process_line(t, line):
     global cstop_processing
     global macro_defining               # If defining macro.
     global macro_buffer                 # Name of macro, array of lines for macro.
+    global measure_on
 
     if not t or len(t) == 0:
         return
@@ -6123,9 +6256,13 @@ def process_line(t, line):
                 r = commands[command]
             except:
                 print_error("not found processing routine for command {}", command)
-                print("    ", sys.exc_info()[0], sys.exc_info, file=sys.stderr)
+                print("    ", sys.exc_info()[0], sys.exc_info, file=sys.stderr, flush=True)
             # fi
             r(t_args, line)
+            return
+        # fi
+        if measure_on in goto_table:
+            print_error("Notes after a goto are not allowed.", line)
             return
         # fi
         process_notes(t,line)
@@ -6204,16 +6341,16 @@ def parse_args():
     # fi
     if args.vertical:
         if args.horizontal or args.abc == 1 or args.midi1csv:
-            print("Only may have one of --vertical, --horizontal, --abc, or --midi1", file=sys.stderr)
+            print("Only may have one of --vertical, --horizontal, --abc, or --midi1", file=sys.stderr, flush=True)
             sys.exit(1)
         # fi
     elif args.horizontal:
         if args.abc == 1 or args.midi1csv:
-            print("Only may have one of --vertical, --horizontal, --abc, or --midi1", file=sys.stderr)
+            print("Only may have one of --vertical, --horizontal, --abc, or --midi1", file=sys.stderr, flush=True)
             sys.exit(1)
         # fi
     elif args.abc == 1 and args.midi1csv:
-        print("Only may have one of --vertical, --horizontal, or --abc", file=sys.stderr)
+        print("Only may have one of --vertical, --horizontal, or --abc", file=sys.stderr, flush=True)
         sys.exit(1)
     # fi
     return
@@ -6268,7 +6405,7 @@ def main():
             output_name = open(args.rest[1], 'w')
         # fi
         if len(args.rest) > 2:              # Too many.
-            print("Too many arguments, input, output only.  {}".format(args.rest), file=sys.stderr)
+            print("Too many arguments, input, output only.  {}".format(args.rest), file=sys.stderr, flush=True)
             sys.exit(1)
         # fi
     # fi
