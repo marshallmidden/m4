@@ -10,9 +10,6 @@
 # 1) Select clef=treble or clef=bass by notes min and max notes on staff(s).
 #       # NOTDONEYET - add ' clef=bass'  (after the number)
 #       # clef can occur each measure (abc, horizontal, vertical format).
-# 2) Command not done.
-#   print_error("NOTDONEYET - do_putd", line)           Not likely to do. (Not used anywhere that I see.)
-#   print_error("NOTDONEYET - process_putd", line)      Not likely to do. (Not used anywhere that I see.)
 #-----------------------------------------------------------------------------
 # NOTDONEYET - Note processing:
 #   print_error("NOTDONEYET - doing gsw_operand type of note", line)    - Not related to MIDI.
@@ -85,6 +82,9 @@
 #
 # This shows that if not a command, spaces are eliminated for note processing.
 # By the way, the arguments on the voice line for for instruments, 0=default.
+#-----------------------------------------------------------------------------
+# putd substitution lines are done in the order that they are defined. Once
+# through the list, but only if '=' at start of line.
 #-----------------------------------------------------------------------------
 # xpose command is done for --vertical, --horizontal, and --midi1csv, but NOT abc format.
 # ABC format thus will "print" right, but not "play" (abc2midi) right.
@@ -1249,7 +1249,6 @@ def print_measure_abc(m, voice, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_
             l_ky = ky
         # fi
     # fi
-    #-- # fi
     # if meter != last one
     if l_meter != measure_meter[m]:
         l_meter = measure_meter[m]
@@ -1828,7 +1827,7 @@ def print_header():
             if m in goto_table:             # If goto exists, process it.
                 f = goto_variables[m]
                 g = goto_table[m][f]
-                if f >= len(goto_table[m]): # If should start over.
+                if f+1 >= len(goto_table[m]): # If should start over.
                     f = 0
                 else:
                     f = f + 1
@@ -2908,14 +2907,29 @@ def macro_define(command, t_args, line):
 #     putd   /cmajor/c,e,g/
 #     =cmajor,b           # c,e,g,b       Note: do multiple putd's on this line.
 def do_putd(t_args, line):
-    print_error("NOTDONEYET - do_putd", line)
+    if t_args is None or len(t_args) == 0:
+        print_error("putd does not have an argument.", line)
+        return
+    # fi
+    c = t_args[0][0]                    # The separation character.
+    two = t_args[0].split(c)
+    if len(two) != 4 or two[0] != '' or two[3] != '':
+        print_error("putd should look like '/zzz/a,b,c/' - not right number of separators ({}).".format(c), line)
+        return
+    # fi
+    putds[two[1]] = two[2]
     return
 # End of do_putd
 
 #-----------------------------------------------------------------------------
 def process_putd(line):
-    print_error("NOTDONEYET - process_putd", line)
-    return ''                           # Ignore putd for now.
+    global putds
+
+    newline = line[1:]                  # Toss '=' (putd) character.
+    for a in putds:
+        newline = newline.replace(a,putds[a])
+    # rof
+    return newline
 # End of process_putd
 
 #-----------------------------------------------------------------------------
@@ -3314,7 +3328,6 @@ def do_goto(t_args, line):
                 # fi
             # fi
         # fi
-        #-- print("do_goto v={} f1={}".format(v,f1), file=sys.stderr)
         v = str(f1)
 
         g.append(v)
@@ -3382,10 +3395,6 @@ def do_decode(t_args, line):
         print_warning("decode note had error with note {}".format(wargs[1]), line)
         return
     # fi
-    #-- if therest != '':
-    #--     print_warning("decode note has extra characters '{}' after note".format(therest), line)
-    #--     return
-    #-- # fi
     if thenote <= 12+12-3:
         computeit = wargs[0] + '=' + '0'                       # rest = 0
     else:
@@ -4490,7 +4499,6 @@ def do_measure(t_args, line):
         # fi
     # fi
 
-    #-- print("do_measure vargs={} f1={}".format(vargs,f1), file=sys.stderr)
     if f1 in meas:
         print_error("Measure {} already exists.".format(f1), line)
         return
@@ -5171,7 +5179,6 @@ def getnote(note_to_decode, voice, line):
                 return '', None, None                # ???
             # fi
             number_in_sequence = int(round(number_in_sequence))
-            #-- time(note_to_decode, voice, line)   # get the time
             therest = note_to_decode[sc:]
             return therest, number_in_sequence, sequence_note
         # fi
@@ -5449,12 +5456,9 @@ def getnote(note_to_decode, voice, line):
     # Convert to right format.
     if args.horizontal or args.vertical:
         n = n.lower()
-        #-- o = oct[voice]
     elif args.midi1csv:
         n = n.lower()
-        #-- o = oct[voice]
     else:                           # ABC
-        #-- o = oct[voice]
         if o <= 3:                                      # uppercase letter
             n = n.upper()
         else:                                           # lowercase letter
@@ -5497,7 +5501,7 @@ def getnote(note_to_decode, voice, line):
 def get_time(therest, line):
     work4 = 0
     vwork = 0
-    if therest and not therest[0].isalpha():    # if not a note or modifier (computable)
+    if therest:
         vwork, type_error = is_float(therest)
         # errorrest = everything after value -- if error occurs.
         # vwork = value calculated before error (even if not error).
@@ -5869,7 +5873,6 @@ def process_notes(t_args, line):
                         # onenotevole already set for below.
                     else:           # ABC
                         # Cannot do sfp and such. Boo His.
-                        #-- prenote = prenote + DECORATIONS + str(f3) + DECORATIONS
                         j = int(onenotevolume / 16)
                         j = (j * 16) + 15
                         prenote = prenote + DECORATIONS + vlprint[j] + DECORATIONS
@@ -6523,6 +6526,14 @@ def main():
         if line:
             # Split line on spaces, then process line.
             while True:
+                if macro_defining is None:
+                    if line and line[0] == '=':
+                        line = process_putd(line)
+                        if len(line) > 0 and line[0] == '=':
+                            continue
+                        # fi
+                    # fi
+                # fi
                 t = line.split(' ', 1)
                 if t and t[0] and len(t) == 2 and t[1]:
                     t[1] = t[1].strip()
@@ -6536,11 +6547,6 @@ def main():
                         line = None
                         break
                     # fi
-                    continue
-                # fi
-
-                if line and line[0] == '=':
-                    line = process_putd(line)
                     continue
                 # fi
                 break

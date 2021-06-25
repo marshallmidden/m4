@@ -112,6 +112,9 @@ SONGS += sympathy
 SONGS += turkish
 SONGS += three_king
 SONGS += winterwind
+SONGS += double_rat
+SONGS += kije
+SONGS += putd-test
 
 #-----------------------------------------------------------------------------
 #-- SONGS_abc = ${SONGS:=.abc}
