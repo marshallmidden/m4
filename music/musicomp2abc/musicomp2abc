@@ -1,6 +1,9 @@
 #!/usr/bin/python3 -B
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 #-----------------------------------------------------------------------------
+# NOTDONEYET
+# do_pitch - -- midi1csv -- add at last moment to printing.
+#-----------------------------------------------------------------------------
 # This fails with --midi1csv: (file Q)
 # measure 1
 # v1: 2c2t
@@ -761,7 +764,10 @@ global pan
 pan = { }                           # Pan (balance 0=left, 126=right, 64=center) for voice.
 global intensity
 intensity = { }                     # Instrument intensity (volume).
+global pitch                        # Pitch change up or down by semitones.
+pitch = {}                          # Index by measure.
 #...
+pitch[''] = 0                       # Before first measure is no pitch.
 vinstrument[''] = {}                # blank measure.
 reverb[''] = {}
 pan[''] = {}
@@ -1167,7 +1173,7 @@ def rests_in_empty_measure_voices(m, voice):
 # End of rests_in_empty_measure_voices
 
 #-----------------------------------------------------------------------------
-def print_measure_abc(m, voice, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_vl, l_txt, l_ky):
+def print_measure_abc(m, voice, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_vl, l_txt, l_ky, l_pitch):
     global bufs
     #-- global vl
     global measure_meter
@@ -1179,9 +1185,10 @@ def print_measure_abc(m, voice, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_
     global intensity
     global key_voice                        # Running key by voice.
     global tempo_speed_now
+    global pitch
 
     if voice not in bufs:
-        return "ERROR - bufs voice dictionary is hosed.", '', '', '', '', ''
+        return "ERROR - bufs voice dictionary is hosed.", '', '', '', '', '', '', '', ''
     # fi
     pr = l_txt
     # if first measure, and doing voice, output V:# line.
@@ -1199,6 +1206,16 @@ def print_measure_abc(m, voice, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_
         # fi
         pr = pr + '\n'
     # fi
+
+    if pitch[m] != l_pitch:
+        if pr != '' and pr[-1] != '\n':
+            pr = pr + '\n'
+        # fi
+        l_pitch = pitch[m]
+        pr = pr + '%% pitch    '.format(l_pitch) + "\n"
+
+    # fi
+
     if voice not in vinstrument[m]:
         vinstrument[m][voice] = 0
         reverb[m][voice] = 0
@@ -1254,7 +1271,7 @@ def print_measure_abc(m, voice, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_
         l_vl = v_vl
     # fi
     pr = pr + bufs[voice][m] + ' |'
-    return pr, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_vl, l_ky
+    return pr, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_vl, l_ky, l_pitch
 # End of print_measure_abc
 
 #-----------------------------------------------------------------------------
@@ -1271,6 +1288,7 @@ def print_out_abc():
         l_meter = l_dl = l_clef = l_instrument = l_vl = ''
         l_ky = key_default
         l_tempo = ''
+        l_pitch = ''
         print_line = ''
         for i in range(0, len(meas)):
             m = meas[i]
@@ -1281,8 +1299,8 @@ def print_out_abc():
                 print(print_line + "% measure {}".format(m), file=output_name, flush=True)
                 print_line = ''
             # fi
-            print_line, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_vl, l_ky = print_measure_abc(m, voice,
-                        l_meter, l_tempo, l_dl, l_clef, l_instrument, l_vl, print_line, l_ky)
+            print_line, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_vl, l_ky, l_pitch = print_measure_abc(m,
+                        voice, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_vl, print_line, l_ky, l_pitch)
 
             if m in goto_table and goto_table[m] != '':
                 print("WARNING - goto in measure {} not handled.".format(m), file=sys.stderr, flush=True)
@@ -1328,7 +1346,7 @@ def print_out_abc():
 #   v1: 3c4, ...
 #   vX: 3e4, ...
 
-def print_measure_vh_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l_ky, l_tempo, l_t_n_l):
+def print_measure_vh_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l_ky, l_tempo, l_t_n_l, l_pitch):
     global vl
     global measure_meter
     global clef
@@ -1336,6 +1354,7 @@ def print_measure_vh_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l_ky,
     global key_voice
     global tempo_speed_now
     global tempo_now_note_length
+    global pitch
 
     pr = n_meter = n_clef = n_instrument = n_vl = ''
 
@@ -1405,6 +1424,11 @@ def print_measure_vh_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l_ky,
         # fi
     # rof
 
+    if l_pitch != pitch[m]:
+        l_pitch = pitch[m]
+        pr = pr + "pitch   {}\n".format(l_pitch)
+    # fi
+
     if l_tempo != tempo_speed_now[m] or l_t_n_l != tempo_now_note_length[m]:
         l_tempo = tempo_speed_now[m]
         l_t_n_l = tempo_now_note_length[m]
@@ -1413,7 +1437,7 @@ def print_measure_vh_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l_ky,
     # fi
         
     pr = l_txt + pr
-    return pr, n_meter, n_clef, n_instrument, n_vl, l_ky, l_tempo, l_t_n_l
+    return pr, n_meter, n_clef, n_instrument, n_vl, l_ky, l_tempo, l_t_n_l, l_pitch
 # End of print_measure_vh_header
 
 #-----------------------------------------------------------------------------
@@ -1535,6 +1559,7 @@ def print_out_v_or_h():
     global key_default
     global tempo_speed_default
     global default_note_length
+    global pitch
 
     print("voice   {}".format(len(vl)), file=output_name, flush=True)
 
@@ -1547,6 +1572,7 @@ def print_out_v_or_h():
     l_tempo = tempo_speed_default
     l_t_n_l = default_note_length['']
     print_line = ''
+    l_pitch = pitch['']
 
     for i in range(0, len(meas)):
         m = meas[i]
@@ -1557,8 +1583,8 @@ def print_out_v_or_h():
             # rof
             print_line = print_line + "\n"
         # fi
-        print_line, l_meter, l_clef, l_instrument, l_vl, l_ky, l_tempo, l_t_n_l = print_measure_vh_header(m,
-                    l_meter, l_clef, l_instrument, l_vl, print_line, l_ky, l_tempo, l_t_n_l)
+        print_line, l_meter, l_clef, l_instrument, l_vl, l_ky, l_tempo, l_t_n_l, l_pitch = print_measure_vh_header(m,
+                    l_meter, l_clef, l_instrument, l_vl, print_line, l_ky, l_tempo, l_t_n_l, l_pitch)
         # Print out notes for measure.
         print_line = print_out_notes_v_or_h(m, print_line)
 
@@ -1919,6 +1945,7 @@ def print_out_midi1csv_notes():
     global bufs
     global bufs_vol
     global mlth
+    global pitch
 
     channel = 0                                 # next midi instrument channel to use
     chan = 0                                    # the midi channel using now (allows for repeated use).
@@ -2008,16 +2035,18 @@ def print_out_midi1csv_notes():
                 # fi
                 n = bufs[voice][m][i]           # note number
                 if n != '0' and n != 0:         # Only for note that plays (not rest).
+                    n_print = int(n) + pitch[m]
                     v_vl = bufs_vol[voice][m][i]
-                    print("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lth, chan, n, v_vl), file=output_name, flush=True)
+                    print("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lth, chan, n_print, v_vl), file=output_name, flush=True)
                 # fi
                 tmp,m_number,lastmeter, channel, chan, l_instrument, last_keysig, lt,ll = do_possible_midi_tie(m, voice, lthworkingmeasures, i, l,lastmeter, channel, chan, l_instrument, last_keysig, lt,ll)
                 if n != '0' and n != 0:
+                    n_print = int(n) + pitch[m]      # Note: previous measure name, not m_number.
                     acc_s = bufs_accidentals[voice][m][i]
                     if acc_s == 'ts' or acc_s == 's':
                         tmp = int(round(tmp / 2.0))
                     # fi
-                    print("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, (lth + tmp - 1), chan, n, 0), file=output_name, flush=True)
+                    print("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, (lth + tmp - 1), chan, n_print, 0), file=output_name, flush=True)
                 # fi
                 lth = lth + l
                 i = i + 1
@@ -2717,7 +2746,7 @@ def do_tempo(t_args, line):
 
     for ve in range(1, len(vl)+1):
         if mlth[ve][measure_on] != 0:
-            print_error("do_tempo in the middle of a measure not allowed", line)
+            print_error("tempo in the middle of a measure not allowed", line)
             return
         # fi
     # rof
@@ -3171,10 +3200,38 @@ def do_slide(t_args, line):
 # End of do_slide
 
 #-----------------------------------------------------------------------------
-# Not likely to do. I think this is xpose?
+# This command raises or lowers the note pitch by the specified number of
+# semitones. A semitone is one of the 12 notes in a scale from
+#       c,c+,d,d+,e,f,f+,g,g+,a,a+,b,b+ and back to c one octave higher.
 #   pitch -2            sets semitones lower
 def do_pitch(t_args, line):
-    print_error("NOTDONEYET - do_pitch", line)
+    global pitch
+    global measure_on
+    global mlth
+
+    if t_args is None or len(t_args) <= 0 or t_args[0] == '':
+        print_error("pitch does not have an expression to process", line)
+        return
+    # fi
+
+    for ve in range(1, len(vl)+1):
+        if mlth[ve][measure_on] != 0:
+            print_error("pitch in the middle of a measure not allowed", line)
+            return
+        # fi
+    # rof
+
+    m = t_args[0]
+
+    f, type_error = is_float(m)
+    if type_error is not None:
+        return
+    # fi
+    if f is None:
+        print_error("pitch argument as a calculation did not return a value", line)
+        return
+    # fi
+    pitch[measure_on] = int(round(f))
     return
 # End of do_pitch
 
@@ -3377,6 +3434,7 @@ def do_meter(t_args, line):
     global measure_meter
     global measure_on
     global args
+    global mlth
 
     if t_args is None or len(t_args) <= 0 or t_args[0] == '':
         print_error("meter does not have an expression to process", line)
@@ -3385,7 +3443,7 @@ def do_meter(t_args, line):
 
     for ve in range(1, len(vl)+1):
         if mlth[ve][measure_on] != 0:
-            print_error("do_meter in the middle of a measure not allowed", line)
+            print_error("meter in the middle of a measure not allowed", line)
             return
         # fi
     # rof
@@ -4071,7 +4129,7 @@ def do_key(t_args, line):
 
     for ve in range(1, len(vl)+1):
         if mlth[ve][measure_on] != 0:
-            print_error("do_key in the middle of a measure not allowed", line)
+            print_error("key in the middle of a measure not allowed", line)
             return
         # fi
     # rof
@@ -4386,6 +4444,7 @@ def do_measure(t_args, line):
     global key_voice
     global tempo_now_note_length
     global tempo_speed_now
+    global pitch
 
     fill_voice_mlth(line)                   # Need to make measure for other voices up to here "mlth".
 
@@ -4462,6 +4521,7 @@ def do_measure(t_args, line):
     tempo_speed_now[measure_on] = tempo_speed_now[last_m]
     tempo_now_note_length[measure_on] = tempo_now_note_length[last_m]
     measure_meter[measure_on] = meter       # Each measure change can have a different meter.
+    pitch[measure_on] = pitch[last_m]       # continue pitch from measure before.
     return
 # End of do_measure
 
@@ -4475,6 +4535,7 @@ def do_instrument(t_args, line):
     global measure_on
     global instruments
     global extrainfo
+    global mlth
 
     if t_args is None or len(t_args) != 1:
         print_error("instrument does not have arguments.", line)
@@ -4504,7 +4565,7 @@ def do_instrument(t_args, line):
 
     for ve in range(1, len(vl)+1):
         if mlth[ve][measure_on] != 0:
-            print_error("do_instrument in the middle of a measure not allowed", line)
+            print_error("instrument in the middle of a measure not allowed", line)
             return
         # fi
     # rof
