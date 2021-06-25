@@ -958,6 +958,7 @@ variables = {
     'sd': 1, 'td': 1, 'ds': 1, 'dt': 1,
     'sdt': 1, 'std': 1, 'dst': 1, 'dts': 1, 'tsd': 1, 'tds': 1,
     'th': 1,
+    'bt': 1, 'db': 1,           # Not all variations with "b", but those used.
 #   1   .   .   .   2   .   .   .   3   .   .   .   4   .   .   .   5   .   .   .
     'm1': 0,        'm2': 0,        'm3': 0,        'm4': 0,        'm5': 0,
     'm6': 0,        'm7': 0,        'm8': 0,        'm9': 0,        'm10': 0,
