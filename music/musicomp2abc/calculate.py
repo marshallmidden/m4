@@ -955,7 +955,7 @@ variables = {
     'grace': 4,                 # NOTE: lgrace -> grace     NOTUSED
     's': 1, 'd': 1, 'b': 1, 't': 1,
     'w': 1, 'h': 2, 'q': 4, 'e': 8,
-    'sd': 1, 'td': 1, 'ds': 1, 'dt': 1,
+    'sd': 1, 'td': 1, 'ds': 1, 'dt': 1, 'dd':1,
     'sdt': 1, 'std': 1, 'dst': 1, 'dts': 1, 'tsd': 1, 'tds': 1,
     'th': 1,
     'bt': 1, 'db': 1,           # Not all variations with "b", but those used.
