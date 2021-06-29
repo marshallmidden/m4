@@ -724,7 +724,8 @@ meas = []
 global measure_on                   # The measure/unit are we are working on.
 measure_on = ''                     # Default to none. This means we are in the header section.
 global bars                         # number of bars per staff
-bars = NUMBER_BARS_PER_STAFF        # for abc notation, put new line in output, which ends staff.
+bars = {}
+bars[''] = NUMBER_BARS_PER_STAFF    # for abc notation, put new line in output, which ends staff.
 
 global voices                       # number of voices
 voices = 1
@@ -1281,14 +1282,20 @@ def print_out_abc():
         l_tempo = ''
         l_pitch = ''
         print_line = ''
+
+        bar = 0
+        bar_print = 0
+        last_bar = bars['']
         for i in range(0, len(meas)):
+            bar = bar + 1
             m = meas[i]
-            if (i % bars) == 0:                # Zero-th one is ''.
+            if (bar > int(last_bar) + bar_print):                # Zero-th one is ''.
                 if print_line != '':
                     print_line = print_line + '\n'
                 # fi
                 print(print_line + "% measure {}".format(m), file=output_name, flush=True)
                 print_line = ''
+                bar_print = i
             # fi
             print_line, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_vl, l_ky, l_pitch = print_measure_abc(m,
                         voice, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_vl, print_line, l_ky, l_pitch)
@@ -1297,6 +1304,7 @@ def print_out_abc():
                 print("WARNING - goto in measure {} not handled.".format(m), file=sys.stderr, flush=True)
                 print_line = print_line + "\n" + '%% goto    ' + ','.join(goto_table[m]) + "\n"
             # fi
+            last_bar = bars[m]
         # rof
         if print_line != '':
             print_line = print_line + ']'
@@ -1565,6 +1573,8 @@ def print_out_v_or_h():
     print_line = ''
     l_pitch = pitch['']
 
+    bar_print = bars['']
+
     for i in range(0, len(meas)):
         m = meas[i]
         if args.horizontal and m == meas[0]:
@@ -1576,6 +1586,12 @@ def print_out_v_or_h():
         # fi
         print_line, l_meter, l_clef, l_instrument, l_vl, l_ky, l_tempo, l_t_n_l, l_pitch = print_measure_vh_header(m,
                     l_meter, l_clef, l_instrument, l_vl, print_line, l_ky, l_tempo, l_t_n_l, l_pitch)
+
+        if bar_print != bars[m]:            # Zero-th one is ''.
+            print_line = print_line + "bars    {}\n".format(bars[m])
+            bar_print = bars[m]
+        # fi
+
         # Print out notes for measure.
         print_line = print_out_notes_v_or_h(m, print_line)
 
@@ -1670,7 +1686,6 @@ def print_out_midi1csv_instrument(m,voiceon,lthworkingmeasure, last_instrument_o
                 # fi
             # fi
             q = mlth[voiceon][m]
-            print('{}, {}, Program_c, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, last_instrument_on), file=output_name, flush=True)
 # 73: ["flute",             52, 37, 84],
             if last_instrument_on in extrainfo:
                 print('{}, {}, Text_t, "{}"'.format(voiceon+1, lthworkingmeasure, extrainfo[last_instrument_on][0]), file=output_name, flush=True)
@@ -1751,7 +1766,7 @@ def print_header():
 
     if args.vertical or args.horizontal:
         l = str(Fraction(1.0 / default_note_length['']).limit_denominator(256))
-        header = header + "bars    {}\n".format(bars)
+        header = header + "bars    {}\n".format(bars[''])
         header = header + "tempo   {},{}\n".format(tempo_speed_default, l)
         header = header + "key     {}".format(key_default)       # no \n, added when printed.
         for ve in range(1,len(vl) + 1):
@@ -3432,6 +3447,7 @@ def do_clef(t_args, line):
 #-----------------------------------------------------------------------------
 def do_bars(t_args, line):
     global bars
+    global measure_on
 
     if t_args is None or len(t_args) <= 0 or t_args[0] == '':
         print_error("bars does not have an expression to process", line)
@@ -3448,7 +3464,7 @@ def do_bars(t_args, line):
         print_error("bars argument as a calculation did not return a value", line)
         return
     # fi
-    bars = int(round(f))
+    bars[measure_on] = int(round(f))
     # fi
     return
 # End of do_bars
@@ -4464,6 +4480,7 @@ def do_measure(t_args, line):
     global meter
     global measure_meter
     global clef
+    global bars
     global mlth                             # measure length dictionary
     global args
     global key_voice
@@ -4565,6 +4582,7 @@ def do_measure(t_args, line):
     # rof
     # default note length continues with current - might change shortly.
     default_note_length[measure_on] = default_note_length[last_m]
+    bars[measure_on] = bars[last_m]
     tempo_speed_now[measure_on] = tempo_speed_now[last_m]
     tempo_now_note_length[measure_on] = tempo_now_note_length[last_m]
     measure_meter[measure_on] = meter       # Each measure change can have a different meter.
