@@ -716,8 +716,8 @@ putds    = { }                      # dictionary of from:to
 
 global goto_table
 global goto_variables
-goto_table = { '':''}                   # first index is measure number. Value is array of measures.
-goto_variables = { '':0}               # first index is measure number. Value is number of times goto is hit.
+goto_table = { '':[]}               # first index is measure number. Value is array of measures.
+goto_variables = { '':0}            # first index is measure number. Value is number of times goto is hit.
 
 global meas                         # measure names.
 meas = []
@@ -751,6 +751,8 @@ clef = { }                          # no clef specified [measure][voice].
 clef[''] = { }
 global vinstrument
 vinstrument = { }                   # no instruments specified [measure][voice].
+global percents
+percents = { }                      # no %% passthru commands for start of [measure] (for abc).
 global reverb
 reverb = { }                        # Reverb value for voice.
 global pan
@@ -765,6 +767,7 @@ vinstrument[''] = {}                # blank measure.
 reverb[''] = {}
 pan[''] = {}
 intensity[''] = {}
+percents[''] = []                   # blank measure.
 
 global cresc_volume
 cresc_volume = [ ]
@@ -1205,7 +1208,7 @@ def print_measure_abc(m, voice, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_
             pr = pr + '\n'
         # fi
         l_pitch = pitch[m]
-        pr = pr + '%% pitch    '.format(l_pitch) + "\n"
+        pr = pr + '%% pitch    {}'.format(l_pitch) + "\n"
 
     # fi
 
@@ -1297,6 +1300,14 @@ def print_out_abc():
                 print_line = ''
                 bar_print = i
             # fi
+
+            if m in percents:
+                print_line = print_line + "\n"
+                for p in percents[m]:
+                    print_line = print_line + p + "\n"
+                # rof
+            # fi
+
             print_line, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_vl, l_ky, l_pitch = print_measure_abc(m,
                         voice, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_vl, print_line, l_ky, l_pitch)
 
@@ -1584,6 +1595,14 @@ def print_out_v_or_h():
             # rof
             print_line = print_line + "\n"
         # fi
+
+        if m in percents:
+            print_line = print_line + "\n"
+            for p in percents[m]:
+                print_line = print_line + p + "\n"
+            # rof
+        # fi
+
         print_line, l_meter, l_clef, l_instrument, l_vl, l_ky, l_tempo, l_t_n_l, l_pitch = print_measure_vh_header(m,
                     l_meter, l_clef, l_instrument, l_vl, print_line, l_ky, l_tempo, l_t_n_l, l_pitch)
 
@@ -1862,6 +1881,23 @@ def print_header():
         print_out_midi1csv_end(0, lthworkingmeasure)
         return
     else:                                   # ABC format
+        ps = "%abc\n"
+        ps = ps + "%%pageheight 10.5in\n"
+        ps = ps + "%%staffwidth 7.0in\n"
+        # ps = ps + "%%stretchlast no\n"
+        ps = ps + "%%leftmargin .25in\n"
+        ps = ps + "%%rightmargin .25in\n"
+        ps = ps + "%%scale 0.43\n"
+        ps = ps + "%%vocalfont Times-BoldItalic 13.0\n"
+
+        header = ps + header
+
+        if '' in percents:
+            header = header + "%abc2mtex: yes\n"
+            for p in percents['']:
+                header = header + p + "\n"
+            # rof
+        # fi
         # Must be a fraction.
         fdnl = default_note_text_fraction('')
         if fdnl == '1':
@@ -4947,6 +4983,19 @@ def do_xpose(t_args, line):
 # End of do_xpose
 
 #-----------------------------------------------------------------------------
+# '%%'      : do_percents,
+def do_percents(t_args, line):
+    global measure_on
+    global percents
+
+    if measure_on not in percents:
+        percents[measure_on] = []
+    # fi
+    percents[measure_on].append(line)
+    return
+# End of do_percents
+
+#-----------------------------------------------------------------------------
 # dictionary commandname : routine. execute via(?): globals()['do_cstopnow'](t_args, line)
 global commands
 commands = {
@@ -4998,6 +5047,7 @@ commands = {
              'intensity' : do_intensity,
              'instrument' : do_instrument,
              'xpose'   : do_xpose,
+             '%%'      : do_percents,
              # '.' -- handled specially.
            }
 
@@ -6406,6 +6456,9 @@ def process_line(t, line):
         if command in macro_buffer.keys():
             replace_macro(command, t_args, line)
             return                      # Henceforth get lines from macro_buffer.
+        # fi
+        if command[0] == '%' and command[1] == '%':
+            command = '%%'
         # fi
         if command in commands:
             try:
