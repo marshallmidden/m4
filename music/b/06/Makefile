@@ -24,7 +24,7 @@ clean:
 s:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc ${V} >${V}.abc
 	yaps ${V}.abc -o ${V}.ps -k
-	abcm2ps -l -s 0.65 -M -b 0 ${V}.abc -i -N 2 -j 1
+	abcm2ps -l -s 0.5 -M -b 0 ${V}.abc -i -N 2 -j 1
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m ${V} >${V}.csv
 	csvmidi ${V}.csv ${V}.mid
 	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 ${V}.mid
