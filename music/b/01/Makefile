@@ -51,7 +51,7 @@ a1:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.01 >a1.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.01 >a1.abc
 	yaps a1.abc -o a1.ps -k
-	abcm2ps -l -s 0.42 -M -b 1 a1.abc -i
+	abcm2ps -l -s 0.8 -M -b 1 a1.abc -i -N 2 -j 1
 	#-- csvmidi a1.csv a1.mid
 	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a1.mid
 #-----------------------------------------------------------------------------
@@ -60,7 +60,7 @@ a2:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.02 >a2.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.02 >a2.abc
 	yaps a2.abc -o a2.ps -k
-	abcm2ps -l -s 0.42 -M -b 1 a2.abc -i
+	abcm2ps -l -s 0.8 -M -b 1 a2.abc -i -N 2 -j 1
 	#-- csvmidi a2.csv a2.mid
 	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a2.mid
 #-----------------------------------------------------------------------------
@@ -69,7 +69,7 @@ a3:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.02 >a3.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.02 >a3.abc
 	yaps a3.abc -o a3.ps -k
-	abcm2ps -l -s 0.42 -M -b 1 a3.abc -i
+	abcm2ps -l -s 0.8 -M -b 1 a3.abc -i -N 2 -j 1
 	#-- csvmidi a3.csv a3.mid
 	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a3.mid
 #-----------------------------------------------------------------------------
@@ -78,7 +78,7 @@ a4:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.04 >a4.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.04 >a4.abc
 	yaps a4.abc -o a4.ps -k
-	abcm2ps -l -s 0.42 -M -b 1 a4.abc -i
+	abcm2ps -l -s 0.8 -M -b 1 a4.abc -i -N 2 -j 1
 	#-- csvmidi a4.csv a4.mid
 	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a4.mid
 #-----------------------------------------------------------------------------
@@ -87,7 +87,7 @@ a5:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.05 >a5.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.05 >a5.abc
 	yaps a5.abc -o a5.ps -k
-	abcm2ps -l -s 0.42 -M -b 1 a5.abc -i
+	abcm2ps -l -s 0.8 -M -b 1 a5.abc -i -N 2 -j 1
 	#-- csvmidi a5.csv a5.mid
 	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a5.mid
 #-----------------------------------------------------------------------------
@@ -96,7 +96,7 @@ a6:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.06 >a6.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.06 >a6.abc
 	yaps a6.abc -o a6.ps -k
-	abcm2ps -l -s 0.42 -M -b 1 a6.abc -i
+	abcm2ps -l -s 0.8 -M -b 1 a6.abc -i -N 2 -j 1
 	#-- csvmidi a6.csv a6.mid
 	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a6.mid
 #-----------------------------------------------------------------------------
@@ -105,7 +105,7 @@ a7:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.07 >a7.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.07 >a7.abc
 	yaps a7.abc -o a7.ps -k
-	abcm2ps -l -s 0.42 -M -b 1 a7.abc -i
+	abcm2ps -l -s 0.8 -M -b 1 a7.abc -i -N 2 -j 1
 	#-- csvmidi a7.csv a7.mid
 	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a7.mid
 #-----------------------------------------------------------------------------
@@ -114,7 +114,7 @@ a8:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.08 >a8.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.08 >a8.abc
 	yaps a8.abc -o a8.ps -k
-	abcm2ps -l -s 0.42 -M -b 1 a8.abc -i
+	abcm2ps -l -s 0.8 -M -b 1 a8.abc -i -N 2 -j 1
 	#-- csvmidi a8.csv a8.mid
 	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a8.mid
 #-----------------------------------------------------------------------------
@@ -123,7 +123,7 @@ a9:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.09 >a9.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.09 >a9.abc
 	yaps a9.abc -o a9.ps -k
-	abcm2ps -l -s 0.42 -M -b 1 a9.abc -i
+	abcm2ps -l -s 0.8 -M -b 1 a9.abc -i -N 2 -j 1
 	#-- csvmidi a9.csv a9.mid
 	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a9.mid
 #-----------------------------------------------------------------------------
@@ -132,7 +132,7 @@ a10:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.10 >a10.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.10 >a10.abc
 	yaps a10.abc -o a10.ps -k
-	abcm2ps -l -s 0.42 -M -b 1 a10.abc -i
+	abcm2ps -l -s 0.8 -M -b 1 a10.abc -i -N 2 -j 1
 	#-- csvmidi a10.csv a10.mid
 	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a10.mid
 #-----------------------------------------------------------------------------
