@@ -135,8 +135,8 @@ all: ${SONGS_mid}
 #-- %1.mid: %.abc
 #-- 	abc2midi $<
 %.mid: %
-	${MUSICOMP2ABC} -m < $< > $<.csv || (rm -f $@ ; exit 1)
-	csvmidi $<.csv > $@
+	${MUSICOMP2ABC} -m $< $<.csv || (rm -f $@ ; exit 1)
+	csvmidi $<.csv $@
 #-- %.ps: %.abc
 #-- 	yaps $< -k
 #-- %.abc: %
