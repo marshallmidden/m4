@@ -1,33 +1,22 @@
-V = v1-1
+V1 = v1-1
+V2 = v1-2
+V3 = v1-3
+V4 = v1-4
 #-----------------------------------------------------------------------------
 .PHONY: help
 help:
 	@echo "Targets:"
 	@echo "  clean  - Remove postscript (ps), csv, and mid files."
 	@echo ""
-	@echo "Use 'musicomp2abc ${V} to get ${V}.abc."
-	@echo "Use 'yaps ${V}.abc -k' to get ${V}.ps."
-	@echo "Use 'abcm2ps ${V}.abc > Out.ps'."
-	@echo "Use 'csvmidi ${V}.csv > ${V}.mid'."
+	@echo "Use 'musicomp2abc ${V1} to get ${V1}.abc."
+	@echo "Use 'yaps ${V1}.abc -k' to get ${V1}.ps."
+	@echo "Use 'abcm2ps ${V1}.abc > Out.ps'."
+	@echo "Use 'csvmidi ${V1}.csv > ${V1}.mid'."
 	@echo
-	@echo "  s      - create ${V}.abc from ${V}"
-#=============================================================================
-S1 = 'symphony_1_1_(c)lucarelli.mid'
-S2 = 'symphony_1_2_(c)lucarelli.mid'
-S3 = 
-S4 = 'symphony_1_4_(c)lucarelli.mid'
-#=============================================================================
-s1-1:
-	../../abc/mcomp/mcomp ${S1} vertical  > s1-1
-#-----------------------------------------------------------------------------
-s1-2:
-	../../abc/mcomp/mcomp ${S2} vertical  > s1-2
-#-----------------------------------------------------------------------------
-s1-3:
-	../../abc/mcomp/mcomp ${S3} vertical  > s1-3
-#-----------------------------------------------------------------------------
-s1-4:
-	../../abc/mcomp/mcomp ${S4} vertical  > s1-4
+	@echo "  s1     - create ${V1}.abc from ${V1}"
+	@echo "  s2     - create ${V2}.abc from ${V2}"
+	@echo "  s3     - create ${V3}.abc from ${V3}"
+	@echo "  s4     - create ${V4}.abc from ${V4}"
 #=============================================================================
 .PHONY: clean
 clean:
@@ -37,14 +26,41 @@ clean:
 	rm -f *.abc
 	rm -f A.[012]* B.[012]*
 #-----------------------------------------------------------------------------
-.PHONY: s
-s:
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc ${V} >${V}.abc
-	yaps ${V}.abc -o ${V}.ps -k
-	abcm2ps -l -s 0.42 -M -b 1 ${V}.abc -i -N 2 -j 1
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m ${V} >${V}.csv
-	csvmidi ${V}.csv ${V}.mid
-	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 ${V}.mid
+.PHONY: s1
+s1:
+	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc ${V1} >${V1}.abc
+	yaps ${V1}.abc -o ${V1}.ps -k
+	abcm2ps -l -s 0.42 -M -b 1 ${V1}.abc -i -N 2 -j 1
+	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m ${V1} >${V1}.csv
+	csvmidi ${V1}.csv ${V1}.mid
+	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 ${V1}.mid
+#-----------------------------------------------------------------------------
+.PHONY: s2
+s2:
+	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc ${V2} >${V2}.abc
+	yaps ${V2}.abc -o ${V2}.ps -k
+	abcm2ps -l -s 0.42 -M -b 1 ${V2}.abc -i -N 2 -j 1
+	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m ${V2} >${V2}.csv
+	csvmidi ${V2}.csv ${V2}.mid
+	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 ${V2}.mid
+#-----------------------------------------------------------------------------
+.PHONY: s3
+s3:
+	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc ${V3} >${V3}.abc
+	yaps ${V3}.abc -o ${V3}.ps -k
+	abcm2ps -l -s 0.42 -M -b 1 ${V3}.abc -i -N 2 -j 1
+	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m ${V3} >${V3}.csv
+	csvmidi ${V3}.csv ${V3}.mid
+	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 ${V3}.mid
+#-----------------------------------------------------------------------------
+.PHONY: s4
+s4:
+	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc ${V4} >${V4}.abc
+	yaps ${V4}.abc -o ${V4}.ps -k
+	abcm2ps -l -s 0.42 -M -b 1 ${V4}.abc -i -N 2 -j 1
+	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m ${V4} >${V4}.csv
+	csvmidi ${V4}.csv ${V4}.mid
+	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 ${V4}.mid
 #-----------------------------------------------------------------------------
 .PHONY: a01
 a01:
