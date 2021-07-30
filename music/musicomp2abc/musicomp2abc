@@ -694,6 +694,12 @@ global meas                         # measure names.
 meas = []
 global measure_on                   # The measure/unit are we are working on.
 measure_on = ''                     # Default to none. This means we are in the header section.
+global premeasurecomment            # Collect comments before a new measure for before new measure.
+premeasurecomment = {}
+premeasurecomment[measure_on] = ''
+global measurelinecomment
+measurelinecomment = {}
+measurelinecomment[measure_on] = ''
 global bars                         # number of bars per staff
 bars = {}
 bars[''] = NUMBER_BARS_PER_STAFF    # for abc notation, put new line in output, which ends staff.
@@ -1349,7 +1355,14 @@ def print_measure_vh_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l_ky,
 
     pr = n_meter = n_clef = n_instrument = n_vl = ''
 
-    pr = pr + "measure {}\n".format(m)
+    if premeasurecomment[m] != '':
+        pr = pr + premeasurecomment[m]
+    # fi
+    pr = pr + "measure {}".format(m)
+    if measurelinecomment[m] != '':
+        pr = pr + '     ' + measurelinecomment[m]
+    # fi
+    pr = pr + "\n"
 
     n_meter = measure_meter[m]
     if l_meter != n_meter:
@@ -2398,13 +2411,20 @@ def get_line():
             # fi
             linecount = linecount + 1
             if line:
-                # delete anything from $$ onwards.
-                line = re.sub('[$][$].*$', '', line)
-                # ignore leading and trailing spaces.
-                line = line.replace("\t", ' ')      # tabs to spaces
+                commentdollardollar = ''
+                if '$$' in line:
+                    # delete anything from $$ onwards.
+                    commentdollardollar = re.sub('^.*[$][$]', '$$', line)
+                    commentdollardollar = commentdollardollar.strip()
+                    line = re.sub('[$][$].*$', '', line)
+                # fi
+                # Convert tabs to spaces.
+                line = line.replace("\t", ' ')
+                # Remove spaces on both sides of string.
                 line = line.strip()
+                # NOTDONEYET, the input from Plato Printouts where character ' is a shift.
                 # Convert ' followed by something as a "shift".  '; = :   'a = A
-                return line
+                return line, commentdollardollar
             # fi
         except EOFError:
             pass            # print("Read gave EOF", file=sys.stderr, flush=True)
@@ -4693,6 +4713,10 @@ def do_measure(t_args, line):
     global tempo_now_note_length
     global tempo_speed_now
     global pitch
+    global premeasurecomment                # Collected comments before a new measure for before new measure.
+    global measurelinecomment               # Collected comments before a new measure for before new measure.
+    global precomment
+    global commentonline
 
     fill_voice_mlth(line)                   # Need to make measure for other voices up to here "mlth".
 
@@ -4786,6 +4810,8 @@ def do_measure(t_args, line):
             acc_m_xpose[i] =  {k: v for k, v in acc_v_init.items()}
         # fi
     # rof
+    premeasurecomment[measure_on] = precomment
+    measurelinecomment[measure_on] = commentonline
     # default note length continues with current - might change shortly.
     default_note_length[measure_on] = default_note_length[last_m]
     bars[measure_on] = bars[last_m]
@@ -6905,6 +6931,8 @@ def main():
     global measure_on
     global key_default
     global key_voice
+    global commentonline
+    global precomment
 
     parse_args()
     if args.vertical or args.horizontal:
@@ -6946,8 +6974,9 @@ def main():
         # fi
     # fi
 
+    precomment = ''
     while True:
-        line = get_line()
+        line, commentonline = get_line()
         if line:
             # Split line on spaces, then process line.
             while True:
@@ -6981,6 +7010,9 @@ def main():
                 # If command == '*' ignore.
                 if t[0] != '*' and line[0] != '*' and t[0] != '#' and line[0] != '#':
                     process_line(t, line)
+                    precomment = ''
+                else:
+                    precomment = precomment + line + "\n"
                 # fi
             # fi
         # fi
