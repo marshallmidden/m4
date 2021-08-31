@@ -44,11 +44,11 @@ clean:
 	rm -f *.stdout *.stderr
 	rm -f *.csv *.mid
 	rm -f *.abc
-	rm -f A.[012]* B.[012]* C.[012]*
+	rm -f A.[0123]* B.[0123]* C.[0123]*
 	rm -f X X.v
 	rm -f ${EXPANDED_V}
 #-----------------------------------------------------------------------------
-${EXPANDED_V}: ${V}
+${EXPANDED_V}: ${V} beethoven.macros
 	${CPP} ${V} -o ${EXPANDED_V}
 #-----------------------------------------------------------------------------
 .PHONY: s
@@ -63,7 +63,7 @@ s: ${EXPANDED_V}
 	#-- fluidsynth -F "${V}.wav" -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 "${V}.mid"
 #-----------------------------------------------------------------------------
 .PHONY: a01
-a01:
+a01: ${EXPANDED_V}
 	${SEPARATE}
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.01 >a01.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.01 >a01.abc
@@ -74,7 +74,7 @@ a01:
 	open Out.ps
 #-----------------------------------------------------------------------------
 .PHONY: a02
-a02:
+a02: ${EXPANDED_V}
 	${SEPARATE}
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.02 >a02.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.02 >a02.abc
@@ -85,7 +85,7 @@ a02:
 	open Out.ps
 #-----------------------------------------------------------------------------
 .PHONY: a03
-a03:
+a03: ${EXPANDED_V}
 	${SEPARATE}
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.03 >a03.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.03 >a03.abc
@@ -96,7 +96,7 @@ a03:
 	open Out.ps
 #-----------------------------------------------------------------------------
 .PHONY: a04
-a04:
+a04: ${EXPANDED_V}
 	${SEPARATE}
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.04 >a04.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.04 >a04.abc
@@ -107,7 +107,7 @@ a04:
 	open Out.ps
 #-----------------------------------------------------------------------------
 .PHONY: a05
-a05:
+a05: ${EXPANDED_V}
 	${SEPARATE}
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.05 >a05.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.05 >a05.abc
@@ -118,7 +118,7 @@ a05:
 	open Out.ps
 #-----------------------------------------------------------------------------
 .PHONY: a06
-a06:
+a06: ${EXPANDED_V}
 	${SEPARATE}
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.06 >a06.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.06 >a06.abc
@@ -129,7 +129,7 @@ a06:
 	open Out.ps
 #-----------------------------------------------------------------------------
 .PHONY: a07
-a07:
+a07: ${EXPANDED_V}
 	${SEPARATE}
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.07 >a07.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.07 >a07.abc
@@ -140,7 +140,7 @@ a07:
 	open Out.ps
 #-----------------------------------------------------------------------------
 .PHONY: a08
-a08:
+a08: ${EXPANDED_V}
 	${SEPARATE}
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.08 >a08.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.08 >a08.abc
@@ -151,7 +151,7 @@ a08:
 	open Out.ps
 #-----------------------------------------------------------------------------
 .PHONY: a09
-a09:
+a09: ${EXPANDED_V}
 	${SEPARATE}
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.09 >a09.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.09 >a09.abc
@@ -162,7 +162,7 @@ a09:
 	open Out.ps
 #-----------------------------------------------------------------------------
 .PHONY: a10
-a10:
+a10: ${EXPANDED_V}
 	${SEPARATE}
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.10 >a10.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.10 >a10.abc
@@ -173,7 +173,7 @@ a10:
 	open Out.ps
 #-----------------------------------------------------------------------------
 .PHONY: a11
-a11:
+a11: ${EXPANDED_V}
 	${SEPARATE}
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.11 >a11.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.11 >a11.abc
@@ -184,7 +184,7 @@ a11:
 	open Out.ps
 #-----------------------------------------------------------------------------
 .PHONY: a12
-a12:
+a12: ${EXPANDED_V}
 	${SEPARATE}
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.12 >a12.csv
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.12 >a12.abc
