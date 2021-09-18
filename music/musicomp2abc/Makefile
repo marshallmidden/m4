@@ -1,26 +1,24 @@
 #-----------------------------------------------------------------------------
-SONG = b-6
+SONGS =
+SONGS = b-6
+#- SONGS += inv15-example
+#- SONGS += inv15-example.working
+SONGS += loudness.mcomp
+SONGS += promenade
+SONGS += promenade-musicomp2abc
+
+SONGS_MID = ${SONGS:=.mid}
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ./musicomp2abc
 #-----------------------------------------------------------------------------
-# SONG = promenade
-# SONG += tv
-#-- SONG_abc = ${SONG:=.abc}
-#-- SONG_ps = ${SONG:=.ps}
-# .SUFFIXES: .abc 1.mid .ps
-#-- %1.mid:	%.abc
-#-- 	abc2midi $<
-#-- %.ps:	%.abc
-#-- 	yaps $< -k
-#-- %.abc:	%
-#-- 	${MUSICOMP2ABC} $< > $@ || (rm -f $@ ; exit 1)
+.SUFFIXES: .mid .csv
+%.csv:	%.mid
+%.mid:	%
+	${MUSICOMP2ABC} --midi1csv $< $<.csv
+	csvmidi $<.csv $@
 #-----------------------------------------------------------------------------
 .PHONY: all
-all: ${SONG}.mid
-${SONG}.mid: ${SONG}.csv
-	csvmidi $< $@
-${SONG}.csv: ${SONG}
-	${MUSICOMP2ABC} --midi1csv $< > $@
+all: ${SONGS_MID}
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
