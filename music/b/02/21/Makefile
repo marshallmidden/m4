@@ -61,7 +61,7 @@ s: ${EXPANDED_V}
 	abcm2ps -l -s 0.42 -M -b 1 ${V}.abc -i -N 2 -j 1
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m ${EXPANDED_V} >${V}.csv
 	csvmidi ${V}.csv ${V}.mid
-	open Out.ps
+	#++ open Out.ps
 	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 ${V}.mid
 	#-- fluidsynth -F "${V}.wav" -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 "${V}.mid"
 #-----------------------------------------------------------------------------
