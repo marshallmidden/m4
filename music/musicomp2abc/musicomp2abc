@@ -1,6 +1,14 @@
 #!/usr/bin/python3 -B
-#-----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
+#-----------------------------------------------------------------------------
+# TO DO:
+# * vol(sf,0.25)    -- optional 2nd argument for length of sf.
+#   vol(fp,0.25)    -- optional 2nd argument for length of "f" before returning to "p".
+# * Change to control 11 for volume changes. See F.pl for example. Needs quite a few steps.
+# * Legato control 68 for slurs.  Perhaps "l" (like staccato) for slurred notes).
+#       Value Range: 0 (to 63) is off. 127 (to 64) is on. 
+#   ABC notation for "v2: 4c4l,4d4l,4e4" should be "V:3 \n (cde)"
+#   Need to have spaces mean something ...  suggest space between notes in abc notation. Thus header bars.
 #-----------------------------------------------------------------------------
 # ./musicomp --midi1csv song song.csv   # Output midi1csv format.
 # ./musicomp song song.abc              # Output ABC format.
@@ -16,9 +24,57 @@
 #-----------------------------------------------------------------------------
 # NOTDONEYET - Note processing:
 #   print_error("NOTDONEYET - doing gsw_operand type of note", line)    - Not related to MIDI.
+#   print_error("NOTDONEYET - do_temper", line)     -- no real need for this?
+#   print_error("NOTDONEYET - do_sharp", line)      -- no real need for this?
+#   print_error("NOTDONEYET - do_flat", line)       -- no real need for this?
+#   print_error("NOTDONEYET - do_natural", line)    -- no real need for this?
 #=============================================================================
 # measures and gotos may be calculations using "m1" type variables, but not
 # any other alphanumeric characters.
+#-----------------------------------------------------------------------------
+# Accidentals - A tied note doesn't cause the accidental to be carried over so
+# much as it indicates the duration of the note rather than the pitch. If a tied
+# note is followed by another note on the same staff position the accidental
+# will not carry into that note (a courtesy accidental would often be helpful).
+#
+# In most cases, a sharp raises the pitch of a note one semitone while a flat lowers
+# it one semitone. A natural is used to cancel the effect of a flat or sharp. This
+# system of accidentals operates in conjunction with the key signature, whose effect
+# continues throughout an entire piece, unless canceled by another key signature.
+# An accidental can also be used to cancel a previous accidental or reinstate the flats
+# or sharps of the key signature.
+#
+# Accidentals apply to subsequent notes on the same staff position for the remainder
+# of the measure where they occur, unless explicitly changed by another accidental.
+# Once a barline is passed, the effect of the accidental ends, except when a note
+# affected by an accidental is tied to the same note across a barline. Subsequent notes
+# at the same staff position in the second or later bars are not affected by the
+# accidental carried through with the tied note.
+#.............................................................................
+# Courtesy accidentals - In modern scores, a barline cancels an accidental,
+# with the exception of tied notes. Courtesy accidentals, also called cautionary
+# accidentals or reminder accidentals are used to remind the musician of the
+# correct pitch if the same note occurs in the following measure. The rules for
+# applying courtesy accidentals (sometimes enclosed in parentheses) vary among
+# publishers, though in a few situations they are customary:
+#  - When the first note of a measure had an accidental in the previous measure.
+#  - After a tie carries an accidental across a barline, and the same note
+#    appears in the next measure.
+#  - When a chord contains a diminished or augmented octave.
+#  - When there is a cross relation with another part.
+#.............................................................................
+# While ties and phrasing slurs do look very similar, they are not the same thing at all.
+# If the curved line is below the noteheads (written closest to the noteheads)
+# and opposite the stems (if stems are ascending, the curved tie line is below;
+# if stems are descending, the curved tie line is above).
+#
+# While the bar line cancels an accidental, the "Power of the Tie" is stronger.
+#
+#  - The composer would put a natural/flat/sharp on the second note of the tie.
+#  - The composer would put the curved line above the stems, thus on OPPOSITE
+#    side of the noteheads.
+# (Remember - a curved line written closest to 2 noteheads in the same space or
+# on the same line is a tie!)
 #-----------------------------------------------------------------------------
 # Additional note processing:
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
@@ -163,7 +219,7 @@
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Tremulo Level, Number: 92
 # The tremulo amount (ie, level) for the device. If a MultiTimbral device, then each
-# Part Parts usually has its own tremulo level.
+# part usually has its own tremulo level.
 # Value Range: 0 to 127, with 0 being no tremulo applied at all. 
 #-----------------------------------------------------------------------------
 # Note: New addition: second arguments on "voice" command is MIDI instruments.
@@ -692,6 +748,8 @@ goto_variables = { '':0}            # first index is measure number. Value is nu
 
 global meas                         # measure names.
 meas = []
+global last_m                       # Previous measure.
+last_m = ''                         # Default to none.
 global measure_on                   # The measure/unit are we are working on.
 measure_on = ''                     # Default to none. This means we are in the header section.
 global premeasurecomment            # Collect comments before a new measure for before new measure.
@@ -773,7 +831,10 @@ global acc_v_init                   # Last accidental on a note in measure.
 global acc_v_init_v_or_h            # Last accidental on a note in measure.
 acc_v_init = { 'C':'', 'D':'', 'E':'', 'F':'', 'G':'', 'A':'', 'B':''}
 acc_v_init_v_or_h = { 'c':'', 'd':'', 'e':'', 'f':'', 'g':'', 'a':'', 'b':''}
+global acc_m
 acc_m = { '': {''}}                 # voice: {notes:'+'/-/n}    For this measure, index is voice.
+global last_acc_m
+last_acc_m =  { '': {''}}           # Accidentals on previous measure.
                                     # acc_v_init or acc_v_init_v_or_h: note (a-g): last accidental in # measure.
 global acc_m_xpose
 acc_m_xpose = { '': {''}}           # After xpose, the new key ... voice: {notes:'+'/-/n}
@@ -4754,6 +4815,7 @@ def do_voice(t_args, line):
 #   measure 6.5         $$ need not be integers
 def do_measure(t_args, line):
     global measure_on
+    global last_m
     global meas
     global vl
     global running_vl
@@ -4763,6 +4825,7 @@ def do_measure(t_args, line):
     global pan
     global intensity
     global acc_m                            # Last accidental on a note in measure.
+    global last_acc_m                       # Last accidental on a note in previous measure.
     global acc_m_xpose
     global acc_v_init                       # Last accidental on a note in measure.
     global acc_v_init_v_or_h                # Last accidental on a note in measure.
@@ -4816,6 +4879,10 @@ def do_measure(t_args, line):
 
     # Last note length ... continue to this measure, until it changes.
     last_m = measure_on
+    for i in range(1, len(vl)+1):
+        last_acc_m[i] = acc_m[i]
+    # rof
+
     measure_on = str(f1)
     meas.append(measure_on)
     for i in range(1, len(vl)+1):
