@@ -474,10 +474,6 @@ legal_floating = dict((y,x) for x,y in legal_notes.items())
 global legal_floating_times
 legal_floating_times = sorted(legal_notes.values())
 
-# Staccato, tied, break, dotted.
-global bit_from_character
-bit_from_character = { 's': -1, 't': -2, 'b': -4, 'd': -8 }
-
 global DECORATIONS
 DECORATIONS = '+'
 #-- DECORATIONS = '!'
@@ -854,6 +850,8 @@ global bufs_accidental              # bufs_length[voice][measure][#] ... number=
 bufs_accidentals = { 1: {} }
 global bufs_tie_next
 bufs_tie_next = { 1: '' }
+global bufs_legato_next
+bufs_legato_next = { 1: '' }
 global bufs_vol
 bufs_vol = { 1: {} }
 
@@ -1021,6 +1019,7 @@ def new_voice_initialize(voice, m):
     global bufs_length
     global bufs_accidentals
     global bufs_tie_next
+    global bufs_legato_next
     global bufs_vol
     global acc_m
     global acc_m_xpose
@@ -1048,6 +1047,7 @@ def new_voice_initialize(voice, m):
         bufs_length[voice] = {}
         bufs_accidentals[voice] = {}
         bufs_tie_next[voice] = ''
+        bufs_legato_next[voice] = ''
         bufs_vol[voice] = {}
     # fi
 
@@ -1139,6 +1139,7 @@ def rests_in_empty_measure_voices(m, voice):
     global bufs_length
     global bufs_accidentals
     global bufs_tie_next
+    global bufs_legato_next
     global bufs_vol
     global args
     global running_vl
@@ -1163,6 +1164,7 @@ def rests_in_empty_measure_voices(m, voice):
             bufs_length[voice][m] = []
             bufs_accidentals[voice][m] = []
             bufs_tie_next[voice] = ''
+            bufs_legato_next[voice] = ''
         else:       # ABC
             bufs[voice][m] = ''
         # fi
@@ -1192,6 +1194,7 @@ def rests_in_empty_measure_voices(m, voice):
     # fi
 
     bufs_tie_next[voice] = ''
+    bufs_legato_next[voice] = ''
     if args.horizontal or args.vertical:
         bufs[voice][m].append('r')
         bufs_length[voice][m].append(l)
@@ -2122,7 +2125,6 @@ def print_out_midi1csv_notes():
             last_keysig = print_out_midi1csv_keysignature(m,voice,lthworkingmeasures, last_keysig)
             lt, ll = print_out_midi1csv_tempo(m,voice,lthworkingmeasures, lt,ll)
 
-            # v_vl = running_vl[voice][m]         # volume level for this voice/measure
             if voice in vl and m in vl[voice]:
                 v_vl = vl[voice][m]             # volume level for this voice/measure
             else:
@@ -2162,7 +2164,13 @@ def print_out_midi1csv_notes():
                 if n != '0' and n != 0:         # Only for note that plays (not rest).
                     n_print = int(n) + pitch[m]
                     v_vl = bufs_vol[voice][m][i]
+                    if 'l' in bufs_accidentals[voice][m][i]:
+                        print("{}, {}, Control_c, {}, 68, 127".format(voice+1, lth, chan), file=output_name, flush=True)
+                    # fi
                     print("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lth, chan, n_print, v_vl), file=output_name, flush=True)
+                    if 'l' in bufs_accidentals[voice][m][i]:
+                        print("{}, {}, Control_c, {}, 68, 127".format(voice+1, lth+1, chan), file=output_name, flush=True)
+                    # fi
                 # fi
                 tmp,m_number,lastmeter, channel, chan, l_instrument, last_keysig, lt,ll = do_possible_midi_tie(m, voice, lthworkingmeasures, i, l,lastmeter, channel, chan, l_instrument, last_keysig, lt,ll)
                 if n != '0' and n != 0:
@@ -2342,6 +2350,7 @@ def do_pass2():
     global meas                             # measures
     global args
     global bufs_tie_next
+    global bufs_legato_next
     global vl
     global output_name
     global ifdepth
@@ -2386,6 +2395,7 @@ def do_pass2():
         for voice in range(1, len(vl) +1):
             rests_in_empty_measure_voices(m, voice)
             bufs_tie_next[voice] = ''
+            bufs_legato_next[voice] = ''
         # rof
     # rof
 
@@ -2599,6 +2609,7 @@ def put_on_bufs(onvoice, p_meas, prenote, abc_note, timeofnote, append_tie, onet
     global bufs_length
     global bufs_accidentals
     global bufs_tie_next
+    global bufs_legato_next
     global running_vl
     global DECORATIONS
     global args
@@ -2625,6 +2636,7 @@ def put_on_bufs(onvoice, p_meas, prenote, abc_note, timeofnote, append_tie, onet
         bufs_length[onvoice] = {}
         bufs_accidentals[onvoice] = {}
         bufs_tie_next[onvoice] = ''
+        bufs_legato_next[onvoice] = ''
         bufs_vol[onvoice] = {}
     # fi
     if onetimevolume is None:
@@ -5911,9 +5923,33 @@ def getnote(note_to_decode, voice, line):
 # compute time
 # Returns:
 #   timeofnote      computed length in 60ths
-#   accidentals     -4 marcato, -2 tied, -1 stac, 0 normal
+#   accidentals     Union of bits for accidentals.
 #   number_dots     Number of "dots".
-# "b" for broken verses slur -- ignored.
+
+global accidental_marcato
+global accidental_tied
+global accidental_stac
+global accidental_broken
+global accidental_legato
+global accidental_normal
+accidental_legato = 16      # glide to next note - no note attack on start of note.
+accidental_broken = 8       # broken - ignored - break between notes ... because gsw didn't have it.
+accidental_marcato = 4      # ignored   -- use vol(sf), etc.
+accidental_tied = 2         # tied
+accidental_stac = 1         # staccato
+accidental_dotted = -1      # dotted
+accidental_normal = 0
+
+# Staccato, tied, break, dotted.
+global bit_from_character
+bit_from_character = { 
+   'l': accidental_legato,
+#  'b': accidental_broken,
+#  'm': accidental_marcato,
+   't': accidental_tied,
+   's': accidental_stac,
+   'd': accidental_dotted
+}
 
 def get_time(therest, line):
     whqe = { 'w':'1', 'h':'2', 'q':'4', 'e':'8' }
@@ -5959,24 +5995,23 @@ def get_time(therest, line):
             work = 1.0 / vwork
         # fi
     # fi
-    work4 = 0                                   # No incidentals yet.
+    work4 = accidental_normal                   # No incidentals yet.
     number_dots = 0
     if therest and therest != '':
         for i in reversed(range(0, len(therest))):
             temp4 = therest[i]
-            # temp4 = [temp4 == "s"] + 2*[temp4 == "t"] + 4*[temp4 == "b"] + 8*[temp4 == "d"]
             if temp4 not in bit_from_character:
                 break
             # fi
             temp4 = bit_from_character[temp4]
-            if temp4 < 0 and temp4 > -8:
-                work4 = work4 | (-temp4)
-            else:
+            if temp4 == accidental_dotted:
                 number_dots = number_dots + 1
+            else:
+                work4 = work4 | temp4
             # fi
         # rof
     # fi
-    return work, -work4, number_dots
+    return work, work4, number_dots
 # End of get_time
 
 #-----------------------------------------------------------------------------
@@ -6220,6 +6255,7 @@ def process_notes(t_args, line):
     global args
     global bufs_accidentals
     global bufs_tie_next
+    global bufs_legato_next
     global bufs
     global DECORATIONS
     global macro_buffer                 # Name of macro, array of lines for macro.
@@ -6524,7 +6560,7 @@ def process_notes(t_args, line):
                     return
                 # fi
                 timeofnote, r_accidentals, number_dots = get_time(therest, line)
-                if r_accidentals is None or r_accidentals < 0 or number_dots is None:
+                if r_accidentals is None or r_accidentals != accidental_normal or number_dots is None:
                     print_error("trill is not legal", line)
                     return
                 # fi
@@ -6717,7 +6753,7 @@ def process_notes(t_args, line):
                     stacs.append(staccato)
                 # rof
                 timeofnote, r_accidentals, number_dots = get_time(therest, line)
-                if r_accidentals is None or r_accidentals < 0 or number_dots is None:
+                if r_accidentals is None or r_accidentals != accidental_normal or number_dots is None:
                     print_error("sequence is not legal, r_accidentals={} number_dots={}".format(r_accidentals,number_dots), line)
                     return
                 # fi
@@ -6831,13 +6867,18 @@ def process_notes(t_args, line):
             # end of sequence processing above.
 
             timeofnote, r_accidentals, number_dots = get_time(therest, line)
+
             if r_accidentals is None or number_dots is None:
                 print_error("Error getting time for note", line)
                 return
             # fi
-            # r_accidentals = -4 marcato, -2 tied, -1 stac, 0 normal
-            #    bits are $union$'ed together for multiple modifiers (then negated).
-            # number_dots  are how many "d" (dotted) were found.
+            # accidental_legato = 16        -- glide to next note.
+            # accidental_tied = 2           -- tied
+            # accidental_stac = 1           -- staccato
+            # accidental_dotted = -1
+            # accidental_normal = 0
+            # bits are $union$'ed together for multiple modifiers.
+            # number_dots are how many "d" (dotted) were found.
             if timeofnote is None or timeofnote == 0:
                 if number_dots != 0:
                     print_error("cannot have dotted syntax on a default note length.", line)
@@ -6862,8 +6903,7 @@ def process_notes(t_args, line):
             append_tie = bufs_tie_next[onvoice]
             bufs_tie_next[onvoice] = ''
             # Tied note
-            # r_accidentals = -4 marcato, -2 tied, -1 stac, 0 normal
-            if r_accidentals < -6 or r_accidentals in (-6, -3, -2):
+            if (r_accidentals & accidental_tied) != 0:
                 if vnumber is not None:         # vertical input format
                     if args.horizontal:                     # horizontal output
                         # put tie on following note.
@@ -6903,7 +6943,7 @@ def process_notes(t_args, line):
             # fi
 
             # Staccato
-            if r_accidentals < -6 or r_accidentals in (-5, -3, -1):
+            if (r_accidentals & accidental_stac) != 0:
                 if args.horizontal or args.vertical or args.midi1csv:
                     append_tie = append_tie + 's'
                 else:           # ABC
@@ -6911,7 +6951,29 @@ def process_notes(t_args, line):
                 # fi
             # fi
 
+            # Legato
+            if (r_accidentals & accidental_legato) != 0:
+                if args.horizontal or args.vertical or args.midi1csv:
+                    append_tie = append_tie + 'l'
+                else:           # ABC
+                    if bufs_legato_next[onvoice] != 'l':
+                        thenote = '(' + thenote             # ( before the note for glide/legato
+                    # fi
+                # fi
+                bufs_legato_next[onvoice] = 'l'
+            else:
+                if bufs_legato_next[onvoice] == 'l':
+                    if args.horizontal or args.vertical or args.midi1csv:
+                        pass
+                    else:           # ABC
+                        postnote = ')' + postnote           # ) after the note for glide/legato
+                    # fi
+                # fi
+                bufs_legato_next[onvoice] = ''
+            # fi
+
             instak(onvoice, measure_on, prenote, thenote, timeofnote, append_tie, line, onenotevolume, postnote)
+
             if vnumber is None:
                 break                                       # normal old way.
             else:

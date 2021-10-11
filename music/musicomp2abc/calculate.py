@@ -953,12 +953,24 @@ variables = {
     'pause': 4,                 # NOTE: lpause -> pause     NOTUSED
     'stac': 4,                  # NOTE: lstac -> stac       NOTUSED
     'grace': 4,                 # NOTE: lgrace -> grace     NOTUSED
-    's': 1, 'd': 1, 'b': 1, 't': 1,
     'w': 1, 'h': 2, 'q': 4, 'e': 8,
-    'sd': 1, 'td': 1, 'ds': 1, 'dt': 1, 'dd':1,
-    'sdt': 1, 'std': 1, 'dst': 1, 'dts': 1, 'tsd': 1, 'tds': 1,
+
+    's': 1, 'd': 1, 'b': 1, 't': 1, 'l': 1,
+
+             'sd': 1, 'sb': 1, 'st': 1, 'sl': 1,
+    'ds': 1, 'dd': 1, 'db': 1, 'dt': 1, 'dl': 1,
+    'bs': 1, 'bd': 1,          'bt': 1, 'bl': 1,
+    'ts': 1, 'td': 1, 'tb': 1,          'tl': 1,
+    'ls': 1, 'ld': 1, 'lb': 1, 'lt': 1,
+
+    'sdb': 1, 'sdt': 1, 'sdl': 1, 'sbt': 1, 'sbl': 1, 'stl': 1, 'dbt': 1,
+    'dbl': 1, 'dtl': 1, 'dsb': 1, 'dst': 1, 'dsl': 1, 'bsd': 1, 'bst': 1,
+    'bsl': 1, 'bds': 1, 'bdt': 1, 'bdl': 1, 'btl': 1, 'blt': 1, 'tsd': 1,
+    'tsb': 1, 'tsl': 1, 'tds': 1, 'tdb': 1, 'tdl': 1, 'tbs': 1, 'tbd': 1,
+    'tbl': 1, 'lsd': 1, 'lsb': 1, 'lst': 1, 'lds': 1, 'ldb': 1, 'ldt': 1,
+    'lbs': 1, 'lbd': 1, 'lbt': 1, 'lts': 1, 'ltd': 1, 'ltb': 1,
+
     'th': 1,
-    'bt': 1, 'db': 1,           # Not all variations with "b", but those used.
 #   1   .   .   .   2   .   .   .   3   .   .   .   4   .   .   .   5   .   .   .
     'm1': 0,        'm2': 0,        'm3': 0,        'm4': 0,        'm5': 0,
     'm6': 0,        'm7': 0,        'm8': 0,        'm9': 0,        'm10': 0,
