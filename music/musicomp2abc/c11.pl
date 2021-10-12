@@ -8,6 +8,7 @@ use warnings;
 # 2) See if faster/slower notes start (loudness) at same rate.
 #    OVERLAP remain the same over speed changes.
 # 3) See if loudness does decade at same rate -- and OVERLAP. (#1,#2)
+# 4) See if instrument not piano does decade at same rate -- and OVERLAP. (#1,#2)
 # ----------------------------------------------------------------------------
 my $QN = 480;                           # Length in MIDI of a quarter note.
 my $NOTELTH=$QN;
