@@ -2,11 +2,27 @@
 use strict;
 use warnings;
 # ----------------------------------------------------------------------------
+# To do:
+# 1) See if faster/slower notes decade at same rate.
+#    See if $cc11_start = 80; $cc11_stop = 127; -- works over start to end of note.
+# 2) See if faster/slower notes start (loudness) at same rate.
+#    OVERLAP remain the same over speed changes.
+# 3) See if loudness does decade at same rate -- and OVERLAP. (#1,#2)
+# ----------------------------------------------------------------------------
 my $QN = 480;                           # Length in MIDI of a quarter note.
 my $NOTELTH=$QN;
 my $MAXVOICES = 1;
+my @NOTES = ( 60, 62, 64, 65 );
 
-my $ENDTRACKS = ($NOTELTH) * ($MAXVOICES) * 3;
+#-- my $OVERLAP = 80;
+#-- my $OVERLAP = 60;
+#-- my $OVERLAP = 40;
+#-- my $OVERLAP = 30;
+#-- my $OVERLAP = 20;
+my $OVERLAP = 10;
+
+# my $ENDTRACKS = ($NOTELTH) * ($MAXVOICES) * 8;
+my $ENDTRACKS = ($NOTELTH) * ($MAXVOICES) * 12;
 # ----------------------------------------------------------------------------
 sub print_header($$)
 {
@@ -69,26 +85,31 @@ sub print_expression($$$$)
 }   # End of print_expression
 
 #-----------------------------------------------------------------------------
-sub print_legato($$$$)
+sub print_legato($$$$$$)
 {
-    my ($track, $start, $stop, $chan) = @_;
-    my $NOTELTH = $stop - $start + 1;
-#--    my $cc11_start = 96;
+    my ($track, $start, $stop, $chan, $p_note, $p_stop) = @_;
+    my $notelth = $stop - $start + 1;
     my $cc11_start = 80;
-#--    my $cc11_start = 75;
-#--    my $cc11_start = 60;
     my $cc11_stop = 127;
     my $thing = $cc11_start;
     print_expression($track, $start, $chan, $cc11_start);
     my $x = $cc11_stop - $cc11_start;
-    for (my $i = 0; $i < $NOTELTH; $i++)
+    for (my $i = 0; $i < $notelth; $i++)
     {
-        my $d = int($cc11_start + (($i / ($NOTELTH - 1)) * ($x + 0.0)));
+        my $d = int($cc11_start + (($i / ($notelth - 1)) * ($x + 0.0)));
+	if ($i < $OVERLAP)
+	{
+	    $d = $d - int(($OVERLAP - $i) / 4);
+	}
         if ($d != $thing)
         {
             print_expression($track, $start + $i, $chan, $d);
             $thing = $d;
         }
+	if ($i == $OVERLAP && $p_note > 0)
+	{
+	    print_note_stop($track, $p_stop + $OVERLAP, $chan, $p_note);
+	}
     }
 }   # End of print_legato
 
@@ -97,7 +118,9 @@ my $track;
 my $chan = 0;
 my $start = 0;
 my $stop = $QN;
-my $note = 60;
+my $note;
+my $prev_note;
+my $prev_stop;
 #-----------------------------------------------------------------------------
 # Print header
 print_header($MAXVOICES + 1, $QN);
@@ -110,25 +133,45 @@ print_track_start($track, $ENDTRACKS);
 print_track($track, $chan, 0, 0, $start, $stop, $note, 64);
 
 #-----------------------------------------------------------------------------
-print_note_start($track, $start, $chan, $note);
-print_legato($track, $start, $stop, $chan);
-print_note_stop($track, $stop, $chan, $note);
+# Do normal first.
+for (my $i = 0; $i < 4; $i++)
+{
+    $note = $NOTES[$i];;
+    print_note_start($track, $start, $chan, $note);
+    print_note_stop($track, $stop, $chan, $note);
+    $note = $note + 2;
+    $start = $start + $NOTELTH;
+    $stop = $stop + $NOTELTH;
+}
 #-----------------------------------------------------------------------------
-$start = $start + $NOTELTH;
-$stop = $stop + $NOTELTH;
-$note = $note + 2;
+$prev_note = -1;
+$prev_stop = -1;
+
 #-----------------------------------------------------------------------------
-print_note_start($track, $start, $chan, $note);
-print_legato($track, $start, $stop, $chan);
-print_note_stop($track, $stop, $chan, $note);
+# Do legato second.
+for (my $i = 0; $i < 4; $i++)
+{
+    $note = $NOTES[$i];;
+    print_note_start($track, $start, $chan, $note);
+    print_legato($track, $start, $stop, $chan, $prev_note, $prev_stop);
+    $prev_note = $note;
+    $prev_stop = $stop;
+    $note = $note + 2;
+    $start = $start + $NOTELTH;
+    $stop = $stop + $NOTELTH;
+}
+print_note_stop($track, $prev_stop, $chan, $prev_note);
 #-----------------------------------------------------------------------------
-$start = $start + $NOTELTH;
-$stop = $stop + $NOTELTH;
-$note = $note + 2;
-#-----------------------------------------------------------------------------
-print_note_start($track, $start, $chan, $note);
-print_legato($track, $start, $stop, $chan);
-print_note_stop($track, $stop, $chan, $note);
+# Do third normal again.
+for (my $i = 0; $i < 4; $i++)
+{
+    $note = $NOTES[$i];;
+    print_note_start($track, $start, $chan, $note);
+    print_note_stop($track, $stop, $chan, $note);
+    $note = $note + 2;
+    $start = $start + $NOTELTH;
+    $stop = $stop + $NOTELTH;
+}
 #-----------------------------------------------------------------------------
 
 print_track_end($track, $ENDTRACKS);
