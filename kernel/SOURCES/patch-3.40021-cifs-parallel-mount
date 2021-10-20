@@ -1,7 +1,7 @@
 diff --git a/fs/cifs/cifsglob.h b/fs/cifs/cifsglob.h
 --- a/fs/cifs/cifsglob.h	2020-01-31 18:35:29.070757324 -0600
 +++ b/fs/cifs/cifsglob.h	2020-01-28 16:25:07.000000000 -0600
-@@ -579,14 +579,15 @@ inc_rfc1001_len(void *buf, int count)
+@@ -570,14 +570,15 @@ inc_rfc1001_len(void *buf, int count)
  
  struct TCP_Server_Info {
  	struct list_head tcp_ses_list;
@@ -13,28 +13,15 @@ diff --git a/fs/cifs/cifsglob.h b/fs/cifs/cifsglob.h
  	char server_RFC1001_name[RFC1001_NAME_LEN_WITH_NULL];
  	struct smb_version_operations	*ops;
  	struct smb_version_values	*vals;
+ 	/* updates to tcpStatus protected by GlobalMid_Lock */
  	enum statusEnum tcpStatus; /* what we think the status is */
  	char *hostname; /* hostname portion of UNC string */
  	struct socket *ssocket;
  	struct sockaddr_storage dstaddr;
-------------------------------------------------------------------------------
- 	struct list_head smb_ses_list;
- 	__u64 conn_id; /* connection identifier (useful for debugging) */
- 	int srv_count; /* reference counter */
- 	/* 15 character server name + 0x20 16th byte indicating type = srv */
-+	char *volUNC;
- 	char server_RFC1001_name[RFC1001_NAME_LEN_WITH_NULL];
- 	struct smb_version_operations	*ops;
- 	struct smb_version_values	*vals;
- 	enum statusEnum tcpStatus; /* what we think the status is */
- 	char *hostname; /* hostname portion of UNC string */
- 	struct socket *ssocket;
- 	struct sockaddr_storage dstaddr;
-------------------------------------------------------------------------------
 diff --git a/fs/cifs/cifsproto.h b/fs/cifs/cifsproto.h
 --- a/fs/cifs/cifsproto.h	2020-01-31 18:35:29.070757324 -0600
 +++ b/fs/cifs/cifsproto.h	2020-01-31 12:41:29.000000000 -0600
-@@ -203,15 +203,16 @@ extern struct inode *cifs_iget(struct su
+@@ -201,15 +201,16 @@ extern struct inode *cifs_iget(struct su
  			       int xid, const struct cifs_fid *fid);
  extern int smb311_posix_get_inode_info(struct inode **pinode, const char *search_path,
  			struct super_block *sb, unsigned int xid);
@@ -42,8 +29,8 @@ diff --git a/fs/cifs/cifsproto.h b/fs/cifs/cifsproto.h
  			const unsigned char *search_path,
  			struct super_block *sb, unsigned int xid);
  extern int cifs_set_file_info(struct inode *inode, struct iattr *attrs,
--			      unsigned int xid, char *full_path, __u32 dosattr);
-+			      unsigned int xid, char *full_path, __u32 dosattr,
+-			      unsigned int xid, const char *full_path, __u32 dosattr);
++			      unsigned int xid, const char *full_path, __u32 dosattr,
 +			      __le64 creationtime);
  extern int cifs_rename_pending_delete(const char *full_path,
  				      struct dentry *dentry,
@@ -55,7 +42,7 @@ diff --git a/fs/cifs/cifsproto.h b/fs/cifs/cifsproto.h
 diff --git a/fs/cifs/connect.c b/fs/cifs/connect.c
 --- a/fs/cifs/connect.c	2020-01-31 18:35:29.071757320 -0600
 +++ b/fs/cifs/connect.c	2020-01-28 16:25:07.000000000 -0600
-@@ -1224,16 +1224,20 @@ static int match_server(struct TCP_Serve
+@@ -1225,16 +1225,20 @@ static int match_server(struct TCP_Serve
  	if (strcmp(ctx->vals->version_string, SMB3ANY_VERSION_STRING) == 0) {
  		if (server->vals->protocol_id < SMB30_PROT_ID)
  			return 0;
@@ -77,7 +64,7 @@ diff --git a/fs/cifs/connect.c b/fs/cifs/connect.c
  	if (!match_address(server, addr,
  			   (struct sockaddr *)&ctx->srcaddr))
  		return 0;
-@@ -1344,14 +1348,15 @@ cifs_get_tcp_session(struct smb_vol *vol
+@@ -1359,14 +1363,15 @@ cifs_get_tcp_session(struct smb_vol *vol
  	if (!tcp_ses) {
  		rc = -ENOMEM;
  		goto out_err;

@@ -228,10 +228,10 @@ input and output, etc.
 
 # ----------------------------------------------------------------------------
 
-## Install new kernel v5.11.0
+## Install new kernel v5.15.0
 
-Kernel v5.11.0 (probably anything newer than v5.5 needs a newer gcc
-(version 10.2.0 is good) and new rpmbuild, which needs more packages.
+Kernel v5.15.0 (probably anything newer than v5.5 needs a newer gcc
+(version 11.1.0 is good) and new rpmbuild, which needs more packages.
 Default is for gcc 4.8.5 with redhat 7.5, and 8.x.y for centos 8.1.
 
 The following documents how to get new gmp, mpfr, mpc, binutils before
@@ -256,10 +256,11 @@ Now to use the new tools:
 	  *) PATH=$1:$PATH;;
 	esac
     }
-    prepath ~/new-gcc-11.1//bin
-    ldconfig ~/new-gcc-11.1//lib	# Need the new shared libraries.
-    which gcc                   # should be ~/new-gcc-11.1//bin/gcc
-    gcc --version               # gcc (GCC) 10.3.0
+    prepath /new-gcc-11.1/bin
+    # Need the new shared libraries.
+    ldconfig /new-gcc-11.1/lib64/ /new-gcc-11.1/lib
+    which gcc                   # should be /new-gcc-11.1//bin/gcc
+    gcc --version               # gcc (GCC) 11.1.0
     make kb                     # creates rpm files	Note: rpm fails.
     make all                    # installs into /boot
     vi +20 /boot/efi/EFI/redhat/grub.cfg     # change 1 to 0

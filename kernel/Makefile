@@ -15,6 +15,7 @@ help:
 	@echo '              do a kernel make, all the make installs.'
 	@echo '  clean     - Within BUILD/kernel-*/linux-* do a make clean.'
 #-----------------------------------------------------------------------------
+.PHONY: kernel
 kernel:
 	rm -f SUCCESS
 	rm -rf RPMS
@@ -26,11 +27,11 @@ kernel:
 	  --without up        \
 	  --without perf      \
 	  --without debug     \
-	  --without debuginfo \
 	  lightspeed.spec     \
 	)
 	touch SUCCESS
 #-----------------------------------------------------------------------------
+.PHONY: kprep
 kprep:
 	rm -f SUCCESS
 	rm -rf RPMS
@@ -42,7 +43,6 @@ kprep:
 	    --without up        \
 	    --without perf      \
 	    --without debug     \
-	    --without debuginfo \
 	    lightspeed.spec     \
 	)
 	touch SUCCESS
@@ -60,7 +60,6 @@ kb:	kb-clean
 	    --without up        \
 	    --without perf      \
 	    --without debug     \
-	    --without debuginfo \
 	    ${WORKSPACE}/SPECS/lightspeed.spec
 	echo "build complete"
 #-----------------------------------------------------------------------------
@@ -68,6 +67,7 @@ kb:	kb-clean
 kb-clean:
 	rm -rf BUILD BUILDROOT RPMS/ SRPMS/
 #-----------------------------------------------------------------------------
+.PHONY: prep
 prep:	kb-clean
 	echo ""
 
@@ -78,7 +78,6 @@ prep:	kb-clean
 	    --without up        \
 	    --without perf      \
 	    --without debug     \
-	    --without debuginfo \
 	    ${WORKSPACE}/SPECS/lightspeed.spec
 	echo "kernel src expanded, patched, and cleaned"
 #-----------------------------------------------------------------------------
@@ -100,6 +99,16 @@ all:
 clean:
 	(cd BUILD/kernel-*/linux-*/ && \
 	    ${MAKE} -j 255 clean)
+#-----------------------------------------------------------------------------
+.PHONY: echo
+echo:
+	echo "WORKSPACE=${WORKSPACE}"
+	which gcc
+	gcc --version
+	which rpm
+	rpm --version
+	which rpmbuild
+	rpmbuild --version
 #-----------------------------------------------------------------------------
 # End of file Makefile
 #-----------------------------------------------------------------------------

@@ -4,7 +4,7 @@
 
 Summary: The Linux kernel
 
-# Light specification file. 2021-04-13
+# Light specification file. 2021-10-12
 %define buildid .lightspeed
 
 # For a kernel released for public testing, released_kernel should be 1.
@@ -13,8 +13,8 @@ Summary: The Linux kernel
 
 %global distro_build 693
 
-%define rpmversion 5.12.rc7
-%define pkgrelease 2021.04.13
+%define rpmversion 5.15.0
+%define pkgrelease 2021.10.12
 
 %define pkg_release %{pkgrelease}%{?buildid}
 
@@ -168,6 +168,7 @@ Summary: The Linux kernel
 %define all_arch_configs kernel-%{version}-x86_64*.config
 %define image_install_path boot
 %define kernel_image arch/x86/boot/bzImage
+%undefine _missing_build_ids_terminate_build
 %endif
 
 %ifarch ppc
@@ -345,13 +346,14 @@ PATCH40013: patch-3.40013-qla2xxx-5.0-target-fix
 PATCH40020: patch-3.40020-cifs-xattr-additions
 PATCH40021: patch-3.40021-cifs-parallel-mount
 PATCH40030: patch-3.40030-NO-SELINUX-MAXBONDS
-PATCH40040: patch-3.40040-bme-1
+# PATCH40040: patch-3.40040-bme-1
 PATCH40041: patch-3.40041-smb-202-7mode
 PATCH40042: patch-3.40042-add_getfsattr
 PATCH40043: patch-3.40043-reparse-attrs
 PATCH40044: patch-3.40044-disable_nobufferwrite
 PATCH40046: patch-3.40046-SMB202_mem_leak
-PATCH40050: patch-3.40050-scripts-to-python3
+PATCH40047: patch-3.40047-smb-all-info-fix-and-oplock-disable
+PATCH40048: patch-3.40048-SMB202_forwarding
 PATCH40060: patch-3.40060-less-fc-iscsi-bad-messages
 
 # empty final patch to facilitate testing of kernel patches
@@ -486,19 +488,19 @@ Provides: kernel-tools-devel
 This package contains the development files for the tools/ directory from
 the kernel source.
 
-%package -n kernel-tools-debuginfo
-Summary: Debug information for package kernel-tools
-Group: Development/Debug
-AutoReqProv: no
-%description -n kernel-tools-debuginfo
-This package provides debug information for package kernel-tools.
-
-# Note that this pattern only works right to match the .build-id
-# symlinks because of the trailing nonmatching alternation and
-# the leading .*, because of find-debuginfo.sh's buggy handling
-# of matching the pattern against the symlinks file.
-
-%{expand:%%global debuginfo_args %{?debuginfo_args} -p 'XXX' -o kernel-tools-debuginfo.list}
+# %package -n kernel-tools-debuginfo
+# Summary: Debug information for package kernel-tools
+# Group: Development/Debug
+# AutoReqProv: no
+# %description -n kernel-tools-debuginfo
+# This package provides debug information for package kernel-tools.
+# 
+# # Note that this pattern only works right to match the .build-id
+# # symlinks because of the trailing nonmatching alternation and
+# # the leading .*, because of find-debuginfo.sh's buggy handling
+# # of matching the pattern against the symlinks file.
+# 
+# #{expand:##global debuginfo_args #{?debuginfo_args} -p 'XXX' -o kernel-tools-debuginfo.list}
 
 %endif
 
@@ -663,13 +665,14 @@ ApplyOptionalPatch patch-3.40013-qla2xxx-5.0-target-fix
 ApplyOptionalPatch patch-3.40020-cifs-xattr-additions
 ApplyOptionalPatch patch-3.40021-cifs-parallel-mount
 ApplyOptionalPatch patch-3.40030-NO-SELINUX-MAXBONDS
-ApplyOptionalPatch patch-3.40040-bme-1
+# ApplyOptionalPatch patch-3.40040-bme-1
 ApplyOptionalPatch patch-3.40041-smb-202-7mode
 ApplyOptionalPatch patch-3.40042-add_getfsattr
 ApplyOptionalPatch patch-3.40043-reparse-attrs
 ApplyOptionalPatch patch-3.40044-disable_nobufferwrite
 ApplyOptionalPatch patch-3.40046-SMB202_mem_leak
-ApplyOptionalPatch patch-3.40050-scripts-to-python3
+ApplyOptionalPatch patch-3.40047-smb-all-info-fix-and-oplock-disable
+ApplyOptionalPatch patch-3.40048-SMB202_forwarding
 ApplyOptionalPatch patch-3.40060-less-fc-iscsi-bad-messages
 
 # The empty test patch -- put LightSpeed patches before this.
@@ -753,7 +756,8 @@ cd ..
 # in the stripped object, but repeating debugedit is a no-op.  We do it
 # beforehand to get the proper final build ID bits into the embedded image.
 # This affects the vDSO images in vmlinux, and the vmlinux image in bzImage.
-export AFTER_LINK='sh -xc "/usr/lib/rpm/debugedit -b $$RPM_BUILD_DIR -d /usr/src/debug -i $@ > $@.id"'
+# export AFTER_LINK='sh -xc "/usr/lib/rpm/debugedit -b $$RPM_BUILD_DIR -d /usr/src/debug -i $@ > $@.id"'
+export AFTER_LINK='sh -xc "/new-gcc-11.1/lib/rpm/debugedit -b $$RPM_BUILD_DIR -d /usr/src/debug -i $@ > $@.id"'
 %endif
 
 cp_vmlinux()
@@ -1028,6 +1032,8 @@ BuildKernel() {
 
     # prune junk from kernel-devel
     find $RPM_BUILD_ROOT/usr/src/kernels -name ".*.cmd" -exec rm -f {} \;
+    rm -rf $RPM_BUILD_ROOT/usr/src/kernels/*/scripts/*
+    rm -rf $RPM_BUILD_ROOT/usr/src/kernels/*/tools/*
 }
 
 ###
@@ -1121,8 +1127,9 @@ find Documentation -type d | xargs chmod u+w
 
 %if %{with_debuginfo}
 
+#   /usr/lib/rpm/find-debuginfo.sh %{debuginfo_args} %{_builddir}/%{?buildsubdir}
 %define __debug_install_post \
-  /usr/lib/rpm/find-debuginfo.sh %{debuginfo_args} %{_builddir}/%{?buildsubdir}\
+   /new-gcc-11.1/bin/find-debuginfo %{debuginfo_args} %{_builddir}/%{?buildsubdir}
 %{nil}
 
 %ifnarch noarch
@@ -1405,7 +1412,7 @@ fi
 %files -n kernel-tools
 %defattr(-,root,root)
 %if %{with_debuginfo}
-%files -f kernel-tools-debuginfo.list -n kernel-tools-debuginfo
+# #files -f kernel-tools-debuginfo.list -n kernel-tools-debuginfo
 #TODO: crvaale quick hack to get around debug files not being owned by other debuginfo parts
 /usr/lib/debug
 %defattr(-,root,root)
@@ -1471,20 +1478,17 @@ fi
 %kernel_variant_files %{with_kdump} kdump
 
 %changelog
-* Tue Apr 13 2021 Marshall Midden
-- [kernel] rhel-kernel: Kernel v5.12.rc7, uses gcc-10.3.0
+* Fri Oct 15 2021 Marshall Midden
+- [kernel] all: v5.15-rc4 Get rpmbuild to work, core dumps to work. Needs new debugedit for dwarf.
 
-* Thu Feb 18 2021 Marshall Midden
-- [kernel] rhel-kernel: Kernel v5.11.0, uses gcc-10.0.2.
+* Tue Oct 12 2021 Marshall Midden
+- [kernel] all: v5.15-rc4 from kernel.org. Note: git tag does NOT have it as v5.15.0 -- .0 dropped.
 
-* Fri Nov 20 2020 Marshall Midden
-- [kernel] rhel-kernel: Kernel v5.10-rc4, use gcc-10.0.2.
+* Wed Feb 03 2021 Marshall Midden
+- [kernel] rhel-kernel: Reduce messages from iSCSI and FC networks when bad things happe.
 
-* Thu Nov 19 2020 Marshall Midden
-- [kernel] rhel-kernel: Kernel v5.9.9, use gcc-10.0.2.
-
-* Thu Nov 19 2020 Marshall Midden
-- [kernel] rhel-kernel: Kernel v5.9.8 with patches updated, use gcc-10.0.2.
+* Tue Feb 02 2021 Marshall Midden
+- [kernel] rhel-kernel: update qlogic driver to v5.3.17
 
 * Tue Aug 18 2020 jturner
 - [kernel] rhel-kernel: SMB 202 mem leak
