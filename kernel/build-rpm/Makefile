@@ -4,6 +4,7 @@ help:
 	@echo 'Targets:'
 	@echo '  all           - Get sources (if needed), configure, install, clean.'
 	@echo '  distclean     - Remove sources.'
+	@echo ' '
 	@echo '  clean         - Remove source for tools (not gcc and friends).'
 	@echo '  unpack        - Unpack sources (not gcc and friends).'
 	@echo '  compile       - Compile sources (not gcc and friends).'
@@ -12,9 +13,11 @@ help:
 all:
 	./01.new-gcc+rpm+etc
 #-----------------------------------------------------------------------------
+.PHONY: unpack
 unpack:
 	./03.unpack.tools
 #-----------------------------------------------------------------------------
+.PHONY: compile
 compile:
 	./20-libgcrypt
 	./21-help2man
@@ -26,6 +29,7 @@ compile:
 	./27-lua
 	./28-rpm
 #-----------------------------------------------------------------------------
+.PHONY: clean
 clean:
 	./98.tools-clean
 #-----------------------------------------------------------------------------
