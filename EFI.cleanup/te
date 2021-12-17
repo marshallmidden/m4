@@ -1,0 +1,123 @@
+#!/usr/bin/expect
+#Usage ./te <user> <ip> <password>
+#-----------------------------------------------------------------------------
+set USER [lindex $argv 0]
+set IP [lindex $argv 1]
+set PW [lindex $argv 2]
+
+set PROMPT "(:|#|\\$) $"
+
+set timeout 30
+
+#-----------------------------------------------------------------------------
+eval spawn ssh -o Connecttimeout=25 "$USER\@$IP"
+
+#-----------------------------------------------------------------------------
+proc do_login { } {
+    global PROMPT
+    global PW
+    global IP
+    global USER
+    send_tty "before login\n"
+    expect {
+	"*No route to host*" {
+	    send_tty "No route to host gotten - $IP not reachable.\n"
+	    exit 1
+	}
+	"yes/no" {
+	    send_tty "yes/no gotten\n"
+	    send "yes\r" 
+	    exp_continue
+	}
+	"*?assword" {
+	    send_tty "Password requested\n"
+	    send "$PW\r"
+	    exp_continue
+	}
+	-re "$PROMPT" {
+	    send_tty "Prompt gotten\n"
+	}
+	timeout {
+	    send_tty "timeout gotten while connecting to $USER\@$IP\n"
+	    exit 1
+	}
+	eof {
+	    send_tty "eof gotten\n"
+	    exit 1
+	}
+    }
+}
+
+#-----------------------------------------------------------------------------
+proc run_command { txt } {
+    global PROMPT
+    send_tty "send $txt\n"
+    send "$txt\r"
+    expect {
+	-re $PROMPT {
+	}
+	eof {
+	    send_tty "eof gotten, after sending $txt\n"
+	    exit 1
+	}
+	timeout {
+	    send_tty "timeout gotten, after sending $txt\n"
+	    exit 1
+	}
+    }
+}
+
+#-----------------------------------------------------------------------------
+proc do_exit { } {
+    global PROMPT
+    send_tty "send exit 0\n"
+    send "exit 0\r"
+    expect {
+	-re $PROMPT {
+	    send_tty "prompt gotten, should not have appeared\n"
+	    exit 1
+	}
+	eof {
+	    send_tty "eof gotten\n"
+	    exit 1
+	}
+	timeout {
+	    send_tty "timeout gotten before prompt to exit\n"
+	    send_user "timeout while waiting to exit\n"
+	    exit 1
+	}
+    }
+}
+
+#-----------------------------------------------------------------------------
+do_login
+#-----------------------------------------------------------------------------
+# run_command "pwd"
+# run_command "echo USER=\$USER SHELL=\$SHELL"
+run_command "LS_OPTIONS=--color=none"
+run_command "unset LS_COLORS"
+run_command "export LS_TABSTOP=0"
+run_command "export TABSTOP=8"
+run_command "export LANG=en_US.UTF-8"
+run_command "export LC_COLLATE=C"
+run_command "alias ls=\"ls -F --tabsize=\${LS_TABSTOP}\""
+#-----------------------------------------------------------------------------
+run_command "lsblk -o name,type,fstype,label,uuid,size,parttype,partuuid,tran,rev,vendor,mountpoint"
+run_command "if \[ \"\$?\" != 0 ]; then lsblk -o name,type,fstype,label,uuid,size,partuuid,tran,rev,vendor,mountpoint ; fi"
+
+run_command "ls -l /dev/disk/by-label/"
+run_command "ls -l /dev/disk/by-partlabel/"
+run_command "ls -l /dev/disk/by-uuid/"
+run_command "ls -l /dev/disk/by-partuuid/"
+
+run_command "blkid"
+
+run_command "efibootmgr -v"
+#-----------------------------------------------------------------------------
+do_exit
+
+#-----------------------------------------------------------------------------
+send_tty "Should not get here.\n"
+exit 1
+
+#=============================================================================
