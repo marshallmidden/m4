@@ -1,37 +1,77 @@
 V            = v2-1
-EXPANDED_V   = ${V}.E
+#-----------------------------------------------------------------------------
 MCOMP        = ~/src/abc/mcomp/mcomp
-MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 SEPARATE     = ./A.separate
+MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
+YAPS         = yaps
+ABCM2PS      = abcm2ps
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
+.SUFFIXES: .mid .csv .ps .abc _m.ps .E
+# output $@   -- input $<
+%.mid:  %.csv
+	csvmidi $< $@
+%.csv:  %.E
+	${MUSICOMP2ABC} --midi1csv $< $@
+%.abc:  %.E
+	${MUSICOMP2ABC} --abc $< $@
+%.ps:   %.abc
+	${YAPS} $< -o $@ -k
+%_m.ps: %.abc
+	${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@
+%.E: % beethoven.macros
+	${CPP} $< -o $@
+#-----------------------------------------------------------------------------
+.SUFFIXES: _A.ps .A_abc _m_A.ps
+# output $@   -- input $<
+%.A_abc:  %.E
+	${MUSICOMP2ABC} --abc $< $@
+%_A.ps:   %.A_abc
+	${YAPS} $< -o $@ -k
+%_m_A.ps: %.A_abc
+	${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@
+#-----------------------------------------------------------------------------
+As = 01 02 03 04 05 06 07 08 09 10 11 12
+w_A := ${words $(As)}
+s := $(shell seq 1 $(w_A))
+#-----------------------------------------------------------------------------
+define many_targets
+    help::
+	@echo "  a${word $1,${As}}    - Use '${SEPARATE} to create A.${word $1,${As}}, and yaps&abcm2ps for staff $1"
+    A.${word $1,${As}}: ${V}.E ${SEPARATE}
+	${SEPARATE}
+    .PHONY: a.${word $1,${As}}
+    a${word $1,${As}}: A.${word $1,${As}} a.${word $1,${As}}_A.ps a.${word $1,${As}}_m_A.ps
+	open a.${word $1,${As}}_A.ps a.${word $1,${As}}_m_A.ps
+    a.${word $1,${As}}.E: A.${word $1,${As}}
+	ln -sf A.${word $1,${As}} a.${word $1,${As}}.E
+endef
+#-----------------------------------------------------------------------------
 .PHONY: help
-help:
+help::
 	@echo "Targets:"
 	@echo "  clean  - Remove postscript (ps), csv, and mid files."
 	@echo ""
-	@echo "Use 'musicomp2abc ${V} to get ${V}.abc."
-	@echo "Use 'yaps ${V}.abc -k' to get ${V}.ps."
-	@echo "Use 'abcm2ps ${V}.abc > Out.ps'."
-	@echo "Use 'csvmidi ${V}.csv > ${V}.mid'."
-	@echo
-	@echo "  s      - create ${V}.abc from ${V} (via 'musicomp2abc')"
+	@echo "  all    - create ${V}.abc from ${V} (via 'musicomp2abc')"
 	@echo "         - and ${V}.ps from ${V}.abc (via 'yaps')"
 	@echo "         - and Out.ps from ${V}.abc (via 'abcm2ps')"
 	@echo "         - and ${V}.mid from ${V} (via 'musicomp2abc --midicsv')"
 	@echo ""
-	@echo "  a01    - Use '${SEPARATE}' to create A.01, and create Out.ps for staff 1."
-	@echo "  a02    - Use '${SEPARATE}' to create A.02, and create Out.ps for staff 2."
-	@echo "  ..."
-	@echo "  a12    - Use '${SEPARATE}' to create A.12, and create Out.ps for staff 12."
-#=============================================================================
+#-----------------------------------------------------------------------------
 .PHONY: check
 check:
-	echo "MCOMP=${MCOMP}"
-	echo "MUSICOMP2ABC=${MUSICOMP2ABC}"
-	echo "SEPARATE=${SEPARATE}"
-	echo "V=${V}"
+	@echo "V=${V}"
+	@echo "MCOMP=${MCOMP}"
+	@echo "SEPARATE=${SEPARATE}"
+	@echo "MUSICOMP2ABC=${MUSICOMP2ABC}"
+	@echo "YAPS=${YAPS}"
+	@echo "ABCM2PS=${ABCM2PS}"
+#=============================================================================
+all: ${V}.mid ${V}.ps ${V}_m.ps
+	#++ open ${V}.ps ${V}_m.ps
+	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 ${V}.mid
+	#-- fluidsynth -F "${V}.wav" -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 "${V}.mid"
 #=============================================================================
 #-- S21 = b21-orig
 #=============================================================================
@@ -44,145 +84,11 @@ clean:
 	rm -f *.stdout *.stderr
 	rm -f *.csv *.mid
 	rm -f *.abc
+	rm -f *.E
 	rm -f A.[0123]* B.[0123]* C.[0123]*
 	rm -f X X.v
-	rm -f ${EXPANDED_V}
 #-----------------------------------------------------------------------------
-${EXPANDED_V}: ${V} beethoven.macros
-	${CPP} ${V} -o ${EXPANDED_V}
-#-----------------------------------------------------------------------------
-A.01 A.02 A.03 A.04 A.05 A.06 A.07 A.08 A.09 A.10 A.11 A.12: ${EXPANDED_V} ${SEPARATE}
-	${SEPARATE}
-#-----------------------------------------------------------------------------
-.PHONY: s
-s: ${EXPANDED_V}
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc ${EXPANDED_V} >${V}.abc
-	yaps ${V}.abc -o ${V}.ps -k
-	abcm2ps -l -s 0.42 -M -b 1 ${V}.abc -i -N 2 -j 1
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m ${EXPANDED_V} >${V}.csv
-	csvmidi ${V}.csv ${V}.mid
-	#++ open Out.ps
-	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 ${V}.mid
-	#-- fluidsynth -F "${V}.wav" -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 "${V}.mid"
-#-----------------------------------------------------------------------------
-.PHONY: a01
-a01: A.01
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.01 >a01.csv
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.01 >a01.abc
-	yaps a01.abc -o a01.ps -k
-	abcm2ps -l -s 0.8 -M -b 1 a01.abc -i -N 2 -j 1
-	#-- csvmidi a01.csv a01.mid
-	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a01.mid
-	open Out.ps
-#-----------------------------------------------------------------------------
-.PHONY: a02
-a02: A.02
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.02 >a02.csv
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.02 >a02.abc
-	yaps a02.abc -o a02.ps -k
-	abcm2ps -l -s 0.8 -M -b 1 a02.abc -i -N 2 -j 1
-	#-- csvmidi a02.csv a02.mid
-	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a02.mid
-	open Out.ps
-#-----------------------------------------------------------------------------
-.PHONY: a03
-a03: A.03
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.03 >a03.csv
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.03 >a03.abc
-	yaps a03.abc -o a03.ps -k
-	abcm2ps -l -s 0.8 -M -b 1 a03.abc -i -N 2 -j 1
-	#-- csvmidi a03.csv a03.mid
-	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a03.mid
-	open Out.ps
-#-----------------------------------------------------------------------------
-.PHONY: a04
-a04: A.04
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.04 >a04.csv
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.04 >a04.abc
-	yaps a04.abc -o a04.ps -k
-	abcm2ps -l -s 0.8 -M -b 1 a04.abc -i -N 2 -j 1
-	#-- csvmidi a04.csv a04.mid
-	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a04.mid
-	open Out.ps
-#-----------------------------------------------------------------------------
-.PHONY: a05
-a05: A.05
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.05 >a05.csv
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.05 >a05.abc
-	yaps a05.abc -o a05.ps -k
-	abcm2ps -l -s 0.8 -M -b 1 a05.abc -i -N 2 -j 1
-	#-- csvmidi a05.csv a05.mid
-	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a05.mid
-	open Out.ps
-#-----------------------------------------------------------------------------
-.PHONY: a06
-a06: A.06
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.06 >a06.csv
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.06 >a06.abc
-	yaps a06.abc -o a06.ps -k
-	abcm2ps -l -s 0.8 -M -b 1 a06.abc -i -N 2 -j 1
-	#-- csvmidi a06.csv a06.mid
-	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a06.mid
-	open Out.ps
-#-----------------------------------------------------------------------------
-.PHONY: a07
-a07: A.07
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.07 >a07.csv
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.07 >a07.abc
-	yaps a07.abc -o a07.ps -k
-	abcm2ps -l -s 0.8 -M -b 1 a07.abc -i -N 2 -j 1
-	#-- csvmidi a07.csv a07.mid
-	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a07.mid
-	open Out.ps
-#-----------------------------------------------------------------------------
-.PHONY: a08
-a08: A.08
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.08 >a08.csv
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.08 >a08.abc
-	yaps a08.abc -o a08.ps -k
-	abcm2ps -l -s 0.8 -M -b 1 a08.abc -i -N 2 -j 1
-	#-- csvmidi a08.csv a08.mid
-	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a08.mid
-	open Out.ps
-#-----------------------------------------------------------------------------
-.PHONY: a09
-a09: A.09
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.09 >a09.csv
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.09 >a09.abc
-	yaps a09.abc -o a09.ps -k
-	abcm2ps -l -s 0.8 -M -b 1 a09.abc -i -N 2 -j 1
-	#-- csvmidi a09.csv a09.mid
-	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a09.mid
-	open Out.ps
-#-----------------------------------------------------------------------------
-.PHONY: a10
-a10: A.10
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.10 >a10.csv
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.10 >a10.abc
-	yaps a10.abc -o a10.ps -k
-	abcm2ps -l -s 0.8 -M -b 1 a10.abc -i -N 2 -j 1
-	#-- csvmidi a10.csv a10.mid
-	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a10.mid
-	open Out.ps
-#-----------------------------------------------------------------------------
-.PHONY: a11
-a11: A.11
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.11 >a11.csv
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.11 >a11.abc
-	yaps a11.abc -o a11.ps -k
-	abcm2ps -l -s 0.8 -M -b 1 a11.abc -i -N 2 -j 1
-	#-- csvmidi a11.csv a11.mid
-	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a11.mid
-	open Out.ps
-#-----------------------------------------------------------------------------
-.PHONY: a12
-a12: A.12
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m A.12 >a12.csv
-	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.12 >a12.abc
-	yaps a12.abc -o a12.ps -k
-	abcm2ps -l -s 0.8 -M -b 1 a12.abc -i -N 2 -j 1
-	#-- csvmidi a12.csv a12.mid
-	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a12.mid
-	open Out.ps
+$(foreach e,$(s),$(eval $(call many_targets,$(e))))
 #-----------------------------------------------------------------------------
 # End of Makefile
+#-----------------------------------------------------------------------------
