@@ -5,7 +5,7 @@
 # * vol(sf,0.25)    -- optional 2nd argument for length of sf.
 #   vol(fp,0.25)    -- optional 2nd argument for length of "f" before returning to "p".
 # * Change to control 11 for volume changes. See F.pl for example. Needs quite a few steps.
-# * Legato control 68 for slurs.  Perhaps "l" (like staccato) for slurred notes).
+# * Legato control 68 for slurs.
 #       Value Range: 0 (to 63) is off. 127 (to 64) is on. 
 #   ABC notation for "v2: 4c4l,4d4l,4e4" should be "V:3 \n (cde)"
 #   Need to have spaces mean something ...  suggest space between notes in abc notation. Thus header bars.
@@ -77,6 +77,16 @@
 # on the same line is a tie!)
 #-----------------------------------------------------------------------------
 # Additional note processing:
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# If the file format is in 'vertical' mode (i.e. 'v4: 3c8,3d8,3e8, 3f8,3g8'),
+# Then for --abc format, the comma followed by a space means to separate the
+# bars. (i.e. c,d,e have bar lines connected, and then there is a separation
+# and lastly f and g have their bar lines connected.)
+# This does not affect playing at all.
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# If a note's time (which may be optionally missing) is followed by a "l",
+# then the note is legato (glided) to the next note. (i.e. there is no note
+# attack section done when playing the note -- also considered slurred notes.)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # vol(xxx) before a note sets volume for that note only.
 # vol(sfp) before a note sets volume to f for that note only, and following p.
@@ -916,7 +926,7 @@ def print_error(strg, line):
     errors_happened = 1             # When exiting, do 1 instead of 0
 
     print("ERROR -", strg, file=sys.stderr, flush=True)
-    print("  Line {} - {}".format(linecount, line), file=sys.stderr, flush=True)
+    print("  Line {} - '{}'".format(linecount, line), file=sys.stderr, flush=True)
     return
 # End of print_error
 
@@ -925,7 +935,7 @@ def print_warning(strg, line):
     global linecount
 
     print("WARNING -", strg, file=sys.stderr, flush=True)
-    print("  Line {} - {}".format(linecount, line), file=sys.stderr, flush=True)
+    print("  Line {} - '{}'".format(linecount, line), file=sys.stderr, flush=True)
     return
 # End of print_warning
 
@@ -1248,7 +1258,6 @@ def print_measure_abc(m, voice, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_
         # fi
         l_pitch = pitch[m]
         pr = pr + '%% pitch    {}'.format(l_pitch) + '\n'
-
     # fi
 
     if voice not in vinstrument[m]:
@@ -2670,7 +2679,7 @@ def put_on_bufs(onvoice, p_meas, prenote, abc_note, timeofnote, append_tie, onet
             bufs_length[onvoice][p_meas].append(timeofnote)
             bufs_accidentals[onvoice][p_meas].append(append_tie)
         else:           # ABC
-            bufs[onvoice][p_meas] = bufs[onvoice][p_meas] + ' ' + prenote + abc_note + postnote
+            bufs[onvoice][p_meas] = bufs[onvoice][p_meas] + prenote + abc_note + postnote
         # fi
     # fi
 
@@ -2851,8 +2860,8 @@ def arglist(wline, line):
         if c == ',' and np == 0 and nb == 0 and nc == 0:    # we want to split on commas
             newline.append(newstr)
             newstr = ''
-        elif c == ' ' or c == "\t":
-            pass
+        #-- elif c == ' ' or c == "\t":
+        #--     pass
         else:
             newstr = newstr + c
             if c == '(':
@@ -5527,6 +5536,13 @@ def getnote(note_to_decode, voice, line):
     global xpose
     global xpose_new_key
 
+    leading_space = False
+    if note_to_decode and len(note_to_decode) > 0:
+        if note_to_decode[0] == '\t' or note_to_decode[0] == ' ':
+            note_to_decode = note_to_decode[1:]
+            leading_space = True
+        # fi
+    # fi
     temp3 = 0                                   # character pointer
     if note_to_decode == '0':
         return '', 0, normal_note
@@ -5924,6 +5940,9 @@ def getnote(note_to_decode, voice, line):
     else:           # ABC
         # Do not convert it in ABC format.
         thenote = A + n + octaves[o]
+        if leading_space:
+            thenote = ' ' + thenote
+        # fi
     # fi
 # .............................................................................
     therest = note_to_decode[temp3:]
@@ -5955,8 +5974,8 @@ accidental_normal = 0
 global bit_from_character
 bit_from_character = { 
    'l': accidental_legato,
-#  'b': accidental_broken,
-#  'm': accidental_marcato,
+   'b': accidental_broken,
+   'm': accidental_marcato,
    't': accidental_tied,
    's': accidental_stac,
    'd': accidental_dotted
@@ -6128,7 +6147,11 @@ def get_vol_note(temp1, onvoice, line):
     global S_vlprint
     global vlprint
 
-    therest = temp1[4:]
+    if temp1[0] == ' ':
+        therest = temp1[5:]
+    else:
+        therest = temp1[4:]
+    # fi
     sc = therest.find(')')
     if sc < 0 or sc == 0:
         print_error("A 'vol(' needs a number followed by a ')' -- ')' or number is missing", line)
@@ -6184,7 +6207,11 @@ def get_vol_note(temp1, onvoice, line):
 #-----------------------------------------------------------------------------
 # therest,newvolume,newtime = get_cresc(temp1, line)
 def get_cresc(temp1, line):
-    therest = temp1[6:]
+    if temp1[0] == ' ':
+        therest = temp1[7:]
+    else:
+        therest = temp1[6:]
+    # fi
     sc = therest.find(',')
     if sc < 0 or sc == 0:
         print_error("A 'cresc(' needs a number followed by a ',' -- ',' or number is missing", line)
@@ -6286,8 +6313,8 @@ def process_notes(t_args, line):
         print_error("no measure processed yet - must have one before notes.", line)
         return
     # fi
-    # Get rid of all white spoce.
-    wline = ''.join(line.split())
+    wline = re.sub(r'\s+', ' ', line)
+    wline = re.sub(r'([^,]) ', r'\1', wline)
     wargs = arglist(wline, line)
     if not wargs or len(wargs) < 1:
         print_error("no arguments on note line", line)
@@ -6341,12 +6368,12 @@ def process_notes(t_args, line):
         # fi
         measlth = 0
         for i in range(0, len(wargs)):
-            if wargs[i] != '':
+            if not(wargs[i] == '' or wargs[i] == ' '):
                 measlth = max(measlth, mlth[i+1][measure_on])
             # fi
         # rof
         for i in range(0, len(wargs)):
-            if wargs[i] != '':
+            if not(wargs[i] == '' or wargs[i] == ' '):
                 l = measlth - mlth[i+1][measure_on]
                 if l > 0:
                     nl = (MIDICLICKSPERQUARTER * 4) / l
@@ -6418,7 +6445,7 @@ def process_notes(t_args, line):
                         return                                      # Go out and read line for macro.
                     # fi
                 # rof
-                if temp1[0:4] == 'vol(':
+                if temp1[0:4] == 'vol(' or temp1[0:5] == ' vol(':
                     therest,onenotevolume,f2,s1 = get_vol_note(temp1, onvoice, line)
                     # onenotevolume for midi1csv format.
                     if onenotevolume is None:
@@ -6445,12 +6472,16 @@ def process_notes(t_args, line):
                     temp1 = therest
                     continue
                 # fi
-                if temp1[0:5] == 'cres(' or temp1[0:5] == 'dimi(' or temp1[0:4] == 'cre(' or temp1[0:4] == 'dim(' or temp1[0:3] == 'cr(' or temp1[0:3] == 'di(':
+                if (temp1[0:5] == 'cres(' or temp1[0:4] == 'cre(' or temp1[0:3] == 'cr(' or
+                    temp1[0:6] == ' cres(' or temp1[0:5] == ' cre(' or temp1[0:4] == ' cr(' or
+                    temp1[0:5] == 'dimi(' or temp1[0:4] == 'dim(' or temp1[0:3] == 'di(' or
+                    temp1[0:6] == ' dimi(' or temp1[0:5] == ' dim(' or temp1[0:4] == ' di('):
                     print_error("cresc() and dimin() are incorrectly written.", line)
                     return
                 # fi
 
-                if temp1[0:6] == 'cresc(' or temp1[0:6] == 'dimin(':
+                if (temp1[0:6] == 'cresc(' or temp1[0:6] == 'dimin(' or
+                    temp1[0:7] == ' cresc(' or temp1[0:7] == ' dimin('):
                     # cresc(ff,5.25)    # volume to go to, 5.25 = time in floating.
                     therest,newvolume,newtime = get_cresc(temp1, line)
                     if newvolume is None:
@@ -6703,7 +6734,7 @@ def process_notes(t_args, line):
                 for sn in range(0,number_in_sequence):
                     s_postnote = ''
                     s_prenote = ''
-                    if therest[0:4] == 'vol(':
+                    if therest[0:4] == 'vol(' or therest[0:5] == ' vol(':
                         therest,onenotevolume,f2,s1 = get_vol_note(therest, onvoice, line)
                         # onenotevolume for midi1csv format.
                         if onenotevolume is None:
@@ -6958,7 +6989,11 @@ def process_notes(t_args, line):
                 if args.horizontal or args.vertical or args.midi1csv:
                     append_tie = append_tie + 's'
                 else:           # ABC
-                    thenote = '.' + thenote                 # . before the note for staccato
+                    # thenote = '.' + thenote                 # . before the note for staccato
+                    if len(thenote) > 0 and thenote[0] == ' ':  # Special leading space!
+                        thenote = ' .' + thenote[1:]        # . before the note for staccato
+                    else:
+                        thenote = '.' + thenote             # . before the note for staccato
                 # fi
             # fi
 

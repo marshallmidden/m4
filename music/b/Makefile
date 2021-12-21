@@ -13,7 +13,7 @@ help:
 	@echo "Targets:"
 	@echo "  clean  - Remove postscript (ps), csv, and mid files."
 	@echo ""
-	@echo "  s      - create .mid from source(s)."
+	@echo "  all    - create .mid from source(s)."
 #=============================================================================
 .PHONY: clean
 clean:
@@ -21,10 +21,10 @@ clean:
 	    ${MAKE} -C $$d clean ; \
 	done
 #-----------------------------------------------------------------------------
-.PHONY: s
-s:
+.PHONY: all
+all:
 	for d in ${DIRS} ; do \
-	    ${MAKE} -C $$d s ; \
+	    ${MAKE} -C $$d all ; \
 	done
 #-----------------------------------------------------------------------------
 # End of Makefile

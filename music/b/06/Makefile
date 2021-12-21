@@ -5,6 +5,7 @@ MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 YAPS         = yaps
 ABCM2PS      = abcm2ps
 #-----------------------------------------------------------------------------
+.PRECIOUS: %.abc
 .SUFFIXES: .mid .csv .ps .abc _m.ps
 # output $@   -- input $<
 %.mid:  %.csv
@@ -18,6 +19,7 @@ ABCM2PS      = abcm2ps
 %_m.ps: %.abc
 	${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@
 #-----------------------------------------------------------------------------
+.PRECIOUS: %.A_abc
 .SUFFIXES: _A.ps .A_abc _m_A.ps
 # output $@   -- input $<
 %.A_abc:  %
@@ -74,7 +76,7 @@ clean::
 	rm -f *.ps
 	rm -f *.stdout *.stderr
 	rm -f *.csv *.mid
-	rm -f *.abc
+	rm -f *.abc *.A_abc
 	rm -f A.[012]* B.[012]*
 #-----------------------------------------------------------------------------
 $(foreach e,$(s),$(eval $(call many_targets,$(e))))

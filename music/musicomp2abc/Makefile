@@ -15,6 +15,7 @@ MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 YAPS	     = yaps
 ABCM2PS	     = abcm2ps
 #-----------------------------------------------------------------------------
+.PRECIOUS: %.abc
 .SUFFIXES: .mid .csv .ps .abc _m.ps
 # output $@   -- input $<
 %.mid:	%.csv
@@ -26,7 +27,8 @@ ABCM2PS	     = abcm2ps
 %.ps:	%.abc
 	${YAPS} $< -o $@ -k
 %_m.ps:	%.abc
-	${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@
+	${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1
+	mv Out.ps $@
 #-----------------------------------------------------------------------------
 .PHONY: all
 all: ${SONGS_MID} ${SONGS_PS} ${SONGS_M_PS}
@@ -39,8 +41,3 @@ clean:
 tags ctags:
 	ctags --language-force=python ${MUSICOMP2ABC} calculate.py
 #-----------------------------------------------------------------------------
-
-#	yaps ${V}.abc -o ${V}.ps -k
-#	abcm2ps -l -s 0.42 -M -b 1 ${V}.abc -i -N 2 -j 1
-#	open Out.ps
-

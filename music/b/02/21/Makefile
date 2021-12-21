@@ -8,6 +8,7 @@ ABCM2PS      = abcm2ps
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
+.PRECIOUS: %.abc
 .SUFFIXES: .mid .csv .ps .abc _m.ps .E
 # output $@   -- input $<
 %.mid:  %.csv
@@ -23,6 +24,7 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 %.E: % beethoven.macros
 	${CPP} $< -o $@
 #-----------------------------------------------------------------------------
+.PRECIOUS: %.A_abc
 .SUFFIXES: _A.ps .A_abc _m_A.ps
 # output $@   -- input $<
 %.A_abc:  %.E
@@ -83,7 +85,7 @@ clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
 	rm -f *.csv *.mid
-	rm -f *.abc
+	rm -f *.abc *.A_abc
 	rm -f *.E
 	rm -f A.[0123]* B.[0123]* C.[0123]*
 	rm -f X X.v
