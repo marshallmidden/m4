@@ -1555,7 +1555,8 @@ def print_out_notes_v_or_h(m, print_line):
             txt = txt + "v{}: ".format(voice)
             for i in range(0,len(bufs[voice][m])):
                 if i != 0:
-                    txt = txt + ', '
+                    #--old--    txt = txt + ', '
+                    txt = txt + ','
                 # fi
                 l =  bufs_length[voice][m][i]
                 if l in legal_mc_notes:
@@ -1594,10 +1595,12 @@ def print_out_notes_v_or_h(m, print_line):
     # rof
 
     now = 0
-    txt = ' '
+    #--old--    txt = ' '
+    txt = ''
     while now < ml:
         for voice in range(1,len(vl)+1):
-            if txt != ' ':
+            #--old--    if txt != ' ':
+            if txt != '':
                 txt = txt + ','
             # fi
             i = workingtime[voice]
@@ -1606,7 +1609,8 @@ def print_out_notes_v_or_h(m, print_line):
                 l =  bufs_length[voice][m][j]
 
                 if l in legal_mc_notes:
-                    lth = "{:>3s}".format(legal_mc_notes[l] + bufs_accidentals[voice][m][j])
+                    #--old--    lth = "{:>3s}".format(legal_mc_notes[l] + bufs_accidentals[voice][m][j])
+                    lth = legal_mc_notes[l] + bufs_accidentals[voice][m][j]
                 else:
                     lth = str(Fraction(l).limit_denominator(256))
                     if '/' in lth:
@@ -1614,15 +1618,17 @@ def print_out_notes_v_or_h(m, print_line):
                     # fi
                     lth = lth + bufs_accidentals[voice][m][j]
                 # fi
-                txt = txt + "{:>4s}".format(bufs[voice][m][j]) + lth
+                #--old--    txt = txt + "{:>4s}".format(bufs[voice][m][j]) + lth
+                txt = txt + bufs[voice][m][j] + lth
                 workingtime[voice] = workingtime[voice] + l
                 working[voice] = working[voice] + 1
-            else:
-                txt = txt + '    ' + '   '
+            #--old--    else:
+            #--old--        txt = txt + '    ' + '   '
             # fi
         # rof
         print_line = print_line + txt + '\n'
-        txt = ' '
+        #--old--    txt = ' '
+        txt = ''
         nextmin = 999999
         for voice in range(1,len(vl)+1):
             if workingtime[voice] < nextmin:
@@ -1675,10 +1681,12 @@ def print_out_v_or_h():
 
     for i in range(0, len(meas)):
         m = meas[i]
-        if args.horizontal and m == meas[0]:
-            print_line = print_line + "*   1"
+        if args.horizontal and m == meas[0] and len(vl) > 1:
+            #--old--    print_line = print_line + "*   1"
+            print_line = print_line + "* 1"
             for j in range(2,len(vl)+1):
-                print_line = print_line + "   ,{:>4s}".format(str(j))
+                #--old-- print_line = print_line + "   ,{:>4s}".format(str(j))
+                print_line = print_line + ",{:>3s}".format(str(j))
             # rof
             print_line = print_line + '\n'
         # fi
@@ -2368,6 +2376,7 @@ def do_pass2():
     global errors_happened
     global goto_table
 
+    # Check that song finishes 'reasonably'.
     if ifdepth > 0:
         print("Error inside an if block (depth={}) when end of file or cstop* reached".format(ifdepth),file=sys.stderr, flush=True)
     # fi
@@ -3687,6 +3696,9 @@ def to_abc_note(note_number):
 #   decode  m1,3c+      $$ note number for 3c+ into m1
 def do_decode(t_args, line):
     global args
+    global measure_on
+    global key_sig
+    global key_voice
 
     if t_args is None or len(t_args) <= 0 or t_args[0] == '':
         print_error("decode command does not have any arguments.", line)
@@ -3703,23 +3715,59 @@ def do_decode(t_args, line):
     saveargsv = args.vertical
     saveargsm = args.midi1csv
     saveargabc = args.abc
+    savekeyvoice = key_voice[measure_on][1]
+    # ------------------------------------------------------------------------------
+    if args.vertical or args.horizontal:
+        k = key_sig[savekeyvoice]      # Convert to number.
+    elif args.midi1csv:
+        k = savekeyvoice
+    else:                   # ABC
+        # Convert to normal format.
+        k = savekeyvoice.lower()
+        k = k.replace('b', '-')             # Does multiple flats
+        k = k.replace('#', '+')             # Does multiple sharps.
+        k = k.replace('=', 'n')             # Does multiple naturals.
+        k = key_sig[k]                  # Convert to number.
+    # fi
+    # ------------------------------------------------------------------------------
     # Set to midi format -- so we have a value.
     args.horizontal = False
     args.vertical = False
     args.midi1csv = True
     args.abc = False
+    key_voice[measure_on][1] = k
 
     therest, thenote, typenote = getnote(wargs[1], 1, line)
+    # Ignore leading space.
     
     # Restore type of processing we are doing.
     args.horizontal = saveargsh
     args.vertical = saveargsv
     args.midi1csv = saveargsm
     args.abc = saveargabc
+    key_voice[measure_on][1] = savekeyvoice
 
-    if therest is None:
+    if therest is None or thenote is None:
         print_warning("decode note had error with note {}".format(wargs[1]), line)
         return
+    # fi
+    if therest and len(therest) > 0:
+        print_warning("decode note has information ({}) after the note {}".format(therest,wargs[1]), line)
+        return
+    # fi
+    if typenote != normal_note:
+        print_warning("decode note is not of type normal_note -- ({})".format(typenote), line)
+        return
+    # fi
+
+    if args.midi1csv:
+        computeit = wargs[0] + '=' + str(thenote)              # No conversion needed.
+    else:                   # ABC
+        if thenote <= 12+12-3:
+            computeit = wargs[0] + '=' + '0'                       # rest = 0
+        else:
+            computeit = wargs[0] + '=' + str(thenote) + '+3-12-12'  # Convert from midi note to musicomp value.
+        # fi
     # fi
     if thenote <= 12+12-3:
         computeit = wargs[0] + '=' + '0'                       # rest = 0
@@ -5564,9 +5612,9 @@ def getnote(note_to_decode, voice, line):
         # balance parens
         for temp2 in range(temp3 + 1, len(note_to_decode)):
             work4 = note_to_decode[temp2]
-            if work4 == '(' or work4 == '[':
+            if work4 == '(' or work4 == '[' or work4 == '{':
                 work3 = work3 + 1               # count ('s
-            elif work4 == ')' or work4 == ']':
+            elif work4 == ')' or work4 == ']' or work4 == '}':
                 work3 = work3 - 1               # subtract  )'s
                 if work3 < 1:
                     temp3 = temp2 + 1           # temp2 has last matched )
@@ -5607,6 +5655,10 @@ def getnote(note_to_decode, voice, line):
     # fi
     thenote = note_to_decode[temp3]
     if thenote not in [ 'a', 'b', 'c', 'd', 'e', 'f', 'g' ]:      # if not note -- reset, etc.
+        if temp3 != 0:
+            print_error("Not a note (sequence/trill?) has an octave before it", line)
+            return '', None, None                # ???
+        # fi
         if note_to_decode[0] == 's':            # check for sequence
             if note_to_decode[1] == '(':        # if time given
                 print_error("sequence does not have a number of notes before parenthesis", line)
@@ -5631,6 +5683,9 @@ def getnote(note_to_decode, voice, line):
             # fi
             number_in_sequence = int(round(number_in_sequence))
             therest = note_to_decode[sc:]
+            if leading_space:
+                therest = ' ' + therest             # Flag for later processing.
+            # fi
             return therest, number_in_sequence, sequence_note
         # fi
         if note_to_decode[0] == 't':            # check for trill
@@ -5642,7 +5697,11 @@ def getnote(note_to_decode, voice, line):
             #--     print_error("Note is not legal '{}' double trill".format(note_to_decode), line)
             #--     return '', None, normal_note
             #-- # fi
-            return note_to_decode[2:], 't(', trill_note
+            therest = note_to_decode[2:]
+            if leading_space:
+                therest = ' ' + therest             # Flag for later processing.
+            # fi
+            return therest, 't(', trill_note
         # fi
         if note_to_decode[0] == 'r':          # check for rest
             # Rest follows.
@@ -5656,6 +5715,9 @@ def getnote(note_to_decode, voice, line):
             temp3 = temp3 + 1
             # get ready for time computation
             therest = note_to_decode[temp3:]
+            if leading_space:
+                therest = ' ' + therest             # Flag for later processing.
+            # fi
             return therest, thenote, normal_note
         # fi
         print_error("Note is not legal '{}' unknown".format(note_to_decode), line)
@@ -5923,6 +5985,9 @@ def getnote(note_to_decode, voice, line):
     # fi
     if args.horizontal or args.vertical:
         thenote = "{}".format(o) + n + a
+        if leading_space:
+            thenote = ' ' + thenote
+        # fi
     elif args.midi1csv:
         if a != '':
             thenote = "{}".format(o) + n + a
@@ -6533,6 +6598,11 @@ def process_notes(t_args, line):
             # fi
             if typenote == trill_note:
                 therest, thenote, typenote = getnote(therest, onvoice, line)
+                leading_space = False
+                if thenote and len(thenote) > 0 and thenote[0] == ' ':
+                    thenote = thenote[1:]
+                    leading_space = True
+                # fi
                 if thenote is None or thenote == 0 or thenote == '':
                     print_error("trill is not legal, no first note", line)
                     return
@@ -6544,9 +6614,14 @@ def process_notes(t_args, line):
                     quotes = thenote
                 # fi
                 staccato = ''
+                legato = ''
                 if therest is not None and therest != '':   # Check for staccato after note.
                     if therest[0] == 's':
                         staccato = 's'
+                        therest = therest[1:]
+                    # fi
+                    if therest[0] == 'l':
+                        legato = 'l'
                         therest = therest[1:]
                     # fi
                 # fi
@@ -6574,9 +6649,14 @@ def process_notes(t_args, line):
                     return
                 # fi
                 staccato1 = ''
+                legato1 = ''
                 if therest is not None and therest != '':   # Check for staccato after note.
                     if therest[0] == 's':
                         staccato1 = 's'
+                        therest = therest[1:]
+                    # fi
+                    if therest[0] == 'l':
+                        legato1 = 'l'
                         therest = therest[1:]
                     # fi
                 # fi
@@ -6656,7 +6736,10 @@ def process_notes(t_args, line):
 
                 if args.horizontal or args.vertical:
                     np = int(round(np))
-                    abc_note = "t({}{},{}{},{})".format(quotes,staccato,quotes1,staccato1,np)
+                    abc_note = "t({}{}{},{}{}{},{})".format(quotes,staccato,legato,quotes1,staccato1,legato1,np)
+                    if leading_space:
+                        abc_note = ' ' + abc_note
+                    # fi
                     put_on_bufs(onvoice, measure_on, prenote, abc_note, lengthf[0], '', onenotevolume, '')
                     if vnumber is None:
                         break                                       # normal old way.
@@ -6677,10 +6760,10 @@ def process_notes(t_args, line):
                         # print("i={} put_on_lth={}".format(i,put_on_lth),file=sys.stderr,flush=True)
                         if (i % 2) == 0:
                             abc_note = quotes
-                            sn = staccato
+                            sn = staccato + legato
                         else:
                             abc_note = quotes1
-                            sn = staccato1
+                            sn = staccato1 + legato1
                         # fi
                         put_on_bufs(onvoice, measure_on, prenote, abc_note, put_on_lth, sn, onenotevolume, '')
                     # rof
@@ -6692,6 +6775,13 @@ def process_notes(t_args, line):
                 else:           # ABC
                     abc_note = "[L:{}]".format(l)
                     abc_note = abc_note + '(' + str(int(np)) + ':' + lth + ':' + str(int(np))
+                    if leading_space:
+                        abc_note = ' ' + abc_note
+                    # fi
+# NOTDONEYET - sequence/trill and legato.   -- trill_note fetching
+                    if legato != '' or legato1 != '':
+                        print("trill processing legato -- #1 NOTDONEYET",file=sys.stderr,flush=True)
+                    # fi
                     for i in range(0, int(np)):
                         if (i % 2) == 0:
                             if staccato == 's':
@@ -6712,6 +6802,7 @@ def process_notes(t_args, line):
                         l_dl = '1/1'
                     # fi
                     abc_note = abc_note + "[L:{}]".format(l_dl)
+# NOTDONEYET - sequence/trill and legato.   -- trill_note fetching
                     put_on_bufs(onvoice, measure_on, prenote, abc_note, lengthf[0], '', onenotevolume, postnote)
                     if vnumber is None:
                         break                                       # normal old way.
@@ -6720,6 +6811,11 @@ def process_notes(t_args, line):
                     continue
                 # fi
             elif typenote == sequence_note:
+                leading_space = False
+                if therest and len(therest) > 0 and therest[0] == ' ':
+                    therest = therest[1:]
+                    leading_space = True
+                # fi
                 number_in_sequence = thenote
                 if therest[0] != '(':
                     print_error("sequence is not legal, no parenthesis after number {}".format(number_in_sequence), line)
@@ -6731,6 +6827,7 @@ def process_notes(t_args, line):
                 vols_postnote = []              # for abc.
                 vols_onenote = []               # For midi1csv, volume for this note.
                 stacs = []
+                glides = []
                 for sn in range(0,number_in_sequence):
                     s_postnote = ''
                     s_prenote = ''
@@ -6771,9 +6868,14 @@ def process_notes(t_args, line):
                         quotes = thenote
                     # fi
                     staccato = ''
+                    legato = ''
                     if therest is not None and therest != '':   # Check for staccato after note.
                         if therest[0] == 's':
                             staccato = 's'
+                            therest = therest[1:]
+                        # fi
+                        if therest[0] == 'l':
+                            legato = 'l'
                             therest = therest[1:]
                         # fi
                     # fi
@@ -6793,6 +6895,7 @@ def process_notes(t_args, line):
                     vols_onenote.append(onenotevolume)
                     onenotevolume = None                # We used the last one.
                     stacs.append(staccato)
+                    glides.append(legato)
                 # rof
                 timeofnote, r_accidentals, number_dots = get_time(therest, line)
                 if r_accidentals is None or r_accidentals != accidental_normal or number_dots is None:
@@ -6816,12 +6919,15 @@ def process_notes(t_args, line):
                     n_s = ''
                     for i in range(0,len(notes)):
                         if i == 0:
-                            n_s = vols_prenote[i] + notes[i] + stacs[i] + vols_postnote[i]
+                            n_s = vols_prenote[i] + notes[i] + stacs[i] + glides[i] + vols_postnote[i]
                         else:
-                            n_s = n_s + ',' + vols_prenote[i] + notes[i] + stacs[i] + vols_postnote[i]
+                            n_s = n_s + ',' + vols_prenote[i] + notes[i] + stacs[i] + glides[i] + vols_postnote[i]
                         # fi
                     # rof
                     abc_note = "s{}({})".format(number_in_sequence, n_s)
+                    if leading_space:
+                        abc_note = ' ' + abc_note
+                    # fi
                     put_on_bufs(onvoice, measure_on, prenote, abc_note, lengthf[0], '', onenotevolume, '')
                     if vnumber is None:
                         break                                       # normal old way.
@@ -6842,7 +6948,7 @@ def process_notes(t_args, line):
                         put_on_lth = int(round(numerator/seq_num_so_far))
                         seq_num_so_far = seq_num_so_far - 1
                         numerator = numerator - put_on_lth
-                        put_on_bufs(onvoice, measure_on, prn, notes[i], put_on_lth, stacs[i], vols_onenote[i], '')
+                        put_on_bufs(onvoice, measure_on, prn, notes[i], put_on_lth, stacs[i] + glides[i], vols_onenote[i], '')
                     # rof
                     if vnumber is None:
                         break                                       # normal old way.
@@ -6878,6 +6984,9 @@ def process_notes(t_args, line):
                     if dnl_str == '1':
                         dnl_str = '1/1'
                     # fi
+                    if leading_space:
+                        abc_note = ' ' + abc_note
+                    # fi
                     abc_note = "[L:{}]".format(dnl_str)
                     abc_note = abc_note + '(' + str(number_in_sequence) + ':' + str(l_time) + ':' + str(number_in_sequence) + ' '
                     for l in range(0,len(notes)):
@@ -6893,12 +7002,16 @@ def process_notes(t_args, line):
                         else:
                             abc_note = abc_note + prn + notes[l] + psn
                         # fi
+                        if glides[l] != '':
+                            print("sequence processing legato -- #2 NOTDONEYET",file=sys.stderr,flush=True)
+                        # fi
                     # rof
                     l_dl = default_note_text_fraction(measure_on)
                     if l_dl == '1':
                         l_dl = '1/1'
                     # fi
                     abc_note = abc_note + "[L:{}]".format(l_dl)
+# NOTDONEYET - sequence/trill and legato.   -- sequence processing.
                     put_on_bufs(onvoice, measure_on, '', abc_note, lengthf[0], '', onenotevolume, '')
                     if vnumber is None:
                         break                                       # normal old way.
