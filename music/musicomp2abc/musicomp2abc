@@ -1555,7 +1555,6 @@ def print_out_notes_v_or_h(m, print_line):
             txt = txt + "v{}: ".format(voice)
             for i in range(0,len(bufs[voice][m])):
                 if i != 0:
-                    #--old--    txt = txt + ', '
                     txt = txt + ','
                 # fi
                 l =  bufs_length[voice][m][i]
@@ -1595,11 +1594,9 @@ def print_out_notes_v_or_h(m, print_line):
     # rof
 
     now = 0
-    #--old--    txt = ' '
     txt = ''
     while now < ml:
         for voice in range(1,len(vl)+1):
-            #--old--    if txt != ' ':
             if txt != '':
                 txt = txt + ','
             # fi
@@ -1609,7 +1606,6 @@ def print_out_notes_v_or_h(m, print_line):
                 l =  bufs_length[voice][m][j]
 
                 if l in legal_mc_notes:
-                    #--old--    lth = "{:>3s}".format(legal_mc_notes[l] + bufs_accidentals[voice][m][j])
                     lth = legal_mc_notes[l] + bufs_accidentals[voice][m][j]
                 else:
                     lth = str(Fraction(l).limit_denominator(256))
@@ -1618,16 +1614,12 @@ def print_out_notes_v_or_h(m, print_line):
                     # fi
                     lth = lth + bufs_accidentals[voice][m][j]
                 # fi
-                #--old--    txt = txt + "{:>4s}".format(bufs[voice][m][j]) + lth
                 txt = txt + bufs[voice][m][j] + lth
                 workingtime[voice] = workingtime[voice] + l
                 working[voice] = working[voice] + 1
-            #--old--    else:
-            #--old--        txt = txt + '    ' + '   '
             # fi
         # rof
         print_line = print_line + txt + '\n'
-        #--old--    txt = ' '
         txt = ''
         nextmin = 999999
         for voice in range(1,len(vl)+1):
@@ -1682,10 +1674,8 @@ def print_out_v_or_h():
     for i in range(0, len(meas)):
         m = meas[i]
         if args.horizontal and m == meas[0] and len(vl) > 1:
-            #--old--    print_line = print_line + "*   1"
             print_line = print_line + "* 1"
             for j in range(2,len(vl)+1):
-                #--old-- print_line = print_line + "   ,{:>4s}".format(str(j))
                 print_line = print_line + ",{:>3s}".format(str(j))
             # rof
             print_line = print_line + '\n'
@@ -2503,14 +2493,13 @@ def get_line():
                 commentdollardollar = ''
                 if '$$' in line:
                     # delete anything from $$ onwards.
-                    commentdollardollar = re.sub('^.*[$][$]', '$$', line)
-                    commentdollardollar = commentdollardollar.strip()
-                    line = re.sub('[$][$].*$', '', line)
+                    commentdollardollar = re.sub(r'^.*[$][$]', '$$', line, count=1)
+                    commentdollardollar = commentdollardollar.rstrip()  # trailing spaces gone
+                    line = re.sub(r'[$][$].*$', '', line)
                 # fi
                 # Convert tabs to spaces.
                 line = line.replace("\t", ' ')
-                # Remove spaces on both sides of string.
-                line = line.strip()
+                line = line.rstrip()                                    # trailing spaces gone.
                 # NOTDONEYET, the input from Plato Printouts where character ' is a shift.
                 # Convert ' followed by something as a "shift".  '; = :   'a = A
                 return line, commentdollardollar
@@ -3528,7 +3517,7 @@ def do_delay(t_args, line):
     for onvoice in range(loopstart+1, voices + 1):
         r = r + ',r({}/60.0)'.format(rvalue)
     # rof
-    process_notes([r], r)
+    process_notes(r)
     return
 # End of do_delay
 
@@ -6344,7 +6333,7 @@ def get_cresc(temp1, line):
 # Both have measure terminate them.
 
 #-- unit notego
-def process_notes(t_args, line):
+def process_notes(line):
     global voices                       # number of voices
     global cis                          # if cis active, non-zero.
     global time                         # set default note length (time) dictionary
@@ -6378,8 +6367,9 @@ def process_notes(t_args, line):
         print_error("no measure processed yet - must have one before notes.", line)
         return
     # fi
-    wline = re.sub(r'\s+', ' ', line)
-    wline = re.sub(r'([^,]) ', r'\1', wline)
+    wline = re.sub(r'\s+', ' ', line)           # multiple spaces to single space, multiple times.
+    wline = re.sub(r'([^,]) ', r'\1', wline)    # ', ' left alone, elsewise strip spaces.
+    wline = re.sub(r'^  *v', 'v', wline)          # 'no ' left alone, elsewise strip spaces.
     wargs = arglist(wline, line)
     if not wargs or len(wargs) < 1:
         print_error("no arguments on note line", line)
@@ -6599,7 +6589,7 @@ def process_notes(t_args, line):
             if typenote == trill_note:
                 therest, thenote, typenote = getnote(therest, onvoice, line)
                 leading_space = False
-                if thenote and len(thenote) > 0 and thenote[0] == ' ':
+                if thenote and type(thenote) is str and len(thenote) > 0 and thenote[0] == ' ':
                     thenote = thenote[1:]
                     leading_space = True
                 # fi
@@ -6778,23 +6768,31 @@ def process_notes(t_args, line):
                     if leading_space:
                         abc_note = ' ' + abc_note
                     # fi
-# NOTDONEYET - sequence/trill and legato.   -- trill_note fetching
-                    if legato != '' or legato1 != '':
-                        print("trill processing legato -- #1 NOTDONEYET",file=sys.stderr,flush=True)
-                    # fi
                     for i in range(0, int(np)):
                         if (i % 2) == 0:
-                            if staccato == 's':
-                                abc_note = abc_note + '.' + quotes
-                            else:
-                                abc_note = abc_note + quotes
-                            # fi
+                            leg = legato
+                            sta = staccato
+                            quo = quotes
                         else:
-                            if staccato1 == 's':
-                                abc_note = abc_note + '.' + quotes1
-                            else:
-                                abc_note = abc_note + quotes1
+                            leg = legato1
+                            sta = staccato1
+                            quo = quotes1
+                        # fi
+
+                        if leg != '':
+                            if bufs_legato_next[onvoice] != 'l':
+                                abc_note = abc_note + '('             # ( before the note for glide/legato
                             # fi
+                            bufs_legato_next[onvoice] = 'l'
+                        # fi
+                        if sta == 's':
+                            abc_note = abc_note + '.' + quo
+                        else:
+                            abc_note = abc_note + quo
+                        # fi
+                        if leg == '' and bufs_legato_next[onvoice] == 'l':
+                            abc_note = abc_note + ')'
+                            bufs_legato_next[onvoice] = ''
                         # fi
                     # rof
                     l_dl = default_note_text_fraction(measure_on)
@@ -6802,7 +6800,6 @@ def process_notes(t_args, line):
                         l_dl = '1/1'
                     # fi
                     abc_note = abc_note + "[L:{}]".format(l_dl)
-# NOTDONEYET - sequence/trill and legato.   -- trill_note fetching
                     put_on_bufs(onvoice, measure_on, prenote, abc_note, lengthf[0], '', onenotevolume, postnote)
                     if vnumber is None:
                         break                                       # normal old way.
@@ -6997,13 +6994,20 @@ def process_notes(t_args, line):
                             prn = vols_prenote[l]
                             psn = vols_postnote[l]
                         # fi
-                        if stacs[l] == 's':
-                            abc_note = abc_note + prn + '.' + notes[l] + psn
-                        else:
-                            abc_note = abc_note + prn + notes[l] + psn
-                        # fi
+                        abc_note = abc_note + prn
                         if glides[l] != '':
-                            print("sequence processing legato -- #2 NOTDONEYET",file=sys.stderr,flush=True)
+                            if bufs_legato_next[onvoice] != 'l':
+                                abc_note = abc_note + '('             # ( before the note for glide/legato
+                            # fi
+                            bufs_legato_next[onvoice] = 'l'
+                        # fi
+                        if stacs[l] == 's':
+                            abc_note = abc_note + '.'
+                        # fi
+                        abc_note = abc_note + notes[l] + psn
+                        if glides[l] == '' and bufs_legato_next[onvoice] == 'l':
+                            abc_note = abc_note + ')'
+                            bufs_legato_next[onvoice] = ''
                         # fi
                     # rof
                     l_dl = default_note_text_fraction(measure_on)
@@ -7125,7 +7129,7 @@ def process_notes(t_args, line):
                     if args.horizontal or args.vertical or args.midi1csv:
                         pass
                     else:           # ABC
-                        postnote = ')' + postnote           # ) after the note for glide/legato
+                        append_tie = ')' + append_tie
                     # fi
                 # fi
                 bufs_legato_next[onvoice] = ''
@@ -7154,14 +7158,17 @@ def process_line(t, line):
     global macro_buffer                 # Name of macro, array of lines for macro.
     global measure_on
 
-    if not t or len(t) == 0:
+    if not t or len(t) == 0 or not t[0] or t[0].lstrip() == '':
         return
     elif len(t) == 1:
-        command = t[0]
+        command = t[0].lstrip()
         t_args = None
     else:
-        command = t[0]
+        command = t[0].lstrip()
         t_args = t[1:]
+        if t_args and len(t_args) >= 0:
+            t_args[0] = t_args[0].lstrip()
+        # fi
     # fi
 
     if cstop_processing:
@@ -7219,7 +7226,7 @@ def process_line(t, line):
             print_error("Notes after a goto are not allowed. measure='{}'".format(measure_on), line)
             return
         # fi
-        process_notes(t,line)
+        process_notes(line)
     else:                               # Here if false for "if" -- special else, or in else, or both.
         if t[0] in commands:
             if commands[t[0]] == do_cstopnow:
@@ -7386,11 +7393,12 @@ def main():
                         # fi
                     # fi
                 # fi
-                t = line.split(' ', 1)
-                if t and t[0] and len(t) == 2 and t[1]:
-                    t[1] = t[1].strip()
-                # fi
-                if t and t[0] == '.':
+                line = re.sub(r'  ', r' ', line)                        # multiple spaces to single.
+                t0 = re.sub(r'(^ *[^ ]*).*$', r'\1', line, count=1)
+                t1 = re.sub(r'^ *[^ ]*', '', line, count=1)
+                t_tmp = t0.lstrip()                                     # For command lookup.
+                t = [ t0, t1 ]
+                if t_tmp and t_tmp == '.':
                     # If command == '.' toss '.'
                     if len(t) == 2 and t[1]:
                         line = t[1]
@@ -7404,9 +7412,9 @@ def main():
                 break
             # elihw
 
-            if t and t[0]:
+            if t_tmp and t_tmp[0]:
                 # If command == '*' ignore.
-                if t[0] != '*' and line[0] != '*' and t[0] != '#' and line[0] != '#':
+                if t_tmp[0] != '*' and line[0] != '*' and t_tmp[0] != '#' and line[0] != '#':
                     process_line(t, line)
                     precomment = ''
                 else:
