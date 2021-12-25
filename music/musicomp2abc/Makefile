@@ -15,7 +15,7 @@ MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 YAPS	     = yaps
 ABCM2PS	     = abcm2ps
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.abc
+.PRECIOUS: %.abc %.csv
 .SUFFIXES: .mid .csv .ps .abc _m.ps
 # output $@   -- input $<
 %.mid:	%.csv

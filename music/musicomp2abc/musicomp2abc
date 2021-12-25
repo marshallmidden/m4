@@ -1955,6 +1955,7 @@ def print_header():
             if m in goto_table:             # If goto exists, process it.
                 f = goto_variables[m]
                 g = goto_table[m][f]
+                print("goto at end measure={} value={} new_measure={}".format(m, f, g), file=sys.stderr,flush=True)
                 if f+1 >= len(goto_table[m]): # If should start over.
                     f = 0
                 else:
@@ -2171,12 +2172,14 @@ def print_out_midi1csv_notes():
                 if n != '0' and n != 0:         # Only for note that plays (not rest).
                     n_print = int(n) + pitch[m]
                     v_vl = bufs_vol[voice][m][i]
-                    if 'l' in bufs_accidentals[voice][m][i]:
-                        print("{}, {}, Control_c, {}, 68, 127".format(voice+1, lth, chan), file=output_name, flush=True)
-                    # fi
                     print("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lth, chan, n_print, v_vl), file=output_name, flush=True)
-                    if 'l' in bufs_accidentals[voice][m][i]:
-                        print("{}, {}, Control_c, {}, 68, 127".format(voice+1, lth+1, chan), file=output_name, flush=True)
+# NOTDONEYET - legato -- turn on/off between notes.
+#--                    if 'l' in bufs_accidentals[voice][m][i]:
+#--                        leg = 127
+#--                    else:
+#--                        leg = 0
+#--                    # fi
+#--                    print("{}, {}, Control_c, {}, 68, {}".format(voice+1, lth, chan, leg), file=output_name, flush=True)
                     # fi
                 # fi
                 tmp,m_number,lastmeter, channel, chan, l_instrument, last_keysig, lt,ll = do_possible_midi_tie(m, voice, lthworkingmeasures, i, l,lastmeter, channel, chan, l_instrument, last_keysig, lt,ll)
@@ -2187,6 +2190,12 @@ def print_out_midi1csv_notes():
                         tmp = int(round(tmp / 2.0))
                     # fi
                     print("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, (lth + tmp - 1), chan, n_print, 0), file=output_name, flush=True)
+#--                    if 'l' in bufs_accidentals[voice][m][i]:
+#--                        leg = 127
+#--                    else:
+#--                        leg = 0
+#--                    # fi
+#--                    print("{}, {}, Control_c, {}, 68, {}".format(voice+1, (lth + tmp - 1), chan, leg), file=output_name, flush=True)
                 # fi
                 lth = lth + l
                 i = i + 1
@@ -3742,23 +3751,12 @@ def do_decode(t_args, line):
     # fi
     if therest and len(therest) > 0:
         print_warning("decode note has information ({}) after the note {}".format(therest,wargs[1]), line)
-        return
     # fi
     if typenote != normal_note:
         print_warning("decode note is not of type normal_note -- ({})".format(typenote), line)
         return
     # fi
-
-    if args.midi1csv:
-        computeit = wargs[0] + '=' + str(thenote)              # No conversion needed.
-    else:                   # ABC
-        if thenote <= 12+12-3:
-            computeit = wargs[0] + '=' + '0'                       # rest = 0
-        else:
-            computeit = wargs[0] + '=' + str(thenote) + '+3-12-12'  # Convert from midi note to musicomp value.
-        # fi
-    # fi
-    if thenote <= 12+12-3:
+    if thenote <= 12 + 12 - 3:
         computeit = wargs[0] + '=' + '0'                       # rest = 0
     else:
         computeit = wargs[0] + '=' + str(thenote) + '+3-12-12'  # Convert from midi note to musicomp value.
@@ -5622,6 +5620,9 @@ def getnote(note_to_decode, voice, line):
                         #-- thenote = freq(thenote)
                         thenote = 968000/thenote    # NOT handled anywhere.
                     elif typenote == normal_note:
+                        if thenote != 0 and args.midi1csv:
+                            thenote = thenote + 12 + 12 - 3     # 3c -> 39 must be 60 for midi.
+                        # fi
                         if thenote != 0:
                             thenote = thenote + xpose[voice]
                         # fi
@@ -6579,8 +6580,12 @@ def process_notes(line):
                 if args.vertical or args.horizontal:
                     thenote = "({})".format(thenote)        # Put back as a number.
                 elif args.midi1csv:
-                    if thenote < 0:
+                    if thenote <= 0:
                         thenote = 0
+                    else:
+                        if thenote >= 128:
+                            thenote = 127
+                        # fi
                     # fi
                 else:           # ABC
                     thenote = to_abc_note(thenote)          # Convert number to abc text.
@@ -6981,10 +6986,11 @@ def process_notes(line):
                     if dnl_str == '1':
                         dnl_str = '1/1'
                     # fi
+                    abc_note = ''
                     if leading_space:
                         abc_note = ' ' + abc_note
                     # fi
-                    abc_note = "[L:{}]".format(dnl_str)
+                    abc_note = abc_note + "[L:{}]".format(dnl_str)
                     abc_note = abc_note + '(' + str(number_in_sequence) + ':' + str(l_time) + ':' + str(number_in_sequence) + ' '
                     for l in range(0,len(notes)):
                         if l == 0 and vols_prenote[l] == '':
@@ -7160,7 +7166,7 @@ def process_line(t, line):
 
     if not t or len(t) == 0 or not t[0] or t[0].lstrip() == '':
         return
-    elif len(t) == 1:
+    elif len(t) == 1 or (len(t) == 2 and t[1] == ''):
         command = t[0].lstrip()
         t_args = None
     else:

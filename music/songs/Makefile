@@ -1,5 +1,7 @@
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ../musicomp2abc/musicomp2abc
+YAPS         = yaps
+ABCM2PS      = abcm2ps
 #-----------------------------------------------------------------------------
 #++ = to do yet.
 #-  = macros -- they are not implemented yet.
@@ -27,8 +29,6 @@ SONGS += inv3
 SONGS += inventio-15
 SONGS += invention8
 SONGS += macros-abstraction
-SONGS += macro-aer-ber
-# SONGS += macros-complicated	# NOTDONEYET SOMETHING WRONG WITH "decode m22,A" and then "r(m22)".
 SONGS += minuet-in-G-major
 SONGS += promenade
 SONGS += promenade2
@@ -60,14 +60,12 @@ SONGS += mary
 SONGS += merry
 SONGS += minuet-in-g
 SONGS += moscows
-# SONGS += nachtmusik		# NOTDONEYET Figure out GOTOs and VOLUMEs
 SONGS += nowell
 SONGS += raindeer
 SONGS += rednose
 SONGS += russian-folk-song
 SONGS += shepherds
 SONGS += silentnite
-#++ SONGS += slidall
 SONGS += sol
 SONGS += sonatina
 SONGS += trokiaride
@@ -100,7 +98,7 @@ SONGS += taps
 SONGS += warren1
 SONGS += brand3
 SONGS += chicks
-SONGS += cradle
+
 SONGS += dream
 SONGS += gnome
 SONGS += inv1
@@ -116,37 +114,45 @@ SONGS += double_rat
 SONGS += kije
 SONGS += putd-test
 
+SONGS += cradle
+SONGS += macro-aer-ber
+SONGS += macros-complicated
+
+# SONGS += nachtmusik		# NOTDONEYET Figure out GOTOs and VOLUMEs
+#				# Missing rests, voice in the middle of a measure, goto 5 -- no 5??
+BROKEN += nachtmusik
+
+#++ SONGS += slidall		# Cannot do this in python or MIDI.
+
+
 #-----------------------------------------------------------------------------
-#-- SONGS_abc = ${SONGS:=.abc}
-#-- SONGS_ps = ${SONGS:=.ps}
-#-- SONGS_csv = ${SONGS:=.csv}
 SONGS_mid = ${SONGS:=.mid}
+BROKEN_mid = ${BROKEN:=.mid}
+#-----------------------------------------------------------------------------
+.PRECIOUS: %.abc
+.SUFFIXES: .mid .csv .ps .abc _m.ps
+# output $@   -- input $<
+%.mid:  %.csv
+	csvmidi $< $@
+%.csv:  %
+	${MUSICOMP2ABC} --midi1csv $< $@
+%.abc:  %
+	${MUSICOMP2ABC} --abc $< $@
+%.ps:   %.abc
+	${YAPS} $< -o $@ -k
+%_m.ps: %.abc
+	${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@
 #-----------------------------------------------------------------------------
 .PHONY: all
-#-- all: ${SONGS_ps} ${SONGS_mid} ${SONGS_abc}
 all: ${SONGS_mid}
-#-- ${SONGS_mid}: ${SONGS_csv}
 #-----------------------------------------------------------------------------
-.SUFFIXES:		# delete the default suffixes
-#-- .SUFFIXES:  .abc 1.mid .ps
-#-- .SUFFIXES:  .mid .csv
-.SUFFIXES:  .mid
-#-----------------------------------------------------------------------------
-#-- %1.mid: %.abc
-#-- 	abc2midi $<
-%.mid: %
-	${MUSICOMP2ABC} -m $< $<.csv || (rm -f $@ ; exit 1)
-	csvmidi $<.csv $@
-#-- %.ps: %.abc
-#-- 	yaps $< -k
-#-- %.abc: %
-#-- 	${MUSICOMP2ABC} < $< > $@ || (rm -f $@ ; exit 1)
-#-- %.csv: %
-#-----------------------------------------------------------------------------
-#-- ${SONGS_ps}: ${SONGS_abc}
-#-- ${SONGS_mid}: ${SONGS_abc}
+.PHONY: broken
+broken: ${BROKEN_mid}
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -f *.mid *.ps *.abc *.csv
+	rm -f *.ps
+	rm -f *.csv *.mid
+	rm -f *.abc
 #-----------------------------------------------------------------------------
+# End of Makefile
