@@ -5,19 +5,21 @@ MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 YAPS         = yaps
 ABCM2PS      = abcm2ps
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.abc
-.SUFFIXES: .mid .csv .ps .abc _m.ps
+.PRECIOUS: %.abc %.csv %.mid
+.SUFFIXES: .mid .csv .ps .abc _m.ps .wav
 # output $@   -- input $<
+%.csv:  %.gcs
+	${MUSICOMP2ABC} --midi1csv $< $@ || rm -f $@
 %.mid:  %.csv
-	csvmidi $< $@
-%.csv:  %
-	${MUSICOMP2ABC} --midi1csv $< $@
-%.abc:  %
-	${MUSICOMP2ABC} --abc $< $@
+	csvmidi $< $@ || (rm -f $@ ; exit 1)
+%.wav:  %.mid
+	fluidsynth -F $@ -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 $<
+%.abc:  %.gcs
+	${MUSICOMP2ABC} --abc $< $@ || (rm -f $@ ; exit 1)
 %.ps:   %.abc
-	${YAPS} $< -o $@ -k
+	${YAPS} $< -o $@ -k || (rm -f $@ ; exit 1)
 %_m.ps: %.abc
-	${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@
+	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@) || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.A_abc
 .SUFFIXES: _A.ps .A_abc _m_A.ps
@@ -66,7 +68,7 @@ check:
 	@echo "YAPS=${YAPS}"
 	@echo "ABCM2PS=${ABCM2PS}"
 #=============================================================================
-all: ${V}.mid ${V}.ps ${V}_m.ps
+all: ${V}.mid ${V}.ps ${V}_m.ps ${V}.wav
 	#++ open ${V}.ps ${V}_m.ps
 	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 ${V}.mid
 	#-- fluidsynth -F "${V}.wav" -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 "${V}.mid"
@@ -77,6 +79,7 @@ clean::
 	rm -f *.stdout *.stderr
 	rm -f *.csv *.mid
 	rm -f *.abc *.A_abc
+	rm -f *.wav
 	rm -f A.[012]* B.[012]*
 #-----------------------------------------------------------------------------
 $(foreach e,$(s),$(eval $(call many_targets,$(e))))
