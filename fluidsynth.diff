@@ -1,0 +1,2157 @@
+diff --git a/include/fluidsynth.cmake b/include/fluidsynth.cmake
+index 654a4fd1..66426c52 100644
+--- a/include/fluidsynth.cmake
++++ b/include/fluidsynth.cmake
+@@ -22,6 +22,7 @@
+ #define _FLUIDSYNTH_H
+ 
+ #include <stdio.h>
++#include <time.h>
+ 
+ #ifdef __cplusplus
+ extern "C" {
+@@ -95,6 +96,35 @@ extern "C" {
+  * SoundFont(R) is a registered trademark of E-mu Systems, Inc.
+  */
+ 
++#if 0
++#define m4_print1(a)	fprintf(stderr, "%5ld:%u:%s " a, \
++	(long)pthread_mach_thread_np(pthread_self()), __LINE__,__func__)
++#define m4_print(b, c...)	fprintf(stderr, "%5ld:%u:%s " b, \
++	(long)pthread_mach_thread_np(pthread_self()), __LINE__,__func__, \
++	c)
++
++//    fprintf(stderr, "%5ld: dspA: s=%d e=%d ls=%d le=%d po=%02f pi=%02f p=%02f rp=%02f\n",
++//	(long)pthread_mach_thread_np(pthread_self()),
++//	c->dsp.start, c->dsp.end, c->dsp.loopstart, c->dsp.loopend,
++//	c->dsp.pitchoffset, c->dsp.pitchinc, c->dsp.pitch, c->dsp.root_pitch_hz);
++//    fprintf(stderr, "%5ld: dspB: or=%02f atn=%02f patn=%02f amp=%02f phase=%04lld\n",
++//	(long)pthread_mach_thread_np(pthread_self()),
++//	c->dsp.output_rate, c->dsp.attenuation, c->dsp.prev_attenuation, c->dsp.amp, c->dsp.phase);
++
++#define m4_print_rvoice(c)	\
++ {  fprintf(stderr, "%5ld:%u:%s ticks=%d vol: c=%d s=%d v=%.2f mod: c=%d s=%d v=%.2f p=%02f rp=%02f\n", \
++	(long)pthread_mach_thread_np(pthread_self()), __LINE__,__func__, c->envlfo.ticks,           \
++	c->envlfo.volenv.count, c->envlfo.volenv.section, c->envlfo.volenv.val,                     \
++	c->envlfo.modenv.count, c->envlfo.modenv.section, c->envlfo.modenv.val,			    \
++	c->dsp.pitch, c->dsp.root_pitch_hz);                   \
++  }
++#else	/* 0 */
++#define m4_print1(a)
++#define m4_print(b, c...)
++#define m4_print_rvoice(c)
++#endif	/* 0 */
++
++
+ #include "fluidsynth/types.h"
+ #include "fluidsynth/settings.h"
+ #include "fluidsynth/synth.h"
+diff --git a/include/fluidsynth/synth.h b/include/fluidsynth/synth.h
+index b8d0b0ab..0d771cc1 100644
+--- a/include/fluidsynth/synth.h
++++ b/include/fluidsynth/synth.h
+@@ -458,6 +458,9 @@ enum fluid_channel_legato_mode
+ {
+     FLUID_CHANNEL_LEGATO_MODE_RETRIGGER, /**< Mode 0 - Release previous note, start a new note */
+     FLUID_CHANNEL_LEGATO_MODE_MULTI_RETRIGGER, /**< Mode 1 - On contiguous notes retrigger in attack section using current value, shape attack using current dynamic and make use of previous voices if any */
++    FLUID_CHANNEL_LEGATO_MODE_IGNORE2,	       /**< Mode 2 - Ignore, do "Mode 0". */
++    FLUID_CHANNEL_LEGATO_MODE_IGNORE3,	       /**< Mode 3 - Ignore, do "Mode 0". */
++    FLUID_CHANNEL_LEGATO_MODE_NO_ATTACK,       /**< Mode 4 - No attack on new note. */
+     FLUID_CHANNEL_LEGATO_MODE_LAST /**< @internal Value defines the count of legato modes (#fluid_channel_legato_mode) @warning This symbol is not part of the public API and ABI stability guarantee and may change at any time! */
+ };
+ 
+diff --git a/src/bindings/fluid_cmd.c b/src/bindings/fluid_cmd.c
+index ba8c3eb1..073e3591 100644
+--- a/src/bindings/fluid_cmd.c
++++ b/src/bindings/fluid_cmd.c
+@@ -3121,7 +3121,7 @@ int fluid_handle_legatomode(void *data, int ac, char **av,
+ {
+     static const char name_cde[] = "legatomode";
+     static const char *const name_legato_mode[FLUID_CHANNEL_LEGATO_MODE_LAST] =
+-    {	"(0)retrigger", "(1)multi-retrigger"	};
++    {	"(0)retrigger", "(1)multi-retrigger", "(2)-ignore2", "(3)-ignore3", "(4)no-attack" };
+ 
+     FLUID_ENTRY_COMMAND(data);
+     fluid_synth_t *synth = handler->synth;
+diff --git a/src/drivers/fluid_coreaudio.c b/src/drivers/fluid_coreaudio.c
+index bfa482e3..7b7cd399 100644
+--- a/src/drivers/fluid_coreaudio.c
++++ b/src/drivers/fluid_coreaudio.c
+@@ -173,6 +173,16 @@ new_fluid_core_audio_driver2(fluid_settings_t *settings, fluid_audio_func_t func
+     UInt32 size;
+     int i;
+ 
++    // Open the default output unit
++#if MAC_OS_X_VERSION_MIN_REQUIRED < 1060
++    ComponentDescription desc;
++    Component comp;
++#else
++    AudioComponentDescription desc;
++    AudioComponent comp;
++#endif
++    AURenderCallbackStruct render;
++
+     dev = FLUID_NEW(fluid_core_audio_driver_t);
+ 
+     if(dev == NULL)
+@@ -186,12 +196,6 @@ new_fluid_core_audio_driver2(fluid_settings_t *settings, fluid_audio_func_t func
+     dev->callback = func;
+     dev->data = data;
+ 
+-    // Open the default output unit
+-#if MAC_OS_X_VERSION_MIN_REQUIRED < 1060
+-    ComponentDescription desc;
+-#else
+-    AudioComponentDescription desc;
+-#endif
+     desc.componentType = kAudioUnitType_Output;
+     desc.componentSubType = kAudioUnitSubType_HALOutput; //kAudioUnitSubType_DefaultOutput;
+     desc.componentManufacturer = kAudioUnitManufacturer_Apple;
+@@ -199,9 +203,9 @@ new_fluid_core_audio_driver2(fluid_settings_t *settings, fluid_audio_func_t func
+     desc.componentFlagsMask = 0;
+ 
+ #if MAC_OS_X_VERSION_MIN_REQUIRED < 1060
+-    Component comp = FindNextComponent(NULL, &desc);
++    comp = FindNextComponent(NULL, &desc);
+ #else
+-    AudioComponent comp = AudioComponentFindNext(NULL, &desc);
++    comp = AudioComponentFindNext(NULL, &desc);
+ #endif
+ 
+     if(comp == NULL)
+@@ -223,7 +227,6 @@ new_fluid_core_audio_driver2(fluid_settings_t *settings, fluid_audio_func_t func
+     }
+ 
+     // Set up a callback function to generate output
+-    AURenderCallbackStruct render;
+     render.inputProc = fluid_core_audio_callback;
+     render.inputProcRefCon = (void *) dev;
+     status = AudioUnitSetProperty(dev->outputUnit,
+@@ -418,6 +421,7 @@ fluid_core_audio_callback(void *data,
+ 
+     if(dev->callback)
+     {
++m4_print1("dev->callback exists\n");
+         float *left = dev->buffers[0];
+         float *right = dev->buffers[1];
+ 
+@@ -433,8 +437,11 @@ fluid_core_audio_callback(void *data,
+         }
+     }
+     else
++{
++m4_print1("calling fluid_synth_write_float\n");
+         fluid_synth_write_float((fluid_synth_t *) dev->data, len, buffer, 0, 2,
+                                 buffer, 1, 2);
++}
+ 
+     return noErr;
+ }
+diff --git a/src/drivers/fluid_coremidi.c b/src/drivers/fluid_coremidi.c
+index ab002d1f..b66fa80a 100644
+--- a/src/drivers/fluid_coremidi.c
++++ b/src/drivers/fluid_coremidi.c
+@@ -108,6 +108,8 @@ new_fluid_coremidi_driver(fluid_settings_t *settings, handle_midi_event_func_t h
+     char *id;
+     CFStringRef str_portname;
+     CFStringRef str_clientname;
++    OSStatus result;
++    CFStringRef str_input_portname;
+ 
+     /* not much use doing anything */
+     if(handler == NULL)
+@@ -173,7 +175,7 @@ new_fluid_coremidi_driver(fluid_settings_t *settings, handle_midi_event_func_t h
+         FLUID_FREE(portname);    /* -- free port name */
+     }
+ 
+-    OSStatus result = MIDIClientCreate(str_clientname, NULL, NULL, &client);
++    result = MIDIClientCreate(str_clientname, NULL, NULL, &client);
+     CFRelease(str_clientname);
+ 
+     if(result != noErr)
+@@ -194,7 +196,7 @@ new_fluid_coremidi_driver(fluid_settings_t *settings, handle_midi_event_func_t h
+         goto error_recovery;
+     }
+ 
+-    CFStringRef str_input_portname = CFSTR("input");
++    str_input_portname = CFSTR("input");
+     result = MIDIInputPortCreate(client, str_input_portname,
+                                  fluid_coremidi_callback,
+                                  (void *)dev, &dev->input_port);
+diff --git a/src/drivers/fluid_sdl2.c b/src/drivers/fluid_sdl2.c
+index a7275a9a..ce51aba7 100644
+--- a/src/drivers/fluid_sdl2.c
++++ b/src/drivers/fluid_sdl2.c
+@@ -48,6 +48,7 @@ SDLAudioCallback(void *data, void *stream, int len)
+ 
+     len /= dev->frame_size;
+ 
++m4_print1("Entering (write_ptr)");
+     dev->write_ptr(dev->synth, len, stream, 0, 2, stream, 1, 2);
+ }
+ 
+diff --git a/src/drivers/fluid_waveout.c b/src/drivers/fluid_waveout.c
+index b67ead76..f51fd98d 100644
+--- a/src/drivers/fluid_waveout.c
++++ b/src/drivers/fluid_waveout.c
+@@ -185,6 +185,7 @@ static DWORD WINAPI fluid_waveout_synth_thread(void *data)
+                 }
+                 while(i);
+ 
++m4_print1("Entering (write_ptr)");
+                 dev->write_ptr(dev->func ? (fluid_synth_t*)dev : dev->synth, dev->num_frames, dev->channels_count,
+                                channels_out, channels_off, channels_incr);
+ 
+diff --git a/src/midi/fluid_midi_router.c b/src/midi/fluid_midi_router.c
+index d3928274..bd929929 100644
+--- a/src/midi/fluid_midi_router.c
++++ b/src/midi/fluid_midi_router.c
+@@ -882,34 +882,34 @@ int fluid_midi_dump_prerouter(void *data, fluid_midi_event_t *event)
+     switch(event->type)
+     {
+     case NOTE_ON:
+-        fprintf(stdout, "event_pre_noteon %i %i %i\n",
++        fprintf(stderr, "event_pre_noteon %i %i %i\n",
+                 event->channel, event->param1, event->param2);
+         break;
+ 
+     case NOTE_OFF:
+-        fprintf(stdout, "event_pre_noteoff %i %i %i\n",
++        fprintf(stderr, "event_pre_noteoff %i %i %i\n",
+                 event->channel, event->param1, event->param2);
+         break;
+ 
+     case CONTROL_CHANGE:
+-        fprintf(stdout, "event_pre_cc %i %i %i\n",
++        fprintf(stderr, "event_pre_cc %i %i %i\n",
+                 event->channel, event->param1, event->param2);
+         break;
+ 
+     case PROGRAM_CHANGE:
+-        fprintf(stdout, "event_pre_prog %i %i\n", event->channel, event->param1);
++        fprintf(stderr, "event_pre_prog %i %i\n", event->channel, event->param1);
+         break;
+ 
+     case PITCH_BEND:
+-        fprintf(stdout, "event_pre_pitch %i %i\n", event->channel, event->param1);
++        fprintf(stderr, "event_pre_pitch %i %i\n", event->channel, event->param1);
+         break;
+ 
+     case CHANNEL_PRESSURE:
+-        fprintf(stdout, "event_pre_cpress %i %i\n", event->channel, event->param1);
++        fprintf(stderr, "event_pre_cpress %i %i\n", event->channel, event->param1);
+         break;
+ 
+     case KEY_PRESSURE:
+-        fprintf(stdout, "event_pre_kpress %i %i %i\n",
++        fprintf(stderr, "event_pre_kpress %i %i %i\n",
+                 event->channel, event->param1, event->param2);
+         break;
+ 
+@@ -935,34 +935,34 @@ int fluid_midi_dump_postrouter(void *data, fluid_midi_event_t *event)
+     switch(event->type)
+     {
+     case NOTE_ON:
+-        fprintf(stdout, "event_post_noteon %i %i %i\n",
++        fprintf(stderr, "event_post_noteon %i %i %i\n",
+                 event->channel, event->param1, event->param2);
+         break;
+ 
+     case NOTE_OFF:
+-        fprintf(stdout, "event_post_noteoff %i %i %i\n",
++        fprintf(stderr, "event_post_noteoff %i %i %i\n",
+                 event->channel, event->param1, event->param2);
+         break;
+ 
+     case CONTROL_CHANGE:
+-        fprintf(stdout, "event_post_cc %i %i %i\n",
++        fprintf(stderr, "event_post_cc %i %i %i\n",
+                 event->channel, event->param1, event->param2);
+         break;
+ 
+     case PROGRAM_CHANGE:
+-        fprintf(stdout, "event_post_prog %i %i\n", event->channel, event->param1);
++        fprintf(stderr, "event_post_prog %i %i\n", event->channel, event->param1);
+         break;
+ 
+     case PITCH_BEND:
+-        fprintf(stdout, "event_post_pitch %i %i\n", event->channel, event->param1);
++        fprintf(stderr, "event_post_pitch %i %i\n", event->channel, event->param1);
+         break;
+ 
+     case CHANNEL_PRESSURE:
+-        fprintf(stdout, "event_post_cpress %i %i\n", event->channel, event->param1);
++        fprintf(stderr, "event_post_cpress %i %i\n", event->channel, event->param1);
+         break;
+ 
+     case KEY_PRESSURE:
+-        fprintf(stdout, "event_post_kpress %i %i %i\n",
++        fprintf(stderr, "event_post_kpress %i %i %i\n",
+                 event->channel, event->param1, event->param2);
+         break;
+ 
+diff --git a/src/rvoice/fluid_adsr_env.c b/src/rvoice/fluid_adsr_env.c
+index 00bdd40f..3b43a2b1 100644
+--- a/src/rvoice/fluid_adsr_env.c
++++ b/src/rvoice/fluid_adsr_env.c
+@@ -30,6 +30,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_adsr_env_set_data)
+     fluid_real_t min = param[4].real;
+     fluid_real_t max = param[5].real;
+ 
++m4_print1("Entering\n");
+     env->data[section].count = count;
+     env->data[section].coeff = coeff;
+     env->data[section].increment = increment;
+diff --git a/src/rvoice/fluid_adsr_env.h b/src/rvoice/fluid_adsr_env.h
+index 9ed652d0..6fe233f9 100644
+--- a/src/rvoice/fluid_adsr_env.h
++++ b/src/rvoice/fluid_adsr_env.h
+@@ -39,14 +39,25 @@ struct _fluid_env_data_t
+ /* Indices for envelope tables */
+ enum fluid_voice_envelope_index_t
+ {
+-    FLUID_VOICE_ENVDELAY,
+-    FLUID_VOICE_ENVATTACK,
+-    FLUID_VOICE_ENVHOLD,
+-    FLUID_VOICE_ENVDECAY,
+-    FLUID_VOICE_ENVSUSTAIN,
+-    FLUID_VOICE_ENVRELEASE,
+-    FLUID_VOICE_ENVFINISHED,
+-    FLUID_VOICE_ENVLAST
++    FLUID_VOICE_ENVDELAY,		// 0
++    FLUID_VOICE_ENVATTACK,		// 1
++    FLUID_VOICE_ENVHOLD,		// 2
++    FLUID_VOICE_ENVDECAY,		// 3
++    FLUID_VOICE_ENVSUSTAIN,		// 4
++    FLUID_VOICE_ENVRELEASE,		// 5
++    FLUID_VOICE_ENVFINISHED,		// 6
++    FLUID_VOICE_ENVLAST			// 7
++};
++static char *char_fluid_voice_env[FLUID_VOICE_ENVLAST + 1] =
++{
++    "FLUID_VOICE_ENVDELAY",		// 0
++    "FLUID_VOICE_ENVATTACK",		// 1
++    "FLUID_VOICE_ENVHOLD",		// 2
++    "FLUID_VOICE_ENVDECAY",		// 3
++    "FLUID_VOICE_ENVSUSTAIN",		// 4
++    "FLUID_VOICE_ENVRELEASE",		// 5
++    "FLUID_VOICE_ENVFINISHED",		// 6
++    "FLUID_VOICE_ENVLAST",		// 7
+ };
+ 
+ typedef enum fluid_voice_envelope_index_t fluid_adsr_env_section_t;
+@@ -76,13 +87,16 @@ fluid_adsr_env_calc(fluid_adsr_env_t *env, int is_volenv)
+     {
+         // If we're switching envelope stages from decay to sustain, force the value to be the end value of the previous stage
+         // Hmm, should this only apply to volenv? It was so before refactoring, so keep it for now. [DH]
++m4_print("#1 section=%d %s\n", env->section, char_fluid_voice_env[env->section]);
+         if(env->section == FLUID_VOICE_ENVDECAY && is_volenv)
+         {
++m4_print("#2 section=%d %s == FLUID_VOICE_ENVDECAY(%d)\n", env->section,char_fluid_voice_env[env->section],FLUID_VOICE_ENVDECAY);
+             env->val = env_data->min * env_data->coeff;
+         }
+ 
+         env_data = &env->data[++env->section];
+         env->count = 0;
++m4_print("#3 section=%d %s\n", env->section,char_fluid_voice_env[env->section]);
+     }
+ 
+     /* calculate the envelope value and check for valid range */
+diff --git a/src/rvoice/fluid_lfo.c b/src/rvoice/fluid_lfo.c
+index ae21cdd0..f9c7adc0 100644
+--- a/src/rvoice/fluid_lfo.c
++++ b/src/rvoice/fluid_lfo.c
+@@ -5,6 +5,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_lfo_set_incr)
+     fluid_lfo_t *lfo = obj;
+     fluid_real_t increment = param[0].real;
+ 
++m4_print1("Entering\n");
+     lfo->increment = increment;
+ }
+ 
+@@ -13,5 +14,6 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_lfo_set_delay)
+     fluid_lfo_t *lfo = obj;
+     unsigned int delay = param[0].i;
+ 
++m4_print1("Entering\n");
+     lfo->delay = delay;
+ }
+diff --git a/src/rvoice/fluid_rvoice.c b/src/rvoice/fluid_rvoice.c
+index 5f54c33b..93f82273 100644
+--- a/src/rvoice/fluid_rvoice.c
++++ b/src/rvoice/fluid_rvoice.c
+@@ -33,19 +33,24 @@ fluid_rvoice_calc_amp(fluid_rvoice_t *voice)
+ {
+     fluid_real_t target_amp;	/* target amplitude */
+ 
++// m4_print(stderr, "#1 section=%d pitch=%.2f\n",fluid_adsr_env_get_section(&voice->envlfo.volenv),voice->dsp.pitch);
+     if(fluid_adsr_env_get_section(&voice->envlfo.volenv) == FLUID_VOICE_ENVDELAY)
+     {
++// m4_print(stderr, "section(%d)==FLUID_VOICE_ENVDELAY\n",FLUID_VOICE_ENVDELAY);
+         return -1;    /* The volume amplitude is in hold phase. No sound is produced. */
+     }
+ 
++// m4_print("#2 section=%d pitch=%.2f\n", fluid_adsr_env_get_section(&voice->envlfo.volenv),voice->dsp.pitch);
+     if(fluid_adsr_env_get_section(&voice->envlfo.volenv) == FLUID_VOICE_ENVATTACK)
+     {
++// m4_print("section(%d)==FLUID_VOICE_ENVATTACK\n",FLUID_VOICE_ENVATTACK);
+         /* the envelope is in the attack section: ramp linearly to max value.
+          * A positive modlfo_to_vol should increase volume (negative attenuation).
+          */
+         target_amp = fluid_cb2amp(voice->dsp.attenuation)
+                      * fluid_cb2amp(fluid_lfo_get_val(&voice->envlfo.modlfo) * -voice->envlfo.modlfo_to_vol)
+                      * fluid_adsr_env_get_val(&voice->envlfo.volenv);
++// m4_print("in the FLUID_VOICE_ENVATTACK section target_amp=%.2f\n",target_amp);
+     }
+     else
+     {
+@@ -55,6 +60,7 @@ fluid_rvoice_calc_amp(fluid_rvoice_t *voice)
+         target_amp = fluid_cb2amp(voice->dsp.attenuation)
+                      * fluid_cb2amp(FLUID_PEAK_ATTENUATION * (1.0f - fluid_adsr_env_get_val(&voice->envlfo.volenv))
+                                     + fluid_lfo_get_val(&voice->envlfo.modlfo) * -voice->envlfo.modlfo_to_vol);
++// m4_print("section(%d %s), target_amp=%.2f\n",__func__, fluid_adsr_env_get_section(&voice->envlfo.volenv), char_fluid_voice_env[fluid_adsr_env_get_section(&voice->envlfo.volenv)], target_amp);
+ 
+         /* We turn off a voice, if the volume has dropped low enough. */
+ 
+@@ -76,6 +82,7 @@ fluid_rvoice_calc_amp(fluid_rvoice_t *voice)
+         {
+             amplitude_that_reaches_noise_floor = voice->dsp.amplitude_that_reaches_noise_floor_nonloop;
+         }
++// m4_print("amplitude_that_reaches_noise_floor=%.2f\n",amplitude_that_reaches_noise_floor);
+ 
+         /* voice->attenuation_min is a lower boundary for the attenuation
+          * now and in the future (possibly 0 in the worst case).  Now the
+@@ -86,11 +93,13 @@ fluid_rvoice_calc_amp(fluid_rvoice_t *voice)
+         amp_max = fluid_cb2amp(voice->dsp.min_attenuation_cB) *
+                   fluid_adsr_env_get_val(&voice->envlfo.volenv);
+ 
++// m4_print("amp_max=%.2f\n",amp_max);
+         /* And if amp_max is already smaller than the known amplitude,
+          * which will attenuate the sample below the noise floor, then we
+          * can safely turn off the voice. Duh. */
+         if(amp_max < amplitude_that_reaches_noise_floor)
+         {
++// m4_print1("volume too low, turn it off\n");
+             return 0;
+         }
+     }
+@@ -103,9 +112,11 @@ fluid_rvoice_calc_amp(fluid_rvoice_t *voice)
+     /* no volume and not changing? - No need to process */
+     if((voice->dsp.amp == 0.0f) && (voice->dsp.amp_incr == 0.0f))
+     {
++// m4_print1("no volume and not changing\n");
+         return -1;
+     }
+ 
++// m4_print1("return 1\n");
+     return 1;
+ }
+ 
+@@ -331,16 +342,19 @@ fluid_rvoice_write(fluid_rvoice_t *voice, fluid_real_t *dsp_buf)
+ 
+     /******************* vol env **********************/
+ 
++// m4_print1("volenv calling fluid_adsr_env_calc\n");
+     fluid_adsr_env_calc(&voice->envlfo.volenv, 1);
+     fluid_check_fpe("voice_write vol env");
+ 
+     if(fluid_adsr_env_get_section(&voice->envlfo.volenv) == FLUID_VOICE_ENVFINISHED)
+     {
++m4_print1("return 0  FLUID_VOICE_ENVFINISHED\n");
+         return 0;
+     }
+ 
+     /******************* mod env **********************/
+ 
++// m4_print1("modenv calling fluid_adsr_env_calc\n");
+     fluid_adsr_env_calc(&voice->envlfo.modenv, 0);
+     fluid_check_fpe("voice_write mod env");
+ 
+@@ -357,6 +371,7 @@ fluid_rvoice_write(fluid_rvoice_t *voice, fluid_real_t *dsp_buf)
+ 
+     if(count <= 0)
+     {
++m4_print("return count=%d\n", count);
+         return count; /* return -1 if voice is quiet, 0 if voice has finished */
+     }
+ 
+@@ -399,17 +414,17 @@ fluid_rvoice_write(fluid_rvoice_t *voice, fluid_real_t *dsp_buf)
+         {
+             voice->dsp.pitchoffset = voice->dsp.pitchinc = 0.0f;
+         }
+-    }
+-    else if(voice->dsp.pitchinc < 0.0f)
+-    {
+-        /* portamento is enabled, so update pitchoffset */
+-        voice->dsp.pitchoffset += voice->dsp.pitchinc;
+-
+-        /* when pitchoffset reaches 0.0f, portamento is disabled */
+-        if(voice->dsp.pitchoffset < 0.0f)
+-        {
+-            voice->dsp.pitchoffset = voice->dsp.pitchinc = 0.0f;
+-        }
++	else if(voice->dsp.pitchinc < 0.0f)
++	{
++	    /* portamento is enabled, so update pitchoffset */
++	    voice->dsp.pitchoffset += voice->dsp.pitchinc;
++
++	    /* when pitchoffset reaches 0.0f, portamento is disabled */
++	    if(voice->dsp.pitchoffset < 0.0f)
++	    {
++		voice->dsp.pitchoffset = voice->dsp.pitchinc = 0.0f;
++	    }
++	}
+     }
+ 
+     fluid_check_fpe("voice_write phase calculation");
+@@ -455,6 +470,7 @@ fluid_rvoice_write(fluid_rvoice_t *voice, fluid_real_t *dsp_buf)
+ 
+     if(count == 0)
+     {
++m4_print("return count=%d\n", count);
+         return count;
+     }
+ 
+@@ -535,6 +551,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_reset)
+ {
+     fluid_rvoice_t *voice = obj;
+ 
++m4_print_rvoice(voice);
+     voice->dsp.has_looped = 0;
+     voice->envlfo.ticks = 0;
+     voice->envlfo.noteoff_ticks = 0;
+@@ -573,6 +590,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_noteoff)
+     fluid_rvoice_t *rvoice = obj;
+     unsigned int min_ticks = param[0].i;
+ 
++m4_print_rvoice(rvoice);
+     fluid_rvoice_noteoff_LOCAL(rvoice, min_ticks);
+ }
+ 
+@@ -641,25 +659,30 @@ static FLUID_INLINE void fluid_rvoice_local_retrigger_attack(fluid_rvoice_t *voi
+     /* skips to Attack section */
+     /* Once in Attack section, current count must be reset, to be sure
+     that the section will be not be prematurely finished. */
++m4_print("calling fluid_adsr_env_set_section %d %s\n", FLUID_VOICE_ENVATTACK, char_fluid_voice_env[FLUID_VOICE_ENVATTACK]);
+     fluid_adsr_env_set_section(&voice->envlfo.volenv, FLUID_VOICE_ENVATTACK);
+     {
+         /* Correction on volume val to achieve equivalent amplitude at noteOn legato */
+         fluid_env_data_t *env_data;
+         fluid_real_t peak = fluid_cb2amp(voice->dsp.attenuation);
+         fluid_real_t prev_peak = fluid_cb2amp(voice->dsp.prev_attenuation);
++m4_print("volenv set to %d %s\n", FLUID_VOICE_ENVATTACK, char_fluid_voice_env[FLUID_VOICE_ENVATTACK]);
+         voice->envlfo.volenv.val = (voice->envlfo.volenv.val  * prev_peak) / peak;
+         /* Correction on slope direction for Attack section */
+         env_data = &voice->envlfo.volenv.data[FLUID_VOICE_ENVATTACK];
++m4_print("volenv set to %d %s\n", FLUID_VOICE_ENVATTACK, char_fluid_voice_env[FLUID_VOICE_ENVATTACK]);
+ 
+         if(voice->envlfo.volenv.val <= 1.0f)
+         {
+             /* slope attack for legato note needs to be positive from val  up to 1 */
++m4_print1("slope attack for legato note needs to be positive\n");
+             env_data->increment = 1.0f / env_data->count;
+             env_data->min = -1.0f;
+             env_data->max =  1.0f;
+         }
+         else
+         {
++m4_print1("slope attack for legato note needs to be negative\n");
+             /* slope attack for legato note needs to be negative: from val  down to 1 */
+             env_data->increment = -voice->envlfo.volenv.val / env_data->count;
+             env_data->min = 1.0f;
+@@ -668,6 +691,59 @@ static FLUID_INLINE void fluid_rvoice_local_retrigger_attack(fluid_rvoice_t *voi
+     }
+ }
+ 
++#if 0
++/**
++ * skips to Hold section ??
++ *
++ * Updates vol and attack data
++ * Correction on volume val to achieve equivalent amplitude at noteOn legato
++ *
++ * @param voice the synthesis voice to be updated
++*/
++#define NO_ATTACK	FLUID_VOICE_ENVATTACK
++// strange decaying	#define NO_ATTACK	FLUID_VOICE_ENVHOLD
++// on-or-off	#define NO_ATTACK	FLUID_VOICE_ENVDECAY
++// on-or-off	#define NO_ATTACK	FLUID_VOICE_ENVSUSTAIN
++// ???		#define NO_ATTACK	FLUID_VOICE_ENVRELEASE
++// ???		#define NO_ATTACK	FLUID_VOICE_ENVFINISHED
++
++static FLUID_INLINE void fluid_rvoice_local_no_attack(fluid_rvoice_t *voice)
++{
++    /* Once in Attack section, current count must be reset, to be sure
++       that the section will be not be prematurely finished. */
++m4_print_rvoice(voice);
++    fluid_adsr_env_set_section(&voice->envlfo.volenv, NO_ATTACK);
++    {
++        /* Correction on volume val to achieve equivalent amplitude at noteOn legato */
++        fluid_env_data_t *env_data;
++        fluid_real_t peak = fluid_cb2amp(voice->dsp.attenuation);
++        fluid_real_t prev_peak = fluid_cb2amp(voice->dsp.prev_attenuation);
++m4_print("volenv set to %d %s\n", NO_ATTACK, char_fluid_voice_env[NO_ATTACK]);
++        voice->envlfo.volenv.val = (voice->envlfo.volenv.val  * prev_peak) / peak;
++        /* Correction on slope direction for Attack section */
++        env_data = &voice->envlfo.volenv.data[NO_ATTACK];
++m4_print("volenv set to %d %s\n", NO_ATTACK, char_fluid_voice_env[NO_ATTACK]);
++
++        if(voice->envlfo.volenv.val <= 1.0f)
++        {
++            /* slope attack for legato note needs to be positive from val  up to 1 */
++m4_print1("slope attack for legato note needs to be positive\n");
++            env_data->increment = 1.0f / env_data->count;
++            env_data->min = -1.0f;
++            env_data->max =  1.0f;
++        }
++        else
++        {
++m4_print1("slope attack for legato note needs to be negative\n");
++            /* slope attack for legato note needs to be negative: from val  down to 1 */
++            env_data->increment = -voice->envlfo.volenv.val / env_data->count;
++            env_data->min = 1.0f;
++            env_data->max = voice->envlfo.volenv.val;
++        }
++    }
++}
++#endif /* 0 */
++
+ /**
+  * Used by legato Mode : multi_retrigger
+  *  see fluid_synth_noteon_mono_legato_multi_retrigger()
+@@ -681,6 +757,8 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_multi_retrigger_attack)
+     /*-------------------------------------------------------------------------
+      Section skip for volume envelope
+     --------------------------------------------------------------------------*/
++m4_print_rvoice(voice);
++m4_print("#9 section=%d pitch=%.2f\n", fluid_adsr_env_get_section(&voice->envlfo.volenv),voice->dsp.pitch);
+     section = fluid_adsr_env_get_section(&voice->envlfo.volenv);
+     if(section >= FLUID_VOICE_ENVHOLD)
+     {
+@@ -688,6 +766,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_multi_retrigger_attack)
+         volenv_val to achieve equivalent amplitude during the attack phase
+         for seamless volume transition. */
+         fluid_real_t amp_cb, env_value;
++m4_print("section(%d %s) >= FLUID_VOICE_ENVHOLD(%d) equivalent decay/sustain/release volumes\n", section, char_fluid_voice_env[section],FLUID_VOICE_ENVHOLD);
+         amp_cb = FLUID_PEAK_ATTENUATION *
+                  (1.0f - fluid_adsr_env_get_val(&voice->envlfo.volenv));
+         env_value = fluid_cb2amp(amp_cb); /* a bit of optimization */
+@@ -703,6 +782,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_multi_retrigger_attack)
+     /*-------------------------------------------------------------------------
+      Section skip for modulation envelope
+     --------------------------------------------------------------------------*/
++m4_print("#10 section=%d pitch=%.2f\n", fluid_adsr_env_get_section(&voice->envlfo.volenv),voice->dsp.pitch);
+     section = fluid_adsr_env_get_section(&voice->envlfo.modenv);
+     if(section >= FLUID_VOICE_ENVHOLD)
+     {
+@@ -716,15 +796,85 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_multi_retrigger_attack)
+         val = (1 - current_val) . FLUID_PEAK_ATTENUATION / 2.0 
+         */
+         fluid_real_t new_value; /* new modenv value */
++m4_print("section(%d %s) >= FLUID_VOICE_ENVHOLD(%d)\n", section, char_fluid_voice_env[section],FLUID_VOICE_ENVHOLD);
+         new_value = fluid_cb2amp((1.0f - fluid_adsr_env_get_val(&voice->envlfo.modenv))
+                                   * FLUID_PEAK_ATTENUATION / 2.0);
+         fluid_clip(new_value, 0.0, 1.0);
+         fluid_adsr_env_set_val(&voice->envlfo.modenv, new_value);
+     }
+     /* Skips from any section to ATTACK section */
++m4_print1("calling fluid_adsr_env_set_section FLUID_VOICE_ENVATTACK\n");
+     fluid_adsr_env_set_section(&voice->envlfo.modenv, FLUID_VOICE_ENVATTACK);
+ }
+ 
++/**
++ * Used by legato Mode : no attack
++ * @param voice the synthesis voice to be updated
++*/
++DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_no_attack)
++{
++    fluid_rvoice_t *voice = obj;
++    fluid_real_t value = param[0].real; 
++
++m4_print_rvoice(voice);
++    voice->dsp.pitch = value;
++m4_print_rvoice(voice);
++
++#if 0
++    int section; /* volume or modulation section */
++    /*-------------------------------------------------------------------------
++     Section skip for volume envelope
++    --------------------------------------------------------------------------*/
++m4_print("#11 section=%d pitch=%.2f\n", fluid_adsr_env_get_section(&voice->envlfo.volenv),voice->dsp.pitch);
++    section = fluid_adsr_env_get_section(&voice->envlfo.volenv);
++    if(section >= FLUID_VOICE_ENVHOLD)
++    {
++        /* DECAY, SUSTAIN,RELEASE section use logarithmic scaling. Calculates new
++        volenv_val to achieve equivalent amplitude during the attack phase
++        for seamless volume transition. */
++        fluid_real_t amp_cb, env_value;
++m4_print("section(%d %s) >= FLUID_VOICE_ENVHOLD(%d) equivalent decay/sustain/release volumes\n", section, char_fluid_voice_env[section],FLUID_VOICE_ENVHOLD);
++        amp_cb = FLUID_PEAK_ATTENUATION *
++                 (1.0f - fluid_adsr_env_get_val(&voice->envlfo.volenv));
++        env_value = fluid_cb2amp(amp_cb); /* a bit of optimization */
++        fluid_clip(env_value, 0.0, 1.0);
++        fluid_adsr_env_set_val(&voice->envlfo.volenv, env_value);
++        /* next, skips to Attack section */
++    }
++
++    /* skips to Attack section from any section */
++    /* Update vol and  attack data */
++    fluid_rvoice_local_no_attack(voice);
++    
++    /*-------------------------------------------------------------------------
++     Section skip for modulation envelope
++    --------------------------------------------------------------------------*/
++m4_print("#12 section=%d pitch=%.2f\n", fluid_adsr_env_get_section(&voice->envlfo.volenv),voice->dsp.pitch);
++    section = fluid_adsr_env_get_section(&voice->envlfo.modenv);
++    if(section >= FLUID_VOICE_ENVHOLD)
++    {
++        /* DECAY, SUSTAIN,RELEASE section use linear scaling. 
++        Since v 2.1 , as recommended by soundfont 2.01/2.4 spec, ATTACK section
++        uses convex shape (see fluid_rvoice_write() - fluid_convex()).
++        Calculate new modenv value (new_value) for seamless attack transition.
++        Here we need the inverse of fluid_convex() function defined as:
++        new_value = pow(10, (1 - current_val) . FLUID_PEAK_ATTENUATION / -200 . 2.0)
++        For performance reason we use fluid_cb2amp(Val) = pow(10, val/-200) with
++        val = (1 - current_val) . FLUID_PEAK_ATTENUATION / 2.0 
++        */
++        fluid_real_t new_value; /* new modenv value */
++m4_print("section(%d %s) >= FLUID_VOICE_ENVHOLD(%d)\n", section, char_fluid_voice_env[section],FLUID_VOICE_ENVHOLD);
++        new_value = fluid_cb2amp((1.0f - fluid_adsr_env_get_val(&voice->envlfo.modenv))
++                                  * FLUID_PEAK_ATTENUATION / 2.0);
++        fluid_clip(new_value, 0.0, 1.0);
++        fluid_adsr_env_set_val(&voice->envlfo.modenv, new_value);
++    }
++    /* Skips from any section to HOLD section */
++m4_print1("calling fluid_adsr_env_set_section FLUID_VOICE_ENVHOLD\n");
++    fluid_adsr_env_set_section(&voice->envlfo.modenv, FLUID_VOICE_ENVHOLD);
++#endif /* 0 */
++}
++
+ /**
+  * sets the portamento dsp parameters: dsp.pitchoffset, dsp.pitchinc
+  * @param voice rvoice to set portamento.
+@@ -742,6 +892,8 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_portamento)
+     unsigned int countinc = param[0].i;
+     fluid_real_t pitchoffset = param[1].real;
+ 
++m4_print_rvoice(voice);
++m4_print("Entering countinc=%d pitchoffset=%.2f pitchinc=%.2f pitch=%.2f root_pitch_hz=%.2f\n", countinc,pitchoffset, voice->dsp.pitchinc, voice->dsp.pitch, voice->dsp.root_pitch_hz);
+     if(countinc)
+     {
+         voice->dsp.pitchoffset += pitchoffset;
+@@ -758,6 +910,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_output_rate)
+     fluid_rvoice_t *voice = obj;
+     fluid_real_t value = param[0].real;
+ 
++m4_print_rvoice(voice);
+     voice->dsp.output_rate = value;
+ }
+ 
+@@ -766,6 +919,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_interp_method)
+     fluid_rvoice_t *voice = obj;
+     int value = param[0].i;
+ 
++m4_print_rvoice(voice);
+     voice->dsp.interp_method = value;
+ }
+ 
+@@ -774,6 +928,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_root_pitch_hz)
+     fluid_rvoice_t *voice = obj;
+     fluid_real_t value = param[0].real;
+ 
++m4_print_rvoice(voice);
+     voice->dsp.root_pitch_hz = value;
+ }
+ 
+@@ -782,6 +937,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_pitch)
+     fluid_rvoice_t *voice = obj;
+     fluid_real_t value = param[0].real;
+ 
++m4_print_rvoice(voice);
+     voice->dsp.pitch = value;
+ }
+ 
+@@ -791,6 +947,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_attenuation)
+     fluid_rvoice_t *voice = obj;
+     fluid_real_t value = param[0].real;
+ 
++m4_print_rvoice(voice);
+     voice->dsp.prev_attenuation = voice->dsp.attenuation;
+     voice->dsp.attenuation = value;
+ }
+@@ -800,6 +957,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_min_attenuation_cB)
+     fluid_rvoice_t *voice = obj;
+     fluid_real_t value = param[0].real;
+ 
++m4_print_rvoice(voice);
+     voice->dsp.min_attenuation_cB = value;
+ }
+ 
+@@ -808,6 +966,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_viblfo_to_pitch)
+     fluid_rvoice_t *voice = obj;
+     fluid_real_t value = param[0].real;
+ 
++m4_print_rvoice(voice);
+     voice->envlfo.viblfo_to_pitch = value;
+ }
+ 
+@@ -816,6 +975,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_modlfo_to_pitch)
+     fluid_rvoice_t *voice = obj;
+     fluid_real_t value = param[0].real;
+ 
++m4_print_rvoice(voice);
+     voice->envlfo.modlfo_to_pitch = value;
+ }
+ 
+@@ -824,6 +984,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_modlfo_to_vol)
+     fluid_rvoice_t *voice = obj;
+     fluid_real_t value = param[0].real;
+ 
++m4_print_rvoice(voice);
+     voice->envlfo.modlfo_to_vol = value;
+ }
+ 
+@@ -832,6 +993,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_modlfo_to_fc)
+     fluid_rvoice_t *voice = obj;
+     fluid_real_t value = param[0].real;
+ 
++m4_print_rvoice(voice);
+     voice->envlfo.modlfo_to_fc = value;
+ }
+ 
+@@ -840,6 +1002,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_modenv_to_fc)
+     fluid_rvoice_t *voice = obj;
+     fluid_real_t value = param[0].real;
+ 
++m4_print_rvoice(voice);
+     voice->envlfo.modenv_to_fc = value;
+ }
+ 
+@@ -848,6 +1011,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_modenv_to_pitch)
+     fluid_rvoice_t *voice = obj;
+     fluid_real_t value = param[0].real;
+ 
++m4_print_rvoice(voice);
+     voice->envlfo.modenv_to_pitch = value;
+ }
+ 
+@@ -856,6 +1020,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_synth_gain)
+     fluid_rvoice_t *voice = obj;
+     fluid_real_t value = param[0].real;
+ 
++m4_print_rvoice(voice);
+     voice->dsp.synth_gain = value;
+ 
+     /* For a looped sample, this value will be overwritten as soon as the
+@@ -872,6 +1037,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_start)
+     fluid_rvoice_t *voice = obj;
+     int value = param[0].i;
+ 
++m4_print_rvoice(voice);
+     voice->dsp.start = value;
+     voice->dsp.check_sample_sanity_flag |= FLUID_SAMPLESANITY_CHECK;
+ }
+@@ -881,6 +1047,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_end)
+     fluid_rvoice_t *voice = obj;
+     int value = param[0].i;
+ 
++m4_print_rvoice(voice);
+     voice->dsp.end = value;
+     voice->dsp.check_sample_sanity_flag |= FLUID_SAMPLESANITY_CHECK;
+ }
+@@ -890,6 +1057,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_loopstart)
+     fluid_rvoice_t *voice = obj;
+     int value = param[0].i;
+ 
++m4_print_rvoice(voice);
+     voice->dsp.loopstart = value;
+     voice->dsp.check_sample_sanity_flag |= FLUID_SAMPLESANITY_CHECK;
+ }
+@@ -899,6 +1067,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_loopend)
+     fluid_rvoice_t *voice = obj;
+     int value = param[0].i;
+ 
++m4_print_rvoice(voice);
+     voice->dsp.loopend = value;
+     voice->dsp.check_sample_sanity_flag |= FLUID_SAMPLESANITY_CHECK;
+ }
+@@ -908,6 +1077,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_samplemode)
+     fluid_rvoice_t *voice = obj;
+     enum fluid_loop value = param[0].i;
+ 
++m4_print_rvoice(voice);
+     voice->dsp.samplemode = value;
+     voice->dsp.check_sample_sanity_flag |= FLUID_SAMPLESANITY_CHECK;
+ }
+@@ -918,6 +1088,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_sample)
+     fluid_rvoice_t *voice = obj;
+     fluid_sample_t *value = param[0].ptr;
+ 
++m4_print_rvoice(voice);
+     voice->dsp.sample = value;
+ 
+     if(value)
+@@ -930,6 +1101,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_voiceoff)
+ {
+     fluid_rvoice_t *voice = obj;
+ 
++m4_print_rvoice(voice);
+     fluid_adsr_env_set_section(&voice->envlfo.volenv, FLUID_VOICE_ENVFINISHED);
+     fluid_adsr_env_set_section(&voice->envlfo.modenv, FLUID_VOICE_ENVFINISHED);
+ }
+diff --git a/src/rvoice/fluid_rvoice.h b/src/rvoice/fluid_rvoice.h
+index 610afd72..e6e98600 100644
+--- a/src/rvoice/fluid_rvoice.h
++++ b/src/rvoice/fluid_rvoice.h
+@@ -177,6 +177,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_noteoff);
+ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_voiceoff);
+ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_reset);
+ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_multi_retrigger_attack);
++DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_no_attack);
+ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_portamento);
+ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_output_rate);
+ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_set_interp_method);
+diff --git a/src/rvoice/fluid_rvoice_event.c b/src/rvoice/fluid_rvoice_event.c
+index e60115f3..347a6d8b 100644
+--- a/src/rvoice/fluid_rvoice_event.c
++++ b/src/rvoice/fluid_rvoice_event.c
+@@ -30,6 +30,7 @@ static int fluid_rvoice_eventhandler_push_LOCAL(fluid_rvoice_eventhandler_t *han
+ static FLUID_INLINE void
+ fluid_rvoice_event_dispatch(fluid_rvoice_event_t *event)
+ {
++m4_print1("Entering\n");
+     event->method(event->object, event->param);
+ }
+ 
+@@ -169,6 +170,73 @@ fluid_rvoice_eventhandler_dispatch_count(fluid_rvoice_eventhandler_t *handler)
+ }
+ 
+ 
++struct routine_name { void *routine; char *name;}  print_routine_name[] =
++{
++    { (void *)fluid_adsr_env_set_data, "fluid_adsr_env_set_data" },
++    { (void *)fluid_iir_filter_init, "fluid_iir_filter_init" },
++    { (void *)fluid_iir_filter_set_fres, "fluid_iir_filter_set_fres" },
++    { (void *)fluid_iir_filter_set_q, "fluid_iir_filter_set_q" },
++    { (void *)fluid_lfo_set_delay, "fluid_lfo_set_delay" },
++    { (void *)fluid_lfo_set_incr, "fluid_lfo_set_incr" },
++    { (void *)fluid_rvoice_buffers_set_amp, "fluid_rvoice_buffers_set_amp" },
++    { (void *)fluid_rvoice_buffers_set_mapping, "fluid_rvoice_buffers_set_mapping" },
++    { (void *)fluid_rvoice_mixer_chorus_enable, "fluid_rvoice_mixer_chorus_enable" },
++    { (void *)fluid_rvoice_mixer_reset_chorus, "fluid_rvoice_mixer_reset_chorus" },
++    { (void *)fluid_rvoice_mixer_reset_reverb, "fluid_rvoice_mixer_reset_reverb" },
++    { (void *)fluid_rvoice_mixer_reverb_enable, "fluid_rvoice_mixer_reverb_enable" },
++    { (void *)fluid_rvoice_mixer_set_chorus_enabled, "fluid_rvoice_mixer_set_chorus_enabled" },
++    { (void *)fluid_rvoice_mixer_set_chorus_params, "fluid_rvoice_mixer_set_chorus_params" },
++    { (void *)fluid_rvoice_mixer_set_polyphony, "fluid_rvoice_mixer_set_polyphony" },
++    { (void *)fluid_rvoice_mixer_set_reverb_params, "fluid_rvoice_mixer_set_reverb_params" },
++    { (void *)fluid_rvoice_mixer_set_samplerate, "fluid_rvoice_mixer_set_samplerate" },
++    { (void *)fluid_rvoice_multi_retrigger_attack, "fluid_rvoice_multi_retrigger_attack" },
++    { (void *)fluid_rvoice_noteoff, "fluid_rvoice_noteoff" },
++    { (void *)fluid_rvoice_reset, "fluid_rvoice_reset" },
++    { (void *)fluid_rvoice_set_attenuation, "fluid_rvoice_set_attenuation" },
++    { (void *)fluid_rvoice_set_end, "fluid_rvoice_set_end" },
++    { (void *)fluid_rvoice_set_interp_method, "fluid_rvoice_set_interp_method" },
++    { (void *)fluid_rvoice_set_loopend, "fluid_rvoice_set_loopend" },
++    { (void *)fluid_rvoice_set_loopstart, "fluid_rvoice_set_loopstart" },
++    { (void *)fluid_rvoice_set_min_attenuation_cB, "fluid_rvoice_set_min_attenuation_cB" },
++    { (void *)fluid_rvoice_set_modenv_to_fc, "fluid_rvoice_set_modenv_to_fc" },
++    { (void *)fluid_rvoice_set_modenv_to_pitch, "fluid_rvoice_set_modenv_to_pitch" },
++    { (void *)fluid_rvoice_set_modlfo_to_fc, "fluid_rvoice_set_modlfo_to_fc" },
++    { (void *)fluid_rvoice_set_modlfo_to_pitch, "fluid_rvoice_set_modlfo_to_pitch" },
++    { (void *)fluid_rvoice_set_modlfo_to_vol, "fluid_rvoice_set_modlfo_to_vol" },
++    { (void *)fluid_rvoice_set_output_rate, "fluid_rvoice_set_output_rate" },
++    { (void *)fluid_rvoice_set_pitch, "fluid_rvoice_set_pitch" },
++    { (void *)fluid_rvoice_set_portamento, "fluid_rvoice_set_portamento" },
++    { (void *)fluid_rvoice_set_no_attack, "fluid_rvoice_set_no_attack" },
++    { (void *)fluid_rvoice_set_root_pitch_hz, "fluid_rvoice_set_root_pitch_hz" },
++    { (void *)fluid_rvoice_set_sample, "fluid_rvoice_set_sample" },
++    { (void *)fluid_rvoice_set_samplemode, "fluid_rvoice_set_samplemode" },
++    { (void *)fluid_rvoice_set_start, "fluid_rvoice_set_start" },
++    { (void *)fluid_rvoice_set_synth_gain, "fluid_rvoice_set_synth_gain" },
++    { (void *)fluid_rvoice_set_viblfo_to_pitch, "fluid_rvoice_set_viblfo_to_pitch" },
++    { (void *)fluid_rvoice_voiceoff, "fluid_rvoice_voiceoff" },
++    { (void *)fluid_rvoice_mixer_add_voice, "fluid_rvoice_mixer_add_voice" },
++    { (void *)0, "UNKNOWN" }
++};
++
++#define print_rvoice_method(method) \
++{ \
++    int i = 0; \
++    while (print_routine_name[i].routine != (void *)0) \
++    { \
++	if (print_routine_name[i].routine == method) \
++	{ \
++	    m4_print("method='%s'\n", print_routine_name[i].name); \
++	    i = -1; \
++	    break; \
++	} \
++	i++; \
++    } \
++    if (i > -1) \
++    { \
++	m4_print("method=%p '%s'\n", method, print_routine_name[i].name); \
++    } \
++}   /* End of print_rvoice_method */
++
+ /**
+  * Call fluid_rvoice_event_dispatch for all events in queue
+  * @return number of events dispatched
+@@ -179,9 +247,11 @@ fluid_rvoice_eventhandler_dispatch_all(fluid_rvoice_eventhandler_t *handler)
+     fluid_rvoice_event_t *event;
+     int result = 0;
+ 
++m4_print1("Entering\n");
+     while(NULL != (event = fluid_ringbuffer_get_outptr(handler->queue)))
+     {
+         fluid_rvoice_event_dispatch(event);
++print_rvoice_method(event->method);
+         result++;
+         fluid_ringbuffer_next_outptr(handler->queue);
+     }
+diff --git a/src/rvoice/fluid_rvoice_mixer.c b/src/rvoice/fluid_rvoice_mixer.c
+index 0b2d1606..58562fd1 100644
+--- a/src/rvoice/fluid_rvoice_mixer.c
++++ b/src/rvoice/fluid_rvoice_mixer.c
+@@ -503,6 +503,19 @@ fluid_mixer_buffers_render_one(fluid_mixer_buffers_t *buffers,
+ {
+     int i, total_samples = 0, last_block_mixed = 0;
+ 
++fluid_adsr_env_t *vm = &rvoice->envlfo.volenv;
++m4_print("volenv count=%d section=%d %s val=%.2f blockcount=%d\n", vm->count, vm->section,char_fluid_voice_env[vm->section],vm->val, blockcount);
++for (i=0; i<FLUID_VOICE_ENVLAST; i++) {
++fluid_env_data_t *d = &vm->data[i];
++m4_print("  i=%d %s count=%d coeff=%.2f increment=%.2f min=%.2f max=%.2f\n", i, char_fluid_voice_env[i], d->count,d->coeff,d->increment,d->min,d->max);
++}
++vm = &rvoice->envlfo.modenv;
++m4_print("modenv count=%d section=%d %s val=%.2f\n", vm->count, vm->section,char_fluid_voice_env[vm->section],vm->val);
++for (i=0; i<FLUID_VOICE_ENVLAST; i++) {
++fluid_env_data_t *d = &vm->data[i];
++m4_print("  i=%d %s count=%d coeff=%.2f increment=%.2f min=%.2f max=%.2f\n", i, char_fluid_voice_env[i], d->count,d->coeff,d->increment,d->min,d->max);
++}
++
+     for(i = 0; i < blockcount; i++)
+     {
+         /* render one block in src_buf */
+@@ -549,6 +562,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_mixer_add_voice)
+     fluid_rvoice_mixer_t *mixer = obj;
+     fluid_rvoice_t *voice = param[0].ptr;
+ 
++m4_print_rvoice(voice);
+     if(mixer->active_voices < mixer->polyphony)
+     {
+         mixer->rvoices[mixer->active_voices++] = voice;
+@@ -567,6 +581,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_mixer_add_voice)
+ 
+         if(mixer->rvoices[i]->envlfo.volenv.section == FLUID_VOICE_ENVFINISHED)
+         {
++m4_print("mixer->rvoices[i]->envlfo.volenv.section = %d FLUID_VOICE_ENVFINISHED=%d\n", mixer->rvoices[i]->envlfo.volenv.section,FLUID_VOICE_ENVFINISHED);
+             fluid_finish_rvoice(&mixer->buffers, mixer->rvoices[i]);
+             mixer->rvoices[i] = voice;
+             return; // success
+@@ -609,6 +624,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_mixer_set_polyphony)
+     fluid_rvoice_mixer_t *handler = obj;
+     int value = param[0].i;
+ 
++m4_print1("Entering\n");
+     if(handler->active_voices > value)
+     {
+         return /*FLUID_FAILED*/;
+@@ -659,10 +675,14 @@ fluid_render_loop_singlethread(fluid_rvoice_mixer_t *mixer, int blockcount)
+ 
+     fluid_real_t *local_buf = fluid_align_ptr(mixer->buffers.local_buf, FLUID_DEFAULT_ALIGNMENT);
+ 
++m4_print1("Entering\n");
+     fluid_profile_ref_var(prof_ref);
+ 
+     for(i = 0; i < mixer->active_voices; i++)
+     {
++//============================================================================
++m4_print("i=%d calling fluid_mixer_buffers_render_one sections: volenv=%d modenv=%d\n", i, mixer->rvoices[i]->envlfo.volenv.section,mixer->rvoices[i]->envlfo.modenv.section);
++//============================================================================
+         fluid_mixer_buffers_render_one(&mixer->buffers, mixer->rvoices[i], bufs,
+                                        bufcount, local_buf, blockcount);
+         fluid_profile(FLUID_PROF_ONE_BLOCK_VOICE, prof_ref, 1,
+@@ -753,6 +773,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_mixer_set_samplerate)
+ 
+     int i;
+ 
++m4_print1("Entering\n");
+     for(i = 0; i < mixer->fx_units; i++)
+     {
+         if(mixer->fx[i].chorus)
+@@ -1101,6 +1122,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_mixer_set_reverb_enabled)
+     fluid_rvoice_mixer_t *mixer = obj;
+     int on = param[0].i;
+ 
++m4_print1("Entering\n");
+     mixer->with_reverb = on;
+ }
+ 
+@@ -1112,6 +1134,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_mixer_reverb_enable)
+ 
+     int nr_units = mixer->fx_units;
+ 
++m4_print1("Entering\n");
+     /* does on/off must be applied only to fx group at index fx_group ? */
+     if(fx_group >= 0)
+     {
+@@ -1145,6 +1168,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_mixer_set_chorus_enabled)
+ {
+     fluid_rvoice_mixer_t *mixer = obj;
+     int on = param[0].i;
++m4_print1("Entering\n");
+     mixer->with_chorus = on;
+ }
+ 
+@@ -1156,6 +1180,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_mixer_chorus_enable)
+ 
+     int nr_units = mixer->fx_units;
+ 
++m4_print1("Entering\n");
+     /* does on/off must be applied only to fx group at index fx_group ? */
+     if(fx_group >= 0)
+     {
+@@ -1202,6 +1227,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_mixer_set_chorus_params)
+ 
+     int nr_units = mixer->fx_units;
+ 
++m4_print1("Entering\n");
+     /* does parameters must be applied only to fx group i ? */
+     if(i >= 0)
+     {
+@@ -1230,6 +1256,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_mixer_set_reverb_params)
+ 
+     int nr_units = mixer->fx_units;
+ 
++m4_print1("Entering\n");
+     /* does parameters change should be applied only to fx group i ? */
+     if(i >= 0)
+     {
+@@ -1251,6 +1278,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_mixer_reset_reverb)
+     fluid_rvoice_mixer_t *mixer = obj;
+     int i;
+ 
++m4_print1("Entering\n");
+     for(i = 0; i < mixer->fx_units; i++)
+     {
+         fluid_revmodel_reset(mixer->fx[i].reverb);
+@@ -1262,6 +1290,7 @@ DECLARE_FLUID_RVOICE_FUNCTION(fluid_rvoice_mixer_reset_chorus)
+     fluid_rvoice_mixer_t *mixer = obj;
+     int i;
+ 
++m4_print1("Entering\n");
+     for(i = 0; i < mixer->fx_units; i++)
+     {
+         fluid_chorus_reset(mixer->fx[i].chorus);
+@@ -1328,6 +1357,7 @@ fluid_mixer_thread_func(void *data)
+     int current_blockcount = 0;
+     fluid_real_t *local_buf = fluid_align_ptr(buffers->local_buf, FLUID_DEFAULT_ALIGNMENT);
+ 
++m4_print1("Entering\n");
+     while(!fluid_atomic_int_get(&mixer->threads_should_terminate))
+     {
+         fluid_rvoice_t *rvoice = fluid_mixer_get_mt_rvoice(mixer);
+@@ -1371,6 +1401,7 @@ fluid_mixer_thread_func(void *data)
+             }
+ 
+             // then render voice to buffers
++m4_print("calling fluid_mixer_buffers_render_one section: volenv=%d modenv=%d\n", rvoice->envlfo.volenv.section,rvoice->envlfo.modenv.section);
+             fluid_mixer_buffers_render_one(buffers, rvoice, bufs, bufcount, local_buf, current_blockcount);
+         }
+     }
+@@ -1506,6 +1537,7 @@ fluid_render_loop_multithread(fluid_rvoice_mixer_t *mixer, int current_blockcoun
+     // How many threads should we start this time?
+     int extra_threads = mixer->active_voices / VOICES_PER_THREAD;
+ 
++m4_print1("Entering\n");
+     if(extra_threads > mixer->thread_count)
+     {
+         extra_threads = mixer->thread_count;
+@@ -1514,6 +1546,7 @@ fluid_render_loop_multithread(fluid_rvoice_mixer_t *mixer, int current_blockcoun
+     if(extra_threads == 0)
+     {
+         // No extra threads? No thread overhead!
++m4_print1("calling fluid_render_loop_singlethread\n");
+         fluid_render_loop_singlethread(mixer, current_blockcount);
+         return;
+     }
+@@ -1542,6 +1575,7 @@ fluid_render_loop_multithread(fluid_rvoice_mixer_t *mixer, int current_blockcoun
+         if(rvoice != NULL)
+         {
+             fluid_profile_ref_var(prof_ref);
++m4_print("calling fluid_mixer_buffers_render_one section: volenv=%d modenv=%d\n", rvoice->envlfo.volenv.section,rvoice->envlfo.modenv.section);
+             fluid_mixer_buffers_render_one(&mixer->buffers, rvoice, bufs, bufcount, local_buf, current_blockcount);
+             fluid_profile(FLUID_PROF_ONE_BLOCK_VOICE, prof_ref, 1,
+                           current_blockcount * FLUID_BUFSIZE);
+@@ -1678,6 +1712,7 @@ static int fluid_rvoice_mixer_set_threads(fluid_rvoice_mixer_t *mixer, int threa
+ int
+ fluid_rvoice_mixer_render(fluid_rvoice_mixer_t *mixer, int blockcount)
+ {
++m4_print1("Entering\n");
+     fluid_profile_ref_var(prof_ref);
+ 
+     mixer->current_blockcount = blockcount;
+@@ -1691,11 +1726,13 @@ fluid_rvoice_mixer_render(fluid_rvoice_mixer_t *mixer, int blockcount)
+ 
+     if(mixer->thread_count > 0)
+     {
++m4_print1("calling fluid_render_loop_multithread\n");
+         fluid_render_loop_multithread(mixer, blockcount);
+     }
+     else
+ #endif
+     {
++m4_print1("calling fluid_render_loop_singlethread\n");
+         fluid_render_loop_singlethread(mixer, blockcount);
+     }
+ 
+diff --git a/src/sfloader/fluid_defsfont.c b/src/sfloader/fluid_defsfont.c
+index f1539808..7816a595 100644
+--- a/src/sfloader/fluid_defsfont.c
++++ b/src/sfloader/fluid_defsfont.c
+@@ -188,6 +188,7 @@ int fluid_defpreset_preset_get_num(fluid_preset_t *preset)
+ int fluid_defpreset_preset_noteon(fluid_preset_t *preset, fluid_synth_t *synth,
+                                   int chan, int key, int vel)
+ {
++m4_print1("calling fluid_defpreset_noteon\n");
+     return fluid_defpreset_noteon(fluid_preset_get_data(preset), synth, chan, key, vel);
+ }
+ 
+@@ -757,6 +758,7 @@ fluid_defpreset_noteon_add_mod_to_voice(fluid_voice_t *voice,
+     int identity_limit_count;
+ 
+     /* Step 1: Local modulators replace identic global modulators. */
++m4_print1("Entering\n");
+ 
+     /* local (instrument zone/preset zone), modulators: Put them all into a list. */
+     mod_list_count = 0;
+@@ -871,6 +873,7 @@ fluid_defpreset_noteon(fluid_defpreset_t *defpreset, fluid_synth_t *synth, int c
+     int tuned_key;
+     int i;
+ 
++m4_print("Entering key=%d\n", key);
+     /* For detuned channels it might be better to use another key for Soundfont sample selection
+      * giving better approximations for the pitch than the original key.
+      * Example: play key 60 on 6370 Hz => use tuned key 64 for sample selection
+@@ -958,6 +961,7 @@ fluid_defpreset_noteon(fluid_defpreset_t *defpreset, fluid_synth_t *synth, int c
+                     } /* for all generators */
+ 
+                     /* Adds instrument zone modulators (global and local) to the voice.*/
++m4_print1("calling fluid_defpreset_noteon_add_mod_to_voice\n");
+                     fluid_defpreset_noteon_add_mod_to_voice(voice,
+                                                             /* global instrument modulators */
+                                                             global_inst_zone ? global_inst_zone->mod : NULL,
+@@ -1006,6 +1010,7 @@ fluid_defpreset_noteon(fluid_defpreset_t *defpreset, fluid_synth_t *synth, int c
+                     } /* for all generators */
+ 
+                     /* Adds preset zone modulators (global and local) to the voice.*/
++m4_print1("calling fluid_defpreset_noteon_add_mod_to_voice\n");
+                     fluid_defpreset_noteon_add_mod_to_voice(voice,
+                                                             /* global preset modulators */
+                                                             global_preset_zone ? global_preset_zone->mod : NULL,
+@@ -1013,6 +1018,7 @@ fluid_defpreset_noteon(fluid_defpreset_t *defpreset, fluid_synth_t *synth, int c
+                                                             FLUID_VOICE_ADD); /* mode */
+ 
+                     /* add the synthesis process to the synthesis loop. */
++m4_print1("calling fluid_synth_start_voice\n");
+                     fluid_synth_start_voice(synth, voice);
+ 
+                     /* Store the ID of the first voice that was created by this noteon event.
+diff --git a/src/sfloader/fluid_instpatch.c b/src/sfloader/fluid_instpatch.c
+index 8539da9a..fdbc6723 100644
+--- a/src/sfloader/fluid_instpatch.c
++++ b/src/sfloader/fluid_instpatch.c
+@@ -126,6 +126,7 @@ fluid_instpatch_preset_noteon(fluid_preset_t *preset, fluid_synth_t *synth, int
+     /* lookup the voice cache that we've created on loading */
+     IpatchSF2VoiceCache *cache = preset_data->cache;
+ 
++m4_print("Entering key=%d\n", key);
+     /* loading and caching the instrument could have failed though */
+     if(FLUID_UNLIKELY(cache == NULL))
+     {
+@@ -249,6 +250,7 @@ fluid_instpatch_preset_noteon(fluid_preset_t *preset, fluid_synth_t *synth, int
+             p = p->next;
+         }
+ 
++m4_print1("calling fluid_synth_start_voice\n");
+         fluid_synth_start_voice(synth, flvoice);
+ 
+         /* sample store reference taken over by fsample structure */
+diff --git a/src/synth/fluid_chan.c b/src/synth/fluid_chan.c
+index b685a766..58e4a06d 100644
+--- a/src/synth/fluid_chan.c
++++ b/src/synth/fluid_chan.c
+@@ -86,7 +86,9 @@ fluid_channel_init(fluid_channel_t *chan)
+     fluid_channel_clear_prev_note(chan); /* Mark previous note invalid */
+     /*---*/
+     chan->key_mono_sustained = INVALID_NOTE; /* No previous mono note sustained */
+-    chan->legatomode = FLUID_CHANNEL_LEGATO_MODE_MULTI_RETRIGGER;		/* Default mode */
++//    chan->legatomode = FLUID_CHANNEL_LEGATO_MODE_RETRIGGER;		/* Default mode */
++//    chan->legatomode = FLUID_CHANNEL_LEGATO_MODE_MULTI_RETRIGGER;	/* Default mode */
++    chan->legatomode = FLUID_CHANNEL_LEGATO_MODE_NO_ATTACK;		/* Default mode */
+     chan->portamentomode = FLUID_CHANNEL_PORTAMENTO_MODE_LEGATO_ONLY;	/* Default mode */
+     /*--- End of poly/mono initialization --------------------------------------*/
+ 
+@@ -227,6 +229,7 @@ delete_fluid_channel(fluid_channel_t *chan)
+ void
+ fluid_channel_reset(fluid_channel_t *chan)
+ {
++m4_print1("Entering\n");
+     fluid_channel_init(chan);
+     fluid_channel_init_ctrl(chan, 0);
+ }
+@@ -289,6 +292,7 @@ fluid_channel_set_bank_lsb(fluid_channel_t *chan, int banklsb)
+ {
+     int oldval, newval, style;
+ 
++m4_print1("Entering\n");
+     style = chan->synth->bank_select;
+ 
+     if(style == FLUID_BANK_STYLE_GM ||
+@@ -317,6 +321,7 @@ fluid_channel_set_bank_msb(fluid_channel_t *chan, int bankmsb)
+ {
+     int oldval, newval, style;
+ 
++m4_print1("Entering\n");
+     style = chan->synth->bank_select;
+ 
+     if(style == FLUID_BANK_STYLE_XG)
+@@ -383,6 +388,7 @@ fluid_channel_get_sfont_bank_prog(fluid_channel_t *chan, int *sfont,
+  */
+ fluid_real_t fluid_channel_get_key_pitch(fluid_channel_t *chan, int key)
+ {
++m4_print1("Entering\n");
+     if(chan->tuning)
+     {
+         return fluid_tuning_get_pitch(chan->tuning, key)
+@@ -605,6 +611,7 @@ fluid_channel_remove_monolist(fluid_channel_t *chan, int i, int *i_prev)
+  */
+ void fluid_channel_clear_monolist(fluid_channel_t *chan)
+ {
++m4_print1("Entering\n");
+     /* keeps trace off the most recent note played */
+     chan->prev_note = chan->monolist[chan->i_last].note;
+ 
+@@ -628,6 +635,7 @@ void fluid_channel_clear_monolist(fluid_channel_t *chan)
+ void fluid_channel_set_onenote_monolist(fluid_channel_t *chan, unsigned char key,
+                                         unsigned char vel)
+ {
++m4_print1("Entering\n");
+     fluid_channel_add_monolist(chan, key, vel, 1);
+ }
+ 
+@@ -683,7 +691,7 @@ void fluid_channel_cc_legato(fluid_channel_t *chan, int value)
+                FLUID_CHANNEL_LEGATO_PLAYING bit keeps trace of legato/staccato playing.
+             */
+             chan->i_first = chan->i_last;
+-            chan->n_notes = 1;
++	   chan->n_notes = 1;
+         }
+         else /* legato is depressed */
+         {
+diff --git a/src/synth/fluid_synth.c b/src/synth/fluid_synth.c
+index fc0d35fc..d840cfdc 100644
+--- a/src/synth/fluid_synth.c
++++ b/src/synth/fluid_synth.c
+@@ -1253,6 +1253,7 @@ fluid_synth_noteon(fluid_synth_t *synth, int chan, int key, int vel)
+     fluid_return_val_if_fail(vel >= 0 && vel <= 127, FLUID_FAILED);
+     FLUID_API_ENTRY_CHAN(FLUID_FAILED);
+ 
++// m4_print("Entering chan=%d key=%d vel=%d\n", chan,key,vel);
+     /* Allowed only on MIDI channel enabled */
+     FLUID_API_RETURN_IF_CHAN_DISABLED(FLUID_FAILED);
+ 
+@@ -1269,6 +1270,7 @@ fluid_synth_noteon_LOCAL(fluid_synth_t *synth, int chan, int key, int vel)
+     /* notes with velocity zero go to noteoff  */
+     if(vel == 0)
+     {
++m4_print1("vel=0, calling fluid_synth_noteoff_LOCAL\n");
+         return fluid_synth_noteoff_LOCAL(synth, chan, key);
+     }
+ 
+@@ -1277,6 +1279,7 @@ fluid_synth_noteon_LOCAL(fluid_synth_t *synth, int chan, int key, int vel)
+     /* makes sure this channel has a preset */
+     if(channel->preset == NULL)
+     {
++m4_print1("channel does not have a preset\n");
+         if(synth->verbose)
+         {
+             FLUID_LOG(FLUID_INFO, "noteon\t%d\t%d\t%d\t%05d\t%.3f\t%.3f\t%.3f\t%d\t%s",
+@@ -1289,8 +1292,10 @@ fluid_synth_noteon_LOCAL(fluid_synth_t *synth, int chan, int key, int vel)
+         return FLUID_FAILED;
+     }
+ 
++m4_print("channel->mode & FLUID_CHANNEL_POLY_OFF=0x%02x fluid_channel_legato(channel)=0x%02x\n", channel->mode & FLUID_CHANNEL_POLY_OFF,fluid_channel_legato(channel));
+     if(fluid_channel_is_playing_mono(channel)) /* channel is mono or legato CC is On) */
+     {
++m4_print("is_playing_mono calling fluid_synth_noteon_mono_LOCAL key=%d\n", key);
+         /* play the noteOn in monophonic */
+         return fluid_synth_noteon_mono_LOCAL(synth, chan, key, vel);
+     }
+@@ -1304,11 +1309,13 @@ fluid_synth_noteon_LOCAL(fluid_synth_t *synth, int chan, int key, int vel)
+         (by depressing the CC legato on), the next noteOn mono could be played legato
+          with the previous note poly (if the musician choose this).
+             */
++m4_print("no note is_playing calling fluid_channel_set_onenote_monolist key=%d\n", key);
+         fluid_channel_set_onenote_monolist(channel, (unsigned char) key,
+                                            (unsigned char) vel);
+ 
+         /* If there is another voice process on the same channel and key,
+            advance it to the release phase. */
++m4_print("calling fluid_synth_release_voice_on_same_note_LOCAL key=%d\n", key);
+         fluid_synth_release_voice_on_same_note_LOCAL(synth, chan, key);
+ 
+         /* a noteon poly is passed to fluid_synth_noteon_monopoly_legato().
+@@ -1317,6 +1324,7 @@ fluid_synth_noteon_LOCAL(fluid_synth_t *synth, int chan, int key, int vel)
+           a MIDI specification (see FluidPolymono-0004.pdf chapter 4.3-a ,3.4.11
+           for details).
+         */
++m4_print("calling fluid_synth_noteon_monopoly_legato key=%d\n", key);
+         return fluid_synth_noteon_monopoly_legato(synth, chan, INVALID_NOTE, key, vel);
+     }
+ }
+@@ -1581,6 +1589,7 @@ fluid_synth_cc(fluid_synth_t *synth, int chan, int num, int val)
+     fluid_return_val_if_fail(val >= 0 && val <= 127, FLUID_FAILED);
+     FLUID_API_ENTRY_CHAN(FLUID_FAILED);
+ 
++m4_print("Entering chan=%d num=%d val=%d\n", chan,num,val);
+     channel = synth->channel[chan];
+ 
+     if(channel->mode &  FLUID_CHANNEL_ENABLED)
+@@ -1591,6 +1600,7 @@ fluid_synth_cc(fluid_synth_t *synth, int chan, int num, int val)
+             FLUID_LOG(FLUID_INFO, "cc\t%d\t%d\t%d", chan, num, val);
+         }
+ 
++m4_print1("calling #1 fluid_channel_set_cc\n");
+         fluid_channel_set_cc(channel, num, val);
+         result = fluid_synth_cc_LOCAL(synth, chan, num);
+     }
+@@ -1625,6 +1635,7 @@ fluid_synth_cc(fluid_synth_t *synth, int chan, int num, int val)
+                     FLUID_LOG(FLUID_INFO, "cc\t%d\t%d\t%d", i, num, val);
+                 }
+ 
++m4_print1("calling #2 fluid_channel_set_cc\n");
+                 fluid_channel_set_cc(synth->channel[i], num, val);
+                 result = fluid_synth_cc_LOCAL(synth, i, num);
+             }
+@@ -1678,6 +1689,7 @@ fluid_synth_cc_LOCAL(fluid_synth_t *synth, int channum, int num)
+     int value;
+ 
+     value = fluid_channel_get_cc(chan, num);
++m4_print("Entering channum=%d num=%d value=%d\n", channum,num,value);
+ 
+     switch(num)
+     {
+@@ -1741,11 +1753,13 @@ fluid_synth_cc_LOCAL(fluid_synth_t *synth, int channum, int num)
+         return FLUID_FAILED;
+ 
+     case LEGATO_SWITCH: /* not allowed to modulate */
++m4_print1("LEGATO_SWITCH\n");
+         /* handles Poly/mono commutation on Legato pedal On/Off.*/
+         fluid_channel_cc_legato(chan, value);
+         break;
+ 
+     case PORTAMENTO_SWITCH: /* not allowed to modulate */
++m4_print1("PORTAMENTO_SWITCH\n");
+         /* Special handling of the monophonic list  */
+         /* Invalids the most recent note played in a staccato manner */
+         fluid_channel_invalid_prev_note_staccato(chan);
+@@ -1898,17 +1912,20 @@ fluid_synth_cc_LOCAL(fluid_synth_t *synth, int channum, int num)
+         break;
+ 
+     case BREATH_MSB:
++m4_print1("BREATH_MSB\n");
+         /* handles CC Breath On/Off noteOn/noteOff mode */
+         fluid_channel_cc_breath_note_on_off(chan, value);
+ 
+     /* fall-through */
+     default:
++m4_print1("default\n");
+         /* CC lsb shouldn't allowed to modulate (spec SF 2.01 - 8.2.1) */
+         /* However, as long fluidsynth will use only CC 7 bits resolution, it
+            is safe to ignore these SF recommendations on CC receive. See
+            explanations above */
+         /* if (! (32 <= num && num <= 63)) */
+         {
++m4_print1("calling fluid_synth_modulate_voices_LOCAL\n");
+             return fluid_synth_modulate_voices_LOCAL(synth, channum, 1, num);
+         }
+     }
+@@ -2227,6 +2244,7 @@ fluid_synth_sysex_midi_tuning(fluid_synth_t *synth, const char *data, int len,
+ 
+         prog = *dataptr++;
+         count = *dataptr++;
++m4_print("count=%d\n", count);
+ 
+         for(i = 0, index = 0; i < count; i++)
+         {
+@@ -2670,6 +2688,7 @@ fluid_synth_modulate_voices_LOCAL(fluid_synth_t *synth, int chan, int is_cc, int
+     fluid_voice_t *voice;
+     int i;
+ 
++// m4_print("Entering chan=%d is_cc=%d ctrl=%d\n", chan,is_cc,ctrl);
+     for(i = 0; i < synth->polyphony; i++)
+     {
+         voice = synth->voice[i];
+@@ -3889,6 +3908,7 @@ fluid_synth_nwrite_float(fluid_synth_t *synth, int len,
+     while(count < len)
+     {
+         fluid_rvoice_mixer_set_mix_fx(synth->eventhandler->mixer, 0);
++m4_print1("calling fluid_synth_render_blocks\n");
+         fluid_synth_render_blocks(synth, 1); // TODO:
+         fluid_rvoice_mixer_get_bufs(synth->eventhandler->mixer, &left_in, &right_in);
+         fluid_rvoice_mixer_get_fx_bufs(synth->eventhandler->mixer, &fx_left_in, &fx_right_in);
+@@ -4092,6 +4112,7 @@ int
+ fluid_synth_process(fluid_synth_t *synth, int len, int nfx, float *fx[],
+                     int nout, float *out[])
+ {
++m4_print1("Entering - calling fluid_synth_process_LOCAL with fluid_synth_render_blocks\n");
+     return fluid_synth_process_LOCAL(synth, len, nfx, fx, nout, out, fluid_synth_render_blocks);
+ }
+ 
+@@ -4214,6 +4235,7 @@ fluid_synth_process_LOCAL(fluid_synth_t *synth, int len, int nfx, float *fx[],
+         int blocksleft = (len - count + FLUID_BUFSIZE - 1) / FLUID_BUFSIZE;
+         /* render audio (dry and effect) to respective internal dry and effect buffers */
+         int blockcount = block_render_func(synth, blocksleft);
++m4_print1("called (block_render_func), maybe fluid_synth_render_blocks\n");
+ 
+         num = (blockcount * FLUID_BUFSIZE > len - count) ? len - count : blockcount * FLUID_BUFSIZE;
+ 
+@@ -4298,6 +4320,7 @@ fluid_synth_write_float(fluid_synth_t *synth, int len,
+     int channels_off[2] = {loff, roff };
+     int channels_incr[2] = {lincr, rincr };
+ 
++m4_print1("Entering calling fluid_synth_write_float_channels\n");
+     return fluid_synth_write_float_channels(synth, len, 2, channels_out,
+                                             channels_off, channels_incr);
+ }
+@@ -4338,6 +4361,7 @@ fluid_synth_write_float_channels(fluid_synth_t *synth, int len,
+                                  void *channels_out[], int channels_off[],
+                                  int channels_incr[])
+ {
++m4_print1("Entering, calling with fluid_synth_render_blocks\n");
+     return fluid_synth_write_float_channels_LOCAL(synth, len, channels_count,
+                                       channels_out, channels_off, channels_incr,
+                                       fluid_synth_render_blocks);
+@@ -4363,6 +4387,7 @@ fluid_synth_write_float_channels_LOCAL(fluid_synth_t *synth, int len,
+     double time = fluid_utime();
+     float cpu_load;
+ 
++m4_print1("Entering\n");
+     /* start profiling duration probe (if profiling is enabled) */
+     fluid_profile_ref_var(prof_ref);
+ 
+@@ -4418,6 +4443,7 @@ fluid_synth_write_float_channels_LOCAL(fluid_synth_t *synth, int len,
+             /* render audio (dry and effect) to internal dry buffers */
+             /* always render full blocs multiple of FLUID_BUFSIZE */
+             int blocksleft = (size + FLUID_BUFSIZE - 1) / FLUID_BUFSIZE;
++m4_print1("calling (block_render_func), maybe fluid_synth_render_blocks\n");
+             synth->curmax = FLUID_BUFSIZE * block_render_func(synth, blocksleft);
+ 
+             /* get first internal mixer audio dry buffer's pointer (left and right channel) */
+@@ -4497,6 +4523,7 @@ fluid_synth_write_float_LOCAL(fluid_synth_t *synth, int len,
+     int channels_off[2] = {loff, roff };
+     int channels_incr[2] = {lincr, rincr };
+ 
++m4_print1("Entering, calling fluid_synth_write_float_channels_LOCAL, maybe (block_render_func)\n");
+     return fluid_synth_write_float_channels_LOCAL(synth, len, 2, channels_out,
+                                             channels_off, channels_incr,
+                                             block_render_func);
+@@ -4696,6 +4723,7 @@ fluid_synth_write_s16_channels(fluid_synth_t *synth, int len,
+             /* render audio (dry and effect) to internal dry buffers */
+             /* always render full blocs multiple of FLUID_BUFSIZE */
+             int blocksleft = (size + FLUID_BUFSIZE - 1) / FLUID_BUFSIZE;
++m4_print1("calling fluid_synth_render_blocks\n");
+             synth->curmax = FLUID_BUFSIZE * fluid_synth_render_blocks(synth, blocksleft);
+ 
+             /* get first internal mixer audio dry buffer's pointer (left and right channel) */
+@@ -4860,6 +4888,7 @@ fluid_synth_check_finished_voices(fluid_synth_t *synth)
+  */
+ void fluid_synth_process_event_queue(fluid_synth_t *synth)
+ {
++m4_print1("Entering - calling fluid_rvoice_eventhandler_dispatch_all\n");
+     fluid_rvoice_eventhandler_dispatch_all(synth->eventhandler);
+ }
+ 
+@@ -4875,6 +4904,7 @@ fluid_synth_render_blocks(fluid_synth_t *synth, int blockcount)
+     int i, maxblocks;
+     fluid_profile_ref_var(prof_ref);
+ 
++m4_print("Entering - calling fluid_rvoice_eventhandler_dispatch_all blockcount=%d\n", blockcount);
+     /* Assign ID of synthesis thread */
+ //  synth->synth_thread_id = fluid_thread_get_id ();
+ 
+@@ -5145,7 +5175,7 @@ fluid_synth_alloc_voice_LOCAL(fluid_synth_t *synth, fluid_sample_t *sample, int
+             }
+         }
+ 
+-        FLUID_LOG(FLUID_INFO, "noteon\t%d\t%d\t%d\t%05d\t%.3f\t%.3f\t%.3f\t%d",
++        FLUID_LOG(FLUID_INFO, "noteon\tchan=%d\tkey=%d\tvel=%d\tstoreid=%05d\tticks=%.3f\tms=%.3f\t%.3f\tk=%d",
+                   chan, key, vel, synth->storeid,
+                   (float) ticks / 44100.0f,
+                   (fluid_curtime() - synth->start) / 1000.0f,
+@@ -5246,6 +5276,7 @@ fluid_synth_kill_by_exclusive_class_LOCAL(fluid_synth_t *synth,
+ void
+ fluid_synth_start_voice(fluid_synth_t *synth, fluid_voice_t *voice)
+ {
++m4_print("Entering voice->key=%d\n", voice->key);
+     fluid_return_if_fail(synth != NULL);
+     fluid_return_if_fail(voice != NULL);
+ //  fluid_return_if_fail (fluid_synth_is_synth_thread (synth));
+@@ -6794,6 +6825,7 @@ fluid_synth_release_voice_on_same_note_LOCAL(fluid_synth_t *synth, int chan,
+     int i;
+     fluid_voice_t *voice;
+ 
++m4_print("Entering key=%d\n", key);
+     /* storeid is a parameter for fluid_voice_init() */
+     synth->storeid = synth->noteid++;
+ 
+@@ -7653,6 +7685,7 @@ fluid_synth_start(fluid_synth_t *synth, unsigned int id, fluid_preset_t *preset,
+     else
+     {
+         synth->storeid = id;
++m4_print1("calling ->noteon\n");
+         result = fluid_preset_noteon(preset, synth, chan, key, vel);
+     }
+ 
+@@ -7971,6 +8004,7 @@ int fluid_synth_set_legato_mode(fluid_synth_t *synth, int chan, int legatomode)
+     /* checks parameters first */
+     fluid_return_val_if_fail(legatomode >= 0, FLUID_FAILED);
+     fluid_return_val_if_fail(legatomode < FLUID_CHANNEL_LEGATO_MODE_LAST, FLUID_FAILED);
++//    fluid_return_val_if_fail(!(legatomode == FLUID_CHANNEL_LEGATO_MODE_IGNORE2 || legatomode == FLUID_CHANNEL_LEGATO_MODE_IGNORE3), FLUID_FAILED);
+     FLUID_API_ENTRY_CHAN(FLUID_FAILED);
+     /**/
+     synth->channel[chan]->legatomode = legatomode;
+@@ -7994,6 +8028,7 @@ int fluid_synth_set_legato_mode(fluid_synth_t *synth, int chan, int legatomode)
+  */
+ int fluid_synth_get_legato_mode(fluid_synth_t *synth, int chan, int *legatomode)
+ {
++m4_print1("Entering\n");
+     /* checks parameters first */
+     fluid_return_val_if_fail(legatomode != NULL, FLUID_FAILED);
+     FLUID_API_ENTRY_CHAN(FLUID_FAILED);
+@@ -8021,6 +8056,7 @@ int fluid_synth_get_legato_mode(fluid_synth_t *synth, int chan, int *legatomode)
+ int fluid_synth_set_portamento_mode(fluid_synth_t *synth, int chan,
+                                     int portamentomode)
+ {
++m4_print1("Entering\n");
+     /* checks parameters first */
+     fluid_return_val_if_fail(portamentomode >= 0, FLUID_FAILED);
+     fluid_return_val_if_fail(portamentomode < FLUID_CHANNEL_PORTAMENTO_MODE_LAST, FLUID_FAILED);
+@@ -8047,6 +8083,7 @@ int fluid_synth_set_portamento_mode(fluid_synth_t *synth, int chan,
+ int fluid_synth_get_portamento_mode(fluid_synth_t *synth, int chan,
+                                     int *portamentomode)
+ {
++m4_print1("Entering\n");
+     /* checks parameters first */
+     fluid_return_val_if_fail(portamentomode != NULL, FLUID_FAILED);
+     FLUID_API_ENTRY_CHAN(FLUID_FAILED);
+diff --git a/src/synth/fluid_synth_monopoly.c b/src/synth/fluid_synth_monopoly.c
+index d1de1319..e18381d9 100644
+--- a/src/synth/fluid_synth_monopoly.c
++++ b/src/synth/fluid_synth_monopoly.c
+@@ -18,6 +18,7 @@
+  * 02110-1301, USA
+  */
+ 
++#include <stdio.h>
+ #include "fluid_synth.h"
+ #include "fluid_chan.h"
+ #include "fluid_defsfont.h"
+@@ -167,11 +168,14 @@ static char fluid_synth_get_fromkey_portamento_legato(fluid_channel_t *chan,
+ {
+     unsigned char ptc = fluid_channel_get_cc(chan, PORTAMENTO_CTRL);
+ 
++m4_print("Entering default_fromkey=%d\n", default_fromkey);
+     if(fluid_channel_is_valid_note(ptc))
+     {
++m4_print1("valid note, calling fluid_channel_clear_portamento\n");
+         /* CC PTC has been received */
+         fluid_channel_clear_portamento(chan);	/* clears the CC PTC receive */
+         chan->synth->fromkey_portamento =  ptc;/* returns fromkey portamento */
++m4_print("ptc=%d\n", ptc);
+ 
+         /* returns fromkey legato */
+         if(!fluid_channel_is_valid_note(default_fromkey))
+@@ -184,6 +188,7 @@ static char fluid_synth_get_fromkey_portamento_legato(fluid_channel_t *chan,
+         /* determines and returns fromkey portamento */
+         unsigned char fromkey_portamento = INVALID_NOTE;
+ 
++m4_print1("not valid note\n");
+         if(fluid_channel_portamento(chan))
+         {
+             /* Portamento when Portamento pedal is On */
+@@ -200,6 +205,7 @@ static char fluid_synth_get_fromkey_portamento_legato(fluid_channel_t *chan,
+                 fromkey_portamento = fluid_channel_prev_note(chan); /* on each note */
+             }
+ 
++m4_print("portamentomode=%d FLUID_CHANNEL_PORTAMENTO_MODE_LEGATO_ONLY=%d\n", portamentomode,FLUID_CHANNEL_PORTAMENTO_MODE_LEGATO_ONLY);
+             if(portamentomode == FLUID_CHANNEL_PORTAMENTO_MODE_LEGATO_ONLY)
+             {
+                 /* Mode portamento:legato only */
+@@ -211,6 +217,7 @@ static char fluid_synth_get_fromkey_portamento_legato(fluid_channel_t *chan,
+             else if(portamentomode == FLUID_CHANNEL_PORTAMENTO_MODE_STACCATO_ONLY)
+             {
+                 /* Mode portamento:staccato only */
++m4_print("portamentomode=%d FLUID_CHANNEL_PORTAMENTO_MODE_STACCATO_ONLY=%d\n", portamentomode,FLUID_CHANNEL_PORTAMENTO_MODE_STACCATO_ONLY);
+                 if(chan->mode  & FLUID_CHANNEL_LEGATO_PLAYING)
+                 {
+                     fromkey_portamento = INVALID_NOTE;
+@@ -226,11 +233,13 @@ static char fluid_synth_get_fromkey_portamento_legato(fluid_channel_t *chan,
+         /* Determines and returns fromkey legato */
+         if(!fluid_channel_is_valid_note(default_fromkey))
+         {
++m4_print1("staccato returning INVALID_NOTE?\n");
+             /* in staccato (poly/Mono) returns INVALID_NOTE */
+             /* In mono mode legato playing returns the note prior most
+                recent note played */
+             if(fluid_channel_is_playing_mono(chan) && (chan->mode  & FLUID_CHANNEL_LEGATO_PLAYING))
+             {
++m4_print1("fluid_channel_is_playing_mono && FLUID_CHANNEL_LEGATO_PLAYING\n");
+                 default_fromkey = fluid_channel_prev_note(chan); /* note prior last note */
+             }
+ 
+@@ -328,6 +337,7 @@ int fluid_synth_noteon_mono_LOCAL(fluid_synth_t *synth, int chan,
+ {
+     fluid_channel_t *channel = synth->channel[chan];
+ 
++m4_print("Entering chan=%d key=%d vel=%d\n", chan,key,vel);
+     /* Adds the note into the monophonic list */
+     fluid_channel_add_monolist(channel, key, vel, 0);
+ 
+@@ -336,6 +346,7 @@ int fluid_synth_noteon_mono_LOCAL(fluid_synth_t *synth, int chan,
+     if(!(channel->mode &  FLUID_CHANNEL_BREATH_SYNC) ||
+             fluid_channel_breath_msb(channel))
+     {
++m4_print("channel->mode=0x%02x key=%d\n", channel->mode,key);
+         /* legato/staccato playing detection */
+         if(channel->mode  & FLUID_CHANNEL_LEGATO_PLAYING)
+         {
+@@ -343,11 +354,13 @@ int fluid_synth_noteon_mono_LOCAL(fluid_synth_t *synth, int chan,
+             /* legato from prev_note to key */
+             /* the voices from prev_note key number are to be used to play key number */
+             /* fromkey must be valid */
++m4_print1("FLUID_CHANNEL_LEGATO_PLAYING calling fluid_synth_noteon_monopoly_legato\n");
+             return 	fluid_synth_noteon_monopoly_legato(synth, chan,
+                     fluid_channel_prev_note(channel), key, vel);
+         }
+         else
+         {
++m4_print1("staccato playing? calling fluid_synth_noteon_mono_staccato\n");
+             /* staccato playing */
+             return fluid_synth_noteon_mono_staccato(synth, chan, key, vel);
+         }
+@@ -395,6 +408,7 @@ int fluid_synth_noteoff_mono_LOCAL(fluid_synth_t *synth, int chan, int key)
+     int status;
+     int i, i_prev;
+     fluid_channel_t *channel = synth->channel[chan];
++m4_print1("Entering\n");
+     /* searching the note in the monophonic list */
+     i = fluid_channel_search_monolist(channel, key, &i_prev);
+ 
+@@ -419,6 +433,7 @@ int fluid_synth_noteoff_mono_LOCAL(fluid_synth_t *synth, int chan, int key)
+                     /* legato from key to i_prev key */
+                     /* the voices from key number are to be used to
+                     play i_prev key number. */
++m4_print1("calling fluid_synth_noteon_monopoly_legato\n");
+                     status = fluid_synth_noteon_monopoly_legato(synth, chan,
+                              key, channel->monolist[i_prev].note,
+                              channel->monolist[i_prev].vel);
+@@ -495,12 +510,14 @@ fluid_synth_noteon_mono_staccato(fluid_synth_t *synth, int chan, int key, int ve
+ {
+     fluid_channel_t *channel = synth->channel[chan];
+ 
++m4_print("Entering key=%d\n", key);
+     /* Before playing a new note, if a previous monophonic note is currently
+        sustained it needs to be released */
+     fluid_synth_release_voice_on_same_note_LOCAL(synth, chan, channel->key_mono_sustained);
+     /* Get possible 'fromkey portamento'   */
+     fluid_synth_get_fromkey_portamento_legato(channel, INVALID_NOTE);
+     /* The note needs to be played by voices allocation  */
++m4_print1("calling ->noteon\n");
+     return fluid_preset_noteon(channel->preset, synth, chan, key, vel);
+ }
+ 
+@@ -546,6 +563,7 @@ int fluid_synth_noteoff_monopoly(fluid_synth_t *synth, int chan, int key,
+     int i;
+     fluid_channel_t *channel = synth->channel[chan];
+ 
++m4_print1("Entering\n");
+     /* Key_sustained is prepared to return no note sustained (INVALID_NOTE) */
+     if(Mono)
+     {
+@@ -574,7 +592,7 @@ int fluid_synth_noteoff_monopoly(fluid_synth_t *synth, int chan, int key,
+                     }
+                 }
+ 
+-                FLUID_LOG(FLUID_INFO, "noteoff\t%d\t%d\t%d\t%05d\t%.3f\t%d",
++                FLUID_LOG(FLUID_INFO, "noteoff\tchannel=%d\tkey=%d\t%d\tvoice=%05d\tms=%.3f\tused_voices=%d",
+                           fluid_voice_get_channel(voice), fluid_voice_get_key(voice), 0,
+                           fluid_voice_get_id(voice),
+                           (fluid_curtime() - synth->start) / 1000.0f,
+@@ -658,9 +676,11 @@ int fluid_synth_noteon_monopoly_legato(fluid_synth_t *synth, int chan,
+     int i ;
+     /* Gets possible 'fromkey portamento' and possible 'fromkey legato' note  */
+     fromkey = fluid_synth_get_fromkey_portamento_legato(channel, fromkey);
++m4_print("fromkey=%d\n", fromkey);
+ 
+     if(fluid_channel_is_valid_note(fromkey))
+     {
++m4_print1("is_valid_note\n");
+         for(i = 0; i < synth->polyphony; i++)
+         {
+             /* searching fromkey voices: only those who don't have 'note off' */
+@@ -671,6 +691,7 @@ int fluid_synth_noteon_monopoly_legato(fluid_synth_t *synth, int chan,
+                     fluid_voice_get_key(voice) == fromkey)
+             {
+                 fluid_zone_range_t *zone_range = voice->zone_range;
++m4_print("voice is on, keylo=%d keyhi=%d vello=%d velhi=%d\n", zone_range->keylo, zone_range->keyhi, zone_range->vello, zone_range->velhi);
+ 
+                 /* Ignores voice when there is no instrument zone (i.e no zone_range). Otherwise
+                    checks if tokey is inside the range of the running voice */
+@@ -679,10 +700,14 @@ int fluid_synth_noteon_monopoly_legato(fluid_synth_t *synth, int chan,
+                     switch(legatomode)
+                     {
+                     case FLUID_CHANNEL_LEGATO_MODE_RETRIGGER: /* mode 0 */
++                    case FLUID_CHANNEL_LEGATO_MODE_IGNORE2: /* mode 2 */
++                    case FLUID_CHANNEL_LEGATO_MODE_IGNORE3: /* mode 3 */
++m4_print1("FLUID_CHANNEL_LEGATO_MODE_RETRIGGER\n");
+                         fluid_voice_release(voice); /* normal release */
+                         break;
+ 
+                     case FLUID_CHANNEL_LEGATO_MODE_MULTI_RETRIGGER: /* mode 1 */
++m4_print1("FLUID_CHANNEL_LEGATO_MODE_MULTI_RETRIGGER\n");
+                         /* Skip in attack section */
+                         fluid_voice_update_multi_retrigger_attack(voice, tokey, vel);
+ 
+@@ -690,6 +715,7 @@ int fluid_synth_noteon_monopoly_legato(fluid_synth_t *synth, int chan,
+                         if(fluid_channel_is_valid_note(synth->fromkey_portamento))
+                         {
+                             /* Sends portamento parameters to the voice dsp */
++m4_print("calling fluid_voice_update_portamento fromkey_portamento=%d tokey=%d\n", synth->fromkey_portamento, tokey);
+                             fluid_voice_update_portamento(voice,
+                                                           synth->fromkey_portamento,
+                                                           tokey);
+@@ -701,6 +727,30 @@ int fluid_synth_noteon_monopoly_legato(fluid_synth_t *synth, int chan,
+                         zone_range->ignore = TRUE;
+                         break;
+ 
++                    case FLUID_CHANNEL_LEGATO_MODE_NO_ATTACK: /* mode 4 */
++m4_print("FLUID_CHANNEL_LEGATO_MODE_NO_ATTACK key=%d\n", voice->key);
++			voice->key = tokey;  /* new note */
++			fluid_voice_update_no_attack(voice, tokey);
++
++// /* Skip in attack section */
++// voice->vel = vel;    /* new velocity */					// 2
++m4_print("FLUID_CHANNEL_LEGATO_MODE_NO_ATTACK key=%d\n", voice->key);
++// fluid_voice_modulate(voice, FALSE, FLUID_MOD_VELOCITY);			// 2
++// /* Updates generator dependent of voice->key */				// 2
++// fluid_voice_update_param(voice, GEN_KEYTOMODENVHOLD);			// 2
++// fluid_voice_update_param(voice, GEN_KEYTOMODENVDECAY);			// 2
++// fluid_voice_update_param(voice, GEN_KEYTOVOLENVHOLD);			// 2
++// fluid_voice_update_param(voice, GEN_KEYTOVOLENVDECAY);			// 2
++// /* Updates pitch generator  */						// 2
++// fluid_voice_calculate_gen_pitch(voice);					// 2
++// fluid_voice_update_param(voice, GEN_PITCH);				// 2
++
++                        /* The voice is now used to play tokey in legato manner */
++                        /* Marks this Instrument Zone to be ignored during next
++                           fluid_preset_noteon() */
++                        zone_range->ignore = TRUE;
++                        break;
++
+                     default: /* Invalid mode: this should never happen */
+                         FLUID_LOG(FLUID_WARN, "Failed to execute legato mode: %d",
+                                   legatomode);
+@@ -716,7 +766,9 @@ int fluid_synth_noteon_monopoly_legato(fluid_synth_t *synth, int chan,
+         }
+     }
+ 
++m4_print1("Here#2\n");
+     /* May be,tokey will enter in new others Insrument Zone(s),Preset Zone(s), in
+        this case it needs to be played by voices allocation  */
++m4_print1("calling ->noteon\n");
+     return fluid_preset_noteon(channel->preset, synth, chan, tokey, vel);
+ }
+diff --git a/src/synth/fluid_voice.c b/src/synth/fluid_voice.c
+index a7fa3be0..95816c5b 100644
+--- a/src/synth/fluid_voice.c
++++ b/src/synth/fluid_voice.c
+@@ -447,6 +447,7 @@ void fluid_voice_start(fluid_voice_t *voice)
+      * sample with its nominal loop settings. This happens, when the sample is used
+      * for the first time.*/
+ 
++m4_print("Entering key=%d calling fluid_voice_calculate_runtime_synthesis_parameters.\n", voice->key);
+     fluid_voice_calculate_runtime_synthesis_parameters(voice);
+ 
+ #ifdef WITH_PROFILING
+@@ -586,6 +587,7 @@ fluid_voice_calculate_runtime_synthesis_parameters(fluid_voice_t *voice)
+         GEN_CUSTOM_FILTERQ                   /*                ---  */
+     };
+ 
++m4_print("Entering key=%d\n", voice->key);
+     /* When the voice is made ready for the synthesis process, a lot of
+      * voice-internal parameters have to be calculated.
+      *
+@@ -612,7 +614,7 @@ fluid_voice_calculate_runtime_synthesis_parameters(fluid_voice_t *voice)
+         int dest_gen_index = mod->dest;
+         fluid_gen_t *dest_gen = &voice->gen[dest_gen_index];
+         dest_gen->mod += modval;
+-        /*      fluid_dump_modulator(mod); */
++	/* fluid_dump_modulator(mod); */
+     }
+ 
+     /* Now the generators are initialized, nominal and modulation value.
+@@ -634,6 +636,7 @@ fluid_voice_calculate_runtime_synthesis_parameters(fluid_voice_t *voice)
+         fluid_voice_update_param(voice, list_of_generators_to_initialize[n]);
+     }
+ 
++#if 1
+     /* Start portamento if enabled */
+     {
+         /* fromkey note comes from "GetFromKeyPortamentoLegato()" detector.
+@@ -644,13 +647,16 @@ fluid_voice_calculate_runtime_synthesis_parameters(fluid_voice_t *voice)
+         if(fluid_channel_is_valid_note(fromkey))
+         {
+             /* Send portamento parameters to the voice dsp */
++m4_print("calling fluid_voice_update_portamento fromkey=%d key=%d\n", fromkey, voice->key);
+             fluid_voice_update_portamento(voice, fromkey, fluid_voice_get_actual_key(voice));
+         }
+     }
++#endif /* 0 */
+ 
+     /* Make an estimate on how loud this voice can get at any time (attenuation). */
+     UPDATE_RVOICE_R1(fluid_rvoice_set_min_attenuation_cB,
+                      fluid_voice_get_lower_boundary_for_attenuation(voice));
++m4_print("exiting key=%d\n", voice->key);
+     return FLUID_OK;
+ }
+ 
+@@ -675,6 +681,7 @@ calculate_hold_decay_buffers(fluid_voice_t *voice, int gen_base,
+     fluid_real_t seconds;
+     int buffers;
+ 
++m4_print1("Entering\n");
+     /* SF2.01 section 8.4.3 # 31, 32, 39, 40
+      * GEN_KEYTOxxxENVxxx uses key 60 as 'origin'.
+      * The unit of the generator is timecents per key number.
+@@ -1070,6 +1077,7 @@ fluid_voice_update_param(fluid_voice_t *voice, int gen)
+      * - attack, decay and release are converted to their increment per sample
+      */
+     case GEN_VOLENVDELAY:                /* SF2.01 section 8.1.3 # 33 */
++m4_print1("GEN_VOLENVDELAY\n");
+         fluid_clip(x, -12000.0f, 5000.0f);
+         count = NUM_BUFFERS_DELAY(x);
+         fluid_voice_update_volenv(voice, TRUE, FLUID_VOICE_ENVDELAY,
+@@ -1077,6 +1085,7 @@ fluid_voice_update_param(fluid_voice_t *voice, int gen)
+         break;
+ 
+     case GEN_VOLENVATTACK:               /* SF2.01 section 8.1.3 # 34 */
++m4_print1("GEN_VOLENVATTACK\n");
+         fluid_clip(x, -12000.0f, 8000.0f);
+         count = 1 + NUM_BUFFERS_ATTACK(x);
+         fluid_voice_update_volenv(voice, TRUE, FLUID_VOICE_ENVATTACK,
+@@ -1085,6 +1094,7 @@ fluid_voice_update_param(fluid_voice_t *voice, int gen)
+ 
+     case GEN_VOLENVHOLD:                 /* SF2.01 section 8.1.3 # 35 */
+     case GEN_KEYTOVOLENVHOLD:            /* SF2.01 section 8.1.3 # 39 */
++m4_print1("GEN_VOLENVHOLD or GEN_KEYTOVOLENVHOLD\n");
+         count = calculate_hold_decay_buffers(voice, GEN_VOLENVHOLD, GEN_KEYTOVOLENVHOLD, 0); /* 0 means: hold */
+         fluid_voice_update_volenv(voice, TRUE, FLUID_VOICE_ENVHOLD,
+                                   count, 1.0f, 0.0f, -1.0f, 2.0f);
+@@ -1093,6 +1103,7 @@ fluid_voice_update_param(fluid_voice_t *voice, int gen)
+     case GEN_VOLENVDECAY:               /* SF2.01 section 8.1.3 # 36 */
+     case GEN_VOLENVSUSTAIN:             /* SF2.01 section 8.1.3 # 37 */
+     case GEN_KEYTOVOLENVDECAY:          /* SF2.01 section 8.1.3 # 40 */
++m4_print1("GEN_VOLENVDECAY or GEN_VOLENVSUSTAIN or GEN_KEYTOVOLENVDECAY\n");
+         x = 1.0f - 0.001f * fluid_voice_gen_value(voice, GEN_VOLENVSUSTAIN);
+         fluid_clip(x, 0.0f, 1.0f);
+         count = calculate_hold_decay_buffers(voice, GEN_VOLENVDECAY, GEN_KEYTOVOLENVDECAY, 1); /* 1 for decay */
+@@ -1101,6 +1112,7 @@ fluid_voice_update_param(fluid_voice_t *voice, int gen)
+         break;
+ 
+     case GEN_VOLENVRELEASE:             /* SF2.01 section 8.1.3 # 38 */
++m4_print1("GEN_VOLENVRELEASE\n");
+         fluid_clip(x, FLUID_MIN_VOLENVRELEASE, 8000.0f);
+         count = 1 + NUM_BUFFERS_RELEASE(x);
+         fluid_voice_update_volenv(voice, TRUE, FLUID_VOICE_ENVRELEASE,
+@@ -1109,12 +1121,14 @@ fluid_voice_update_param(fluid_voice_t *voice, int gen)
+ 
+     /* Modulation envelope */
+     case GEN_MODENVDELAY:               /* SF2.01 section 8.1.3 # 25 */
++m4_print1("GEN_MODENVDELAY\n");
+         fluid_clip(x, -12000.0f, 5000.0f);
+         fluid_voice_update_modenv(voice, TRUE, FLUID_VOICE_ENVDELAY,
+                                   NUM_BUFFERS_DELAY(x), 0.0f, 0.0f, -1.0f, 1.0f);
+         break;
+ 
+     case GEN_MODENVATTACK:               /* SF2.01 section 8.1.3 # 26 */
++m4_print1("GEN_MODENVATTACK\n");
+         fluid_clip(x, -12000.0f, 8000.0f);
+         count = 1 + NUM_BUFFERS_ATTACK(x);
+         fluid_voice_update_modenv(voice, TRUE, FLUID_VOICE_ENVATTACK,
+@@ -1123,6 +1137,7 @@ fluid_voice_update_param(fluid_voice_t *voice, int gen)
+ 
+     case GEN_MODENVHOLD:               /* SF2.01 section 8.1.3 # 27 */
+     case GEN_KEYTOMODENVHOLD:          /* SF2.01 section 8.1.3 # 31 */
++m4_print1("GEN_MODENVHOLD or GEN_KEYTOMODENVHOLD\n");
+         count = calculate_hold_decay_buffers(voice, GEN_MODENVHOLD, GEN_KEYTOMODENVHOLD, 0); /* 1 means: hold */
+         fluid_voice_update_modenv(voice, TRUE, FLUID_VOICE_ENVHOLD,
+                                   count, 1.0f, 0.0f, -1.0f, 2.0f);
+@@ -1131,6 +1146,7 @@ fluid_voice_update_param(fluid_voice_t *voice, int gen)
+     case GEN_MODENVDECAY:                                   /* SF 2.01 section 8.1.3 # 28 */
+     case GEN_MODENVSUSTAIN:                                 /* SF 2.01 section 8.1.3 # 29 */
+     case GEN_KEYTOMODENVDECAY:                              /* SF 2.01 section 8.1.3 # 32 */
++m4_print1("GEN_MODENVDECAY or GEN_MODENVSUSTAIN or GEN_KEYTOMODENVDECAY\n");
+         count = calculate_hold_decay_buffers(voice, GEN_MODENVDECAY, GEN_KEYTOMODENVDECAY, 1); /* 1 for decay */
+         x = 1.0f - 0.001f * fluid_voice_gen_value(voice, GEN_MODENVSUSTAIN);
+         fluid_clip(x, 0.0f, 1.0f);
+@@ -1139,12 +1155,15 @@ fluid_voice_update_param(fluid_voice_t *voice, int gen)
+         break;
+ 
+     case GEN_MODENVRELEASE:                                  /* SF 2.01 section 8.1.3 # 30 */
++m4_print1("GEN_MODENVRELEASE\n");
+         fluid_clip(x, -12000.0f, 8000.0f);
+         count = 1 + NUM_BUFFERS_RELEASE(x);
+         fluid_voice_update_modenv(voice, TRUE, FLUID_VOICE_ENVRELEASE,
+                                   count, 1.0f, -1.0f / count, 0.0f, 2.0f);
+ 
+         break;
++default:
++m4_print1("default\n");
+ 
+     } /* switch gen */
+ }
+@@ -1204,6 +1223,7 @@ int fluid_voice_modulate(fluid_voice_t *voice, int cc, int ctrl)
+     /* Clears registered bits table of updated generators */
+     uint32_t updated_gen_bit[SIZE_UPDATED_GEN_BIT] = {0};
+ 
++m4_print("Entering cc=%d ctrl=%d voice->mod_count=%d\n", cc,ctrl,voice->mod_count);
+     /*    printf("Chan=%d, CC=%d, Src=%d, Val=%d\n", voice->channel->channum, cc, ctrl, val); */
+ 
+     for(i = 0; i < voice->mod_count; i++)
+@@ -1215,6 +1235,7 @@ int fluid_voice_modulate(fluid_voice_t *voice, int cc, int ctrl)
+            are updated */
+         if(ctrl < 0 || fluid_mod_has_source(mod, cc, ctrl))
+         {
++m4_print("in for loop i=%d mod found?\n", i);
+             gen = fluid_mod_get_dest(mod);
+ 
+             /* Skip if this generator has already been updated */
+@@ -1229,16 +1250,20 @@ int fluid_voice_modulate(fluid_voice_t *voice, int cc, int ctrl)
+                     if(fluid_mod_has_dest(&voice->mod[k], gen))
+                     {
+                         modval += fluid_mod_get_value(&voice->mod[k], voice);
++m4_print("fluid_mod_get_value returned modval=%.2f\n", modval);
+                     }
+                 }
+ 
++m4_print("calling fluid_mod_set_value modval=%.2f\n", modval);
+                 fluid_gen_set_mod(&voice->gen[gen], modval);
+ 
+                 /* now recalculate the parameter values that are derived from the
+                    generator */
++m4_print1("calling fluid_voice_update_param\n");
+                 fluid_voice_update_param(voice, gen);
+ 
+                 /* set the bit that indicates this generator is updated */
++m4_print1("calling set_gen_updated\n");
+                 set_gen_updated(updated_gen_bit, gen);
+             }
+         }
+@@ -1286,6 +1311,7 @@ void fluid_voice_update_portamento(fluid_voice_t *voice, int fromkey, int tokey)
+                                             (fluid_real_t)fluid_channel_portamentotime(channel))  /
+                                            (fluid_real_t)FLUID_BUFSIZE  + 0.5f);
+ 
++m4_print1("Entering\n");
+     /* Send portamento parameters to the voice dsp */
+     UPDATE_RVOICE_GENERIC_IR(fluid_rvoice_set_portamento, voice->rvoice, countinc, pitchoffset);
+ }
+@@ -1303,6 +1329,7 @@ void fluid_voice_update_portamento(fluid_voice_t *voice, int fromkey, int tokey)
+ void fluid_voice_update_multi_retrigger_attack(fluid_voice_t *voice,
+         int tokey, int vel)
+ {
++m4_print1("Entering\n");
+     voice->key = tokey;  /* new note */
+     voice->vel = vel; /* new velocity */
+     /* Updates generators dependent of velocity */
+@@ -1323,6 +1350,25 @@ void fluid_voice_update_multi_retrigger_attack(fluid_voice_t *voice,
+     /* updates adsr generator */
+     UPDATE_RVOICE0(fluid_rvoice_multi_retrigger_attack);
+ }
++
++/*legato mode 4: no attack
++ *
++ * Modulates all generators dependent of key,vel.
++ * Forces the voice envelopes in the attack section (legato mode 1).
++ *
++ * @voice voice the synthesis voice
++ * @tokey the new key to be applied to this voice.
++ * @vel the new velocity to be applied to this voice.
++ */
++void fluid_voice_update_no_attack(fluid_voice_t *voice, int tokey)
++{
++    /* Calculates pitch offset. */
++    fluid_real_t Pitch = fluid_voice_calculate_pitch(voice, tokey);
++
++    /* Send parameter to the voice dsp */
++    UPDATE_RVOICE_GENERIC_R1(fluid_rvoice_set_no_attack, voice->rvoice, Pitch);
++}
++
+ /** end of legato update functions */
+ 
+ /*
+@@ -1679,10 +1725,12 @@ int fluid_voice_get_actual_key(const fluid_voice_t *voice)
+ 
+     if(x >= 0)
+     {
++m4_print("key=%d\n", (int)x);
+         return (int)x;
+     }
+     else
+     {
++m4_print("key=%d\n", (int)fluid_voice_get_key(voice));
+         return fluid_voice_get_key(voice);
+     }
+ }
+diff --git a/src/synth/fluid_voice.h b/src/synth/fluid_voice.h
+index 4ce6c2b7..6afe218e 100644
+--- a/src/synth/fluid_voice.h
++++ b/src/synth/fluid_voice.h
+@@ -149,6 +149,7 @@ void fluid_voice_update_param(fluid_voice_t *voice, int gen);
+ /** legato modes */
+ /* force in the attack section for legato mode multi_retrigger: 1 */
+ void fluid_voice_update_multi_retrigger_attack(fluid_voice_t *voice, int tokey, int vel);
++void fluid_voice_update_no_attack(fluid_voice_t *voice, int tokey);
+ /* Update portamento parameter */
+ void fluid_voice_update_portamento(fluid_voice_t *voice, int fromkey, int tokey);
+ 
+diff --git a/src/utils/fluid_sys.c b/src/utils/fluid_sys.c
+index 08647463..ef6696e1 100644
+--- a/src/utils/fluid_sys.c
++++ b/src/utils/fluid_sys.c
+@@ -1297,7 +1297,8 @@ fluid_get_stdin(void)
+ fluid_ostream_t
+ fluid_get_stdout(void)
+ {
+-    return STDOUT_FILENO;
++//    return STDOUT_FILENO;
++    return STDERR_FILENO;
+ }
+ 
+ /**
+diff --git a/src/utils/fluidsynth_priv.h b/src/utils/fluidsynth_priv.h
+index 999b3245..222954df 100644
+--- a/src/utils/fluidsynth_priv.h
++++ b/src/utils/fluidsynth_priv.h
+@@ -270,7 +270,8 @@ do { strncpy(_dst,_src,_n-1); \
+ #define FLUID_FLUSH()
+ #else
+ #define FLUID_PRINTF                 printf
+-#define FLUID_FLUSH()                fflush(stdout)
++// #define FLUID_FLUSH()                fflush(stdout)
++#define FLUID_FLUSH()                fflush(stderr)
+ #endif
+ 
+ /* People who want to reduce the size of the may do this by entirely
