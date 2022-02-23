@@ -1,10 +1,6 @@
 #-----------------------------------------------------------------------------
-MUSICOMP2ABC = ../musicomp2abc/musicomp2abc
-YAPS         = yaps
-ABCM2PS      = abcm2ps
-#-----------------------------------------------------------------------------
+SONGS  =
 #++ = to do yet.
-#-  = macros -- they are not implemented yet.
 #   = converted, probably (maybe) okay.
 SONGS += 5-dollar-fuga
 SONGS += BigBad
@@ -20,11 +16,11 @@ SONGS += Madrigal
 SONGS += SixtyFour
 SONGS += SuperStar
 SONGS += WaltzOfTheFlowers
-SONGS += andante 
+SONGS += andante
 SONGS += bbb-huh
 SONGS += courante
-SONGS += fuga-vii 
-SONGS += fuga-vii-2 
+SONGS += fuga-vii
+SONGS += fuga-vii-2
 SONGS += inv3
 SONGS += inventio-15
 SONGS += invention8
@@ -80,7 +76,6 @@ SONGS += chopin
 SONGS += david
 SONGS += handel
 SONGS += kleine-suite
-SONGS += vinci
 SONGS += JC1
 SONGS += amerika
 SONGS += bbs
@@ -100,12 +95,9 @@ SONGS += brand3
 SONGS += chicks
 
 SONGS += dream
-SONGS += gnome
-SONGS += inv1
 SONGS += little
 SONGS += pete
 SONGS += rand_rock
-SONGS += sonata
 SONGS += sympathy
 SONGS += turkish
 SONGS += three_king
@@ -116,43 +108,79 @@ SONGS += putd-test
 
 SONGS += cradle
 SONGS += macro-aer-ber
-SONGS += macros-complicated
 
-# SONGS += nachtmusik		# NOTDONEYET Figure out GOTOs and VOLUMEs
+SONGS += gnome
+
+SONGS += nachtmusik		# NOTDONEYET Figure out GOTOs and VOLUMEs
 #				# Missing rests, voice in the middle of a measure, goto 5 -- no 5??
-BROKEN += nachtmusik
-
-#++ SONGS += slidall		# Cannot do this in python or MIDI.
-
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# Following will not create postscript files correctly - printable note length problems.
+SONGS_NO_PS += inv1
+SONGS_NO_PS += vinci
+SONGS_NO_PS += sonata
+SONGS_NO_PS += macros-complicated
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+BROKEN += slidall		# Cannot do this in python or MIDI.
+#				# MAYBE could do this with PTE and portamento.
 
 #-----------------------------------------------------------------------------
-SONGS_mid = ${SONGS:=.mid}
-BROKEN_mid = ${BROKEN:=.mid}
+MUSICOMP2ABC = ../musicomp2abc/musicomp2abc
+YAPS         = yaps
+ABCM2PS      = abcm2ps
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.abc
-.SUFFIXES: .mid .csv .ps .abc _m.ps
+# SONGS_GCS = ${SONGS:=.gcs}
+SONGS_ABC = ${SONGS:=.abc}
+SONGS_CSV = ${SONGS:=.csv} ${SONGS_NO_PS:=.csv}
+SONGS_MID = ${SONGS:=.mid} ${SONGS_NO_PS:=.mid}
+SONGS_M_PS = ${SONGS:=_m.ps}
+SONGS_PS = ${SONGS:=.ps}
+SONGS_WAV = ${SONGS:=.wav} ${SONGS_NO_PS:=.wav}
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+BROKEN_MID = ${BROKEN:=.mid}
+#-----------------------------------------------------------------------------
+.PRECIOUS: %.csv %.abc %.mid
+.SUFFIXES: .mid .csv .ps .abc _m.ps .wav
 # output $@   -- input $<
+%.csv:  %.gcs
+	${MUSICOMP2ABC} --midi1csv $< $@ || rm -f $@
 %.mid:  %.csv
-	csvmidi $< $@
-%.csv:  %
-	${MUSICOMP2ABC} --midi1csv $< $@
-%.abc:  %
-	${MUSICOMP2ABC} --abc $< $@
+	csvmidi $< $@ || (rm -f $@ ; exit 1)
+%.wav:  %.mid
+	fluidsynth -F $@ -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 $<
+%.abc:  %.gcs
+	${MUSICOMP2ABC} --abc $< $@ || (rm -f $@ ; exit 1)
 %.ps:   %.abc
-	${YAPS} $< -o $@ -k
+	${YAPS} $< -o $@ -k || (rm -f $@ ; exit 1)
 %_m.ps: %.abc
-	${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@
+	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@) || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
-.PHONY: all
-all: ${SONGS_mid}
+.PHONY: help
+help:
+	@echo 'Targets:'
+	@echo '  all       - Convert all working (?) .gcs songs to .mid files.'
+	@echo '  broken    - Attempt to convert all broken .gcs songs to .mid files.'
+	@echo "  all_ps    - Use ${YAPS} to create .ps (postscript) files from .gcs files."
+	@echo "  all_m_ps  - Use ${ABCM2PS} to create .ps (postscript) files from .gcs files."
+	@echo '  all_wav   - Use fluidsynth to create .wav (audio) files from .gcs files.'
+	@echo '  clean     - Remove intermediate .csv,.mid,.abc,.ps,_m.ps, and .wav files.'
+#-----------------------------------------------------------------------------
+.PHONY: all all_mid
+all all_mid: ${SONGS_MID}
 #-----------------------------------------------------------------------------
 .PHONY: broken
-broken: ${BROKEN_mid}
+broken: ${BROKEN_MID}
+#-----------------------------------------------------------------------------
+.PHONY: all_ps
+all_ps: ${SONGS_PS}
+#-----------------------------------------------------------------------------
+.PHONY: all_m_ps
+all_m_ps: ${SONGS_M_PS}
+#-----------------------------------------------------------------------------
+.PHONY: all_wav
+all_wav: ${SONGS_WAV}
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -f *.ps
-	rm -f *.csv *.mid
-	rm -f *.abc
+	rm -f ${SONGS_CSV} ${SONGS_MID} ${SONGS_ABC} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV} *.stderr
 #-----------------------------------------------------------------------------
 # End of Makefile
