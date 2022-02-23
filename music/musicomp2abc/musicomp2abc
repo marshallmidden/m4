@@ -2,10 +2,66 @@
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 #-----------------------------------------------------------------------------
 # TO DO:
+#musicomp2abc ... Program_c ... and controls following are unique, pan, etc.
+#       Thinking that keeping track of V#: instrument on voice gets new channel.
+#       So pan, etc. works.
+#   a) instruments need a bunch of things set when used in a channel.
+#                        v--> instrument number (chan) matters for everything that follows.
+#       3, 0, Program_c, 1, 73
+#       3, 0, Control_c, 1, 125, 0
+#       3, 0, Control_c, 1, 127, 0
+#       3, 0, Control_c, 1, 121, 0
+#       3, 0, Control_c, 1, 7, 127
+#       3, 0, Control_c, 1, 5, 0
+#       3, 0, Control_c, 1, 65, 0
+#       3, 0, Control_c, 1, 68, 0
+#       3, 0, Control_c, 1, 64, 0
+#       3, 0, Control_c, 1, 10, 0
+#       3, 0, Control_c, 1, 91, 52
+#   b) Maybe change all song files that have instrument, pan, reverb, etc.
+#-----------------------------------------------------------------------------
+# TO DO: Fix Makefiles:
+#   A) change all songs to .gcs suffix.
+#       SONGS += C
+#       #-----------------------------------------------------------------------------
+#       SONGS_GCS = ${SONGS:=.gcs}
+#       SONGS_ABC = ${SONGS:=.abc}
+#       SONGS_CSV = ${SONGS:=.csv}
+#       SONGS_MID = ${SONGS:=.mid}
+#       SONGS_M_PS = ${SONGS:=_m.ps}
+#       SONGS_PS = ${SONGS:=.ps}
+#       SONGS_WAV = ${SONGS:=.wav}
+#       #-----------------------------------------------------------------------------
+#       MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
+#       YAPS         = yaps
+#       ABCM2PS      = abcm2ps
+#       #-----------------------------------------------------------------------------
+#       .PRECIOUS: %.abc %.csv
+#       .SUFFIXES: .mid .csv .ps .abc _m.ps
+#       # output $@   -- input $<
+#       %.csv:  %.gcs
+#               ${MUSICOMP2ABC} --midi1csv $< $@
+#       %.mid:  %.csv
+#               csvmidi $< $@
+#       %.wav:  %.mid
+#               fluidsynth -F $@ -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 $<
+#       %.abc:  %.gcs
+#               ${MUSICOMP2ABC} --abc $< $@
+#       %.ps:   %.abc
+#               ${YAPS} $< -o $@ -k
+#       %_m.ps: %.abc
+#               ${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1
+#               mv Out.ps $@
+#       #-----------------------------------------------------------------------------
+#   B) musicomp2abc: b-6, inv15-example, inv15-example.working, loudness.mcomp,
+#       promenade-vertical, promenade-horizontal, promenade-musicomp2abc, A
+#   C) songs: lots
+#-----------------------------------------------------------------------------
+# TO DO:
 # * vol(sf,0.25)    -- optional 2nd argument for length of sf.
 #   vol(fp,0.25)    -- optional 2nd argument for length of "f" before returning to "p".
 # * Change to control 11 for volume changes. See F.pl for example. Needs quite a few steps.
-# * Legato control 68 for slurs.
+# * Legato control 68 for slurs/glides. NOT PORTAMENTO or LEGATO + PORTAMENTO.
 #       Value Range: 0 (to 63) is off. 127 (to 64) is on. 
 #   ABC notation for "v2: 4c4l,4d4l,4e4" should be "V:3 \n (cde)"
 #   Need to have spaces mean something ...  suggest space between notes in abc notation. Thus header bars.
@@ -2140,6 +2196,8 @@ def print_out_midi1csv_notes():
             goto_variables[v] = 0              # This voice hasn't done any goto's yet.
         # rof
 
+        legato_on = False
+        legato_last_note = ''
         while m_number < len(meas):             # while there are measures left to do
             t_num = m_number
             m = meas[m_number]
@@ -2175,6 +2233,7 @@ def print_out_midi1csv_notes():
                 else:
                     m_number = m_number + 1
                 # fi
+                legato_on = False
                 continue
             # fi
             while i < len(bufs[voice][m]):      # while there are notes in measure
@@ -2186,32 +2245,60 @@ def print_out_midi1csv_notes():
                 # fi
                 n = bufs[voice][m][i]           # note number
                 if n != '0' and n != 0:         # Only for note that plays (not rest).
+                    if 'l' in bufs_accidentals[voice][m][i]:
+                        leg = True
+                    else:
+                        leg = False
+                    # fi
                     n_print = int(n) + pitch[m]
                     v_vl = bufs_vol[voice][m][i]
+#--                    print("here#0", file=sys.stderr, flush=True)
                     print("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lth, chan, n_print, v_vl), file=output_name, flush=True)
-# NOTDONEYET - legato -- turn on/off between notes.
-#--                    if 'l' in bufs_accidentals[voice][m][i]:
-#--                        leg = 127
-#--                    else:
-#--                        leg = 0
-#--                    # fi
-#--                    print("{}, {}, Control_c, {}, 68, {}".format(voice+1, lth, chan, leg), file=output_name, flush=True)
+                    if legato_last_note != '':
+#--                        print("here#1", file=sys.stderr, flush=True)
+                        print("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lth, chan, legato_last_note, 0), file=output_name, flush=True)
+                        legato_last_note = ''
                     # fi
+                else:
+                    if legato_on:
+                        legato_on = False
+                        if legato_last_note != '':
+#--                            print("here#2", file=sys.stderr, flush=True)
+                            print("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lth, chan, legato_last_note, 0), file=output_name, flush=True)
+                            legato_last_note = ''
+                        # fi
+#--                        print("here#3", file=sys.stderr, flush=True)
+                        print("{}, {}, Control_c, {}, 68, {}".format(voice+1, lth, chan, 0), file=output_name, flush=True)
+                    # fi
+                    leg = False
                 # fi
+
+                if not legato_on and leg:
+#--                    print("here#4", file=sys.stderr, flush=True)
+                    print("{}, {}, Control_c, {}, 68, {}".format(voice+1, lth, chan, 127), file=output_name, flush=True)
+                    legato_on = True
+                elif legato_on and not leg:
+#--                    print("here#5", file=sys.stderr, flush=True)
+                    print("{}, {}, Control_c, {}, 68, {}".format(voice+1, lth, chan, 0), file=output_name, flush=True)
+                    legato_on = False
+                # fi
+
+
                 tmp,m_number,lastmeter, channel, chan, l_instrument, last_keysig, lt,ll = do_possible_midi_tie(m, voice, lthworkingmeasures, i, l,lastmeter, channel, chan, l_instrument, last_keysig, lt,ll)
+
                 if n != '0' and n != 0:
                     n_print = int(n) + pitch[m]      # Note: previous measure name, not m_number.
                     acc_s = bufs_accidentals[voice][m][i]
                     if acc_s == 'ts' or acc_s == 's':
                         tmp = int(round(tmp / 2.0))
                     # fi
-                    print("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, (lth + tmp - 1), chan, n_print, 0), file=output_name, flush=True)
-#--                    if 'l' in bufs_accidentals[voice][m][i]:
-#--                        leg = 127
-#--                    else:
-#--                        leg = 0
-#--                    # fi
-#--                    print("{}, {}, Control_c, {}, 68, {}".format(voice+1, (lth + tmp - 1), chan, leg), file=output_name, flush=True)
+                    if leg:
+#--                        print("here#6", file=sys.stderr, flush=True)
+                        legato_last_note = n_print
+                    else:
+#--                        print("here#7", file=sys.stderr, flush=True)
+                        print("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, (lth + tmp), chan, n_print, 0), file=output_name, flush=True)
+                    # fi
                 # fi
                 lth = lth + l
                 i = i + 1
@@ -2244,6 +2331,16 @@ def print_out_midi1csv_notes():
                 # fi
             # elihw
         # elihw
+        if legato_on:
+            legato_on = False
+            if legato_last_note != '':
+#--                print("here#8", file=sys.stderr, flush=True)
+                print("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lth, chan, legato_last_note, 0), file=output_name, flush=True)
+                legato_last_note = ''
+            # fi
+#--            print("here#9", file=sys.stderr, flush=True)
+            print("{}, {}, Control_c, {}, 68, {}".format(voice+1, lth, chan, 0), file=output_name, flush=True)
+        # fi
         print_out_midi1csv_end(voice, lthworkingmeasures)
     # rof   voice in range
     return
