@@ -1,7 +1,5 @@
 #-----------------------------------------------------------------------------
 SONGS  =
-#++ = to do yet.
-#   = converted, probably (maybe) okay.
 SONGS += 5-dollar-fuga
 SONGS += BigBad
 SONGS += BlueBird
@@ -34,7 +32,8 @@ SONGS += promenade5
 SONGS += sonic-squeak
 SONGS += wonderland-winter
 
-SONGS += bellanotte		# Needs triplets(4?) put in
+# Needs triplets(4?) put in
+SONGS += bellanotte
 SONGS += boughs
 SONGS += caroling
 SONGS += children
@@ -111,7 +110,8 @@ SONGS += macro-aer-ber
 
 SONGS += gnome
 
-SONGS += nachtmusik		# NOTDONEYET Figure out GOTOs and VOLUMEs
+# NOTDONEYET Figure out GOTOs and VOLUMEs
+SONGS += nachtmusik
 #				# Missing rests, voice in the middle of a measure, goto 5 -- no 5??
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Following will not create postscript files correctly - printable note length problems.
@@ -120,15 +120,19 @@ SONGS_NO_PS += vinci
 SONGS_NO_PS += sonata
 SONGS_NO_PS += macros-complicated
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-BROKEN += slidall		# Cannot do this in python or MIDI.
-#				# MAYBE could do this with PTE and portamento.
+# Cannot do this in python or MIDI.
+# MAYBE could do this with PTE and portamento.
+BROKEN += slidall
 
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ../musicomp2abc/musicomp2abc
 YAPS         = yaps
 ABCM2PS      = abcm2ps
 #-----------------------------------------------------------------------------
+CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
+#-----------------------------------------------------------------------------
 # SONGS_GCS = ${SONGS:=.gcs}
+SONGS_E = ${SONGS:=.E} ${SONGS_NO_PS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
 SONGS_CSV = ${SONGS:=.csv} ${SONGS_NO_PS:=.csv}
 SONGS_MID = ${SONGS:=.mid} ${SONGS_NO_PS:=.mid}
@@ -138,21 +142,31 @@ SONGS_WAV = ${SONGS:=.wav} ${SONGS_NO_PS:=.wav}
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 BROKEN_MID = ${BROKEN:=.mid}
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.csv %.abc %.mid
-.SUFFIXES: .mid .csv .ps .abc _m.ps .wav
+.PRECIOUS: %.csv %.abc %.mid %.E
+.SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E
 # output $@   -- input $<
-%.csv:  %.gcs
-	${MUSICOMP2ABC} --midi1csv $< $@ || rm -f $@
+%.csv:  %.E
+	${MUSICOMP2ABC} --midi1csv $< $@ \
+		|| (rm -f $@ ; exit 1)
 %.mid:  %.csv
-	csvmidi $< $@ || (rm -f $@ ; exit 1)
+	csvmidi $< $@ \
+		|| (rm -f $@ ; exit 1)
 %.wav:  %.mid
-	fluidsynth -F $@ -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 $<
-%.abc:  %.gcs
-	${MUSICOMP2ABC} --abc $< $@ || (rm -f $@ ; exit 1)
+	fluidsynth -F $@ -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 $< \
+		|| (rm -f $@ ; exit 1)
+%.abc:  %.E
+	${MUSICOMP2ABC} --abc $< $@ \
+		|| (rm -f $@ ; exit 1)
 %.ps:   %.abc
-	${YAPS} $< -o $@ -k || (rm -f $@ ; exit 1)
+	${YAPS} $< -o $@ -k \
+		|| (rm -f $@ ; exit 1)
 %_m.ps: %.abc
-	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@) || (rm -f $@ ; exit 1)
+	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@) \
+		|| (rm -f $@ ; exit 1)
+#-- %.E: %.gcs beethoven.macros
+%.E: %.gcs
+	${CPP} $< -o $@ \
+		|| (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help
 help:
@@ -163,6 +177,7 @@ help:
 	@echo "  all_m_ps  - Use ${ABCM2PS} to create .ps (postscript) files from .gcs files."
 	@echo '  all_wav   - Use fluidsynth to create .wav (audio) files from .gcs files.'
 	@echo '  clean     - Remove intermediate .csv,.mid,.abc,.ps,_m.ps, and .wav files.'
+	@echo "SONGS: ${SONGS}"
 #-----------------------------------------------------------------------------
 .PHONY: all all_mid
 all all_mid: ${SONGS_MID}
@@ -181,6 +196,7 @@ all_wav: ${SONGS_WAV}
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -f ${SONGS_CSV} ${SONGS_MID} ${SONGS_ABC} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV} *.stderr
+	rm -f ${SONGS_CSV} ${SONGS_MID} ${SONGS_ABC} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV} ${SONGS_E}
+	rm -f *.stderr
 #-----------------------------------------------------------------------------
 # End of Makefile

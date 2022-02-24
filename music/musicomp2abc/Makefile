@@ -42,6 +42,14 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 	${CPP} $< -o $@ \
 		|| (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
+.PHONY: help
+help:
+	@echo 'Targets:'
+	@echo '  all       - Convert all working (?) .gcs songs to .mid files.'
+	@echo '  clean     - Remove intermediate .csv,.mid,.abc,.ps,_m.ps, and .wav files.'
+	@echo '  tags      - Create tags file for python sources.'
+	@echo "SONGS: ${SONGS}"
+#-----------------------------------------------------------------------------
 .PHONY: all
 all: ${SONGS_MID} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV}
 #-----------------------------------------------------------------------------
