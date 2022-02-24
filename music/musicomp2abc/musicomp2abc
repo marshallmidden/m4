@@ -20,43 +20,6 @@
 #       3, 0, Control_c, 1, 91, 52
 #   b) Maybe change all song files that have instrument, pan, reverb, etc.
 #-----------------------------------------------------------------------------
-# TO DO: Fix Makefiles:
-#   A) change all songs to .gcs suffix.
-#       SONGS += C
-#       #-----------------------------------------------------------------------------
-#       SONGS_GCS = ${SONGS:=.gcs}
-#       SONGS_ABC = ${SONGS:=.abc}
-#       SONGS_CSV = ${SONGS:=.csv}
-#       SONGS_MID = ${SONGS:=.mid}
-#       SONGS_M_PS = ${SONGS:=_m.ps}
-#       SONGS_PS = ${SONGS:=.ps}
-#       SONGS_WAV = ${SONGS:=.wav}
-#       #-----------------------------------------------------------------------------
-#       MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
-#       YAPS         = yaps
-#       ABCM2PS      = abcm2ps
-#       #-----------------------------------------------------------------------------
-#       .PRECIOUS: %.abc %.csv
-#       .SUFFIXES: .mid .csv .ps .abc _m.ps
-#       # output $@   -- input $<
-#       %.csv:  %.gcs
-#               ${MUSICOMP2ABC} --midi1csv $< $@
-#       %.mid:  %.csv
-#               csvmidi $< $@
-#       %.wav:  %.mid
-#               fluidsynth -F $@ -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 $<
-#       %.abc:  %.gcs
-#               ${MUSICOMP2ABC} --abc $< $@
-#       %.ps:   %.abc
-#               ${YAPS} $< -o $@ -k
-#       %_m.ps: %.abc
-#               ${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1
-#               mv Out.ps $@
-#       #-----------------------------------------------------------------------------
-#   B) musicomp2abc: b-6, inv15-example, inv15-example.working, loudness.mcomp,
-#       promenade-vertical, promenade-horizontal, promenade-musicomp2abc, A
-#   C) songs: lots
-#-----------------------------------------------------------------------------
 # TO DO:
 # * vol(sf,0.25)    -- optional 2nd argument for length of sf.
 #   vol(fp,0.25)    -- optional 2nd argument for length of "f" before returning to "p".
@@ -872,11 +835,14 @@ global cresc_time
 cresc_time = []
 global cresc_direction
 cresc_direction = []
+default_reverb = 0
+default_pan = 64
+default_intensity = 100
 for i in range(1, MAXVOICES+1):     # This is used as [1] .. [MAXVOICES]
     vinstrument[''][i] = 0          # No instrument. (measure, voice)
-    reverb[''][i] = 0
-    pan[''][i] = 64
-    intensity[''][i] = 100
+    reverb[''][i] = default_reverb
+    pan[''][i] = default_pan
+    intensity[''][i] = default_intensity
     clef[''][i] = {}
     clef[''][i] = 'treble'          # No clef.       (voice, measure)
     xpose[i] = 0
@@ -1129,9 +1095,9 @@ def new_voice_initialize(voice, m):
     # fi
     if voice not in vinstrument[m]:
         vinstrument[m][voice] = 0
-        reverb[m][voice] = 0
-        pan[m][voice] = 64
-        intensity[m][voice] = 100
+        reverb[m][voice] = default_reverb
+        pan[m][voice] = default_pan
+        intensity[m][voice] = default_intensity
 
     if m not in key_voice:
         key_voice[m] = {}
@@ -1318,9 +1284,9 @@ def print_measure_abc(m, voice, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_
 
     if voice not in vinstrument[m]:
         vinstrument[m][voice] = 0
-        reverb[m][voice] = 0
-        pan[m][voice] = 64
-        intensity[m][voice] = 100
+        reverb[m][voice] = default_reverb
+        pan[m][voice] = default_pan
+        intensity[m][voice] = default_intensity
     # fi
 
     if len(vinstrument[m]) >= voice and vinstrument[m][voice] != 0:
@@ -1825,46 +1791,71 @@ def print_out_midi1csv_instrument(m,voiceon,lthworkingmeasure, last_instrument_o
 
     if voiceon not in vinstrument[m]:
         vinstrument[m][voiceon] = 0
-        reverb[m][voiceon] = 0
-        pan[m][voiceon] = 64
-        intensity[m][voiceon] = 100
+        reverb[m][voiceon] = default_reverb
+        pan[m][voiceon] = default_pan
+        intensity[m][voiceon] = default_intensity
     # fi
     if len(vinstrument[m]) >= voiceon and vinstrument[m][voiceon] != 0:
         if last_instrument_on != vinstrument[m][voiceon]:
             last_instrument_on = vinstrument[m][voiceon] + args.offset
-            if last_instrument_on in inst:
-                chan = inst[last_instrument_on]
-                if last_instrument_on < 0:
-                    last_instrument_on = 0
-                # fi
-            else:
-                chan = channel
-                inst[last_instrument_on] = chan
+            if last_instrument_on not in inst:
+                inst[last_instrument_on] = {}
+                chan = channel                              # New instrument & voice.
+                inst[last_instrument_on][voiceon] = chan
                 channel = channel + 1
                 if channel == 9:
                     channel = 10
                 # fi
+            elif voiceon not in inst[last_instrument_on]:
+                chan = channel                              # New instrument & voice.
+                inst[last_instrument_on][voiceon] = chan
+                channel = channel + 1
+                if channel == 9:
+                    channel = 10
+                # fi
+            else:
+                chan = inst[last_instrument_on][voiceon]    # instrument used previously on this voice.
+                if last_instrument_on < 0:
+                    ast_instrument_on = 0
+                # fi
             # fi
             q = mlth[voiceon][m]
-            print('{}, {}, Program_c, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, last_instrument_on), file=output_name, flush=True)
-# 73: ["flute",             52, 37, 84],
+            print('{}, {}, Program_c, {}, {}'.format(voiceon+1, lthworkingmeasure, chan, last_instrument_on), file=output_name, flush=True)
             if last_instrument_on in extrainfo:
                 print('{}, {}, Text_t, "{}"'.format(voiceon+1, lthworkingmeasure, extrainfo[last_instrument_on][0]), file=output_name, flush=True)
-
-                # 121   All Controllers Off
-                print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 121, 0), file=output_name, flush=True)
-                #  64   Hold Pedal Off
-                print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 64, 0), file=output_name, flush=True)
-                #   7   Volume
-                print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 7,
-                                                        intensity[m][voiceon]), file=output_name, flush=True)
-                #  10   Pan position   64 is center, 0 is hard left, and 127 is hard right.
-                print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 10,
-                                                        pan[m][voiceon]), file=output_name, flush=True)
-                #  91   Reverb Level
-                print('{}, {}, Control_c, {}, {}, {}'.format( voiceon+1, lthworkingmeasure, chan, 91,
-                                                        reverb[m][voiceon]), file=output_name, flush=True)
             # fi
+
+            # 125   Omni Mode On (and all notes off).
+            print('{}, {}, Control_c, {}, 125, 0'.format(voiceon+1, lthworkingmeasure, chan), file=output_name, flush=True)
+
+            # 127   Set device mode to Polyphonic.
+            print('{}, {}, Control_c, {}, 127, 0'.format(voiceon+1, lthworkingmeasure, chan), file=output_name, flush=True)
+
+            # 121   Reset all Controllers.
+            print('{}, {}, Control_c, {}, 121, 0'.format(voiceon+1, lthworkingmeasure, chan), file=output_name, flush=True)
+
+            #   7   Volume
+            print('{}, {}, Control_c, {}, {}, {}'.format(voiceon+1, lthworkingmeasure, chan, 7,
+                                                    intensity[m][voiceon]), file=output_name, flush=True)
+            #   5   Portamento Time to 0. (No slide between two notes subsequently, without off between.)
+            print('{}, {}, Control_c, {}, 5, 0'.format(voiceon+1, lthworkingmeasure, chan), file=output_name, flush=True)
+
+            #  65   Portamento Off. Note: can still portamento - stupid standard.
+            print('{}, {}, Control_c, {}, 65, 0'.format(voiceon+1, lthworkingmeasure, chan), file=output_name, flush=True)
+
+            #  68   Legato Off.
+            print('{}, {}, Control_c, {}, 68, 0'.format(voiceon+1, lthworkingmeasure, chan), file=output_name, flush=True)
+
+            #  64   Hold Pedal Off
+            print('{}, {}, Control_c, {}, {}, {}'.format(voiceon+1, lthworkingmeasure, chan, 64, 0), file=output_name, flush=True)
+
+            #  10   Pan position   64 is center, 0 is hard left, and 127 is hard right.
+            print('{}, {}, Control_c, {}, {}, {}'.format(voiceon+1, lthworkingmeasure, chan, 10,
+                                                    pan[m][voiceon]), file=output_name, flush=True)
+
+            #  91   Reverb Level
+            print('{}, {}, Control_c, {}, {}, {}'.format(voiceon+1, lthworkingmeasure, chan, 91,
+                                                    reverb[m][voiceon]), file=output_name, flush=True)
         # fi
     # fi
     return last_instrument_on, channel, chan
@@ -2160,20 +2151,20 @@ def print_out_midi1csv_notes():
         m_number = 0
         print_out_midi1csv_start(voice)
 
-        # 125   Omni Mode On (and all notes off).
-        print('{}, 0, Control_c, {}, 125, 0'.format(voice+1, chan), file=output_name, flush=True)
-        # 127   Set device mode to Polyphonic.
-        print('{}, 0, Control_c, {}, 127, 0'.format(voice+1, chan), file=output_name, flush=True)
-        # 121   Reset all Controllers.
-        print('{}, 0, Control_c, {}, 121, 0'.format(voice+1, chan), file=output_name, flush=True)
-        #   7   Channel Volume on full.
-        print('{}, 0, Control_c, {}, 7, 127'.format(voice+1, chan), file=output_name, flush=True)
-        #   5   Portamento Time to 0. (No slide between two notes subsequently, without off between.)
-        print('{}, 0, Control_c, {}, 5, 0'.format(voice+1, chan), file=output_name, flush=True)
-        #  65   Portamento Off. Note: can still portamento - stupid standard.
-        print('{}, 0, Control_c, {}, 65, 0'.format(voice+1, chan), file=output_name, flush=True)
-        #  68   Legato Off.
-        print('{}, 0, Control_c, {}, 68, 0'.format(voice+1, chan), file=output_name, flush=True)
+# --        # 125   Omni Mode On (and all notes off).
+# --        print('{}, 0, Control_c, {}, 125, 0'.format(voice+1, chan), file=output_name, flush=True)
+# --        # 127   Set device mode to Polyphonic.
+# --        print('{}, 0, Control_c, {}, 127, 0'.format(voice+1, chan), file=output_name, flush=True)
+# --        # 121   Reset all Controllers.
+# --        print('{}, 0, Control_c, {}, 121, 0'.format(voice+1, chan), file=output_name, flush=True)
+# --        #   7   Channel Volume on full.
+# --        print('{}, 0, Control_c, {}, 7, 127'.format(voice+1, chan), file=output_name, flush=True)
+# --        #   5   Portamento Time to 0. (No slide between two notes subsequently, without off between.)
+# --        print('{}, 0, Control_c, {}, 5, 0'.format(voice+1, chan), file=output_name, flush=True)
+# --        #  65   Portamento Off. Note: can still portamento - stupid standard.
+# --        print('{}, 0, Control_c, {}, 65, 0'.format(voice+1, chan), file=output_name, flush=True)
+# --        #  68   Legato Off.
+# --        print('{}, 0, Control_c, {}, 68, 0'.format(voice+1, chan), file=output_name, flush=True)
         # A comment.
         print('{}, 0, Text_t, " voice {}"'.format(voice+1, voice), file=output_name, flush=True)
         lt = ''
@@ -2181,8 +2172,9 @@ def print_out_midi1csv_notes():
         last_keysig = ''
         m = ''
 
-        lastmeter = print_out_midi1csv_ts(m, voice, lthworkingmeasures, lastmeter)
         l_instrument, channel, chan = print_out_midi1csv_instrument(m,voice,lthworkingmeasures, l_instrument, channel, chan)
+
+        lastmeter = print_out_midi1csv_ts(m, voice, lthworkingmeasures, lastmeter)
         last_keysig = print_out_midi1csv_keysignature(m,voice,lthworkingmeasures, last_keysig)
         lt, ll = print_out_midi1csv_tempo(m,voice,lthworkingmeasures, lt,ll)
 
@@ -3886,8 +3878,6 @@ def do_decode(t_args, line):
 def do_clef(t_args, line):
     global clef
     global measure_on
-    global extrainfo
-    global vinstrument
 
     if t_args is None or len(t_args) != 1:
         print_error("clef does not have arguments.", line)
@@ -4765,9 +4755,9 @@ def do_cis(t_args, line):
         i = str(vargs[1]).lower()
         if i in instruments:
             vinstrument[measure_on][cis] = instruments[i]
-            reverb[measure_on][cis] = 0
-            pan[measure_on][cis] = 64
-            intensity[measure_on][cis] = 100
+            reverb[measure_on][cis] = default_reverb
+            pan[measure_on][cis] = default_pan
+            intensity[measure_on][cis] = default_intensity
         else:
             f1, type_error = is_float(i)
             if type_error is not None:
@@ -4783,9 +4773,9 @@ def do_cis(t_args, line):
                 return
             # fi
             vinstrument[measure_on][cis] = f1
-            reverb[measure_on][cis] = 0
-            pan[measure_on][cis] = 64
-            intensity[measure_on][cis] = 100
+            reverb[measure_on][cis] = default_reverb
+            pan[measure_on][cis] = default_pan
+            intensity[measure_on][cis] = default_intensity
         # fi
     # fi
     fill_voice_mlth(False, line)               # Need to make measure for all voices up to here "mlth".
@@ -4955,9 +4945,9 @@ def do_voice(t_args, line):
             j = str(j).lower()
             if j in instruments:
                 vinstrument[measure_on][i+1] = instruments[j]
-                reverb[measure_on][i+1] = 0
-                pan[measure_on][i+1] = 64
-                intensity[measure_on][i+1] = 100
+                reverb[measure_on][i+1] = default_reverb
+                pan[measure_on][i+1] = default_pan
+                intensity[measure_on][i+1] = default_intensity
             else:
                 f1, type_error = is_float(j)
                 if type_error is not None:
@@ -4973,9 +4963,9 @@ def do_voice(t_args, line):
                     return
                 # fi
                 vinstrument[measure_on][i+1] = f1
-                reverb[measure_on][i+1] = 0
-                pan[measure_on][i+1] = 64
-                intensity[measure_on][i+1] = 100
+                reverb[measure_on][i+1] = default_reverb
+                pan[measure_on][i+1] = default_pan
+                intensity[measure_on][i+1] = default_intensity
             # fi
         # rof
     # fi
@@ -5220,7 +5210,7 @@ def do_instrument(t_args, line):
 #-----------------------------------------------------------------------------
 def do_reverb(t_args, line):
     global reverb
-    global extrainfo
+#-- MUST NOT CHANGE FOR OTHER VOICES    global extrainfo
     global measure_on
     global vinstrument
 
@@ -5273,7 +5263,7 @@ def do_reverb(t_args, line):
         f1 = int(round(f1))
 
         INST = vinstrument[measure_on][f1]
-        extrainfo[INST][1] = r
+#-- MUST NOT CHANGE FOR OTHER VOICES        extrainfo[INST][1] = r
         reverb[measure_on][f1] = r
     # rof
     return
@@ -5282,7 +5272,7 @@ def do_reverb(t_args, line):
 #-----------------------------------------------------------------------------
 def do_intensity(t_args, line):
     global intensity
-    global extrainfo
+#-- MUST NOT CHANGE FOR OTHER VOICES    global extrainfo
     global measure_on
     global vinstrument
 
@@ -5338,7 +5328,7 @@ def do_intensity(t_args, line):
             return
         # fi
         INST = vinstrument[measure_on][f1]
-        extrainfo[INST][1] = intens
+#-- MUST NOT CHANGE FOR OTHER VOICES        extrainfo[INST][1] = intens
         intensity[measure_on][f1] = intens
     # rof
     return
@@ -5347,7 +5337,7 @@ def do_intensity(t_args, line):
 #-----------------------------------------------------------------------------
 def do_pan(t_args, line):
     global pan
-    global extrainfo
+#-- MUST NOT CHANGE FOR OTHER VOICES    global extrainfo
     global measure_on
     global vinstrument
 
@@ -5399,7 +5389,7 @@ def do_pan(t_args, line):
         f1 = int(round(f1))
 
         INST = vinstrument[measure_on][f1]
-        extrainfo[INST][1] = p
+#-- MUST NOT CHANGE FOR OTHER VOICES        extrainfo[INST][1] = p
         pan[measure_on][f1] = p
     # rof
     return
