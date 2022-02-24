@@ -8,23 +8,30 @@ ABCM2PS      = abcm2ps
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.abc %.csv %.mid
+.PRECIOUS: %.abc %.csv %.mid %.E
 .SUFFIXES: .mid .csv .ps .abc _m.ps .E .wav
 # output $@   -- input $<
 %.csv:  %.E
-	${MUSICOMP2ABC} --midi1csv $< $@ || rm -f $@
+	${MUSICOMP2ABC} --midi1csv $< $@ \
+		|| (rm -f $@ ; exit 1)
 %.mid:  %.csv
-	csvmidi $< $@ || (rm -f $@ ; exit 1)
+	csvmidi $< $@ \
+		|| (rm -f $@ ; exit 1)
 %.wav:  %.mid
-	fluidsynth -F $@ -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 $<
+	fluidsynth -F $@ -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 $< \
+		|| (rm -f $@ ; exit 1)
 %.abc:  %.E
-	${MUSICOMP2ABC} --abc $< $@ || (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} --abc $< $@ \
+		|| (rm -f $@ ; exit 1)
 %.ps:   %.abc
-	${YAPS} $< -o $@ -k || (rm -f $@ ; exit 1)
+	${YAPS} $< -o $@ -k \
+		|| (rm -f $@ ; exit 1)
 %_m.ps: %.abc
-	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@) || (rm -f $@ ; exit 1)
+	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@) \
+		|| (rm -f $@ ; exit 1)
 %.E: %.gcs beethoven.macros
-	${CPP} $< -o $@
+	${CPP} $< -o $@ \
+		|| (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.A_abc
 .SUFFIXES: _A.ps .A_abc _m_A.ps
