@@ -6,21 +6,32 @@ MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 YAPS         = yaps
 ABCM2PS      = abcm2ps
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.abc %.csv %.mid
-.SUFFIXES: .mid .csv .ps .abc _m.ps .wav
-# output $@   -- input $<
-%.csv:  %.gcs
-	${MUSICOMP2ABC} --midi1csv $< $@ || rm -f $@
-%.mid:  %.csv
-	csvmidi $< $@ || (rm -f $@ ; exit 1)
-%.wav:  %.mid
-	fluidsynth -F $@ -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 $<
-%.abc:  %.gcs
-	${MUSICOMP2ABC} --abc $< $@ || (rm -f $@ ; exit 1)
-%.ps:   %.abc
-	${YAPS} $< -o $@ -k || (rm -f $@ ; exit 1)
-%_m.ps: %.abc
-	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@) || (rm -f $@ ; exit 1)
+CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
+#-----------------------------------------------------------------------------
+.PRECIOUS: %.abc %.csv %.mid %.E
+.SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E
+%.csv:	%.E
+	${MUSICOMP2ABC} --midi1csv $< $@ \
+		|| (rm -f $@ ; exit 1)
+%.mid:	%.csv
+	csvmidi $< $@ \
+		|| (rm -f $@ ; exit 1)
+%.wav:	%.mid
+	fluidsynth -F $@ -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 $< \
+		|| (rm -f $@ ; exit 1)
+%.abc:	%.E
+	${MUSICOMP2ABC} --abc $< $@ \
+		|| (rm -f $@ ; exit 1)
+%.ps:	%.abc
+	${YAPS} $< -o $@ -k \
+		|| (rm -f $@ ; exit 1)
+%_m.ps:	%.abc
+	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@) \
+		|| (rm -f $@ ; exit 1)
+#-- %.E: %.gcs beethoven.macros
+%.E: %.gcs
+	${CPP} $< -o $@ \
+		|| (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.A_abc
 .SUFFIXES: _A.ps .A_abc _m_A.ps
@@ -87,6 +98,7 @@ clean::
 	rm -f *.csv *.mid
 	rm -f *.abc *.A_abc
 	rm -f *.wav
+	rm -f *.E
 	rm -f A.[0123]* B.[0123]* C.[0123]*
 #-----------------------------------------------------------------------------
 $(foreach e,$(s),$(eval $(call many_targets,$(e))))
