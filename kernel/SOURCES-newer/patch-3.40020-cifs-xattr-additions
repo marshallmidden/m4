@@ -1,0 +1,81 @@
+diff --git a/fs/cifs/inode.c b/fs/cifs/inode.c
+--- a/fs/cifs/inode.c	2020-01-31 18:35:29.077757298 -0600
++++ b/fs/cifs/inode.c	2020-01-31 13:06:59.000000000 -0600
+@@ -1380,15 +1380,15 @@ out:
+ 	kfree(path);
+ 	free_xid(xid);
+ 	return inode;
+ }
+ 
+ int
+ cifs_set_file_info(struct inode *inode, struct iattr *attrs, unsigned int xid,
+-		   const char *full_path, __u32 dosattr)
++		   const char *full_path, __u32 dosattr, __le64 creationtime)
+ {
+ 	bool set_time = false;
+ 	struct cifs_sb_info *cifs_sb = CIFS_SB(inode->i_sb);
+ 	struct TCP_Server_Info *server;
+ 	FILE_BASIC_INFO	info_buf;
+ 
+ 	if (attrs == NULL)
+@@ -1423,15 +1423,15 @@ cifs_set_file_info(struct inode *inode,
+ 	if (set_time && (attrs->ia_valid & ATTR_CTIME)) {
+ 		cifs_dbg(FYI, "CIFS - CTIME changed\n");
+ 		info_buf.ChangeTime =
+ 		    cpu_to_le64(cifs_UnixTimeToNT(attrs->ia_ctime));
+ 	} else
+ 		info_buf.ChangeTime = 0;
+ 
+-	info_buf.CreationTime = 0;	/* don't change */
++	info_buf.CreationTime = creationtime;	/* don't change, if 0 */
+ 	info_buf.Attributes = cpu_to_le32(dosattr);
+ 
+ 	return server->ops->set_file_info(inode, full_path, &info_buf, xid);
+ }
+ 
+ /*
+  * Open the given file (if it isn't already), set the DELETE_ON_CLOSE bit
+@@ -1669,24 +1669,24 @@ psx_del_no_retry:
+ 		if (origattr == 0)
+ 			origattr |= ATTR_NORMAL;
+ 		dosattr = origattr & ~ATTR_READONLY;
+ 		if (dosattr == 0)
+ 			dosattr |= ATTR_NORMAL;
+ 		dosattr |= ATTR_HIDDEN;
+ 
+-		rc = cifs_set_file_info(inode, attrs, xid, full_path, dosattr);
++		rc = cifs_set_file_info(inode, attrs, xid, full_path, dosattr, 0);
+ 		if (rc != 0)
+ 			goto out_reval;
+ 
+ 		goto retry_std_delete;
+ 	}
+ 
+ 	/* undo the setattr if we errored out and it's needed */
+ 	if (rc != 0 && dosattr != 0)
+-		cifs_set_file_info(inode, attrs, xid, full_path, origattr);
++		cifs_set_file_info(inode, attrs, xid, full_path, origattr, 0);
+ 
+ out_reval:
+ 	if (inode) {
+ 		cifs_inode = CIFS_I(inode);
+ 		cifs_inode->time = 0;	/* will force revalidate to get info
+ 					   when needed */
+ 		inode->i_ctime = current_time(inode);
+@@ -2950,15 +2950,15 @@ cifs_setattr_nounix(struct dentry *diren
+ 			/* ignore mode change - ATTR_READONLY hasn't changed */
+ 			attrs->ia_valid &= ~ATTR_MODE;
+ 		}
+ 	}
+ 
+ 	if (attrs->ia_valid & (ATTR_MTIME|ATTR_ATIME|ATTR_CTIME) ||
+ 	    ((attrs->ia_valid & ATTR_MODE) && dosattr)) {
+-		rc = cifs_set_file_info(inode, attrs, xid, full_path, dosattr);
++		rc = cifs_set_file_info(inode, attrs, xid, full_path, dosattr, 0);
+ 		/* BB: check for rc = -EOPNOTSUPP and switch to legacy mode */
+ 
+ 		/* Even if error on time set, no sense failing the call if
+ 		the server would set the time to a reasonable value anyway,
+ 		and this check ensures that we are not being called from
+ 		sys_utimes in which case we ought to fail the call back to
+ 		the user when the server rejects the call */

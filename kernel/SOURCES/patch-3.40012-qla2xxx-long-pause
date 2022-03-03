@@ -1,15 +1,14 @@
 diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_target.c b/drivers/scsi/qla2xxx/qla_target.c
 --- a/drivers/scsi/qla2xxx/qla_target.c	2019-09-04 15:02:06.233860332 -0500
 +++ b/drivers/scsi/qla2xxx/qla_target.c	2019-09-04 15:03:54.271452803 -0500
-@@ -4421,14 +4421,85 @@ static struct qla_tgt_cmd *qlt_get_tag(s
+@@ -4364,14 +4364,84 @@ static struct qla_tgt_cmd *qlt_get_tag(s
+ 	qlt_assign_qpair(vha, cmd);
  	cmd->reset_count = vha->hw->base_qpair->chip_reset;
  	cmd->vp_idx = vha->vp_idx;
- 	cmd->edif = sess->edif.enable;
  
  	return cmd;
  }
  
-+static struct fc_port *qlt_make_local_sess(struct scsi_qla_host *, be_id_t);
 +static void qlt_create_sess_from_atio(struct work_struct *work)
 +{
 +	struct qla_tgt_sess_op *op = container_of(work,
@@ -19,7 +18,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_target.c b/drivers
 +	struct fc_port *sess;
 +	struct qla_tgt_cmd *cmd;
 +	unsigned long flags;
-+	be_id_t s_id = op->atio.u.isp24.fcp_hdr.s_id;
++	uint8_t *s_id = op->atio.u.isp24.fcp_hdr.s_id;
 +
 +	spin_lock_irqsave(&vha->cmd_list_lock, flags);
 +	list_del(&op->cmd_list);
@@ -35,7 +34,7 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_target.c b/drivers
 +	ql_dbg(ql_dbg_tgt_mgt, vha, 0xf022,
 +	    "qla_target(%d): Unable to find wwn login"
 +	    " (s_id %x:%x:%x), trying to create it manually\n",
-+	    vha->vp_idx, s_id.domain, s_id.area, s_id.al_pa);
++	    vha->vp_idx, s_id[0], s_id[1], s_id[2]);
 +
 +	if (op->atio.u.raw.entry_count > 1) {
 +		ql_dbg(ql_dbg_tgt_mgt, vha, 0xf023,
@@ -87,9 +86,9 @@ diff -Nrp -U 7 --strip-trailing-cr a/drivers/scsi/qla2xxx/qla_target.c b/drivers
  	struct qla_hw_data *ha = vha->hw;
  	struct qla_tgt *tgt = vha->vha_tgt.qla_tgt;
  	struct fc_port *sess;
-@@ -4444,15 +4515,31 @@ static int qlt_handle_cmd_for_atio(struc
- 
- 	id = be_to_port_id(atio->u.isp24.fcp_hdr.s_id);
+@@ -4389,15 +4459,31 @@ static int qlt_handle_cmd_for_atio(struc
+ 	id.b.area = atio->u.isp24.fcp_hdr.s_id[1];
+ 	id.b.domain = atio->u.isp24.fcp_hdr.s_id[0];
  	if (IS_SW_RESV_ADDR(id))
  		return -EBUSY;
  

@@ -1,0 +1,127 @@
+diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' '--exclude=objtool' '--exclude=cpupower' a/fs/cifs/fs_context.c b/fs/cifs/fs_context.c
+--- a/fs/cifs/fs_context.c	2020-05-04 20:01:51.322937390 -0500
++++ b/fs/cifs/fs_context.c	2020-05-04 19:57:02.455392694 -0500
+@@ -589,16 +589,18 @@
+ 	/* Muliuser mounts require CONFIG_KEYS support */
+ 	if (ctx->multiuser) {
+ 		cifs_errorf(fc, "Multiuser mounts require kernels with CONFIG_KEYS enabled\n");
+ 		return -1;
+ 	}
+ #endif
+ 
++#if 0
+ 	if (ctx->got_version == false)
+ 		pr_warn_once("No dialect specified on mount. Default has changed to a more secure dialect, SMB2.1 or later (e.g. SMB3.1.1), from CIFS (SMB1). To use the less secure SMB1 dialect to access old servers which do not support SMB3.1.1 (or even SMB3 or SMB2.1) specify vers=1.0 on mount.\n");
++#endif
+ 
+ 
+ 	if (!ctx->UNC) {
+ 		cifs_errorf(fc, "CIFS mount error: No usable UNC path provided in device string!\n");
+ 		return -1;
+ 	}
+ 
+diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' '--exclude=objtool' '--exclude=cpupower' a/fs/cifs/misc.c b/fs/cifs/misc.c
+--- a/fs/cifs/misc.c	2019-09-15 16:19:32.000000000 -0500
++++ b/fs/cifs/misc.c	2020-05-04 19:57:02.458392689 -0500
+@@ -520,16 +520,18 @@ cifs_autodisable_serverino(struct cifs_s
+ 		if (cifs_sb->master_tlink)
+ 			tcon = cifs_sb_master_tcon(cifs_sb);
+ 
+ 		cifs_sb->mnt_cifs_flags &= ~CIFS_MOUNT_SERVER_INUM;
+ 		cifs_sb->mnt_cifs_serverino_autodisabled = true;
+ 		cifs_dbg(VFS, "Autodisabling the use of server inode numbers on %s\n",
+ 			 tcon ? tcon->treeName : "new server");
++#if 0
+ 		cifs_dbg(VFS, "The server doesn't seem to support them properly or the files might be on different servers (DFS)\n");
+ 		cifs_dbg(VFS, "Hardlinks will not be recognized on this mount. Consider mounting with the \"noserverino\" option to silence this message.\n");
++#endif 
+ 
+ 	}
+ }
+ 
+ void cifs_set_oplock_level(struct cifsInodeInfo *cinode, __u32 oplock)
+ {
+ 	oplock &= 0xF;
+diff -Nrp -U 7 --no-ignore-file-name-case --strip-trailing-cr '--exclude=.git*' '--exclude=objtool' '--exclude=cpupower' a/fs/cifs/xattr.c b/fs/cifs/xattr.c
+--- a/fs/cifs/xattr.c	2020-05-04 20:01:51.313937404 -0500
++++ b/fs/cifs/xattr.c	2020-05-04 19:57:02.462392682 -0500
+@@ -21,14 +21,18 @@
+ 
+ #define MAX_EA_VALUE_SIZE CIFSMaxBufSize
+ #define CIFS_XATTR_CIFS_ACL "system.cifs_acl" /* DACL only */
+ #define CIFS_XATTR_CIFS_NTSD "system.cifs_ntsd" /* owner plus DACL */
+ #define CIFS_XATTR_CIFS_NTSD_FULL "system.cifs_ntsd_full" /* owner/DACL/SACL */
+ #define CIFS_XATTR_ATTRIB "cifs.dosattrib"  /* full name: user.cifs.dosattrib */
+ #define CIFS_XATTR_CREATETIME "cifs.creationtime"  /* user.cifs.creationtime */
++
++#define CIFS_XATTR_GETFSATTR "cifs.getfsattr"  /* user.cifs.getfsattr */
++
++
+ /*
+  * Although these three are just aliases for the above, need to move away from
+  * confusing users and using the 20+ year old term 'cifs' when it is no longer
+  * secure, replaced by SMB2 (then even more highly secure SMB3) many years ago
+  */
+ #define SMB3_XATTR_CIFS_ACL "system.smb3_acl" /* DACL only */
+ #define SMB3_XATTR_CIFS_NTSD "system.smb3_ntsd" /* owner plus DACL */
+@@ -273,14 +277,28 @@ static int cifs_creation_time_get(struct
+ 	/* return dos attributes as pseudo xattr */
+ 	pcreatetime = (__u64 *)value;
+ 	*pcreatetime = CIFS_I(inode)->createtime;
+ 	return sizeof(__u64);
+ }
+ 
+ 
++static int cifs_get_fs_attr(struct cifs_tcon *tcon, void *value, size_t size)
++{
++
++	if (!value || !size)
++		return sizeof(__u32);
++
++	if (size < sizeof(__u32))
++		return -ERANGE;
++
++	*((__u32 *)value) = le32_to_cpu(tcon->fsAttrInfo.Attributes);
++	return sizeof(__u32);
++}
++
++
+ static int cifs_xattr_get(const struct xattr_handler *handler,
+ 			  struct dentry *dentry, struct inode *inode,
+ 			  const char *name, void *value, size_t size)
+ {
+ 	ssize_t rc = -EOPNOTSUPP;
+ 	unsigned int xid;
+ 	struct super_block *sb = dentry->d_sb;
+@@ -302,25 +320,31 @@ static int cifs_xattr_get(const struct x
+ 	if (IS_ERR(full_path)) {
+ 		rc = PTR_ERR(full_path);
+ 		goto out;
+ 	}
+ 
+ 	/* return alt name if available as pseudo attr */
+ 	switch (handler->flags) {
++
++/* GET */
+ 	case XATTR_USER:
+ 		cifs_dbg(FYI, "%s:querying user xattr %s\n", __func__, name);
+ 		if ((strcmp(name, CIFS_XATTR_ATTRIB) == 0) ||
+ 		    (strcmp(name, SMB3_XATTR_ATTRIB) == 0)) {
+ 			rc = cifs_attrib_get(dentry, inode, value, size);
+ 			break;
+ 		} else if ((strcmp(name, CIFS_XATTR_CREATETIME) == 0) ||
+ 		    (strcmp(name, SMB3_XATTR_CREATETIME) == 0)) {
+ 			rc = cifs_creation_time_get(dentry, inode, value, size);
+ 			break;
+ 		}
++		else if (!strcmp(name, CIFS_XATTR_GETFSATTR)) {
++			rc = cifs_get_fs_attr(pTcon, value, size);
++			break;
++		}
+ 
+ 		if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_NO_XATTR)
+ 			goto out;
+ 
+ 		if (pTcon->ses->server->ops->query_all_EAs)
+ 			rc = pTcon->ses->server->ops->query_all_EAs(xid, pTcon,
+ 				full_path, name, value, size, cifs_sb);

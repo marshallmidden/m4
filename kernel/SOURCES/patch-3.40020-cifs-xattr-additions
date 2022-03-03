@@ -1,7 +1,7 @@
 diff --git a/fs/cifs/inode.c b/fs/cifs/inode.c
 --- a/fs/cifs/inode.c	2020-01-31 18:35:29.077757298 -0600
 +++ b/fs/cifs/inode.c	2020-01-31 13:06:59.000000000 -0600
-@@ -1380,15 +1380,15 @@ out:
+@@ -1117,15 +1117,15 @@ out:
  	kfree(path);
  	free_xid(xid);
  	return inode;
@@ -9,8 +9,8 @@ diff --git a/fs/cifs/inode.c b/fs/cifs/inode.c
  
  int
  cifs_set_file_info(struct inode *inode, struct iattr *attrs, unsigned int xid,
--		   const char *full_path, __u32 dosattr)
-+		   const char *full_path, __u32 dosattr, __le64 creationtime)
+-		   char *full_path, __u32 dosattr)
++		   char *full_path, __u32 dosattr, __le64 creationtime)
  {
  	bool set_time = false;
  	struct cifs_sb_info *cifs_sb = CIFS_SB(inode->i_sb);
@@ -18,7 +18,7 @@ diff --git a/fs/cifs/inode.c b/fs/cifs/inode.c
  	FILE_BASIC_INFO	info_buf;
  
  	if (attrs == NULL)
-@@ -1423,15 +1423,15 @@ cifs_set_file_info(struct inode *inode,
+@@ -1160,15 +1160,15 @@ cifs_set_file_info(struct inode *inode,
  	if (set_time && (attrs->ia_valid & ATTR_CTIME)) {
  		cifs_dbg(FYI, "CIFS - CTIME changed\n");
  		info_buf.ChangeTime =
@@ -35,7 +35,7 @@ diff --git a/fs/cifs/inode.c b/fs/cifs/inode.c
  
  /*
   * Open the given file (if it isn't already), set the DELETE_ON_CLOSE bit
-@@ -1669,24 +1669,24 @@ psx_del_no_retry:
+@@ -1395,24 +1395,24 @@ psx_del_no_retry:
  		if (origattr == 0)
  			origattr |= ATTR_NORMAL;
  		dosattr = origattr & ~ATTR_READONLY;
@@ -62,7 +62,7 @@ diff --git a/fs/cifs/inode.c b/fs/cifs/inode.c
  		cifs_inode->time = 0;	/* will force revalidate to get info
  					   when needed */
  		inode->i_ctime = current_time(inode);
-@@ -2950,15 +2950,15 @@ cifs_setattr_nounix(struct dentry *diren
+@@ -2540,15 +2540,15 @@ cifs_setattr_nounix(struct dentry *diren
  			/* ignore mode change - ATTR_READONLY hasn't changed */
  			attrs->ia_valid &= ~ATTR_MODE;
  		}
@@ -79,3 +79,107 @@ diff --git a/fs/cifs/inode.c b/fs/cifs/inode.c
  		and this check ensures that we are not being called from
  		sys_utimes in which case we ought to fail the call back to
  		the user when the server rejects the call */
+diff --git a/fs/cifs/smb2pdu.c b/fs/cifs/smb2pdu.c
+--- a/fs/cifs/smb2pdu.c	2020-01-31 18:35:29.080757288 -0600
++++ b/fs/cifs/smb2pdu.c	2020-01-31 21:33:18.771509821 -0600
+@@ -3442,16 +3442,16 @@ smb2_readv_callback(struct mid_q_entry *
+ {
+ 	struct cifs_readdata *rdata = mid->callback_data;
+ 	struct cifs_tcon *tcon = tlink_tcon(rdata->cfile->tlink);
+ 	struct TCP_Server_Info *server = tcon->ses->server;
+ 	struct smb2_sync_hdr *shdr =
+ 				(struct smb2_sync_hdr *)rdata->iov[0].iov_base;
+ 	struct cifs_credits credits = { .value = 0, .instance = 0 };
+-	struct smb_rqst rqst = { .rq_iov = rdata->iov,
+-				 .rq_nvec = 2,
++	struct smb_rqst rqst = { .rq_iov = &rdata->iov[1],
++				 .rq_nvec = 1,
+ 				 .rq_pages = rdata->pages,
+ 				 .rq_offset = rdata->page_offset,
+ 				 .rq_npages = rdata->nr_pages,
+ 				 .rq_pagesz = rdata->pagesz,
+ 				 .rq_tailsz = rdata->tailsz };
+ 
+ 	cifs_dbg(FYI, "%s: mid=%llu state=%d result=%d bytes=%u\n",
+diff --git a/fs/cifs/xattr.c b/fs/cifs/xattr.c
+--- a/fs/cifs/xattr.c	2020-01-31 18:35:29.082757280 -0600
++++ b/fs/cifs/xattr.c	2020-01-31 21:35:34.469086122 -0600
+@@ -85,14 +85,46 @@ static int cifs_xattr_set(const struct x
+ 	}
+ 
+ 	switch (handler->flags) {
+ 	case XATTR_USER:
+ 		if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_NO_XATTR)
+ 			goto out;
+ 
++		if ((strcmp(name, CIFS_XATTR_ATTRIB) == 0) ||
++		    (strcmp(name, SMB3_XATTR_ATTRIB) == 0)) {
++			__u32 cifsAttrs;
++			struct iattr attrs;
++			if (size != sizeof(__u32))
++			{
++				rc = -ERANGE;
++				break;
++			}
++			cifsAttrs = *(__u32 *)value;
++			memset(&attrs, 0, sizeof(attrs));
++			if (cifsAttrs == 0) {
++				cifsAttrs |= ATTR_NORMAL;
++			}
++			CIFS_I(inode)->cifsAttrs = cifsAttrs;
++			rc = cifs_set_file_info(inode, &attrs, xid, full_path, cifsAttrs, 0);
++			break;
++		} else if ((strcmp(name, CIFS_XATTR_CREATETIME) == 0) ||
++		    (strcmp(name, SMB3_XATTR_CREATETIME) == 0)) {
++			__u32 cifsAttrs;
++			struct iattr attrs;
++			if (size != sizeof(__u64))
++			{
++				rc = -ERANGE;
++				break;
++			}
++			memset(&attrs, 0, sizeof(attrs));
++			cifsAttrs = CIFS_I(inode)->cifsAttrs;
++			CIFS_I(inode)->createtime = *(__u64 *)value;
++			rc = cifs_set_file_info(inode, &attrs, xid, full_path, cifsAttrs, *(__u64 *)value);
++			break;
++		}
+ 		if (pTcon->ses->server->ops->set_EA)
+ 			rc = pTcon->ses->server->ops->set_EA(xid, pTcon,
+ 				full_path, name, value, (__u16)size,
+ 				cifs_sb->local_nls, cifs_sb);
+ 		break;
+ 
+ 	case XATTR_CIFS_ACL: {
+@@ -103,17 +135,31 @@ static int cifs_xattr_set(const struct x
+ 		pacl = kmalloc(size, GFP_KERNEL);
+ 		if (!pacl) {
+ 			rc = -ENOMEM;
+ 		} else {
+ 			memcpy(pacl, value, size);
+ 			if (value &&
+ 			    pTcon->ses->server->ops->set_acl)
++			{
+ 				rc = pTcon->ses->server->ops->set_acl(pacl,
+ 						size, inode,
++						full_path, CIFS_ACL_OWNER);
++				if (rc == 0)
++				{
++					rc = pTcon->ses->server->ops->set_acl(pacl,
++						size, inode,
++						full_path, CIFS_ACL_GROUP);
++				}
++				if (rc == 0)
++				{
++					rc = pTcon->ses->server->ops->set_acl(pacl,
++						size, inode,
+ 						full_path, CIFS_ACL_DACL);
++				}
++			}
+ 			else
+ 				rc = -EOPNOTSUPP;
+ 			if (rc == 0) /* force revalidate of the inode */
+ 				CIFS_I(inode)->time = 0;
+ 			kfree(pacl);
+ 		}
+ 		break;
