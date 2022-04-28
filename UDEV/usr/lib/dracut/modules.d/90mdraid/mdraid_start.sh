@@ -1,5 +1,7 @@
 #!/bin/sh
 
+/usr/bin/echo "STARTED /usr/lib/dracut/modules.d/90mdraid/mdraid_start.sh" > /dev/kmsg
+
 type getargs >/dev/null 2>&1 || . /lib/dracut-lib.sh
 
 _md_start() {
@@ -8,6 +10,7 @@ _md_start() {
     local _path_d
     local _md="$1"
 
+/usr/bin/echo "_md_start ${_md} in /usr/lib/dracut/modules.d/90mdraid/mdraid_start.sh" > /dev/kmsg
     _udevinfo="$(udevadm info --query=env --name="${_md}")"
     strstr "$_udevinfo" "MD_LEVEL=container" && continue
     strstr "$_udevinfo" "DEVTYPE=partition" && continue
@@ -18,7 +21,6 @@ _md_start() {
     # inactive ?
     [ "$(cat "$_path_s")" != "inactive" ] && continue
 
-    /usr/bin/echo "mdadm -R ${_md}" > /dev/kmsg
     mdadm -R "${_md}" 2>&1 | vinfo
 
     # still inactive ?
@@ -40,8 +42,8 @@ _md_force_run() {
         _MD_UUID=$(str_replace "$_MD_UUID" ":" "")
 
         for _md in /dev/md[0-9_]*; do
+/usr/bin/echo "_md_force_run loop1 ${_md} /usr/lib/dracut/modules.d/90mdraid/mdraid_start.sh" > /dev/kmsg
             [ -b "$_md" ] || continue
-	    /usr/bin/echo "/sbin/mdadm -D --export $_md" > /dev/kmsg
             _UUID=$(
                 /sbin/mdadm -D --export "$_md" \
                     | while read line || [ -n "$line" ]; do
@@ -61,6 +63,7 @@ _md_force_run() {
     else
         # try to force-run anything not running yet
         for _md in /dev/md[0-9_]*; do
+/usr/bin/echo "_md_force_run loop2 ${_md} /usr/lib/dracut/modules.d/90mdraid/mdraid_start.sh" > /dev/kmsg
             [ -b "$_md" ] || continue
             _md_start "${_md}"
         done

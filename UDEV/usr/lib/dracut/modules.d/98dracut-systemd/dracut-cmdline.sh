@@ -1,4 +1,5 @@
 #!/bin/sh
+/usr/bin/echo "/usr/lib/dracut/modules.d/98dracut-systemd/dracut-cmdline.sh entering $*" > /dev/kmsg
 
 if [ -f /dracut-state.sh ]; then
     . /dracut-state.sh 2>/dev/null
