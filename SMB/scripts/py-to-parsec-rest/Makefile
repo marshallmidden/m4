@@ -9,9 +9,10 @@
 #-- 	  172.22.13.100		Isilon @ 172.22.13.100
 #-- 	  172.22.15.113		NetApp @ 172.22.15.113 - 9.
 
+#-- gone 2021-09-08 	  SMB-Server-2016.ad.parsec.lab
 I	= SMB-Server-2008.ad.parsec.lab \
 	  SMB-Server-2012.ad.parsec.lab \
-	  SMB-Server-2016.ad.parsec.lab \
+ 	  KRB-TEST2-PDC.krb.test2.lab	\
 	  SMB-Server-2019.ad.parsec.lab \
 	  172.22.14.116 \
 	  172.22.13.100 \
@@ -68,6 +69,7 @@ W	= "-" \
 	  smb-server-2012.ad.parsec.lab \
 	  smb-server-2012.ad.parsec.lab
 
+#-- gone 2021-09-08		  "E:" 
 # Windows mount letter to mount on, if not already mounted.
 V	= "E:" \
 	  "E:" \
@@ -144,49 +146,49 @@ define many_targets
 # . . . . . . . . . . . . . . . . .
     .PHONY: setup_${word $1,${B}}
     setup_${word $1,${B}}:
-	./setup-files "${word $1,${I}}" "${word $1,${S}}" "${word $1,${D}}" \
+	./MAKEFILE-COMMANDS/setup-files "${word $1,${I}}" "${word $1,${S}}" "${word $1,${D}}" \
 		      "${word $1,${V}}" "${word $1,${O}}" "${word $1,${W}}" \
 		      "${word $1,${A}}"
 # . . . . . . . . . . . . . . . . .
     .PHONY: info_${word $1,${B}}_${word $1,${S}}
     info_${word $1,${B}}_${word $1,${S}}:
-	./getinfo "${word $1,${I}}" "${word $1,${S}}" "${word $1,${O}}" \
+	./MAKEFILE-COMMANDS/getinfo "${word $1,${I}}" "${word $1,${S}}" "${word $1,${O}}" \
 		  "${word $1,${V}}" "${word $1,${W}}"
     .PHONY: info_${word $1,${B}}_${word $1,${D}}
     info_${word $1,${B}}_${word $1,${D}}:
-	./getinfo "${word $1,${I}}" "${word $1,${D}}" "${word $1,${O}}" \
+	./MAKEFILE-COMMANDS/getinfo "${word $1,${I}}" "${word $1,${D}}" "${word $1,${O}}" \
 		  "${word $1,${V}}" "${word $1,${W}}"
 # . . . . . . . . . . . . . . . . .
     # Remove files must mount the directories in rw, which is default.
     .PHONY: rm_files_${word $1,${B}}_${word $1,${S}}
     rm_files_${word $1,${B}}_${word $1,${S}}:
-	./rm-files "${word $1,${I}}" "${word $1,${S}}" "${word $1,${O}}" \
+	./MAKEFILE-COMMANDS/rm-files "${word $1,${I}}" "${word $1,${S}}" "${word $1,${O}}" \
 		   "${word $1,${W}}" "${word $1,${V}}"
     .PHONY: rm_files_${word $1,${B}}_${word $1,${D}}
     rm_files_${word $1,${B}}_${word $1,${D}}:
-	./rm-files "${word $1,${I}}" "${word $1,${D}}" "${word $1,${O}}" \
+	./MAKEFILE-COMMANDS/rm-files "${word $1,${I}}" "${word $1,${D}}" "${word $1,${O}}" \
 		   "${word $1,${W}}" "${word $1,${V}}"
 # . . . . . . . . . . . . . . . . .
     # Remove files must mount the directories in rw, which is default.
     .PHONY: mount${word $1,${B}}
     mount_${word $1,${B}}:
-	./mount "${word $1,${I}}" "${word $1,${S}}" "${word $1,${O}}" "${word $1,${D}}"
+	./MAKEFILE-COMMANDS/mount "${word $1,${I}}" "${word $1,${S}}" "${word $1,${O}}" "${word $1,${D}}"
     .PHONY: mount_${word $1,${B}}_${word $1,${S}}
     mount_${word $1,${B}}_${word $1,${S}}:
-	./mount "${word $1,${I}}" "${word $1,${S}}" "${word $1,${O}}"
+	./MAKEFILE-COMMANDS/mount "${word $1,${I}}" "${word $1,${S}}" "${word $1,${O}}"
     .PHONY: mount_${word $1,${B}}_${word $1,${D}}
     mount_${word $1,${B}}_${word $1,${D}}:
-	./mount "${word $1,${I}}" "${word $1,${D}}" "${word $1,${O}}"
+	./MAKEFILE-COMMANDS/mount "${word $1,${I}}" "${word $1,${D}}" "${word $1,${O}}"
 # . . . . . . . . . . . . . . . . .
     .PHONY: umount${word $1,${B}}
     umount_${word $1,${B}}:
-	./umount ${word $1,${I}} ${word $1,${S}} ${word $1,${D}}
+	./MAKEFILE-COMMANDS/umount ${word $1,${I}} ${word $1,${S}} ${word $1,${D}}
     .PHONY: umount_${word $1,${B}}_${word $1,${S}}
     umount_${word $1,${B}}_${word $1,${S}}:
-	./umount ${word $1,${I}} ${word $1,${S}}
+	./MAKEFILE-COMMANDS/umount ${word $1,${I}} ${word $1,${S}}
     .PHONY: umount_${word $1,${B}}_${word $1,${D}}
     umount_${word $1,${B}}_${word $1,${D}}:
-	./umount ${word $1,${I}} ${word $1,${D}}
+	./MAKEFILE-COMMANDS/umount ${word $1,${I}} ${word $1,${D}}
 # . . . . . . . . . . . . . . . . .
     see::
 	@echo setup_${word $1,${B}} I=${word $1,${I}} S=${word $1,${S}} D=${word $1,${D}} O=${word $1,${O}}
@@ -214,13 +216,13 @@ all2:
 	@echo "I[6]='${word 6,${I}} and S/D/O= ${word 6,${S}}/${word 6,${D}}/${word 6,${O}}'"
 	@echo "I[7]='${word 7,${I}} and S/D/O= ${word 7,${S}}/${word 7,${D}}/${word 7,${O}}'"
 #-----------------------------------------------------------------------------
-.PHONY: tags
-tags:
-	ctags --language-force=python m4.py
-#-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -f AAA.* outputs/* tags
+	rm -f AAA.* outputs/*
 	rm -f DIFF-INFO/{XXX,YYY,ZZZ}* DIFF-SETUPS/{XXX,YYY,ZZZ}*
+#-----------------------------------------------------------------------------
+.PHONY: tags ctags
+tags ctags:
+	ctags --language-force=python m4.py
 #-----------------------------------------------------------------------------
 # End of Makefile

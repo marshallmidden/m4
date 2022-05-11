@@ -1,0 +1,38 @@
+#!/bin/bash -ex
+
+M4_PY='../m4.py'
+
+# Do SMB Kerberos migration.
+
+# Create Storage System
+SSSMB=`${M4_PY} --brief storage systems create 'SMB for kerberos' | awk '{print $1}'`
+
+# Create Storage Protocol IDs.
+kdestroy -A
+kinit m4a@KRB.TEST.LAB <<EOF1
+AlphaDog123!
+EOF1
+SPSMB1=`${M4_PY} --brief storage protocols create ${SSSMB} SMB 'WIN-3NAIE8LHK1D.krb.test.lab' 'm4a@KRB.TEST.LAB' 'AlphaDog123!' 'KRB.TEST.LAB storage' | awk '{print $1}'`
+
+#-- kdestroy -A
+kinit m4b@KRB.TEST2.LAB <<EOF2
+AlphaDog123!
+EOF2
+SPSMB2=`${M4_PY} --brief storage protocols create ${SSSMB} SMB 'KRB-TEST2-PDC.krb.test2.lab' 'm4b@KRB.TEST2.LAB' 'AlphaDog123!' 'KRB.TEST2.LAB storage' | awk '{print $1}'`
+
+sleep 30
+
+# Create Project.
+PNSMB1='Scripted SMB project 1.'
+${M4_PY} p c "${PNSMB1}" default default
+
+JNUM=`${M4_PY} --brief p l "${PNSMB1}"`
+
+JNSMB1='job to copy SMB KRB.TEST.LAB to KRB.TEST2.LAB'
+${M4_PY} j c "${JNUM}" cifs://WIN-3NAIE8LHK1D.krb.test.lab/m4a cifs://KRB-TEST2-PDC.krb.test2.lab/m4b "${JNSMB1}"
+
+# Run the job.
+${M4_PY} jobs run "${JNSMB1}"
+
+exit 0
+#-----------------------------------------------------------------------------

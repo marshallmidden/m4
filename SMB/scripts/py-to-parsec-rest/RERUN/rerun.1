@@ -1,0 +1,150 @@
+#!/bin/bash -e
+#-----------------------------------------------------------------------------
+echo "FROM=${FROM} SRCVOL=${SRCVOL} SRCVERS=${SRCVERS} SRCIP=${SRCIP}"
+echo "TO=${TO} DSTVOL=${DSTVOL} DSTVERS=${DSTVERS} DSTIP=${DSTIP}"
+#-----------------------------------------------------------------------------
+T_SETUP="setup_${FROM}"
+PN="Scripted SMB project&job for ${FROM} ${SRCVOL} to ${TO} ${DSTVOL}"
+JN="${FROM} ${SRCVOL} to ${TO} ${DSTVOL}"
+#-----------------------------------------------------------------------------
+# Set defaults, if not exported before running this script.
+if [ "$DELETEJOBS" = '' ]; then DELETEJOBS="yes"; fi
+if [ "$DELETEPROJ" = '' ]; then DELETEPROJ="yes"; fi
+if [ "$DELETESRCVOL" = '' ]; then DELETESRCVOL="no"; fi		# no
+if [ "$DELETEDSTVOL" = '' ]; then DELETEDSTVOL="yes"; fi
+if [ "$SETUPSRCVOL" = '' ]; then SETUPSRCVOL="no"; fi		# no
+if [ "$INFOSRCVOL" = '' ]; then INFOSRCVOL="no"; fi		# no
+if [ "$CREATEPROJ" = '' ]; then CREATEPROJ="yes"; fi
+if [ "$CREATEJOB" = '' ]; then CREATEJOB="yes"; fi
+if [ "$RUNJOB" = '' ]; then RUNJOB="yes"; fi
+if [ "$INFODSTVOL" = '' ]; then INFODSTVOL="yes"; fi
+#-----------------------------------------------------------------------------
+# Get username, password, parsec_IPADDRESS.
+source ENV
+#-----------------------------------------------------------------------------
+M4_PY="../m4.py"
+#-----------------------------------------------------------------------------
+if [ "${DELETEJOBS}" = "yes" ]; then
+    echo 'Delete any existing jobs.'
+    /bin/date '+%Y-%m-%d_%H-%M-%S'
+    # Get the job id's.
+    J=`${M4_PY} --brief job list`
+    if [ "$J" != '' ]; then
+	# Make sure they are stopped.
+	STOP=`${M4_PY} job stop ${J}`
+	echo "${STOP}"
+	# Disable the jobs.
+	DISABLE=`${M4_PY} job disable ${J}`
+	echo "${DISABLE}"
+	# Delete the jobs.
+	DELE=`${M4_PY} job dele ${J}`
+	echo "${DELE}"
+    fi
+    echo "Done deleting existing jobs."
+    /bin/date '+%Y-%m-%d_%H-%M-%S'
+fi
+#-----------------------------------------------------------------------------
+if [ "${DELETEPROJ}" = "yes" ]; then
+    echo 'Delete any existing projects.'
+    /bin/date '+%Y-%m-%d_%H-%M-%S'
+    # Get the project id's.
+    P=`${M4_PY} --brief proj list`
+    if [ "$P" != '' ]; then
+	echo "P='${P}'"
+	P_DELE=`${M4_PY} proj delete ${P}`
+	echo ${P_DELE}
+    fi
+    echo 'Done deleting existing projects.'
+    /bin/date '+%Y-%m-%d_%H-%M-%S'
+fi
+#-----------------------------------------------------------------------------
+if [ "${DELETESRCVOL}" = "yes" ]; then
+    echo 'Clean up source share - remove contents.'
+    /bin/date '+%Y-%m-%d_%H-%M-%S'
+    # Remove all files/directories/data on the source share.
+    make rm_files_${FROM}_${SRCVOL}
+    echo 'Done removing source files on share.'
+    /bin/date '+%Y-%m-%d_%H-%M-%S'
+fi
+if [ "${DELETEDSTVOL}" = "yes" ]; then
+    echo 'Clean up destination share - remove contents.'
+    /bin/date '+%Y-%m-%d_%H-%M-%S'
+    # Remove everything on the destination share.
+    make rm_files_${TO}_${DSTVOL}
+    echo 'Done removing destination files on share.'
+    /bin/date '+%Y-%m-%d_%H-%M-%S'
+fi
+#-----------------------------------------------------------------------------
+if [ "${SETUPSRCVOL}" = "yes" ]; then
+    echo 'Set up share - put stuff in the v1 share.'
+    # Setup the source/destinations with files/directories/data.
+    make ${T_SETUP} 2>&1 | tee AAA.${T_SETUP}
+fi
+#-- #-----------------------------------------------------------------------------
+if [ "${INFOSRCVOL}" = "yes" ]; then
+    echo 'Gather information from source share.'
+    # Get the information from the source directories, before doing anything.
+    make info_${FROM}_${SRCVOL} 2>&1 | tee AAA.info_${FROM}_${SRCVOL}
+fi
+#-----------------------------------------------------------------------------
+if [ "${CREATEPROJ}" = "yes" ]; then
+    # Create the project via REST interface.
+    echo 'Create the project.'
+    PC=`${M4_PY} p c "${PN}" "${SRCVERS}" "${DSTVERS}"`
+    echo "${PN}"
+fi
+#-----------------------------------------------------------------------------
+# Create the job connected to above project, via REST interface.
+if [ "${CREATEJOB}" = "yes" ]; then
+    echo 'Create the new job for migration'
+    JC1=`${M4_PY} j c "${PN}" cifs://${SRCIP}/${SRCVOL} cifs://${DSTIP}/${DSTVOL} "${JN}"`
+    echo "${JC1}"
+fi
+#-----------------------------------------------------------------------------
+if [ "${RUNJOB}" = "yes" ]; then
+    # Need scheduler to wake a few times.
+    echo "sleep 5 seconds"
+    sleep 5
+    /bin/date '+%Y-%m-%d_%H-%M-%S'
+    echo 'Run the job'
+    # Get the new job id's.
+    J=`${M4_PY} --brief job list`
+    if [ "$J" != '' ]; then
+	echo "J=${J}"
+	# Enable the job.
+	ENABLE=`${M4_PY} job enable ${J}`
+	echo "ENABLE=${ENABLE}"
+	# Run the job.
+	START=`${M4_PY} job run ${J}`
+	echo "START=${START}"
+    fi
+    # Scheduler starts pxlhr's. Wait until all are gone.
+    echo "Sleep five seconds to let scheduler do its business."
+    sleep 5
+    /bin/date '+%Y-%m-%d_%H-%M-%S'
+    echo 'Wait until job is finished.'
+    set +e                                  # No longer have exit status exit script.
+    #					      Any assigns of 0 terminate with exception.
+    c=0
+    while [ "$c" != '' ]; do
+        sleep 0.25
+	c=`ps -C pxlhr -o pid=`
+    done
+    echo 'pxlhr appears to be done.'
+    /bin/date '+%Y-%m-%d_%H-%M-%S'
+fi
+#-----------------------------------------------------------------------------
+if [ "${INFODSTVOL}" = "yes" ]; then
+    echo "sleep 5 seconds"
+    sleep 5
+    /bin/date '+%Y-%m-%d_%H-%M-%S'
+    echo 'Gather information from destination share.'
+    # Get the information from the destination directory.
+    make info_${TO}_${DSTVOL} 2>&1 | tee AAA.info_${TO}_${DSTVOL} 
+    /bin/date '+%Y-%m-%d_%H-%M-%S'
+fi
+#-----------------------------------------------------------------------------
+/bin/date '+%Y-%m-%d_%H-%M-%S'
+#-----------------------------------------------------------------------------
+exit 0
+#-----------------------------------------------------------------------------
