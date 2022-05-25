@@ -19,6 +19,7 @@ SONGS_WAV = ${SONGS:=.wav}
 TESTS  =
 TESTS += DECODE
 TESTS += LEGATO
+TESTS += TRILLS
 #-----------------------------------------------------------------------------
 TESTS_E = ${TESTS:=.E}
 TESTS_ABC = ${TESTS:=.abc}
