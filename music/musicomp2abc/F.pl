@@ -25,7 +25,7 @@ my $NUM_EXPR = scalar(@expression);
 
 my $NOTELTH=$QN;
 # my $RESTLTH=$QN;
-# - my $RESTLTH=0;
+#-- my $RESTLTH=0;
 
 # End of all tracks (length in MIDI for 2 quarter notes * voices);
 my $ENDTRACKS = ($NUM_PAN) * ($NOTELTH) * ($MAXVOICES) * ($NUM_EXPR);
@@ -34,7 +34,7 @@ my $ENDTRACKS = ($NUM_PAN) * ($NOTELTH) * ($MAXVOICES) * ($NUM_EXPR);
 # c c+/d- d d+/e- e f f+/g- g g+/a- a a+/b- b  c
 # 0  1    2  3    4 5  6    7  8    9  10  11 12
 #   -11 -10 -9  -8 -7 -6   -5 -4   -3  -2  -1  0
-# - my @NOTE = ( 60-12-12-7, 60-12-12-7, 60-12-12-7, 60-12-12-7,  60-12-12-7, 60-12-12-7, 60-12-12-7, 60-12-12-7);
+#-- my @NOTE = ( 60-12-12-7, 60-12-12-7, 60-12-12-7, 60-12-12-7,  60-12-12-7, 60-12-12-7, 60-12-12-7, 60-12-12-7);
 my $NOTE = 60-12-12-7;
 # ----------------------------------------------------------------------------
 sub print_header($$)
