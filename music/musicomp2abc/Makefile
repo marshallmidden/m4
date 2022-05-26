@@ -7,6 +7,12 @@ SONGS += loudness.mcomp
 SONGS += promenade
 SONGS += promenade-musicomp2abc
 #-----------------------------------------------------------------------------
+TESTS  =
+TESTS += DECODE
+TESTS += LEGATO
+TESTS += TRILLS
+TESTS += Z
+#-----------------------------------------------------------------------------
 # SONGS_GCS = ${SONGS:=.gcs}
 SONGS_E = ${SONGS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
@@ -15,11 +21,6 @@ SONGS_MID = ${SONGS:=.mid}
 SONGS_M_PS = ${SONGS:=_m.ps}
 SONGS_PS = ${SONGS:=.ps}
 SONGS_WAV = ${SONGS:=.wav}
-#-----------------------------------------------------------------------------
-TESTS  =
-TESTS += DECODE
-TESTS += LEGATO
-TESTS += TRILLS
 #-----------------------------------------------------------------------------
 TESTS_E = ${TESTS:=.E}
 TESTS_ABC = ${TESTS:=.abc}
