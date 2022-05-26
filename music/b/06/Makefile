@@ -10,6 +10,7 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 .PRECIOUS: %.abc %.csv %.mid %.E
 .SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E
 # output $@   -- input $<
+#	${MUSICOMP2ABC} --midi1csv --nolegato $< $@
 %.csv:	%.E
 	${MUSICOMP2ABC} --midi1csv $< $@ \
 		|| (rm -f $@ ; exit 1)
