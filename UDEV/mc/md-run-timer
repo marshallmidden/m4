@@ -1,23 +1,39 @@
 #!/bin/bash
 doit()
 {
-    F=`builtin cd /sys/devices/virtual/block/; echo md*`
-    for RAID in $F; do
-	if [ -e "/sys/devices/virtual/block/$RAID/md/array_state" ]; then
-	    read v < /sys/devices/virtual/block/$RAID/md/array_state
-	    if [ "$v" == "inactive" ]; then
-		echo "md-run-timer $RAID is inactive, attempting to start" > /dev/kmsg
-		/usr/sbin/mdadm -R /dev/$RAID > /dev/kmsg
-		sleep 1
+    local F
+    local RAID
+    local v
+    local count=0
+    while [ ${count} -le 32 ]
+    do
+	/usr/bin/sleep 1
+	let count=${count}+1
+	F=`builtin cd /sys/devices/virtual/block/; echo md*`
+	for RAID in $F; do
+	    if [ -e "/sys/devices/virtual/block/$RAID/md/array_state" ]; then
+		read v < /sys/devices/virtual/block/$RAID/md/array_state || true
+		if [ "$v" == "inactive" ]; then
+		    if [ ${count} -eq 32 ]; then
+			/usr/bin/echo "pid $$ md-run-timer $RAID is inactive, attempting to start" > /dev/kmsg
+			/usr/sbin/mdadm -R /dev/$RAID > /dev/kmsg || true
+			sleep 1
+		    else
+			continue 2
+		    fi
+		fi
 	    fi
-	fi
+	done
+	unset F RAID v count
+	exit 0
     done
-    unset F
-    unset RAID
-    unset v
+    unset F RAID v count
+    exit 0
 }
-#-----------------------------------------------------------------------------
-(sleep 15; doit || true ) &
-#-----------------------------------------------------------------------------
+#-- doit &
+#-- (sleep 32; doit || true ) &
+#-- (doit || true ) >/dev/null 2>&1 &
+#-- disown -a
+doit
+unset -f doit
 exit 0
-#-----------------------------------------------------------------------------

@@ -24,43 +24,37 @@ ENV{DM_MULTIPATH_DEVICE_PATH}=="1", GOTO="md_end"
 # First, process all add events (md and dm devices will not really do
 # anything here, just regular disks, and this also won't get any imsm
 # array members either)
-SUBSYSTEM=="block", ENV{ID_FS_TYPE}=="linux_raid_member", PROGRAM="/usr/bin/bash -c '/usr/bin/echo in 65-md-incremental.rules $devnode > /dev/kmsg'"
 SUBSYSTEM=="block", ACTION=="add", ENV{ID_FS_TYPE}=="linux_raid_member", \
-	PROGRAM="/usr/bin/bash -c '/usr/bin/echo 65-md-incremental.rules1 /sbin/mdadm -I $env{DEVNAME} --export $devnode --offroot $env{DEVLINKS} > /dev/kmsg'"
+        IMPORT{program}="/sbin/mdadm -I $env{DEVNAME} --export $devnode --offroot $env{DEVLINKS}"
 SUBSYSTEM=="block", ACTION=="add", ENV{ID_FS_TYPE}=="linux_raid_member", \
-	IMPORT{program}=="/sbin/mdadm -I $env{DEVNAME} --export $devnode --offroot $env{DEVLINKS}"
-SUBSYSTEM=="block", ACTION=="add", ENV{ID_FS_TYPE}=="linux_raid_member", \
-	ENV{MD_STARTED}=="*unsafe*", ENV{MD_FOREIGN}=="no", ENV{SYSTEMD_WANTS}+="mdadm-last-resort@$env{MD_DEVICE}.timer"
+        ENV{MD_STARTED}=="*unsafe*", ENV{MD_FOREIGN}=="no", ENV{SYSTEMD_WANTS}+="mdadm-last-resort@$env{MD_DEVICE}.timer"
 #-----------------------------------------------------------------------------
-SUBSYSTEM=="block", ACTION=="add", ENV{ID_FS_TYPE}=="linux_raid_member", \
-	PROGRAM="/usr/bin/bash -c '/usr/bin/echo 65-md-incremental.rules2 DEVNAME $env{DEVNAME} devnode $devnode MD_STARTED $env{MD_STARTED} MD_FOREIGN $env{MD_FOREIGN} SYSTEMD_WANTS $env{SYSTEMD_WANTS} > /dev/kmsg'"
 # Start a background job that sleeps, then does a "mdadm -R" like timeout would if those rules worked. :)
-SUBSYSTEM=="block", ACTION=="add", ENV{ID_FS_TYPE}=="linux_raid_member", PROGRAM="/m4debug/md-run-timer"
+#-- SUBSYSTEM=="block", ACTION=="add", ENV{ID_FS_TYPE}=="linux_raid_member", PROGRAM="/usr/local/sbin/md-run-timer"
+SUBSYSTEM=="block", ACTION=="add", ENV{ID_FS_TYPE}=="linux_raid_member", PROGRAM="/usr/bin/bash -c '/usr/local/sbin/md-run-timer&'"
 #-----------------------------------------------------------------------------
 SUBSYSTEM=="block", ACTION=="remove", ENV{ID_PATH}=="?*", \
-	ENV{ID_FS_TYPE}=="linux_raid_member", \
-	RUN+="/sbin/mdadm -If $name --path $env{ID_PATH}"
+        ENV{ID_FS_TYPE}=="linux_raid_member", \
+        RUN+="/sbin/mdadm -If $name --path $env{ID_PATH}"
 SUBSYSTEM=="block", ACTION=="remove", ENV{ID_PATH}!="?*", \
-	ENV{ID_FS_TYPE}=="linux_raid_member", \
-	RUN+="/sbin/mdadm -If $name"
+        ENV{ID_FS_TYPE}=="linux_raid_member", \
+        RUN+="/sbin/mdadm -If $name"
 
 # Next, check to make sure the BIOS raid stuff wasn't turned off via cmdline
 IMPORT{cmdline}="noiswmd"
 IMPORT{cmdline}="nodmraid"
 ENV{noiswmd}=="?*", GOTO="md_imsm_inc_end"
 ENV{nodmraid}=="?*", GOTO="md_imsm_inc_end"
-SUBSYSTEM=="block", ENV{ID_FS_TYPE}=="isw_raid_member", PROGRAM="/usr/bin/bash -c '/usr/bin/echo in 65-md-incremental.rules add isw_raid_member mdadm follows ... > /dev/kmsg'"
 SUBSYSTEM=="block", ACTION=="add", ENV{ID_FS_TYPE}=="isw_raid_member", \
-	RUN+="/sbin/mdadm -I $env{DEVNAME}"
-SUBSYSTEM=="block", ENV{ID_FS_TYPE}=="ddf_raid_member", PROGRAM="/usr/bin/bash -c '/usr/bin/echo in 65-md-incremental.rules add ddf_raid_members mdadm follows ... > /dev/kmsg'"
+        RUN+="/sbin/mdadm -I $env{DEVNAME}"
 SUBSYSTEM=="block", ACTION=="add", ENV{ID_FS_TYPE}=="ddf_raid_member", \
-	RUN+="/sbin/mdadm -I $env{DEVNAME}"
+        RUN+="/sbin/mdadm -I $env{DEVNAME}"
 SUBSYSTEM=="block", ACTION=="remove", ENV{ID_PATH}=="?*", \
-	ENV{ID_FS_TYPE}=="isw_raid_member", \
-	RUN+="/sbin/mdadm -If $name --path $env{ID_PATH}"
+        ENV{ID_FS_TYPE}=="isw_raid_member", \
+        RUN+="/sbin/mdadm -If $name --path $env{ID_PATH}"
 SUBSYSTEM=="block", ACTION=="remove", ENV{ID_PATH}!="?*", \
-	ENV{ID_FS_TYPE}=="isw_raid_member", \
-	RUN+="/sbin/mdadm -If $name"
+        ENV{ID_FS_TYPE}=="isw_raid_member", \
+        RUN+="/sbin/mdadm -If $name"
 LABEL="md_imsm_inc_end"
 
 # Next make sure that this isn't a dm device we should skip for some reason
@@ -68,17 +62,13 @@ ENV{DM_UDEV_RULES_VSN}!="?*", GOTO="dm_change_end"
 ENV{DM_UDEV_DISABLE_OTHER_RULES_FLAG}=="1", GOTO="dm_change_end"
 ENV{DM_SUSPENDED}=="1", GOTO="dm_change_end"
 KERNEL=="dm-*", SUBSYSTEM=="block", ENV{ID_FS_TYPE}=="linux_raid_member", \
-	ACTION=="change", RUN+="/sbin/mdadm -I $env{DEVNAME}"
+        ACTION=="change", RUN+="/sbin/mdadm -I $env{DEVNAME}"
 LABEL="dm_change_end"
 
 # Finally catch any nested md raid arrays.  If we brought up an md raid
 # array that's part of another md raid array, it won't be ready to be used
 # until the change event that occurs when it becomes live
 KERNEL=="md*", SUBSYSTEM=="block", ENV{ID_FS_TYPE}=="linux_raid_member", \
-	ACTION=="change", RUN+="/sbin/mdadm -I $env{DEVNAME}"
-#-----------------------------------------------------------------------------
-KERNEL=="md*", SUBSYSTEM=="block", ENV{ID_FS_TYPE}=="linux_raid_member", \
-	ACTION=="change", PROGRAM="/usr/bin/bash -c '/usr/bin/echo in 65-md-incremental.rules nested md, /sbin/mdadm -I $env{DEVNAME} > /dev/kmsg'"
-#-----------------------------------------------------------------------------
+        ACTION=="change", RUN+="/sbin/mdadm -I $env{DEVNAME}"
 
 LABEL="md_end"
