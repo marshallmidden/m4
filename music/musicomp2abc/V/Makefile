@@ -1,17 +1,6 @@
 #-----------------------------------------------------------------------------
 SONGS  =
-SONGS += b-6
-#- SONGS += inv15-example
-#- SONGS += inv15-example.working
-SONGS += loudness.mcomp
-SONGS += promenade
-SONGS += promenade-musicomp2abc
-#-----------------------------------------------------------------------------
-TESTS  =
-TESTS += DECODE
-TESTS += LEGATO
-TESTS += TRILLS
-TESTS += Z
+SONGS = testvoices
 #-----------------------------------------------------------------------------
 # SONGS_GCS = ${SONGS:=.gcs}
 SONGS_E = ${SONGS:=.E}
@@ -21,14 +10,6 @@ SONGS_MID = ${SONGS:=.mid}
 SONGS_M_PS = ${SONGS:=_m.ps}
 SONGS_PS = ${SONGS:=.ps}
 SONGS_WAV = ${SONGS:=.wav}
-#-----------------------------------------------------------------------------
-TESTS_E = ${TESTS:=.E}
-TESTS_ABC = ${TESTS:=.abc}
-TESTS_CSV = ${TESTS:=.csv}
-TESTS_MID = ${TESTS:=.mid}
-TESTS_M_PS = ${TESTS:=_m.ps}
-TESTS_PS = ${TESTS:=.ps}
-TESTS_WAV = ${TESTS:=.wav}
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 YAPS	     = yaps
@@ -69,13 +50,9 @@ help:
 .PHONY: all songs
 all songs: ${SONGS_MID} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV}
 #-----------------------------------------------------------------------------
-.PHONY: tests
-tests: ${TESTS_MID} ${TESTS_PS} ${TESTS_M_PS} ${TESTS_WAV}
-#-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
 	rm -f ${SONGS_CSV} ${SONGS_MID} ${SONGS_ABC} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV} ${SONGS_E}
-	rm -f ${TESTS_CSV} ${TESTS_MID} ${TESTS_ABC} ${TESTS_PS} ${TESTS_M_PS} ${TESTS_WAV} ${TESTS_E}
 	rm -f *.stderr tags ctags
 #-----------------------------------------------------------------------------
 .PHONY: tags ctags

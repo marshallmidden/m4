@@ -415,7 +415,8 @@ NUMBER_BARS_PER_STAFF = 4
 MIDICLICKSPERQUARTER = 480.0
 
 # Let the notes 'release' after piece finishes.
-clicks_at_and_of_piece = 2 * MIDICLICKSPERQUARTER   # Half note.
+#?? clicks_at_end_of_piece = 2 * MIDICLICKSPERQUARTER   # Half note.
+clicks_at_end_of_piece = MIDICLICKSPERQUARTER   # Quarter note.
 
 # Default MIDI control values.
 default_reverb = 0
@@ -990,6 +991,14 @@ def print_output(strg):
     print(strg, file=output_name, flush=True)
     return
 # End of print_output
+
+#-----------------------------------------------------------------------------
+def print_output_no_eol(strg):
+    global output_name
+
+    print(strg, end='', file=output_name, flush=True)
+    return
+# End of print_output_no_eol
 
 #-----------------------------------------------------------------------------
 # Returns: lengthl - value given, like 4 for quarter note.
@@ -1771,7 +1780,7 @@ def print_out_v_or_h():
         # fi
     # rof
     if print_line != '':
-        print_output(print_line, end='')
+        print_output_no_eol(print_line)
     # fi
     return
 # End of print_out_v_or_h
@@ -1783,7 +1792,7 @@ def print_out_midi1csv_start(voiceon):
 
 #-----------------------------------------------------------------------------
 def print_out_midi1csv_end(voiceon, lthworkingmeasures):
-    print_output('{}, {}, End_track'.format(voiceon+1, lthworkingmeasures + clicks_at_and_of_piece))
+    print_output('{}, {}, End_track'.format(voiceon+1, lthworkingmeasures + int(clicks_at_end_of_piece)))
 #   End of print_out_midi1csv_end
 
 #-----------------------------------------------------------------------------
@@ -2315,11 +2324,16 @@ def print_out_midi1csv_notes():
                 if n != '0' and n != 0:
                     n_print = int(n) + pitch[m]      # Note: previous measure name, not m_number.
                     acc_s = bufs_accidentals[voice][m][i]
+#--                    print("before acc_s='{}' tmp={}".format(acc_s,tmp), file=sys.stderr, flush=True)
                     if acc_s == 'ts' or acc_s == 's':
                         tmp = int(round(tmp / 2.0))
                     # fi
-                    if leg:
-#--                        print("here#6", file=sys.stderr, flush=True)
+                    if acc_s == 'sl':
+                        tmp = int(round(7.0 * (tmp / 8.0)))
+                    # fi
+#--                    print("after  acc_s='{}' tmp={}".format(acc_s,tmp), file=sys.stderr, flush=True)
+                    if leg and acc_s != 'sl':
+#--                        print("here#6 legato_last_note={}".format(n_print), file=sys.stderr, flush=True)
                         legato_last_note = n_print
                     else:
 #--                        print("here#7", file=sys.stderr, flush=True)
@@ -2599,6 +2613,10 @@ def check_staves_notes_order():
                 first = -1
                 for n in range(0,len(staves[l])):
                     o = int(staves[l][n]) -1
+                    if o >= len(notes):
+                        print_error_no_line("m:{} voice={} not in notes.".format(m,o+1))
+                        continue
+                    # fi
                     if notes[o] != '' and notes[o] != 0:
                         if first < 0:
                             first_note = int(notes[o]) - xpose[o+1]
@@ -3320,6 +3338,15 @@ def do_title(t_args, line):
 # End of do_title
 
 #-----------------------------------------------------------------------------
+# tempo is measured according to beats per minute (bpm) and is divided into:
+#       prestissimo (>200 bpm)
+#       presto (168-200 bpm)
+#       allegro (120-168 bpm)
+#       moderato (108-120 bpm)
+#       andante (76-108 bpm)
+#       adagio (66-76 bpm)
+#       larghetto (60-66 bpm)
+#       and largo (40-60 bpm)
 #   tempo  150,4        $$ Number of notes of given length in a minute.
 #   tempo  30           $$ Number of frames (1/57.1429 seconds) per whole note.
 def do_tempo(t_args, line):
