@@ -381,7 +381,8 @@ import readline
 import shlex
 import sys
 import random
-import pprint
+#-- import pprint
+#-- # Usage:   pprint.pprint(v_t_lines, width=110, sort_dicts=False)
 
 from fractions import Fraction
 
@@ -980,9 +981,18 @@ def print_warning_no_line(strg):
 # End of print_warning_no_line
 
 # ----------------------------------------------------------------------------
+def really_print_output(strg):
+    global output_name
+
+    print(strg, file=output_name, flush=True)
+    return
+# End of really_print_output
+
+# ----------------------------------------------------------------------------
 global fluidsynth_done
 fluidsynth_done = False
 
+# ----------------------------------------------------------------------------
 def print_output(strg):
     global output_name
     global args
@@ -990,7 +1000,7 @@ def print_output(strg):
     global fluidsynth_done
 
     if not args.fluidsynth and not fluidsynth_done:
-        print(strg, file=output_name, flush=True)
+        really_print_output(strg)
     else:
         if strg == "quit":
             fluidsynth_done = False
@@ -1796,6 +1806,10 @@ def print_out_v_or_h():
 # ----------------------------------------------------------------------------
 def print_out_midi1csv_start(voiceon):
     print_output('{}, 0, Start_track'.format(voiceon+1))
+    if (voiceon+1) == 2:
+        # 121   Reset all Controllers.
+        print_output('{}, 0, Control_c, 0, 121, 0'.format(voiceon+1))
+    # fi
 #   End of print_out_midi1csv_start
 
 # ----------------------------------------------------------------------------
@@ -1888,7 +1902,7 @@ def print_out_midi1csv_instrument(m,voiceon,lthworkingmeasure, last_instrument_o
             print_output('{}, {}, Control_c, {}, 127, 0'.format(voiceon+1, lthworkingmeasure, chan))
 
             # 121   Reset all Controllers.
-            print_output('{}, {}, Control_c, {}, 121, 0'.format(voiceon+1, lthworkingmeasure, chan))
+            # print_output('{}, {}, Control_c, {}, 121, 0'.format(voiceon+1, lthworkingmeasure, chan))
 
             #   7   Volume
             print_output('{}, {}, Control_c, {}, {}, {}'.format(voiceon+1, lthworkingmeasure, chan, 7,
@@ -1931,11 +1945,13 @@ def print_out_midi1csv_tempo(m,voiceon,lthworkingmeasure, t, l):
         t = tempo_speed_now[m]
         l = tempo_now_note_length[m]
     else:
+#--        print("print_out_midi1csv_tempo t={} l={}".format(t,l),file=sys.stderr, flush=True)
         return t, l
     # fi
 
     X = int(round((60.0 * 1000000.0) / ((4.0 * l)) / t))
     print_output("{}, {}, Tempo, {}".format(voiceon+1, lthworkingmeasure, X))
+#--    print("print_out_midi1csv_tempo t={} l={} X={}".format(t,l,X),file=sys.stderr, flush=True)
     return  t, l
 # End of print_out_midi1csv_tempo
 
@@ -2339,12 +2355,35 @@ def print_out_midi1csv_notes():
                 if n != '0' and n != 0:
                     n_print = int(n) + pitch[m]      # Note: previous measure name, not m_number.
                     acc_s = bufs_accidentals[voice][m][i]
+#--                    f = round((tmp * 4.0) * MIDICLICKSPERQUARTER)
+# 480 = clicks * seconds / quarter_note.
+# ll = 60       lt_beats/minute
+# lt = 0.25     quarter_note.
+# whole note = 60 * 0.25 = 15 whole notes per minute
+# 480 = MIDICLICKSPERQUARTER/minute = clicks / quarter_note
+#   notelth .0625 .1250 .2500 .5000 1.0000
+# ll, lt        s     e     q     h      w
+# 60,1.0000   480   960  1920  3840   7680
+# 60,0.5000   240   480   960  1920   3840
+# 60,0.2500   120   240   480   960   1920
+# 60,0.1250    60   120   240   480    960
+# 60,0.0625    30    60   120   240    480
+#            
+# 480 = MIDICLICKSPERQUARTER * ((float(ll)/60.0) * (float(lt) * 4.0))
+#
+                    if args.fluidsynth:
+#--                     f = MIDICLICKSPERQUARTER / ((float(ll)/60.0) * (float(lt) * 4.0))
+                        tmp = tmp / ((float(ll)/60.0) * (float(lt) * 4.0))
+                    # fi
+#--                 print("original tmp={} ll={} lt={} f={}".format(tmp,ll,lt,f),file=sys.stderr, flush=True)
                     if acc_s == 'ts' or acc_s == 's':
                         tmp = int(round(tmp / 2.0))
+#--                     print("s tmp={}".format(tmp),file=sys.stderr, flush=True)
                     # fi
 # NOTDONEYET - portamento - ABC -> sl (staccato + legato).  For midi1csv, short rest/pause at end of note.
                     if acc_s == 'sl':
                         tmp = int(round(7.0 * (tmp / 8.0)))
+#--                     print("sl tmp={}".format(tmp),file=sys.stderr, flush=True)
                     # fi
 # NOTDONEYET - portamento - ABC -> sl (staccato + legato).  For midi1csv, short rest/pause at end of note.
                     if leg and acc_s != 'sl':
@@ -2455,12 +2494,12 @@ def print_out_fluidsynth():
             s = t[3].split(", ", 1) # 2 elements
             t[3] = s[0] + ' 1 0 ' + s[1]
         elif t[2] == 'End_track':
-            if max_midi_time < int(t[1]):
-                max_midi_time = int(t[1])
+            if max_midi_time < float(t[1]):
+                max_midi_time = float(t[1])
             # fi
             t.append('')
         else:
-            print("Unexpected midi command - t={}".format(t))
+            print_error_no_line("Unexpected midi command - t={}".format(t))
         # fi
         if voices < int(t[0]):
             voices = int(t[0])
@@ -2487,7 +2526,7 @@ def print_out_fluidsynth():
 #--            print("this_time[{}]={}".format(v, this_time[v]))
             t = lines[this_time[v]].split(' ', 1) # 2 elements
 #--            print("t={}".format(t))
-            time = int(t[0])
+            time = float(t[0])
             str = t[1]
 #--            print("v={} time={} str={}".format(v,time,str))
             if min_next > time:
@@ -2496,7 +2535,9 @@ def print_out_fluidsynth():
         # rof
 #--        print("min_next = {}".format(min_next))
         if (min_next - current_time) != 0 and current_time >= 0:
-            print("sleep {}".format(min_next - current_time))
+            ms_1000 = int((min_next - current_time) * 1000.0)
+            ms_1000 = float(ms_1000) / 1000.0
+            really_print_output("sleep {}".format(ms_1000))
         # fi
         # Move all this_time voices forward past min_next.
         for voice,lines in v_t_lines.items():
@@ -2505,27 +2546,24 @@ def print_out_fluidsynth():
                 continue
             # fi
             t = lines[this_time[v]].split(' ', 1) # 2 elements
-            time = int(t[0])
+            time = float(t[0])
             while time <= min_next:
                 str = t[1]
                 if str != 'End_track ':
-                    print("{}".format(str))
+                    really_print_output("{}".format(str))
                 # fi
                 this_time[v] += 1
                 if this_time[v] >= len(lines):
                     break
                 # fi
                 t = lines[this_time[v]].split(' ', 1) # 2 elements
-                time = int(t[0])
+                time = float(t[0])
             # elihw
         # rof
         current_time = min_next
     # elihw
 
-# NOTDONEYET
-#--    pprint.pprint(v_t_lines, width=110, sort_dicts=False)
-
-    print("quit")
+    really_print_output("quit")
     return
 #   End of print_out_fluidsynth
 
