@@ -17,7 +17,7 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 	csvmidi $< $@ \
 		|| (rm -f $@ ; exit 1)
 %.wav:	%.mid
-	fluidsynth -F $@ -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 $< \
+	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 $< \
 		|| (rm -f $@ ; exit 1)
 %.abc:	%.E
 	${MUSICOMP2ABC} --abc $< $@ \
@@ -83,8 +83,8 @@ check:
 #=============================================================================
 all: ${V}.mid ${V}.ps ${V}_m.ps ${V}.wav
 	#++ open ${V}.ps ${V}_m.ps
-	#-- fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 ${V}.mid
-	#-- fluidsynth -F "${V}.wav" -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 "${V}.mid"
+	#-- fluidsynth -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 ${V}.mid
+	#-- fluidsynth -F "${V}.wav" -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 "${V}.mid"
 #=============================================================================
 #-- S14 = b14-orig
 #=============================================================================
