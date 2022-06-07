@@ -18,7 +18,7 @@ WAV = ${FILE}.wav
 all:
 	./c11.pl > ${CSV}
 	csvmidi ${CSV} ${MIDI}
-	fluidsynth -F "${WAV}" -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 "${MIDI}"
+	fluidsynth -F "${WAV}" -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 "${MIDI}"
 	cp ${WAV} ~/Downloads/
 
 # ----------------------------------------------------------------------------

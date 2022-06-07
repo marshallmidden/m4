@@ -25,7 +25,7 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 %.mid:  %.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.wav:  %.mid
-	fluidsynth -F $@ -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 $<
+	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 $<
 %.abc:  %.E
 	${MUSICOMP2ABC} --abc $< $@ || (rm -f $@ ; exit 1)
 %.ps:   %.abc

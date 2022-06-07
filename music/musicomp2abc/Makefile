@@ -9,14 +9,16 @@ SONGS += promenade-musicomp2abc
 #-----------------------------------------------------------------------------
 TESTS  =
 TESTS += DECODE
-TESTS += LEGATO
+TESTS += LEGATO1
+TESTS += TIES
 TESTS += TRILLS
-TESTS += Z
+TESTS += TEMPO
 #-----------------------------------------------------------------------------
 # SONGS_GCS = ${SONGS:=.gcs}
 SONGS_E = ${SONGS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
 SONGS_CSV = ${SONGS:=.csv}
+SONGS_FS = ${SONGS:=.fs}
 SONGS_MID = ${SONGS:=.mid}
 SONGS_M_PS = ${SONGS:=_m.ps}
 SONGS_PS = ${SONGS:=.ps}
@@ -25,6 +27,7 @@ SONGS_WAV = ${SONGS:=.wav}
 TESTS_E = ${TESTS:=.E}
 TESTS_ABC = ${TESTS:=.abc}
 TESTS_CSV = ${TESTS:=.csv}
+TESTS_FS = ${TESTS:=.fs}
 TESTS_MID = ${TESTS:=.mid}
 TESTS_M_PS = ${TESTS:=_m.ps}
 TESTS_PS = ${TESTS:=.ps}
@@ -37,14 +40,16 @@ ABCM2PS	     = abcm2ps
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.csv %.mid %.E
-.SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E
+.SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E .fs
 # output $@   -- input $<
+%.fs:  %.E
+	${MUSICOMP2ABC} --fluidsynth $< $@ || rm -f $@
 %.csv:  %.E
 	${MUSICOMP2ABC} --midi1csv $< $@ || rm -f $@
 %.mid:  %.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.wav:  %.mid
-	fluidsynth -F $@ -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 $<
+	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 $<
 %.abc:  %.E
 	${MUSICOMP2ABC} --abc $< $@ || (rm -f $@ ; exit 1)
 %.ps:   %.abc
@@ -60,22 +65,22 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 help:
 	@echo 'Targets:'
 	@echo '  all       - Convert SONGS.gcs files to .mid files, etc.'
-	@echo '  clean     - Remove intermediate .csv,.mid,.abc,.ps,_m.ps, and .wav files.'
+	@echo '  clean     - Remove intermediate .csv,.mid,.abc,.ps,_m.ps,.fs, and .wav files.'
 	@echo '  tags      - Create tags file for python sources.'
 	@echo '  tests     - Convert TESTS.gcs files to .mid files, etc.'
 	@echo "SONGS: ${SONGS}"
 	@echo "TESTS: ${TESTS}"
 #-----------------------------------------------------------------------------
 .PHONY: all songs
-all songs: ${SONGS_MID} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV}
+all songs: ${SONGS_MID} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV} ${SONGS_FS}
 #-----------------------------------------------------------------------------
 .PHONY: tests
-tests: ${TESTS_MID} ${TESTS_PS} ${TESTS_M_PS} ${TESTS_WAV}
+tests: ${TESTS_MID} ${TESTS_PS} ${TESTS_M_PS} ${TESTS_WAV} ${TESTS_FS}
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -f ${SONGS_CSV} ${SONGS_MID} ${SONGS_ABC} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV} ${SONGS_E}
-	rm -f ${TESTS_CSV} ${TESTS_MID} ${TESTS_ABC} ${TESTS_PS} ${TESTS_M_PS} ${TESTS_WAV} ${TESTS_E}
+	rm -f ${SONGS_CSV} ${SONGS_FS} ${SONGS_MID} ${SONGS_ABC} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV} ${SONGS_E}
+	rm -f ${TESTS_CSV} ${TESTS_FS} ${TESTS_MID} ${TESTS_ABC} ${TESTS_PS} ${TESTS_M_PS} ${TESTS_WAV} ${TESTS_E}
 	rm -f *.stderr tags ctags
 #-----------------------------------------------------------------------------
 .PHONY: tags ctags
