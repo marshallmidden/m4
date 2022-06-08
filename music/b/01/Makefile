@@ -64,7 +64,7 @@ all: s1 s2 s3 s4
 clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
-	rm -f *.csv *.mid
+	rm -f *.csv *.mid *.fs
 	rm -f *.abc
 	rm -f *.wav
 	rm -f *.E

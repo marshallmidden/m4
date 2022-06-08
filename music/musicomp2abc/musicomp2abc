@@ -1,21 +1,6 @@
 #!/usr/bin/python3 -B
-# BROKEN - ties in csvmidi and thus fluidsynth.
-# Tempo, staccato, key signature, etc. If note is shorter than full length,
-# then need to have shorter time for note.
-#
-# A lot of debug lines, "Text_t", etc.
 # ----------------------------------------------------------------------------
-# NOTDONEYET - portamento - ABC -> sl (staccato + legato).  For midi1csv, short
-# rest/pause at end of note.
-#
-#   accidental_portamento
-#-----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
-# ----------------------------------------------------------------------------
-# Document: trills, legato on time means last note is legato.
-# If no l on time, last note is unset if legato on note itself.
-# i.e. t(3cl,3el,8)4   -> last 3e does not have legato set.
-#      t(3cl,3el,8)4l  -> last 3e has legato set (which goes to next note).
 # ----------------------------------------------------------------------------
 # TO DO:
 #   vol(sf,0.25)    -- optional 2nd argument for length of sf.
@@ -23,12 +8,23 @@
 #
 #   cresendo/diminuendo - Change to control 11 for volume changes.
 #   See F.pl for example. Needs quite a few steps.
-#
-#  Legato control 68 for slurs/glides. NOT PORTAMENTO or LEGATO + PORTAMENTO.
-#       Value Range: 0 (to 63) is off. 127 (to 64) is on.
-#
-# * ABC notation for "v2: 4c4l,4d4l,4e4" should be "V:3 \n (cde)"
-#
+# ----------------------------------------------------------------------------
+#    A) Put in largo and ties and spaces for note tail groupings for:
+#    *   B1 - 1
+#           - 2
+#           - 3
+#           - 4
+#        B2 - 1	-- needs lots of work.
+#    *   B6
+#    ------------------------------------------------------------------------------
+#    B) Put in pizz/arco in:
+#        B1 - 1
+#           - 2
+#           - 3
+#           - 4
+#        B2 - 1
+#    *   B6
+# ----------------------------------------------------------------------------
 # TODO:
 # 1) Select clef=treble or clef=bass by notes min and max notes on staff(s).
 #       # NOTDONEYET - add ' clef=bass'  (after the number)
@@ -36,15 +32,16 @@
 # 2) --vertical and --horizontal: voice xx yy,zz,ww,uu,... -- do not print, use instrument instead.
 # 3) --vertical and --horizontal: Can save comments on measures? Lines? Like before measures? * ------
 # ----------------------------------------------------------------------------
-# --fluidsynth.
-# MIDI channel is limited to 4 bits. 10 is reserved for drums.
-# Thus, cannot have more than 0,1,2,3,4,5,6,7,8,9,11,12,13,14,15 (total 15).
-# Cannot have a MIDI file. MIDI 2.0 can do it, but no file format exists.
+# Document: trills, legato on time means last note is legato.
+# If no l on time, last note is unset if legato on note itself.
+# i.e. t(3cl,3el,8)4   -> last 3e does not have legato set.
+#      t(3cl,3el,8)4l  -> last 3e has legato set (which goes to next note).
 # ----------------------------------------------------------------------------
-# ./musicomp --midi1csv song song.csv   # Output midi1csv format.
-# ./musicomp song song.abc              # Output ABC format.
-# ./musicomp --vertical song song.v     # Either v or h (or mixed) input, vertical output.
-# ./musicomp --horizontal song song.h   # Either v or h (or mixed) input, horizontal output.
+# ./musicomp --midi1csv song.gcs song.csv   # Output midi1csv format.
+# ./musicomp song.gcs song.abc              # Output ABC format.
+# ./musicomp --vertical song.gcs song.v     # Either v or h (or mixed) input, vertical output.
+# ./musicomp --horizontal song.gcs song.h   # Either v or h (or mixed) input, horizontal output.
+# ./musicomp --fluidsynth song.gcs song.fs  # Input to fluidsynth.
 # ----------------------------------------------------------------------------
 # NOTDONEYET - Note processing:
 #   print_error("NOTDONEYET - doing gsw_operand type of note", line)    - Not related to MIDI.
@@ -52,7 +49,19 @@
 #   print_error("NOTDONEYET - do_sharp", line)      -- no real need for this?
 #   print_error("NOTDONEYET - do_flat", line)       -- no real need for this?
 #   print_error("NOTDONEYET - do_natural", line)    -- no real need for this?
-# ============================================================================
+# ----------------------------------------------------------------------------
+# --fluidsynth.  2022-06-06
+# MIDI channel is limited to 4 bits. 10 is reserved for drums.
+# Thus, cannot have more than 0,1,2,3,4,5,6,7,8,9,11,12,13,14,15 (total 15).
+# Cannot use the MIDI file format. MIDI 2.0 has no file format yet.
+#-----------------------------------------------------------------------------
+# A) To import an ABC into musescore, use the plugin "ABC Import".
+#    Move "X:1" to the top of the file, before any other lines. The '%' confuses it.
+# ----------------------------------------------------------------------------
+# B) To export from musescore:
+#     1) File->Export as MusicXML compressed (suffix .mxl).
+#     2) Then use program 'xml2abc my.mxl > my.abc' to convert it to abc format.
+# ----------------------------------------------------------------------------
 # measures and gotos may be calculations using "m1" type variables, but not
 # any other alphanumeric characters.
 # ----------------------------------------------------------------------------
@@ -6588,14 +6597,12 @@ def getnote(note_to_decode, voice, line):
 #   accidentals     Union of bits for accidentals.
 #   number_dots     Number of "dots".
 
-global accidental_portamento
 global accidental_marcato
 global accidental_tied
 global accidental_stac
 global accidental_broken
 global accidental_legato
 global accidental_normal
-accidental_portamento = 32  # short pause/rest before next note.
 accidental_legato = 16      # glide to next note - no note attack on start of note.
 accidental_broken = 8       # broken - ignored - break between notes ... because gsw didn't have it.
 accidental_marcato = 4      # ignored   -- use vol(sf), etc.
@@ -6607,7 +6614,6 @@ accidental_normal = 0
 # Staccato, tied, break, dotted.
 global bit_from_character
 bit_from_character = {
-   'p': accidental_portamento,
    'l': accidental_legato,
    'b': accidental_broken,
    'm': accidental_marcato,
@@ -6675,11 +6681,6 @@ def get_time(therest, line):
                 work4 = work4 | temp4
             # fi
         # rof
-    # fi
-    if ((work4 & accidental_portamento) != 0 and (
-         (work4 & (accidental_legato | accidental_tied | accidental_stac)) != 0)):
-        print_error("a) Multiple accidentals that cannot occur together, work4=({})".format(work4), line)
-        return 0, None, None
     # fi
     if ((work4 & accidental_legato) != 0 and (
          (work4 & accidental_tied) != 0)):
@@ -7666,7 +7667,6 @@ def process_notes(line):
                 print_error("Error getting time for note", line)
                 return
             # fi
-            # accidental_portamento = 32    -- short pause before next note.
             # accidental_legato = 16        -- glide to next note.
             # accidental_tied = 2           -- tied
             # accidental_stac = 1           -- staccato
@@ -7750,19 +7750,19 @@ def process_notes(line):
                 # fi
             # fi
 
-            # Portamento: ABC -> sl (staccato + legato). For midi1csv, short rest/pause at end of note.
-            if (r_accidentals & accidental_portamento) != 0:
-                if args.horizontal or args.vertical or args.midi1csv or args.fluidsynth:
-                    append_tie = append_tie + 'p'
-                else:           # ABC
-                    # thenote = '.' + thenote                 # . before the note for staccato
-                    if len(thenote) > 0 and thenote[0] == ' ':  # Special leading space!
-                        thenote = ' (.' + thenote[1:]        # (. before the note for staccato + legato
-                    else:
-                        thenote = '(.' + thenote             # . before the note for staccato
-                    # fi
-                # fi
-            # fi
+# Portamento: ABC -> sl (staccato + legato). For midi1csv, short rest/pause at end of note.
+#--             if (r_accidentals & accidental_portamento) != 0:
+#--                 if args.horizontal or args.vertical or args.midi1csv or args.fluidsynth:
+#--                     append_tie = append_tie + 'p'
+#--                 else:           # ABC
+#--                     # thenote = '.' + thenote                 # . before the note for staccato
+#--                     if len(thenote) > 0 and thenote[0] == ' ':  # Special leading space!
+#--                         thenote = ' (.' + thenote[1:]        # (. before the note for staccato + legato
+#--                     else:
+#--                         thenote = '(.' + thenote             # . before the note for staccato
+#--                     # fi
+#--                 # fi
+#--             # fi
 
             # Legato
             if (r_accidentals & accidental_legato) != 0:
