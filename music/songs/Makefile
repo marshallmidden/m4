@@ -136,6 +136,7 @@ SONGS_E = ${SONGS:=.E} ${SONGS_NO_PS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
 SONGS_CSV = ${SONGS:=.csv} ${SONGS_NO_PS:=.csv}
 SONGS_MID = ${SONGS:=.mid} ${SONGS_NO_PS:=.mid}
+SONGS_FS = ${SONGS:=.fs} ${SONGS_NO_PS:=.fs}
 SONGS_M_PS = ${SONGS:=_m.ps}
 SONGS_PS = ${SONGS:=.ps}
 SONGS_WAV = ${SONGS:=.wav} ${SONGS_NO_PS:=.wav}
@@ -145,6 +146,9 @@ BROKEN_MID = ${BROKEN:=.mid}
 .PRECIOUS: %.csv %.abc %.mid %.E
 .SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E
 # output $@   -- input $<
+%.fs:  %.E
+	${MUSICOMP2ABC} --fluidsynth $< $@ \
+		|| (rm -f $@ ; exit 1)
 %.csv:  %.E
 	${MUSICOMP2ABC} --midi1csv $< $@ \
 		|| (rm -f $@ ; exit 1)
@@ -180,7 +184,7 @@ help:
 	@echo "SONGS: ${SONGS}"
 #-----------------------------------------------------------------------------
 .PHONY: all all_mid
-all all_mid: ${SONGS_MID}
+all all_mid: ${SONGS_MID} all_fs
 #-----------------------------------------------------------------------------
 .PHONY: broken
 broken: ${BROKEN_MID}
@@ -194,9 +198,12 @@ all_m_ps: ${SONGS_M_PS}
 .PHONY: all_wav
 all_wav: ${SONGS_WAV}
 #-----------------------------------------------------------------------------
+.PHONY: all_fs
+all_fs: ${SONGS_FS}
+#-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -f ${SONGS_CSV} ${SONGS_MID} ${SONGS_ABC} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV} ${SONGS_E}
+	rm -f ${SONGS_CSV} ${SONGS_MID} ${SONGS_ABC} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV} ${SONGS_E} ${SONGS_FS}
 	rm -f *.stderr
 #-----------------------------------------------------------------------------
 # End of Makefile

@@ -11,6 +11,9 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 .PRECIOUS: %.abc %.csv %.mid %.E
 .SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E
 # output $@   -- input $<
+%.fs:	%.E
+	${MUSICOMP2ABC} --fluidsynth $< $@ \
+		|| (rm -f $@ ; exit 1)
 %.csv:	%.E
 	${MUSICOMP2ABC} --midi1csv $< $@ \
 		|| (rm -f $@ ; exit 1)
@@ -82,7 +85,7 @@ check:
 	@echo "YAPS=${YAPS}"
 	@echo "ABCM2PS=${ABCM2PS}"
 #=============================================================================
-all: ${V}.mid ${V}.ps ${V}_m.ps ${V}.wav
+all: ${V}.mid ${V}.ps ${V}_m.ps ${V}.wav ${V}.fs
 	#++ open ${V}.ps ${V}_m.ps
 	#-- fluidsynth -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 ${V}.mid
 	#-- fluidsynth -F "${V}.wav" -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 "${V}.mid"
@@ -96,7 +99,7 @@ all: ${V}.mid ${V}.ps ${V}_m.ps ${V}.wav
 clean::
 	rm -f *.ps
 	rm -f *.stdout *.stderr
-	rm -f *.csv *.mid
+	rm -f *.csv *.mid *.fs
 	rm -f *.abc *.A_abc
 	rm -f *.wav
 	rm -f *.E

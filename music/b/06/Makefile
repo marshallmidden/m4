@@ -8,12 +8,15 @@ ABCM2PS      = abcm2ps
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.csv %.mid %.E
-.SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E
+.SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E .fs
 # output $@   -- input $<
 #	${MUSICOMP2ABC} --midi1csv --nolegato $< $@
 %.csv:	%.E
 	${MUSICOMP2ABC} --midi1csv $< $@ \
 		|| (rm -f $@ ; exit 1)
+%.fs:	%.E
+	${MUSICOMP2ABC} --fluidsynth $< $@ \
+		|| ( rm -f $@ ; exit 1)
 %.mid:	%.csv
 	csvmidi $< $@ \
 		|| (rm -f $@ ; exit 1)
@@ -65,12 +68,13 @@ endef
 .PHONY: help
 help::
 	@echo "Targets:"
-	@echo "  clean  - Remove postscript (ps), csv, and mid files."
+	@echo "  clean  - Remove postscript (ps), csv, fs, and mid files."
 	@echo ""
 	@echo "  all    - create ${V}.abc from ${V} (via 'musicomp2abc')"
 	@echo "         - and ${V}.ps from ${V}.abc (via 'yaps')"
 	@echo "         - and Out.ps from ${V}.abc (via 'abcm2ps')"
 	@echo "         - and ${V}.mid from ${V} (via 'musicomp2abc --midicsv')"
+	@echo "         - and ${V}.mid from ${V} (via 'musicomp2abc --fluidsynth')"
 	@echo ""
 #-----------------------------------------------------------------------------
 .PHONY: check
@@ -81,7 +85,7 @@ check:
 	@echo "YAPS=${YAPS}"
 	@echo "ABCM2PS=${ABCM2PS}"
 #=============================================================================
-all: ${V}.mid ${V}.ps ${V}_m.ps ${V}.wav
+all: ${V}.mid ${V}.ps ${V}_m.ps ${V}.wav ${V}.fs
 	#++ open ${V}.ps ${V}_m.ps
 	#-- fluidsynth -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 ${V}.mid
 	#-- fluidsynth -F "${V}.wav" -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 "${V}.mid"
@@ -90,7 +94,7 @@ all: ${V}.mid ${V}.ps ${V}_m.ps ${V}.wav
 clean::
 	rm -f *.ps
 	rm -f *.stdout *.stderr
-	rm -f *.csv *.mid
+	rm -f *.csv *.mid *.fs
 	rm -f *.abc *.A_abc
 	rm -f *.wav
 	rm -f *.E
