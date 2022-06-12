@@ -30,7 +30,7 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 	${YAPS} $< -o $@ -k \
 		|| (rm -f $@ ; exit 1)
 %_m.ps:	%.abc
-	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@) \
+	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@) \
 		|| (rm -f $@ ; exit 1)
 #-- %.E: %.gcs beethoven.macros
 %.E: %.gcs
@@ -45,7 +45,7 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 %_A.ps:   %.A_abc
 	${YAPS} $< -o $@ -k
 %_m_A.ps: %.A_abc
-	${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@
+	${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@
 #-----------------------------------------------------------------------------
 As = 01 02 03 04 05 06 07 08 09 10
 w_A := ${words $(As)}
