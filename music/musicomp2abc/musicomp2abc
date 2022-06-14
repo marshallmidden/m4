@@ -1,5 +1,11 @@
 #!/usr/bin/python3 -B
 # ----------------------------------------------------------------------------
+# To do:
+# 1) --noxpose
+# 2) --nogoto
+# 3) --measures
+# 4) --pages
+# ----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 # ----------------------------------------------------------------------------
 # TO DO:
@@ -899,10 +905,10 @@ bufs_legato_next = { 1: '' }
 global bufs_vol
 bufs_vol = { 1: {} }
 
-global lstac
-global lgrace
-global lpause
-lstac = lgrace = lpause = 4         # starting staccato, grace note, lpause as 4/60th of a second
+global pages_to_do
+pages_to_do = []
+global measures_to_do
+measures_to_do = []
 
 global iftest                       # check if after if or else.
 iftest = { 0:-1 }                   # -1 = processing in if, 0 = skip till else,
@@ -2907,7 +2913,7 @@ def do_pass2():
 
     # Check that song finishes 'reasonably'.
     if ifdepth > 0:
-        print_error_no_line("Inside an if block (depth={}) when end of file or cstop* reached".format(ifdepth))
+        print_warning_no_line("Inside an if block (depth={}) when end of file or cstop* reached".format(ifdepth))
     # fi
     if macro_defining is not None:
         print_error_no_line("Inside defining macro {}, no endm reached.".format(macro_defining))
@@ -3398,18 +3404,92 @@ def fill_voice_mlth(meter_check, line):
 # End of fill_voice_mlth
 
 # ----------------------------------------------------------------------------
+# wline = 2..4
+#          l
+#           l+1
+#            l+2
 # Separate arguments for argument.
-def arglist(wline, line):
+def arglist(wline, line, integers):
+    # print("wline={} integers={}".format(wline,integers),file=sys.stderr, flush=True)
     newline = []
     # break into arguments.
     newstr = ''
     np = 0                              # ()
     nb = 0                              # []
     nc = 0                              # {}
-    for c in wline:
+    lth = len(wline)
+    l = 0
+    # print("l={} lth={}".format(l, lth), file=sys.stderr, flush=True)
+    while (l < lth):
+        # print("l={} lth={}".format(l, lth), file=sys.stderr, flush=True)
+        c = wline[l]
+        # print("l={} c='{}'".format(l,c),file=sys.stderr, flush=True)
         if c == ',' and np == 0 and nb == 0 and nc == 0:    # we want to split on commas
-            newline.append(newstr)
+            if integers:
+                n, msg = is_float(newstr)
+                if msg is not None:
+                    print_error("Range first number bad. {}".format(msg), line)
+                    return ''
+                # fi
+                n = int(n)
+                newline.append(str(n))
+            else:
+                newline.append(newstr)
+            # fi
             newstr = ''
+            l = l + 1
+        elif c == '.' and integers:
+            if (l+2) < lth and wline[l+1] == '.':
+                # Range
+                if newstr == '':
+                    print_error("Range needs number before 'STARTING..ENDING'", line)
+                    return ''
+                # fi
+                # print(".. newstr={}".format(newstr),file=sys.stderr, flush=True)
+                first, msg = is_float(newstr)
+                if msg is not None:
+                    print_error("Range first number bad. {}".format(msg), line)
+                    return ''
+                # fi
+                # NOTE: comma looked for, not parenthesis/brackets/braces.
+                # print(".. first={}".format(first),file=sys.stderr, flush=True)
+                try:
+                    comma = wline.find(',', l+2)
+                    # print(".. comma={}".format(comma),file=sys.stderr, flush=True)
+                    # print(".. wline[l]={}".format(wline[l]),file=sys.stderr, flush=True)
+                    if comma >= 0:
+                        last = wline[l+2:comma]
+                        l = comma + 1
+                        # print(".. withcomma last={}".format(last),file=sys.stderr, flush=True)
+                    else:
+                        last = wline[l+2:]
+                        # print(".. withoutcomma wline[l:]={} last={}".format(wline[l:],last),file=sys.stderr, flush=True)
+                        l = lth + 1
+                        # print(".. l={} lth={}".format(l,lth),file=sys.stderr, flush=True)
+                    # fi
+                except:
+                    # print(".. except wline[l]={}".format(wline[l]),file=sys.stderr, flush=True)
+                    last = wline[l+2:]
+                    l = lth + 1
+                # yrt
+                # print(".. last={}".format(last),file=sys.stderr, flush=True)
+                last, msg = is_float(last)
+                if last is None or last == '':
+                    print_error("Range last number bad. {}".format(msg), line)
+                    return ''
+                # fi
+                first = int(first)
+                last = int(last)
+                # print(".. is_float last={}".format(last),file=sys.stderr, flush=True)
+                for n in range(first, last+1):
+                    # print(".. n={}".format(n),file=sys.stderr, flush=True)
+                    newline.append(str(n))
+                # rof
+                newstr = ''
+                continue
+            # fi
+            print_error("Range needs number after 'STARTING..ENDING'", line)
+            return ''
         #-- elif c == ' ' or c == "\t":
         #--     pass
         else:
@@ -3439,6 +3519,7 @@ def arglist(wline, line):
                 # fi
                 nc = nc - 1
             # fi
+            l = l + 1
         # fi
     # rof
     if np != 0:
@@ -3453,7 +3534,18 @@ def arglist(wline, line):
         print_error("too many left (by {}) curly braces".format(nc), line)
         return ''
     # fi
-    newline.append(newstr)
+    if newstr != '' and integers:
+        n, msg = is_float(newstr)
+        if msg is not None:
+            print_error("Range first number bad. {}".format(msg), line)
+            return ''
+        # fi
+        n = int(n)
+        newline.append(str(n))
+    elif newstr != '':
+        newline.append(newstr)
+    # fi
+    # print("newline={}".format(newline),file=sys.stderr, flush=True)
     return newline
 # End of arglist
 
@@ -3690,7 +3782,6 @@ def do_cstart(t_args, line):
 # ----------------------------------------------------------------------------
 #   cstop               stop till cstart or cstop* found.
 def do_cstop(t_args, line):
-    global commands
     global cstop_processing
 
     cstop_processing = True
@@ -3723,7 +3814,7 @@ def replace_macro(command, t_args, line):
         # fi
         wargs = None
     else:
-        wargs = arglist(t_args[0], line)
+        wargs = arglist(t_args[0], line, False)
         if len(wargs) != len(macro_arguments[command]):
             print_error("macro command has {} arguments, but needs {}.".format(wargs, macro_arguments[command]), line)
             return
@@ -3754,7 +3845,7 @@ def do_macro(t_args, line):
         return
     # fi
 
-    wargs = arglist(t_args[0], line)
+    wargs = arglist(t_args[0], line, False)
     if not wargs or len(wargs) < 1:
         print_error("no macro name.", line)
         return
@@ -3875,7 +3966,7 @@ def do_if(t_args, line):
     # if iftest[ifdepth] == 2:            # skipping in else, ignore if and else processing, want endif.
     # if iftest[ifdepth] == 3:            # skip both if and else, want endif
     if iftest[ifdepth] == -1 or iftest[ifdepth] == 1:   # process this if normally.
-        wargs = arglist(t_args[0], line)
+        wargs = arglist(t_args[0], line, False)
         if not wargs or len(wargs) < 1:
             print_error("no if argument.", line)
             return
@@ -3951,7 +4042,7 @@ def do_randp(t_args, line):
         print_error("randp command does not have exactly one argument.", line)
         return
     # fi
-    wargs = arglist(t_args[0], line)
+    wargs = arglist(t_args[0], line, False)
     if not wargs or len(wargs) < 1:
         print_error("no randp argument.", line)
         return
@@ -3980,7 +4071,7 @@ def do_setperm(t_args, line):
         print_error("setperm command does not have any arguments.", line)
         return
     # fi
-    wargs = arglist(t_args[0], line)
+    wargs = arglist(t_args[0], line, False)
     if not wargs or len(wargs) != 1:
         print_error("Need exactly one setperm argument", line)
         return
@@ -4003,7 +4094,7 @@ def do_randu(t_args, line):
         print_error("randu command does not have any arguments.", line)
         return
     # fi
-    wargs = arglist(t_args[0], line)
+    wargs = arglist(t_args[0], line, False)
     if not wargs or len(wargs) < 1:
         print_error("no randu arguments", line)
         return
@@ -4050,7 +4141,7 @@ def do_delay(t_args, line):
         print_error("delay command does not have any arguments.", line)
         return
     # fi
-    wargs = arglist(t_args[0], line)
+    wargs = arglist(t_args[0], line, False)
     if not wargs or len(wargs) < 1:
         print_error("no delay arguments", line)
         return
@@ -4166,6 +4257,11 @@ def do_goto(t_args, line):
     global goto_table
     global goto_variables
 
+    if args.nogoto:
+        print_warning("Ignoring goto parsing.", line)
+        return
+    # fi
+
     if measure_on in goto_table:
         print_error("Second goto in measure note allowed.", line)
         return
@@ -4178,7 +4274,7 @@ def do_goto(t_args, line):
     wline = t_args[0]
     # Get rid of all white spoce.
     wline = ''.join(wline.split())
-    wargs = arglist(wline, line)
+    wargs = arglist(wline, line, False)
 
     if len(wargs) == 0:
         print_error("goto needs at least one argument", line)
@@ -4254,7 +4350,7 @@ def do_decode(t_args, line):
         print_error("decode command does not have any arguments.", line)
         return
     # fi
-    wargs = arglist(t_args[0], line)
+    wargs = arglist(t_args[0], line, False)
     if not wargs or len(wargs) < 1:
         print_error("no decode arguments", line)
         return
@@ -4342,7 +4438,7 @@ def do_clef(t_args, line):
         return
     # fi
     if len(vargs) == 1:
-        wargs = arglist(t_args[0], line)
+        wargs = arglist(t_args[0], line, False)
         if not wargs or len(wargs) < 1:
             print_error("no clef selection arguments", line)
             return
@@ -4355,7 +4451,7 @@ def do_clef(t_args, line):
     clf = vargs[1]
 
     jkl = "".join(vargs[0])
-    wargs = arglist(jkl, line)
+    wargs = arglist(jkl, line, False)
     if not wargs or len(wargs) < 1:
         print_error("no voice arguments on clef line", line)
         return
@@ -5082,8 +5178,10 @@ def do_key(t_args, line):
     # fi
 
     t_args[0] = re.sub(r'\s*,\s*', ',', t_args[0])
-
+    t_args[0] = re.sub(r'\s*\.\.\s*', '..', t_args[0])
+    # Voice numbers, followed by instrument name.
     vargs = t_args[0].split()
+
     if len(vargs) <= 0 or len(vargs) > 2:
         print_error("key command does not have correct number of arguments", line)
         return
@@ -5127,7 +5225,7 @@ def do_key(t_args, line):
     # fi                # multiple arguments, voices first.
 
     jkl = "".join(vargs[0])
-    wargs = arglist(jkl, line)
+    wargs = arglist(jkl, line, False)
     if not wargs or len(wargs) < 1:
         print_error("no voice arguments on key line", line)
         return
@@ -5253,7 +5351,7 @@ def do_volume_both(t_args, line, command_name):
     wline = t_args[0]
     # Get rid of all white spoce.
     wline = ''.join(wline.split())
-    wargs = arglist(wline, line)
+    wargs = arglist(wline, line, False)
 
     if len(wargs) == 0 or len(wargs) > MAXVOICES:
         print_error(command_name + " needs from one to {} arguments".format(MAXVOICES), line)
@@ -5382,7 +5480,7 @@ def do_voice(t_args, line):
     # If there are more arguments, choose instruments for the voices.
     if len(vargs) > 1:
         jkl = "".join(vargs[1:])
-        wargs = arglist(jkl, line)
+        wargs = arglist(jkl, line, False)
         if not wargs or len(wargs) < 1:
             print_error("no instrument selection arguments on voice line", line)
             return
@@ -5425,6 +5523,38 @@ def do_voice(t_args, line):
 # End of do_voice
 
 # ----------------------------------------------------------------------------
+def do_page(t_args, line):
+    global cstop_processing
+    global pages_to_do
+
+    if t_args is None or len(t_args) != 1:
+        print_error("Page missing argument.", line)
+        return
+    # fi
+
+    vargs = t_args[0]
+    n, mesg = is_float(vargs)
+    if mesg is not None or n is None:
+        print_error("Page does not have a number. {}".format(msg), line)
+        return
+    # fi
+    n = int(n)
+    n = str(n)
+    calculate.variables['page'] = n
+
+    if args.pages == None or args.pages == '':
+        return
+    # fi
+    if n not in pages_to_do:
+        cstop_processing = True
+        return
+    # fi
+    # Do cstart.
+    cstop_processing = False
+    return
+# End of do_page
+
+# ----------------------------------------------------------------------------
 #   measure 6.5         $$ need not be integers
 def do_measure(t_args, line):
     global measure_on
@@ -5456,6 +5586,7 @@ def do_measure(t_args, line):
     global measurelinecomment               # Collected comments before a new measure for before new measure.
     global precomment
     global commentonline
+    global measures_to_do
 
     fill_voice_mlth(True, line)                   # Need to make measure for other voices up to here "mlth".
 
@@ -5488,6 +5619,16 @@ def do_measure(t_args, line):
     if f1 in meas:
         print_error("Measure {} already exists.".format(f1), line)
         return
+    # fi
+
+    # Check if in measure_to_do
+    if args.measures:
+        if f1 not in measures_to_do
+            cstop_processing = True
+            return
+        # fi
+        # Do cstart.
+        cstop_processing = False
     # fi
 
     # Last note length ... continue to this measure, until it changes.
@@ -5582,9 +5723,12 @@ def do_instrument(t_args, line):
         return
     # fi
 
+    # Want a list of number separated by commas, followed by a space and an instrument name/number.
     t_args[0] = re.sub(r'\s*,\s*', ',', t_args[0])
-
+    t_args[0] = re.sub(r'\s*\.\.\s*', '..', t_args[0])
+    # Voice numbers, followed by instrument name.
     vargs = t_args[0].split()
+
     INST = " ".join(vargs[1:]).lower()
     if INST in instruments:
         INST = instruments[INST]        # Convert to number.
@@ -5606,7 +5750,7 @@ def do_instrument(t_args, line):
     # fi
 
     jkl = "".join(vargs[0])
-    wargs = arglist(jkl, line)
+    wargs = arglist(jkl, line, True)
     if not wargs or len(wargs) < 1:
         print_error("no voice arguments on instrument line", line)
         return
@@ -5696,7 +5840,7 @@ def do_reverb(t_args, line):
     # fi
 
     jkl = "".join(vargs[0])
-    wargs = arglist(jkl, line)
+    wargs = arglist(jkl, line, True)
     if not wargs or len(wargs) < 1:
         print_error("no voice arguments on reverb line", line)
         return
@@ -5758,7 +5902,7 @@ def do_intensity(t_args, line):
     # fi
 
     jkl = "".join(vargs[0])
-    wargs = arglist(jkl, line)
+    wargs = arglist(jkl, line, True)
     if not wargs or len(wargs) < 1:
         print_error("no voice arguments on intensity line", line)
         return
@@ -5822,7 +5966,7 @@ def do_pan(t_args, line):
         # fi
     # fi
     jkl = "".join(vargs[0])
-    wargs = arglist(jkl, line)
+    wargs = arglist(jkl, line, True)
     if not wargs or len(wargs) < 1:
         print_error("no voice arguments on pan line", line)
         return
@@ -5854,6 +5998,11 @@ def do_xpose(t_args, line):
     global key_sig_int
     global key_default
     global key_voice
+
+    if args.noxpose:
+        print_warning("Ignoring xpose parsing.", line)
+        return
+    # fi
 
     if t_args is None or len(t_args) != 1:
         print_error("xpose does not have arguments.", line)
@@ -5916,7 +6065,7 @@ def do_xpose(t_args, line):
     # k = value to store in key_voice, key_default, etc. -- used for printing, etc.
 
     jkl = "".join(vargs[0])
-    wargs = arglist(jkl, line)
+    wargs = arglist(jkl, line, True)
     if not wargs or len(wargs) < 1:
         print_error("no voice arguments on xpose line", line)
         return
@@ -6013,6 +6162,7 @@ commands = {
              'unit'    : do_measure,
              'meter'   : do_meter,
              'natural' : do_natural,
+             'page'    : do_page,
              'percus'  : do_percus,
              'pitch'   : do_pitch,
              'putd'    : do_putd,
@@ -6957,7 +7107,7 @@ def process_notes(line):
     wline = re.sub(r'\s+', ' ', line)           # multiple spaces to single space, multiple times.
     wline = re.sub(r'([^,]) ', r'\1', wline)    # ', ' left alone, elsewise strip spaces.
     wline = re.sub(r'^  *v', 'v', wline)          # 'no ' left alone, elsewise strip spaces.
-    wargs = arglist(wline, line)
+    wargs = arglist(wline, line, False)
     if not wargs or len(wargs) < 1:
         print_error("no arguments on note line", line)
         return
@@ -7817,6 +7967,9 @@ def process_line(t, line):
     if cstop_processing:
         # Read until cstart found (or end of file)
         if command in commands:
+            if commands[command] == do_page:
+                do_page(t_args, line)
+            # fi
             if commands[command] == do_cstart:
                 do_cstart(t_args, line)
             # fi
@@ -7890,6 +8043,9 @@ def process_line(t, line):
 # ----------------------------------------------------------------------------
 def parse_args():
     global args
+    global pages_to_do
+    global measures_to_do
+
     def offset_value(v):
         if len(v) > 0:
             if v[0] == '=':
@@ -7929,10 +8085,25 @@ def parse_args():
                         '-fluid', '-flui', '-flu', '-fl', '-f', '-fs',
                         action='store_true',
                         help = 'Output fluidsynth music format output.')
+    parser.add_argument('--nogoto', '--nogot', '--nogo', '--nog',
+                        '-nogoto', '-nogot', '-nogo', '-nog',
+                        action='store_true',
+                        help = 'Do not parse goto commands, ignore them.')
+    parser.add_argument('--noxpose', '--noxpos', '--noxpo', '--noxp', '--nox',
+                        '-noxpose', '-noxpos', '-noxpo', '-noxp', '-nox',
+                        action='store_true',
+                        help = 'Do not parse xpose commands, ignore them.')
     parser.add_argument('--offset', default=0, action = 'store', type=offset_value,
                         help = 'Offset for midi instruments +1, -1, -12 -- because they CAN differ for playing.')
     parser.add_argument('--shift', type=float, default=0.0,
                         help = 'Shift all measures before printing (0.5 = 1/2 note to left/earlier measure).')
+    parser.add_argument('--pages', '--page', '-pages', '-page',
+                        default='', action = 'store',
+                        help = 'Only print page(s) specified. "1,2,5" or "1,2,5-8,114".')
+    parser.add_argument('--measures', '--measure', '--measur', '--measu', '--meas', '--mea', '-me',
+                        '-measures', '-measure', '-measur', '-measu', '-meas', '-mea', 'me',
+                        default='', action = 'store',
+                        help = 'Only print measure(s) specified. "1,2,5" or "1,2,5-8,114a,115".')
     parser.add_argument('--nolegato', '--no-legato', action='store_true',
                         help = 'Do not do legatos.')
     parser.add_argument('rest', nargs='*',
@@ -7942,6 +8113,23 @@ def parse_args():
     if args.offset is not None:
         args.offset = int(args.offset)
     # fi
+
+    if args.pages is not None and args.pages != '':
+        # global pages_to_do
+        n = re.sub(r'\s*,\s*', ',', args.pages)
+        n = re.sub(r'\s*,\s*', ',', n)
+        pages_to_do = arglist(n, 'parsing --pages', True)
+    # fi
+
+NOTDONEYET
+    if args.measures is not None and args.measures != '':
+        # global measure_to_do
+        n = re.sub(r'\s*,\s*', ',', args.measures)
+        n = re.sub(r'\s*,\s*', ',', n)
+        measures_to_do = arglist(n, 'parsing --measures', True)
+    # fi
+
+
     if args.rest is not None:
         for indx in range(len(args.rest)):
             if args.rest[indx][0] == '=':
@@ -8054,11 +8242,11 @@ def main():
                         # fi
                     # fi
                 # fi
-                line = re.sub(r'  ', r' ', line)                        # multiple spaces to single.
+                line = re.sub(r'   *', r' ', line)                      # multiple spaces to single.
                 t0 = re.sub(r'(^ *[^ ]*).*$', r'\1', line, count=1)
                 t1 = re.sub(r'^ *[^ ]*', '', line, count=1)
                 t_tmp = t0.lstrip()                                     # For command lookup.
-                t = [ t0, t1 ]
+                t = [ t0, t1 ]                                          # Note: a leading space.
                 if t_tmp and t_tmp == '.':
                     # If command == '.' toss '.'
                     if len(t) == 2 and t[1]:
@@ -8090,6 +8278,7 @@ def main():
 # ----------------------------------------------------------------------------
 if __name__ == '__main__':
     calculate.cexp_parser()                                     # initialize parser
+    # print("stac={} pause={} grace={} page={}".format(calculate.variables['stac'], calculate.variables['pause'], calculate.variables['grace'], calculate.variables['page']), file=sys.stderr, flush=True)
     main()
 # fi
 # ----------------------------------------------------------------------------
