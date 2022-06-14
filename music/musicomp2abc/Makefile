@@ -13,6 +13,8 @@ TESTS += LEGATO1
 TESTS += TIES
 TESTS += TRILLS
 TESTS += TEMPO
+TESTS += RANGE1
+TESTS += RANGE2
 #-----------------------------------------------------------------------------
 # SONGS_GCS = ${SONGS:=.gcs}
 SONGS_E = ${SONGS:=.E}

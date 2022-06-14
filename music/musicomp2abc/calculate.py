@@ -135,6 +135,10 @@ def next_token(string):
             ret = 'stac'
         elif strg == 'lgrace':
             ret = 'grace'
+        elif strg == 'page':
+            ret = 'page'
+        elif strg == 'measure':
+            ret = 'measure'
         # fi
         if len(string) > len(strg):         # Something after this alphabetic string.
             return string[len(strg):], ret, 'ID'
@@ -953,6 +957,8 @@ variables = {
     'pause': 4,                 # NOTE: lpause -> pause     NOTUSED
     'stac': 4,                  # NOTE: lstac -> stac       NOTUSED
     'grace': 4,                 # NOTE: lgrace -> grace     NOTUSED
+    'page': 0,                  # NOTE: Page number. (do_page)
+    'measure': 0,               # NOTE: Measure number. (do_measure)
     'w': 1, 'h': 2, 'q': 4, 'e': 8,
 
     's': 1, 'd': 1, 'b': 1, 't': 1, 'l': 1,
