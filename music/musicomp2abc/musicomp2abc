@@ -784,9 +784,9 @@ linecount = 0
 global putds                        # "micro" and it's replacement/substitution.
 putds    = { }                      # dictionary of from:to
 
-global goto_table
-global goto_variables
-goto_table = { '':[]}               # first index is measure number. Value is array of measures.
+global goto_table                   # Goto is ONLY at end of measure. (Put in extra measures.)
+global goto_variables               # When processing gotos for output, the count of times hit.
+goto_table = { '':[]}               # first index is measure number. Value is array of measures in goto.
 goto_variables = { '':0}            # first index is measure number. Value is number of times goto is hit.
 
 global meas                         # measure names.
@@ -807,7 +807,7 @@ bars[''] = NUMBER_BARS_PER_STAFF    # for abc notation, put new line in output, 
 
 global voices                       # number of voices
 voices = 1
-global cis                          # if cis active, non-zero.
+global cis                          # If cis active, non-zero. (CIS measure one voice #XX only.)
 cis = 0
 
 global vl                           # volume levels
@@ -827,26 +827,33 @@ xpose_new_key = {}
 global clef
 clef = { }                          # no clef specified [measure][voice].
 clef[''] = { }
+
 global vinstrument
 vinstrument = { }                   # no instruments specified [measure][voice].
+vinstrument[''] = {}                # blank measure.
+
 global percents
 percents = { }                      # no %% passthru commands for start of [measure] (for abc).
+percents[''] = []                   # blank measure.
+
 global staves
 staves = [ ]
+
 global reverb
 reverb = { }                        # Reverb value for voice.
+reverb[''] = {}
+
 global pan
 pan = { }                           # Pan (balance 0=left, 126=right, 64=center) for voice.
+pan[''] = {}
+
 global intensity
 intensity = { }                     # Instrument intensity (volume).
+intensity[''] = {}
+
 global pitch                        # Pitch change up or down by semitones.
 pitch = {}                          # Index by measure.
 pitch[''] = 0                       # Before first measure is no pitch.
-vinstrument[''] = {}                # blank measure.
-reverb[''] = {}
-pan[''] = {}
-intensity[''] = {}
-percents[''] = []                   # blank measure.
 
 global cresc_volume
 cresc_volume = [ ]
@@ -854,6 +861,7 @@ global cresc_time
 cresc_time = []
 global cresc_direction
 cresc_direction = []
+
 for i in range(1, MAXVOICES+1):     # This is used as [1] .. [MAXVOICES]
     vinstrument[''][i] = 0          # No instrument. (measure, voice)
     reverb[''][i] = default_reverb
@@ -867,8 +875,10 @@ for i in range(1, MAXVOICES+1):     # This is used as [1] .. [MAXVOICES]
     cresc_time.append(0)
     cresc_direction.append(True)
 # rof
+
 global inst
 inst = { }                          # track using instrument by instrument.
+
 global oct                          # default octave
 oct = { 1 : 0 }
 global acc_v_init                   # Last accidental on a note in measure.
@@ -879,7 +889,7 @@ global acc_m
 acc_m = { '': {''}}                 # voice: {notes:'+'/-/n}    For this measure, index is voice.
 global last_acc_m
 last_acc_m =  { '': {''}}           # Accidentals on previous measure.
-                                    # acc_v_init or acc_v_init_v_or_h: note (a-g): last accidental in # measure.
+                                    # acc_v_init or acc_v_init_v_or_h: note (a-g): last accidental in measure.
 global acc_m_xpose
 acc_m_xpose = { '': {''}}           # After xpose, the new key ... voice: {notes:'+'/-/n}
 
@@ -889,17 +899,23 @@ global mlth                         # measure length dictionary
 mlth = { 1 : { measure_on: 0} }     # nothing in measure working on -- voice 1.
 global tlth                         # #or 60ths/voice
 tlth = { 1 : 0 }                    # 60ths of a second in a voice -- nothing in measure working on.
+
 global bufs                         # bufs[voice][measure] = text line.
 #                                   # ABC format, or musicomp format separated by commas.
 bufs = { 1 : {} }
+
 global bufs_length                  # bufs_length[voice][measure][#] ... number= 0..#commas-1 above.
 bufs_length = { 1 : {} }
+
 global bufs_accidental              # bufs_length[voice][measure][#] ... number= 0..#commas-1 above.
 bufs_accidentals = { 1: {} }
+
 global bufs_tie_next                # The --horizontal and --verticle have "t" (ties) swapped on where
 bufs_tie_next = { 1: '' }           #    the "t" goes on which notes.
+
 global bufs_legato_next
 bufs_legato_next = { 1: '' }
+
 global bufs_vol
 bufs_vol = { 1: {} }
 
@@ -916,6 +932,7 @@ iftest = { 0:-1 }                   # -1 = processing in if, 0 = skip till else,
 #                                   # 3 = skip both if and else.
 global ifdepth                      # level of if/else/endif
 ifdepth = 0
+
 global cstop_processing
 cstop_processing = False            # True if after a cstop.
 
@@ -927,7 +944,6 @@ global macro_buffer                 # Name of macro, array of lines for macro.
 macro_buffer = { '':''}
 global macro_arguments              # Name of macro, array of arguments for macro.
 macro_arguments = { '':''}
-
 global macro_executing_depth        # If processing macro ... reading from macro buffer.
 macro_executing_depth = []          # The macro name currently working on is the last name in the array.
 global macro_executing_args         # Depth, array of arguments given to macro.
@@ -2236,6 +2252,12 @@ def print_header():
 #   lasttempospeed     - newest tempo speed
 #   lasttempo_n_l      - newest tempo note length.
 #   
+#1:
+# Notes and such are NOT put out in this routine. Only gets to end of tied note. And those in the middle.
+#2:
+# NOTDONEYET get rid of negative values for bufs_length -- Used to mark notes before end of tie.
+# bufs_length[voice][m][p] = -tmp     # Mark this length is done.
+
 def do_possible_midi_tie(m, voice, lthworkingmeasures, i, l, lastmeter, channel, chan, l_instrument, last_keysig, lasttempospeed, lasttempo_n_l):
     global bufs_accidentals
     global bufs
@@ -2247,48 +2269,49 @@ def do_possible_midi_tie(m, voice, lthworkingmeasures, i, l, lastmeter, channel,
     m_number = meas.index(m)                    # Need to return the number.
     n = bufs[voice][m][i]                       # Note value being tied forward to...
     Anl = [ bufs_length[voice][m][i] ]                                   # last note length (last of those tied).
-    lastmeter = print_out_midi1csv_ts(m, voice, lthworkingmeasures, lastmeter)
-    l_instrument, channel, chan = print_out_midi1csv_instrument(m, voice, lthworkingmeasures, l_instrument, channel, chan)
-    last_keysig = print_out_midi1csv_keysignature(m, voice, lthworkingmeasures, last_keysig)
-    lasttempospeed, lasttempo_n_l = print_out_midi1csv_tempo(m, voice, lthworkingmeasures, lasttempospeed, lasttempo_n_l)
+#1    lastmeter = print_out_midi1csv_ts(m, voice, lthworkingmeasures, lastmeter)
+#1    l_instrument, channel, chan = print_out_midi1csv_instrument(m, voice, lthworkingmeasures, l_instrument, channel, chan)
+#1    last_keysig = print_out_midi1csv_keysignature(m, voice, lthworkingmeasures, last_keysig)
+#1    lasttempospeed, lasttempo_n_l = print_out_midi1csv_tempo(m, voice, lthworkingmeasures, lasttempospeed, lasttempo_n_l)
 
 #--    print("mt1 time={} lasttempospeed={} lasttempo_n_l={}".format(lthworkingmeasures, lasttempospeed, lasttempo_n_l), file=sys.stderr, flush=True)
 
-    Aacc = [ bufs_accidentals[voice][m][i] ]
-    Avl = [ bufs_vol[voice][m][i] ]
+    Aacc = [ bufs_accidentals[voice][m][i] ]    # This notes accidental.
+    Avl = [ bufs_vol[voice][m][i] ]             # This notes volume.
 
     while True:
-        # tie to next note in this measure
-        p = i+1                                 # Check next note for tied to this one.
+        # Check for tie of next note in this measure to this note. (i.e. 4c, 4ct is data structure.)
+        p = i+1                                 # Check next note in measure for tied to this one.
         acc_s = bufs_accidentals[voice][m]
         if p < len(acc_s):                      # If more notes in this measure
             nacc = acc_s[p]
 
-            Aacc.append(nacc)
-            Avl.append(bufs_vol[voice][m][p])
+            Aacc.append(nacc)                   # Next accidental in measure.
+            Avl.append(bufs_vol[voice][m][p])   # Next volume in measure.
 
-            # if note is not the same.
+            # If note is not the same, or is not tied to previous, exit.
             if n != bufs[voice][m][p] or ('t' not in nacc):
                 return l, Anl, Avl, Aacc, m_number, lastmeter, channel, chan, l_instrument, last_keysig, lasttempospeed, lasttempo_n_l
             # fi
 
-            lastmeter = print_out_midi1csv_ts(m, voice, lthworkingmeasures, lastmeter)
-            l_instrument, channel, chan = print_out_midi1csv_instrument(m, voice, lthworkingmeasures, l_instrument, channel, chan)
-            last_keysig = print_out_midi1csv_keysignature(m, voice, lthworkingmeasures, last_keysig)
-            lasttempospeed, lasttempo_n_l = print_out_midi1csv_tempo(m, voice, lthworkingmeasures, lasttempospeed, lasttempo_n_l)
-
+#1            lastmeter = print_out_midi1csv_ts(m, voice, lthworkingmeasures, lastmeter)
+#1            l_instrument, channel, chan = print_out_midi1csv_instrument(m, voice, lthworkingmeasures, l_instrument, channel, chan)
+#1            last_keysig = print_out_midi1csv_keysignature(m, voice, lthworkingmeasures, last_keysig)
+#1            lasttempospeed, lasttempo_n_l = print_out_midi1csv_tempo(m, voice, lthworkingmeasures, lasttempospeed, lasttempo_n_l)
 #--            print("mt2 time={} lasttempospeed={} lasttempo_n_l={}".format(lthworkingmeasures, lasttempospeed, lasttempo_n_l), file=sys.stderr, flush=True)
 
-            tmp = abs(bufs_length[voice][m][p])
+            tmp = bufs_length[voice][m][p]
+#2            tmp = abs(bufs_length[voice][m][p])
             Anl.append(tmp)
             l = l + tmp
-# PROBLEM WITH GOTOs
-            bufs_length[voice][m][p] = -tmp     # Mark this length is done.
+#-- NOTDONEYET get rid of negative values.
+#2            bufs_length[voice][m][p] = -tmp     # Mark this length is done.
             i = p
             continue
-        else:
-            nacc = ''
         # fi
+
+        # Go to next measure ... and check those notes for ties to this one.
+        nacc = ''
 
         lastmeter = print_out_midi1csv_ts(m, voice, lthworkingmeasures, lastmeter)
         l_instrument, channel, chan = print_out_midi1csv_instrument(m, voice, lthworkingmeasures, l_instrument, channel, chan)
@@ -2359,7 +2382,6 @@ def print_out_midi1csv_notes():
         if l_instrument < 0:
             l_instrument = 0
         # fi
-        m_number = 0
         print_out_midi1csv_start(voice)
 
         # A comment.
@@ -2377,13 +2399,14 @@ def print_out_midi1csv_notes():
 
 #--        print("mn0 time={} lt={} ll={}".format(lthworkingmeasures, lt, ll), file=sys.stderr, flush=True)
 
-        if m_number in meas:
-            m = meas[m_number]
-        # fi
-
         for v in goto_table:
             goto_variables[v] = 0              # This voice hasn't done any goto's yet.
         # rof
+
+        m_number = 0
+        if m_number in meas:
+            m = meas[m_number]
+        # fi
 
         legato_on = False
         legato_last_note = ''
@@ -2406,7 +2429,7 @@ def print_out_midi1csv_notes():
             else:
                 v_vl = 127                      # Probably a rest, put as full volume.
             # fi
-            lth = lthworkingmeasures            # start of measure notes.
+            lth = lthworkingmeasures            # Starting time for this measure's notes. (increment)
 
             print("#2 lth={} lthworkingmeasures={}".format(lth,lthworkingmeasures), file=sys.stderr, flush=True)
             if len(bufs[voice][m]) == 0:        # If nothing in measure, go to next measure.
@@ -2432,17 +2455,18 @@ def print_out_midi1csv_notes():
                 continue
             # fi
 
+            # Starting with first note in measure (i).
             i = 0
             while i < len(bufs[voice][m]):      # while there are notes in measure
                 l = bufs_length[voice][m][i]    # length of current note.
 
                 # print("m={} lth={} i={} l={} n={}".format(m, lth, i, l, bufs[voice][m][i]), file=sys.stderr, flush=True)
  
-                if l < 0:                       # This note is tied to previous.
-                    lth = lth - l
-                    i = i + 1
-                    continue                    # previous note was tied to this.
-                # fi
+#2                if l < 0:                       # This note is tied to previous.
+#2                    lth = lth - l
+#2                    i = i + 1
+#2                    continue                    # previous note was tied to this.
+#2                # fi
 
                 # If a rest - no accidentals can be on it.
                 n = bufs[voice][m][i]           # note number
