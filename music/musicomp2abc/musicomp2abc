@@ -1,23 +1,25 @@
 #!/usr/bin/python3 -B
-# To do: --voices
+# To do: cresc/dimin continuous, and across ties.
+#        Remember last Control_c 11 volume and don't reput it out if the same.
 # ----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 # ----------------------------------------------------------------------------
 # TO DO:
-#   vol(sf,0.25)    -- optional 2nd argument for length of sf.
-#   vol(fp,0.25)    -- optional 2nd argument for length of "f" before returning to "p".
+# 1) cresendo/diminuendo - Change to control 11 for volume changes.
+#    See F.pl for example. Needs quite a few steps.
+# 2) vol(sf,0.25)    -- optional 2nd argument for length of sf.
+#    vol(fp,0.25)    -- optional 2nd argument for length of "f" before returning to "p".
+#   b-6 ... some 1/2 notes that are vol(sf) -- should they be shortened per above?
 #
-#   cresendo/diminuendo - Change to control 11 for volume changes.
-#   See F.pl for example. Needs quite a few steps.
 # ----------------------------------------------------------------------------
 #    A) Put in largo and ties and spaces for note tail groupings for:
 #       One last check of printing - for correct notes.
-#        B1 - 1 - Done largo, ties, spaces.
+#        B1 - 1 - Done largo, ties, spaces. Checking how it looks.
 #        B1 - 2 - Not started.
 #        B1 - 3 - Not started.
 #        B1 - 4 - Not started.
 #        B2 - 1	-- needs lots of work. - Not started for largo and ties.
-#    *   B6     - Done
+#    *   B6     - Done. 2022-06-14_21-03-55
 # ----------------------------------------------------------------------------
 # TODO:
 # 1) Select clef=treble or clef=bass by notes min and max notes on staff(s).
@@ -115,7 +117,7 @@
 # then the note is legato (glided) to the next note. (i.e. there is no note
 # attack section done when playing the note -- also considered slurred notes.)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-# vol(xxx) before a note sets volume for that note only.
+# vol(xxx) before a note sets volume for that note, and following notes ... .
 # vol(sfp) before a note sets volume to f for that note only, and following p.
 #   vol(p) 3c4, 3d4, vol(sfp) 3e4, 3f4, 3g4
 #   (p,p,f,p,p)
@@ -425,6 +427,7 @@ clicks_at_end_of_piece = MIDICLICKSPERQUARTER   # Quarter note.
 default_reverb = 0
 default_pan = 64
 default_intensity = 127
+default_volume = 120        # leave 7. :)
 
 # For setperm and randp commands.
 global array_of_random_numbers
@@ -893,8 +896,8 @@ global bufs_length                  # bufs_length[voice][measure][#] ... number=
 bufs_length = { 1 : {} }
 global bufs_accidental              # bufs_length[voice][measure][#] ... number= 0..#commas-1 above.
 bufs_accidentals = { 1: {} }
-global bufs_tie_next
-bufs_tie_next = { 1: '' }
+global bufs_tie_next                # The --horizontal and --verticle have "t" (ties) swapped on where
+bufs_tie_next = { 1: '' }           #    the "t" goes on which notes.
 global bufs_legato_next
 bufs_legato_next = { 1: '' }
 global bufs_vol
@@ -1709,7 +1712,7 @@ def print_out_notes_v_or_h(m, print_line):
                         lth = '(' + str(l) + ')'
                     # fi
                 # fi
-                txt = txt + bufs[voice][m][i] + lth + bufs_accidentals[voice][m][i]
+                txt = txt + bufs[voice][m][i] + lth + bufs_accidentals[voice][m][i].replace('c','')
             # rof
             txt = txt + '\n'
         # rof
@@ -1759,13 +1762,13 @@ def print_out_notes_v_or_h(m, print_line):
                 l =  bufs_length[voice][m][j]
 
                 if l in legal_mc_notes:
-                    lth = legal_mc_notes[l] + bufs_accidentals[voice][m][j]
+                    lth = legal_mc_notes[l] + bufs_accidentals[voice][m][j].replace('c','')
                 else:
                     lth = str(Fraction(l).limit_denominator(256))
                     if '/' in lth:
                         lth = '(' + str(l) + ')'
                     # fi
-                    lth = lth + bufs_accidentals[voice][m][j]
+                    lth = lth + bufs_accidentals[voice][m][j].replace('c','')
                 # fi
                 txt = txt + bufs[voice][m][j] + lth
                 workingtime[voice] = workingtime[voice] + l
@@ -2219,7 +2222,11 @@ def print_header():
 #
 # Returns:
 #   l                  - total length of current note (ignoring staccato, legato, etc.)
-#   lnl                - last note length (for staccato, legato, etc. -- i.e. subtract from l to where the last note starts)
+#..................................................................................................
+#.  Anl                - Array of note lengths (for staccato, legato, etc. -- i.e. subtract from l to where the last note starts)
+#+  Avl                - Array of note volume levels.
+#.  Aacc               - Array of accidentals (for 'c' meaning crescendo happening).
+#..................................................................................................
 #   m_number           - newest measure number index.  m[m_number] = text of measure name.
 #   lastmeter          - newest last meter (or same)
 #   channel            - newest next channel to use (could change if instrument loaded)
@@ -2239,12 +2246,16 @@ def do_possible_midi_tie(m, voice, lthworkingmeasures, i, l, lastmeter, channel,
     flag = False                                # if need do time signature and instrument.
     m_number = meas.index(m)                    # Need to return the number.
     n = bufs[voice][m][i]                       # Note value being tied forward to...
-    lnl = 0                                     # last note length (last of those tied).
+    Anl = [ bufs_length[voice][m][i] ]                                   # last note length (last of those tied).
     lastmeter = print_out_midi1csv_ts(m, voice, lthworkingmeasures, lastmeter)
     l_instrument, channel, chan = print_out_midi1csv_instrument(m, voice, lthworkingmeasures, l_instrument, channel, chan)
     last_keysig = print_out_midi1csv_keysignature(m, voice, lthworkingmeasures, last_keysig)
     lasttempospeed, lasttempo_n_l = print_out_midi1csv_tempo(m, voice, lthworkingmeasures, lasttempospeed, lasttempo_n_l)
-    lacc = bufs_accidentals[voice][m][i]
+
+#--    print("mt1 time={} lasttempospeed={} lasttempo_n_l={}".format(lthworkingmeasures, lasttempospeed, lasttempo_n_l), file=sys.stderr, flush=True)
+
+    Aacc = [ bufs_accidentals[voice][m][i] ]
+    Avl = [ bufs_vol[voice][m][i] ]
 
     while True:
         # tie to next note in this measure
@@ -2253,9 +2264,12 @@ def do_possible_midi_tie(m, voice, lthworkingmeasures, i, l, lastmeter, channel,
         if p < len(acc_s):                      # If more notes in this measure
             nacc = acc_s[p]
 
+            Aacc.append(nacc)
+            Avl.append(bufs_vol[voice][m][p])
+
             # if note is not the same.
-            if n != bufs[voice][m][p] or (nacc != 't' and nacc != 'ts'):
-                return l, lnl, lacc, m_number, lastmeter, channel, chan, l_instrument, last_keysig, lasttempospeed, lasttempo_n_l
+            if n != bufs[voice][m][p] or ('t' not in nacc):
+                return l, Anl, Avl, Aacc, m_number, lastmeter, channel, chan, l_instrument, last_keysig, lasttempospeed, lasttempo_n_l
             # fi
 
             lastmeter = print_out_midi1csv_ts(m, voice, lthworkingmeasures, lastmeter)
@@ -2263,12 +2277,14 @@ def do_possible_midi_tie(m, voice, lthworkingmeasures, i, l, lastmeter, channel,
             last_keysig = print_out_midi1csv_keysignature(m, voice, lthworkingmeasures, last_keysig)
             lasttempospeed, lasttempo_n_l = print_out_midi1csv_tempo(m, voice, lthworkingmeasures, lasttempospeed, lasttempo_n_l)
 
-            lnl = tmp = abs(bufs_length[voice][m][p])
+#--            print("mt2 time={} lasttempospeed={} lasttempo_n_l={}".format(lthworkingmeasures, lasttempospeed, lasttempo_n_l), file=sys.stderr, flush=True)
+
+            tmp = abs(bufs_length[voice][m][p])
+            Anl.append(tmp)
             l = l + tmp
 # PROBLEM WITH GOTOs
             bufs_length[voice][m][p] = -tmp     # Mark this length is done.
             i = p
-            lacc = nacc
             continue
         else:
             nacc = ''
@@ -2279,24 +2295,27 @@ def do_possible_midi_tie(m, voice, lthworkingmeasures, i, l, lastmeter, channel,
         last_keysig = print_out_midi1csv_keysignature(m, voice, lthworkingmeasures, last_keysig)
         lasttempospeed, lasttempo_n_l = print_out_midi1csv_tempo(m, voice, lthworkingmeasures, lasttempospeed, lasttempo_n_l)
 
-        # Tie to next note in next measure?
-        m_number = m_number + 1
+#--        print("mt3 time={} lasttempospeed={} lasttempo_n_l={}".format(lthworkingmeasures, lasttempospeed, lasttempo_n_l), file=sys.stderr, flush=True)
 
         # * AH * -- goto's stop it too.
         if m in goto_table:
-            return l, lnl, lacc, m_number, lastmeter, channel, chan, l_instrument, last_keysig, lasttempospeed, lasttempo_n_l
+            print("do_possible_midi_tie m={} goto_variables={} goto_table={} goto_variables[m]={} goto_table[m]={}".format(m,goto_variables,goto_table,goto_variables[m],goto_table[m]), file=sys.stderr, flush=True)
+            return l, Anl, Avl, Aacc, m_number, lastmeter, channel, chan, l_instrument, last_keysig, lasttempospeed, lasttempo_n_l
         # fi
+
+        # Tie to next note in next measure?
+        m_number = m_number + 1
 
         lthworkingmeasures = lthworkingmeasures + mlth[voice][m]
         i = -1                                  # To first of next measure.
         flag = True                             # Need do time signature and instrument if use this.
         if m_number >= len(meas):
-            return l, lnl, lacc, m_number, lastmeter, channel, chan, l_instrument, last_keysig, lasttempospeed, lasttempo_n_l
+            return l, Anl, Avl, Aacc, m_number, lastmeter, channel, chan, l_instrument, last_keysig, lasttempospeed, lasttempo_n_l
         # fi
         m = meas[m_number]
         if m not in bufs_accidentals[voice] or len(bufs_accidentals[voice][meas[m_number]]) <= 0:
             # No notes in next measure.
-            return l, lnl, lacc, m_number, lastmeter, channel, chan, l_instrument, last_keysig, lasttempospeed, lasttempo_n_l
+            return l, Anl, Avl, Aacc, m_number, lastmeter, channel, chan, l_instrument, last_keysig, lasttempospeed, lasttempo_n_l
         # fi
     # elihw
 #   End of do_possible_midi_tie
@@ -2356,6 +2375,8 @@ def print_out_midi1csv_notes():
         last_keysig = print_out_midi1csv_keysignature(m, voice, lthworkingmeasures, last_keysig)
         lt, ll = print_out_midi1csv_tempo(m, voice, lthworkingmeasures, lt, ll)
 
+#--        print("mn0 time={} lt={} ll={}".format(lthworkingmeasures, lt, ll), file=sys.stderr, flush=True)
+
         if m_number in meas:
             m = meas[m_number]
         # fi
@@ -2366,6 +2387,9 @@ def print_out_midi1csv_notes():
 
         legato_on = False
         legato_last_note = ''
+        last_cc11 = 0
+
+        print("#1 lthworkingmeasures={}".format(lthworkingmeasures), file=sys.stderr, flush=True)
         while m_number < len(meas):             # while there are measures left to do
             t_num = m_number
             m = meas[m_number]
@@ -2375,16 +2399,19 @@ def print_out_midi1csv_notes():
             last_keysig = print_out_midi1csv_keysignature(m, voice, lthworkingmeasures, last_keysig)
             lt, ll = print_out_midi1csv_tempo(m, voice, lthworkingmeasures, lt, ll)
 
+#--            print("mn1 time={} lt={} ll={}".format(lthworkingmeasures, lt, ll), file=sys.stderr, flush=True)
+
             if voice in vl and m in vl[voice]:
                 v_vl = vl[voice][m]             # volume level for this voice/measure
             else:
                 v_vl = 127                      # Probably a rest, put as full volume.
             # fi
             lth = lthworkingmeasures            # start of measure notes.
-            i = 0
 
+            print("#2 lth={} lthworkingmeasures={}".format(lth,lthworkingmeasures), file=sys.stderr, flush=True)
             if len(bufs[voice][m]) == 0:        # If nothing in measure, go to next measure.
                 if m in goto_table:
+                    print("print_out_midi1csv_notes m={} goto_variables={} goto_table={} goto_variables[m]={} goto_table[m]={}".format(m,goto_variables,goto_table,goto_variables[m],goto_table[m]), file=sys.stderr, flush=True)
                     f = goto_variables[m]
                     g = goto_table[m][f]
                     if f >= len(goto_table[m]): # If should start over.
@@ -2404,39 +2431,75 @@ def print_out_midi1csv_notes():
                 legato_on = False
                 continue
             # fi
+
+            i = 0
             while i < len(bufs[voice][m]):      # while there are notes in measure
                 l = bufs_length[voice][m][i]    # length of current note.
-                if l < 0:
+
+                # print("m={} lth={} i={} l={} n={}".format(m, lth, i, l, bufs[voice][m][i]), file=sys.stderr, flush=True)
+ 
+                if l < 0:                       # This note is tied to previous.
                     lth = lth - l
                     i = i + 1
                     continue                    # previous note was tied to this.
                 # fi
+
+                # If a rest - no accidentals can be on it.
                 n = bufs[voice][m][i]           # note number
-                if n != '0' and n != 0:         # Only for note that plays (not rest).
-                    if 'l' in bufs_accidentals[voice][m][i]:
-                        leg = True
-                    else:
-                        leg = False
-                    # fi
-                    n_print = int(n) + pitch[m]
-                    v_vl = bufs_vol[voice][m][i]
-                    print_output("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lth, chan, n_print, v_vl))
+                if n == '0' or n == 0:
+                    n_print = 0                 # Mark as rest.
+                    # If legato note happening, turn it off.
                     if legato_last_note != '':
+                        print("note_off #1 n={} legatoon lth={}".format(n,lth), file=sys.stderr, flush=True)
                         print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lth, chan, legato_last_note, 0))
                         legato_last_note = ''
                     # fi
-                else:
                     if legato_on:
-                        legato_on = False
-                        if legato_last_note != '':
-                            print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lth, chan, legato_last_note, 0))
-                            legato_last_note = ''
-                        # fi
                         print_output("{}, {}, Control_c, {}, 68, {}".format(voice+1, lth, chan, 0))
+                        legato_on = False
                     # fi
+                    lth = lth + l
+                    i = i + 1
+                    if i >= len(bufs[voice][m]):
+                        m_number = m_number +1
+                    # fi
+                    continue
+                # fi
+
+# Order:
+#?? Turn previous note off?
+# Turn note on.
+# Set note volume.
+#--    # If last legato note was sl - (staccato legato - portamento), turn that note off.
+#--    # MOVE THIS. NOT HERE!
+# If legato, turn it on (if not already on).
+# Get total length of tied notes.
+# Limit length of last note if 's' or 'sl'.
+# Calculate noteoff - when to turn it off.
+# Do crescendo (stop when noteoff).
+# Turn note off.
+
+                # Cannot have legato and a tied note.
+                if 'l' in bufs_accidentals[voice][m][i]:
+                    leg = True
+                else:
                     leg = False
                 # fi
 
+                # The note to be turned on then off later.
+                n_print = int(n) + pitch[m]
+                print("note_on #1 lth={} note={}".format(lth,n_print), file=sys.stderr, flush=True)
+                print_output("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lth, chan, n_print, default_volume))
+                # The volume of this note at start of playing.
+                v_vl = bufs_vol[voice][m][i]
+                if last_cc11 !=  v_vl:
+# NOTDONEYET - tempo/key/etc. check for change before these?
+                    print("Control_c11 #1 time={}".format(lth), file=sys.stderr, flush=True)
+                    print_output("{}, {}, Control_c, {}, 11, {}".format(voice+1, lth, chan, v_vl))
+                    last_cc11 = v_vl
+                # fi
+
+                # If this note is legato, and it already isn't turned on (and --nolegato isn't present).
                 if not legato_on and leg and not args.nolegato:
                     print_output("{}, {}, Control_c, {}, 68, {}".format(voice+1, lth, chan, 127))
                     legato_on = True
@@ -2445,45 +2508,120 @@ def print_out_midi1csv_notes():
                     legato_on = False
                 # fi
 
-                tmp, lnl, lacc, m_number, lastmeter, channel, chan, l_instrument, last_keysig, lt, ll = do_possible_midi_tie(m, voice, lthworkingmeasures, i, l, lastmeter, channel, chan, l_instrument, last_keysig, lt, ll)
+                tmp, Anl, Avl, Aacc, m_number, lastmeter, channel, chan, l_instrument, last_keysig, lt, ll = do_possible_midi_tie(m, voice, lthworkingmeasures, i, l, lastmeter, channel, chan, l_instrument, last_keysig, lt, ll)
 
-                if n != '0' and n != 0:
-                    n_print = int(n) + pitch[m]      # Note: previous measure name, not m_number.
-                    lnl = float(lnl)
-                    orig_lnl = lnl
-                    if lacc == 'ts' or lacc == 's':
-                        lnl = lnl / 2.0
-                    # fi
-# NOTDONEYET - portamento - ABC -> sl (staccato + legato).  For midi1csv, short rest/pause at end of note.
-                    if lacc == 'sl':
-                        lnl = int(round(7.0 * (lnl / 8.0)))     # Really should be a fixed length from end of note? Might just work without?
-                    # fi
-                    sub_lnl = orig_lnl - lnl                    # Amount to subtract from tmp for note.
-# NOTDONEYET - portamento - ABC -> sl (staccato + legato).  For midi1csv, short rest/pause at end of note.
-                    note_off = int(lth + tmp - sub_lnl)
+                print("m={} lthworkingmeasures={} lth={} m_number={} note={} tmp={} Anl={} Avl={} Aacc={}".format(m, lthworkingmeasures,lth,meas[m_number] if m_number < len(meas) else 'EOF', n_print, tmp, Anl,Avl,Aacc), file=sys.stderr, flush=True)
 
-                    if leg:
-                        if lacc != 'sl':
-                            legato_last_note = n_print
+                lnl = Anl[-1]
+                orig_lnl = lnl
+                lacc = Aacc[-1]
+                lnl = float(lnl)
+                if 's' in lacc:
+                    if 'l' in lacc:
+                        # Really should be a fixed length from end of note? Might just work without?
+                        lnl = int(round(7.0 * (orig_lnl / 8.0)))
+                    else:
+                        lnl = orig_lnl / 2.0
+                    # fi
+                    lnl = int(lnl)
+                    Anl[-1] = lnl
+                # fi
+                sub_lnl = orig_lnl - lnl                    # Amount to subtract from tmp for note.
+                note_off = int(lth + tmp - sub_lnl)
+                print("note_off={} orig_lnl={} lnl={} lth={} tmp={} sub_lnl={}".format(note_off, orig_lnl, lnl, lth, tmp, sub_lnl), file=sys.stderr, flush=True)
+
+                # We have when the note is to be turned off.
+                # note_off and tmp is where to continue loop.
+                # lth = starting of note.
+
+                # If there are ties...
+                ltmp = lth
+                if len(Anl) == 1:
+                    if 'c' in Aacc[0]:
+                        if len(Avl) > 1:
+                            # Do crescendo between this and next.
+                            fvol = float(Avl[0])
+                            dv = fvol - float(Avl[1])
+                            dinc = dv / float(Anl[0])
+                            for T in range(ltmp, ltmp+Anl[0]):
+                                if note_off < T:
+                                    break
+                                # fi
+                                # calculate crescendo number. If same as last, continue.
+                                fvol = fvol - dinc
+                                ivol = int(fvol)
+                                if last_cc11 !=  ivol and T < note_off:
+                                    print("Control_c11 #2 time={}".format(T), file=sys.stderr, flush=True)
+                                    print_output("{}, {}, Control_c, {}, 11, {}".format(voice+1, T, chan, ivol))
+                                    last_cc11 = ivol
+                                # fi
+                            # rof
+                            v_vl = Avl[1]
+                        else:           # uh, is current v_lvl
+                            print("#6 only 1 for Avl ... v_vl={} Avl={}".format(v_vl,Avl),file=sys.stderr,flush=True)
+                            # ... v_vl = Avl[0]       # NOTDONEYET ...
+                        # fi
+                    # fi
+                    print("note_off #2 n={} lth={}".format(n_print,note_off), file=sys.stderr, flush=True)
+                    print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, note_off, chan, n_print, 0))
+                    lth = lth + tmp
+                    i = i + 1
+                    continue
+                # fi
+
+                for q in range(0, len(Anl)):
+                    if 'c' in Aacc[q]:
+                        if q < len(Avl)-1:   # Could be end of file. :)
+                            # Do crescendo between this and next.
+                            fvol = float(Avl[q])
+                            dv = fvol - float(Avl[q+1])
+                            dinc = dv / float(Anl[q])
+                            for T in range(ltmp, ltmp+Anl[q]):
+                                # calculate crescendo number. If same as last, continue.
+                                fvol = fvol - dinc
+                                ivol = int(fvol)
+                                if last_cc11 !=  ivol and T < note_off:
+                                    print("Control_c11 #3 time={}".format(T), file=sys.stderr, flush=True)
+                                    print_output("{}, {}, Control_c, {}, 11, {}".format(voice+1, T, chan, ivol))
+                                    last_cc11 = ivol
+                                # fi
+                            # rof
+                            ltmp = ltmp + Anl[q]
+                            v_vl = Avl[q+1]       # NOTDONEYET ...
                         else:
-                            print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, note_off, chan, n_print, 0))
+                            print("#7 only 1 for Avl ... v_vl={} Avl={}".format(v_vl,Avl),file=sys.stderr,flush=True)
+                            # ... v_vl = Avl[0]       # NOTDONEYET ...
                         # fi
                     else:
-                        print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, note_off, chan, n_print, 0))
+                        if last_cc11 !=  Avl[q]:
+                            print("Control_c11 #4 time={}".format(T), file=sys.stderr, flush=True)
+                            print_output("{}, {}, Control_c, {}, 11, {}".format(voice+1, ltmp+Anl[q], chan, Avl[q]))
+                            last_cc11 = Anl[q]
+                        # fi
+                        ltmp = ltmp + Anl[q]
                     # fi
-                # fi
-                lth = lth + l
+                # rof
+                print("note_off #3 lth={} n={}".format(note_off,n_print), file=sys.stderr, flush=True)
+                print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, note_off, chan, n_print, 0))
+
+                lth = lth + tmp
                 i = i + 1
+# NOTDONEYET - if i > those in measure.
             # elihw
-            while t_num < m_number:
+
+            # Go forward through measures.
+            while t_num <= m_number:            # ??? NOTDONEYET < changed to <= ...
+                print("t_num={} m_number={}".format(t_num,m_number), file=sys.stderr, flush=True)
                 lthworkingmeasures = lthworkingmeasures + mlth[voice][m]
+                print("#3 lthworkingmeasures={} mlth[voice][m]={} lth={}".format(lthworkingmeasures,mlth[voice][m],lth), file=sys.stderr, flush=True)
                 if m in goto_table:
+                    print("m={} goto_variables={} goto_table={} goto_variables[m]={} goto_table[m]={}".format(m,goto_variables,goto_table,goto_variables[m],goto_table[m]), file=sys.stderr, flush=True)
                     f = goto_variables[m]
+                    print("f={} len(goto_table[m])={}".format(f,len(goto_table[m])), file=sys.stderr, flush=True)
                     g = goto_table[m][f]
+                    f = f + 1
                     if f >= len(goto_table[m]):         # If should start over.
                         f = 0
-                    else:
-                        f = f + 1
                     # fi
                     goto_variables[m] = f
                     if g == 'x':
@@ -2502,10 +2640,14 @@ def print_out_midi1csv_notes():
                     m = meas[t_num]
                 # fi
             # elihw
+            print("end of forwarding - m={} m_number={} t_num={}".format(m,m_number,t_num), file=sys.stderr, flush=True)
         # elihw
+
+        # No more notes.
         if legato_on:
             legato_on = False
             if legato_last_note != '':
+                print("note_off #4 legatoon lth={} legato_last_note={}".format(lth,legato_last_note), file=sys.stderr, flush=True)
                 print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lth, chan, legato_last_note, 0))
                 legato_last_note = ''
             # fi
@@ -3275,6 +3417,10 @@ def put_on_bufs(onvoice, p_meas, prenote, abc_note, timeofnote, append_tie, onet
         elif args.midi1csv or args.fluidsynth:
             bufs[onvoice][p_meas] = [abc_note]
             bufs_length[onvoice][p_meas] = [timeofnote]
+            if cresc_time[onvoice] != 0:
+#--                print("cresc_time[onvoice] != 0", file=sys.stderr, flush=True)
+                append_tie = append_tie + 'c'
+            # fi
             bufs_accidentals[onvoice][p_meas] = [append_tie]
         else:           # ABC
             bufs[onvoice][p_meas] = prenote + abc_note + postnote
@@ -3288,6 +3434,10 @@ def put_on_bufs(onvoice, p_meas, prenote, abc_note, timeofnote, append_tie, onet
         elif args.midi1csv or args.fluidsynth:
             bufs[onvoice][p_meas].append(abc_note)
             bufs_length[onvoice][p_meas].append(timeofnote)
+            if cresc_time[onvoice] != 0:
+#--                print("cresc_time[onvoice] != 0", file=sys.stderr, flush=True)
+                append_tie = append_tie + 'c'
+            # fi
             bufs_accidentals[onvoice][p_meas].append(append_tie)
         else:           # ABC
             bufs[onvoice][p_meas] = bufs[onvoice][p_meas] + prenote + abc_note + postnote
@@ -3299,8 +3449,8 @@ def put_on_bufs(onvoice, p_meas, prenote, abc_note, timeofnote, append_tie, onet
         return
     # fi
 
+#--    print("cresc_time={} timeofnote={} append_tie={} running_vl={}".format(cresc_time[onvoice],timeofnote,append_tie,running_vl[onvoice][p_meas]), file=sys.stderr, flush=True)
     if cresc_time[onvoice] <= timeofnote:
-
         running_vl[onvoice][p_meas] = cresc_volume[onvoice]
         cresc_time[onvoice] = 0
         if args.vertical or args.horizontal or args.midi1csv or args.fluidsynth:
@@ -3316,6 +3466,7 @@ def put_on_bufs(onvoice, p_meas, prenote, abc_note, timeofnote, append_tie, onet
                                     DECORATIONS + vlprint[j] + DECORATIONS + \
                                     DECORATIONS + k + DECORATIONS
         # fi
+#--        print("done", file=sys.stderr, flush=True)
         return
     # fi
 
@@ -3325,8 +3476,10 @@ def put_on_bufs(onvoice, p_meas, prenote, abc_note, timeofnote, append_tie, onet
         x1 = v / dt                         # total  1920/48 = 4
         x2 = x1 * timeofnote                # x2 = x1 * timeofnote
         running_vl[onvoice][p_meas] = running_vl[onvoice][p_meas] + int(x2)
+#--        print("dt={} v={} x1={} x2={} running_vl={}".format(dt,v,x1,x2,running_vl[onvoice][p_meas]), file=sys.stderr, flush=True)
     # fi
     cresc_time[onvoice] = cresc_time[onvoice] - timeofnote
+#--    print("updated", file=sys.stderr, flush=True)
 
     return
 # End of put_on_bufs
@@ -6806,6 +6959,7 @@ bit_from_character = {
    't': accidental_tied,
    's': accidental_stac,
    'd': accidental_dotted
+   #-- hidden for cresendo ... 'c'.
 }
 
 def get_time(therest, line):
@@ -7329,6 +7483,7 @@ def process_notes(line):
                         cresc_time[onvoice] = newtime + 0.0
                     elif args.midi1csv or args.fluidsynth:
                         cresc_time[onvoice] = int(round(newtime * MIDICLICKSPERQUARTER * 4))
+#--                        print("#4 cresc(  newvolume={} newtime={}".format(newvolume,newtime), file=sys.stderr, flush=True)
                     else:           # ABC
                         if newvolume > running_vl[onvoice][measure_on]:
                             cresc_direction[onvoice] = True
