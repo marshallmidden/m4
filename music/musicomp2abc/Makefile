@@ -15,6 +15,7 @@ TESTS += TRILLS
 TESTS += TEMPO
 TESTS += RANGE1
 TESTS += RANGE2
+TESTS += CRESC
 #-----------------------------------------------------------------------------
 # SONGS_GCS = ${SONGS:=.gcs}
 SONGS_E = ${SONGS:=.E}
@@ -73,17 +74,23 @@ help:
 	@echo "SONGS: ${SONGS}"
 	@echo "TESTS: ${TESTS}"
 #-----------------------------------------------------------------------------
-.PHONY: all songs
-all songs: ${SONGS_MID} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV} ${SONGS_FS}
+.PHONY: all songs ${SONGS}
+all songs ${SONGS}: ${SONGS_MID} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV} ${SONGS_FS}
 #-----------------------------------------------------------------------------
-.PHONY: tests
-tests: ${TESTS_MID} ${TESTS_PS} ${TESTS_M_PS} ${TESTS_WAV} ${TESTS_FS}
+.PHONY: tests ${TESTS}
+tests ${TESTS}: ${TESTS_MID} ${TESTS_PS} ${TESTS_M_PS} ${TESTS_WAV} ${TESTS_FS}
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -f ${SONGS_CSV} ${SONGS_FS} ${SONGS_MID} ${SONGS_ABC} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV} ${SONGS_E}
-	rm -f ${TESTS_CSV} ${TESTS_FS} ${TESTS_MID} ${TESTS_ABC} ${TESTS_PS} ${TESTS_M_PS} ${TESTS_WAV} ${TESTS_E}
-	rm -f *.stderr tags ctags
+	rm -f ${SONGS_CSV} ${TESTS_CSV}
+	rm -f ${SONGS_FS} ${TESTS_FS}
+	rm -f ${SONGS_MID} ${TESTS_MID}
+	rm -f ${SONGS_ABC} ${TESTS_ABC}
+	rm -f ${SONGS_PS} ${TESTS_PS}
+	rm -f ${SONGS_M_PS} ${TESTS_M_PS}
+	rm -f ${SONGS_WAV} ${TESTS_WAV}
+	rm -f ${SONGS_E} ${TESTS_E}
+	rm -f *.stderr
 #-----------------------------------------------------------------------------
 .PHONY: tags ctags
 tags ctags:
