@@ -2272,7 +2272,6 @@ def print_out_midi1csv_notes():
 
         m_number = 0                            # Start from absolute first (pre-first) measure.
         if m_number >= len(meas):
-            print("type(m_number)={} m_number={} meas={}".format(type(m_number), m_number, meas), file=sys.stderr, flush=True)
             print_error_no_line("No measures in song.")
             sys.exit(1)
         # fi
@@ -2305,6 +2304,7 @@ def print_out_midi1csv_notes():
             while i < len(bufs[voice][m]):      # while there are notes in measure
                 n = bufs[voice][m][i]           # note number
                 v = bufs_vol[voice][m][i]       # volume for the next note.
+
                 if note_length > 0:             # If there is a previous note to update length, or ...
                     # Crescendo needs current volume and next notes starting volume.
                     if 'c' in last_acc:
@@ -2312,6 +2312,7 @@ def print_out_midi1csv_notes():
                         fvol = float(v_vl)      # Previous volume
                         dv = fvol - float(v)    # New volume
                         dinc = dv / float(note_length)
+
                         for T in range(lthworkingmeasures, lthworkingmeasures + l):
                             # calculate crescendo number. If same as last, continue.
                             fvol = fvol - dinc
@@ -2356,23 +2357,28 @@ def print_out_midi1csv_notes():
 
                 if 't' in last_acc:    # This note is tied to previous.
                     if legato_on:
-                        print_error_no_line("Measure {} - tied note ({}) coming from a legato playing note ({}).".format(m, n, last_note_on))
+                        print_error_no_line("voice {} measure {} - tied note ({}) coming from a legato playing note ({}).".format(voice, m, n, last_note_on))
                         print_output("{}, {}, Control_c, {}, 68, {}".format(voice+1, lthworkingmeasures, chan, 0))
                         legato_on = False
                     # fi
                     if n != last_note_on:
-                        print_error_no_line("Measure {} - tied note ({}) is not same as previous playing note ({}).".format(m, n, last_note_on))
+                        print_error_no_line("voice {} measure {} - tied note ({}) is not same as previous playing note ({}).".format(voice, m, n, last_note_on))
                         print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, last_note_on, 0))
                         print_output("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, n, default_volume))
                         last_note_on = n
                     # fi
                     # Already on, good.
                 else:
+                    if legato_on:
+                        print_output("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, n, default_volume))
+                    # fi
                     # We want a note-on here.
                     if last_note_on != '':                  # If not a rest, or note off.
                         print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, last_note_on, 0))
                     # fi
-                    print_output("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, n, default_volume))
+                    if not legato_on:
+                        print_output("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, n, default_volume))
+                    # fi
                     last_note_on = n
                     # fi
                 # fi
@@ -2410,16 +2416,16 @@ def print_out_midi1csv_notes():
                         # Really should be a fixed length from end of note? Might just work without?
                         l = int(round(7.0 * (orig_lnl / 8.0)))
                     else:
-                        l = l / 2.0
+                        l = int(l / 2.0)
                     # fi
                 # fi
 
                 if l < bufs_length[voice][m][i]:
                     print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lthworkingmeasures + l, chan, n, 0))
-                    last_note_on = 0
+                    last_note_on = ''
                 # fi
 
-                lthworkingmeasures = lthworkingmeasures + bufs_length[voice][m][i]
+                #-- lthworkingmeasures = lthworkingmeasures + bufs_length[voice][m][i]
                 i = i + 1
             # elihw
 
@@ -2447,6 +2453,7 @@ def print_out_midi1csv_notes():
             # fi
         # elihw
 
+        lthworkingmeasures = lthworkingmeasures + note_length
         # No more notes.
 # NOTDONEYET - crescendo of last note.
         # Cannot crescendo to last note - don't have volume -- or do we?.
@@ -3445,8 +3452,12 @@ def arglist(wline, line, integers):
             else:
                 newline.append(newstr)
             # fi
-            newstr = ''
             l = l + 1
+            if l < lth:
+                newstr = ''
+            else:
+                newstr = None
+            # fi
         elif c == '.' and integers:
             if (l+2) < lth and wline[l+1] == '.':
                 # Range
@@ -3519,7 +3530,7 @@ def arglist(wline, line, integers):
             # fi
             l = l + 1
         # fi
-    # rof
+    # elihw
     if np != 0:
         print_error("too many left (by {}) parenthesis".format(np), line)
         return ''
@@ -3532,7 +3543,9 @@ def arglist(wline, line, integers):
         print_error("too many left (by {}) curly braces".format(nc), line)
         return ''
     # fi
-    if newstr != '':
+    if newstr is None:
+        newline.append('')
+    elif newstr != '':
         if integers:
             n, msg = is_float(newstr)
             if msg is not None:
@@ -3547,6 +3560,7 @@ def arglist(wline, line, integers):
     # elif not integers:
     #     newline.append(newstr)
     # fi
+
     return newline
 # End of arglist
 
@@ -8766,27 +8780,3 @@ exit(errors_happened)
 #     126 Mono Operation
 #     127 Poly Mode
 # ----------------------------------------------------------------------------
-
-#?             if len(bufs[voice][m]) == 0:        # If nothing in measure, go to next measure.
-#?                 if m in goto_table:
-#?                     print("print_out_midi1csv_notes m={} goto_variables={} goto_table={} goto_variables[m]={} goto_table[m]={}".format(m,goto_variables,goto_table,goto_variables[m],goto_table[m]), file=sys.stderr, flush=True)
-#?                     f = goto_variables[m]
-#?                     g = goto_table[m][f]
-#?                     if f >= len(goto_table[m]): # If should start over.
-#?                         f = 0
-#?                     else:
-#?                         f = f + 1
-#?                     # fi
-#?                     goto_variables[m] = f
-#?                     if g == 'x':
-#?                         m_number = m_number + 1
-#?                     else:
-#?                         m_number = meas.index(g)
-#?                     # fi
-#?                 else:
-#?                     m_number = m_number + 1
-#?                 # fi
-#?                 legato_on = False
-#?                 continue
-#?             # fi
-
