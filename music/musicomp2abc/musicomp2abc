@@ -1,6 +1,8 @@
 #!/usr/bin/python3 -B
 # To do: cresc/dimin continuous, and across ties.
-#        Remember last Control_c 11 volume and don't reput it out if the same.
+#       Fix crescendos.
+#       Make sure rests have volume ... so cresc(ff,1.0) 3c4,r4,3d4,r4,3e4 works.
+#       --midicsv and --fluidsynth make sure tiny rest at end of all voices?
 # ----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 # ----------------------------------------------------------------------------
@@ -2150,7 +2152,7 @@ def print_header():
             if m in goto_table:             # If goto exists, process it.
                 f = goto_variables[m]
                 g = goto_table[m][f]
-                print_warning_no_line("goto at end measure={} value={} new_measure={}".format(m, f, g))
+#++                print_warning_no_line("goto at end measure={} value={} new_measure={}".format(m, f, g))
                 if f+1 >= len(goto_table[m]): # If should start over.
                     f = 0
                 else:
@@ -2284,44 +2286,47 @@ def print_out_midi1csv_notes():
         legato_on = False                       # Legato is not on yet.
         last_note_on = ''                       # There is no note that is currently on.
         last_cc11 = 0                           # The last control 11 volume put out for voice.
-        last_note_on = ''                       # The last note turned on.
-
-        l = 0                                   # There is no note length to '4c4s' rest (staccato/portamento).
+        note_playing = 0                        # There is no note length to '4c4s' rest (staccato/portamento).
         note_length = 0                         # The length of the last note (4c4).
         last_acc = ''                           # No accidental to start with.
 
         while m_number < len(meas):             # While there are measures left to do.
             m = meas[m_number]
 
-            if voice in vl and m in vl[voice]:
-                v_vl = vl[voice][m]             # volume level for this voice/measure
-            else:
-                v_vl = 127                      # Probably a rest, put as full volume.
-            # fi
+#--            if voice in vl and m in vl[voice]:
+            v_vl = vl[voice][m]             # volume level for this voice/measure
+#--            else:
+#--                v_vl = 127                      # Probably a rest, put as full volume.
+#--            # fi
 
             # Starting with first note in measure (i).
             i = 0
             while i < len(bufs[voice][m]):      # while there are notes in measure
                 n = bufs[voice][m][i]           # note number
                 v = bufs_vol[voice][m][i]       # volume for the next note.
-
                 if note_length > 0:             # If there is a previous note to update length, or ...
                     # Crescendo needs current volume and next notes starting volume.
                     if 'c' in last_acc:
-                        # Do crescendo between lthworkingmeasures and lthworkingmeasures+l.
+                        # Do crescendo between lthworkingmeasures and lthworkingmeasures+note_playing.
                         fvol = float(v_vl)      # Previous volume
                         dv = fvol - float(v)    # New volume
                         dinc = dv / float(note_length)
-
-                        for T in range(lthworkingmeasures, lthworkingmeasures + l):
+                        for T in range(lthworkingmeasures, lthworkingmeasures + note_playing):
                             # calculate crescendo number. If same as last, continue.
                             fvol = fvol - dinc
                             ivol = int(fvol)
-                            if last_cc11 !=  ivol:
-                                print_output("{}, {}, Control_c, {}, 11, {}".format(voice+1, T, chan, ivol))
+                            if last_cc11 != ivol:
+                                if last_note_on != '':
+                                    print_output("{}, {}, Control_c, {}, 11, {}".format(voice+1, T, chan, ivol))
+                                # fi
                                 last_cc11 = ivol
                             # fi
                         # rof
+                        if note_playing < note_length:
+                            # Must turn off stacatto note before moving lthworkingmeasures.
+                            print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lthworkingmeasures + note_playing, chan, n, 0))
+                            last_note_on = ''
+                        # fi
                     # fi
                     lthworkingmeasures = lthworkingmeasures + note_length
                 # fi
@@ -2349,6 +2354,7 @@ def print_out_midi1csv_notes():
                     # Next event after this rest.
                     #-- lthworkingmeasures = lthworkingmeasures + bufs_length[voice][m][i]
                     # To next note. While loop checks for end of measure.
+                    v_vl = bufs_vol[voice][m][i]
                     i = i + 1
                     continue
                 # fi
@@ -2358,12 +2364,12 @@ def print_out_midi1csv_notes():
 
                 if 't' in last_acc:    # This note is tied to previous.
                     if legato_on:
-                        print_error_no_line("voice {} measure {} - tied note ({}) coming from a legato playing note ({}).".format(voice, m, n, last_note_on))
+                        print_error_no_line("voice {} measure {} - tied note #{} ({}, {}) coming from a legato playing note ({}, {}).".format(voice, m, i+1, n, midi_value_to_note_sharp[n], last_note_on, midi_value_to_note_sharp[last_note_on]))
                         print_output("{}, {}, Control_c, {}, 68, {}".format(voice+1, lthworkingmeasures, chan, 0))
                         legato_on = False
                     # fi
                     if n != last_note_on:
-                        print_error_no_line("voice {} measure {} - tied note ({}) is not same as previous playing note ({}).".format(voice, m, n, last_note_on))
+                        print_error_no_line("voice {} measure {} - tied note #{} ({}, {}) is not same as previous playing note ({}, {}).".format(voice, m, i+1, n, midi_value_to_note_sharp[n], last_note_on, midi_value_to_note_sharp[last_note_on]))
                         print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, last_note_on, 0))
                         print_output("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, n, default_volume))
                         last_note_on = n
@@ -2403,29 +2409,17 @@ def print_out_midi1csv_notes():
                     last_cc11 = v_vl
                 # fi
 
-                # note is turned on, volume set, legato on, etc.
-
-                l = note_length
-
-                # l will eventually be when to turn note off.
-                # if l < bufs_length[voice][m][i] : do noteoff and mark no note playing.
-
-
+                # note_playing will eventually be when to turn note off.
+                note_playing = note_length
                 if 's' in last_acc:
                     if 'l' in last_acc:
                         # Really should be a fixed length from end of note? Might just work without?
-                        l = int(round(7.0 * (orig_lnl / 8.0)))
+                        note_playing = int(round(7.0 * (orig_lnl / 8.0)))
                     else:
-                        l = int(l / 2.0)
+                        note_playing = int(note_playing / 2.0)
                     # fi
                 # fi
 
-                if l < bufs_length[voice][m][i]:
-                    print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lthworkingmeasures + l, chan, n, 0))
-                    last_note_on = ''
-                # fi
-
-                #-- lthworkingmeasures = lthworkingmeasures + bufs_length[voice][m][i]
                 i = i + 1
             # elihw
 
@@ -2453,10 +2447,39 @@ def print_out_midi1csv_notes():
             # fi
         # elihw
 
+        # No more notes to turn on -- might be one already on.
+        if note_length > 0:             # If there is a previous note to update length, or ...
+            # Cannot crescendo to last note - don't have volume -- or do we?
+            # Crescendo needs current volume and next notes starting volume.
+            if 'c' in last_acc:
+                # Do crescendo between lthworkingmeasures and lthworkingmeasures+note_playing.
+                fvol = float(v_vl)      # Previous volume
+                # Use previous values for this one.
+                #-- dv = fvol - float(v)    # New volume
+                #-- dinc = dv / float(note_length)
+                for T in range(lthworkingmeasures, lthworkingmeasures + note_playing):
+                    # calculate crescendo number. If same as last, continue.
+                    fvol = fvol - dinc
+                    if fvol < 1:
+                        fvol = 0
+                    elif fvol > 126.49:
+                        fvol = 127
+                    # fi
+                    ivol = int(fvol)
+                    if last_cc11 !=  ivol:
+                        print_output("{}, {}, Control_c, {}, 11, {}".format(voice+1, T, chan, ivol))
+                        last_cc11 = ivol
+                    # fi
+                # rof
+                if note_playing < note_length:
+                    # Must turn off stacatto note before moving lthworkingmeasures.
+                    print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lthworkingmeasures + note_playing, chan, last_note_on, 0))
+                    last_note_on = ''
+                # fi
+            # fi
+        # fi
         lthworkingmeasures = lthworkingmeasures + note_length
-        # No more notes.
-# NOTDONEYET - crescendo of last note.
-        # Cannot crescendo to last note - don't have volume -- or do we?.
+
         if legato_on:
             legato_on = False
             print_output("{}, {}, Control_c, {}, 68, {}".format(voice+1, lthworkingmeasures, chan, 0))
@@ -3197,6 +3220,7 @@ def put_on_bufs(onvoice, p_meas, prenote, abc_note, timeofnote, append_tie, onet
         abc_note = str(abc_note)
     # fi
     if abc_note == 'r' and append_tie != '':
+        print_warning_no_line("put_on_bufs - rest and accidentals={}".format(append_tie),file=sys.stderr,flush=True)
         append_tie = ''
     # fi
     tlth[onvoice] = tlth[onvoice] + timeofnote
