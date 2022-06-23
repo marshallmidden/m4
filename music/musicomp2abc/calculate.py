@@ -974,7 +974,7 @@ variables = {
     'bsl': 1, 'bds': 1, 'bdt': 1, 'bdl': 1, 'btl': 1, 'blt': 1, 'tsd': 1,
     'tsb': 1, 'tsl': 1, 'tds': 1, 'tdb': 1, 'tdl': 1, 'tbs': 1, 'tbd': 1,
     'tbl': 1, 'lsd': 1, 'lsb': 1, 'lst': 1, 'lds': 1, 'ldb': 1, 'ldt': 1,
-    'lbs': 1, 'lbd': 1, 'lbt': 1, 'lts': 1, 'ltd': 1, 'ltb': 1,
+    'lbs': 1, 'lbd': 1, 'lbt': 1, 'lts': 1, 'ltd': 1, 'ltb': 1, 'dls': 1, 'sld':1,
 
     'th': 1,
 #   1   .   .   .   2   .   .   .   3   .   .   .   4   .   .   .   5   .   .   .
