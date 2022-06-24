@@ -36,12 +36,12 @@ CC=gcc
 OS := ${shell uname}
 #-----------------------------------------------------------------------------
 CFLAGS   +=-g
-#-- CFLAGS   +=-O0
-ifneq (${OS},Darwin)
-CFLAGS   +=-O4
-else
-CFLAGS   +=-O3
-endif
+CFLAGS   +=-O0
+#-- ifneq (${OS},Darwin)
+#-- CFLAGS   +=-O4
+#-- else
+#-- CFLAGS   +=-O3
+#-- endif
 CFLAGS += -mtune=corei7
 CFLAGS += -march=corei7
 

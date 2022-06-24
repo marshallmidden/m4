@@ -30,7 +30,9 @@ static char     original_termios_gotten = 0;
 #define MINSTUFF    654321
 /* ------------------------------------------------------------------------ */
 /* Can cope with up to 64 track MIDI files */
-#define MAXTRACKS   64
+#define MAXTRACKS   1024
+/* ------------------------------------------------------------------------ */
+#define MAXBUFFER   1024
 /* ------------------------------------------------------------------------ */
 /* not static, because might not be used in debugging. */
 char *nt[] = {
@@ -125,13 +127,13 @@ static char get_single_ch(void)
 
 /* ------------------------------------------------------------------------ */
 #define MAXFRAC     7
-// #define MAXFRAC3    0
+#define MAXFRAC3    7
 // #define MAXFRAC3    1
 // #define MAXFRAC3    2
 // #define MAXFRAC3    3
 // #define MAXFRAC3    4
 // #define MAXFRAC3    5
-#define MAXFRAC3    6
+// #define MAXFRAC3    6
 // #define MAXFRAC3    7
 static int fractionsdotted[MAXFRAC];            /* Ticks for 2^x notes dotted. */
 static int fractions[MAXFRAC];                  /* Ticks for 2^x notes. */
@@ -173,7 +175,7 @@ static struct bars_location *bars_location_start = NULL;
 static struct bars_location *bars_location_last = NULL;
 static long     bar_number = 0;
 /* ------------------------------------------------------------------------ */
-#define MC_MAXVOICE 64
+#define MC_MAXVOICE 128
 struct voice_notes
 {
     struct voice_notes *vcnext;         /* Next in link. */
@@ -233,7 +235,7 @@ static void           *checkmalloc(int bytes)
 static void stop_note(int p_trackno, long currtime, struct note **playing, int p, int ch)
 {
     struct note    *i;
-    struct note    *j;
+//    struct note    *j;
     struct note    *prev;
     int             found;
 
@@ -278,7 +280,7 @@ static void stop_note(int p_trackno, long currtime, struct note **playing, int p
         }
     }
     /* i is not in playing anymore. */
-    j = track[p_trackno];
+//    j = track[p_trackno];
     i->n_stop_time = currtime;
     i->notenext = NULL;
     /* Tack onto the end of track. */
@@ -550,16 +552,16 @@ static long read32bit(long *ToBeRead)
 /* ------------------------------------------------------------------------ */
 static void readheader(long *ToBeRead)
 {
-    int             ntrks;
-    int             format;
+//    int             ntrks;
+//    int             format;
 
     if (readmt("MThd") == EOF)
     {
         return;
     }
     *ToBeRead = read32bit(ToBeRead);
-    format = read16bit(ToBeRead);           /* Ignore format. */
-    ntrks = read16bit(ToBeRead);            /* Ignore, reading tracks tells us this. */
+    /* format = */ read16bit(ToBeRead);           /* Ignore format. */
+    /* ntrks = */ read16bit(ToBeRead);            /* Ignore, reading tracks tells us this. */
     division = read16bit(ToBeRead);
     /* Flush any extra stuff, in case the length of header is not 6. */
     while (*ToBeRead > 0)
@@ -1077,7 +1079,7 @@ static void set_starting_rest_times(void)
     int             p_trackno;
     long            when;
     struct note    *newnote;
-    struct note    *nextnote;
+//    struct note    *nextnote;
     struct note    *j;
 
     for (p_trackno = 0; p_trackno < trackcount; p_trackno++)
@@ -1104,7 +1106,7 @@ static void set_starting_rest_times(void)
             when = j->n_stop_time;
             if (when < j->notenext->n_start_time)
             {
-                nextnote = j->notenext;
+//                nextnote = j->notenext;
                 newnote = (struct note *)checkmalloc(sizeof(struct note));
                 newnote->notenext = j->notenext;
                 newnote->pitch = -1;            /* rest */
@@ -1340,7 +1342,7 @@ static int valid_note_length(int n)
     if (n >= fractionsthird      [6]) { return (fractionsthird[6]); }
 #endif  /* MAXFRAC3 > 6 */
 
-fprintf(stderr, "valid_note_length strange note length n=%d\n", n);
+// fprintf(stderr, "valid_note_length strange note length n=%d\n", n);
     return (-n);
 }   /* End of valid_note_length */
 
@@ -1459,15 +1461,16 @@ static void add_note_to_voice(int p_voice, long p_now, long p_stop, char *p_txt)
 static void printnotelength(struct voice_notes *p_vn, int a, int p_volume)
 {
     int n;
-    char buf[20];
+    char buf[MAXBUFFER];
 
+    bzero(buf,MAXBUFFER);
     p_vn->volume = p_volume;
     n = 1;
     for (int j = 0; j < MAXFRAC; j++)                   /* Find legal lengths. */
     {
         if (a == fractionsdotted[j])
         {
-            snprintf(buf, 20, "%dd", n);
+            snprintf(buf, MAXBUFFER, "%dd", n);
             p_vn->lth = strdup(buf);
             return;
         }
@@ -1478,7 +1481,7 @@ static void printnotelength(struct voice_notes *p_vn, int a, int p_volume)
     {
         if (a == fractions[j])
         {
-            snprintf(buf, 20, "%d", n);
+            snprintf(buf, MAXBUFFER, "%d", n);
             p_vn->lth = strdup(buf);
             return;
         }
@@ -1489,7 +1492,7 @@ static void printnotelength(struct voice_notes *p_vn, int a, int p_volume)
     {
         if (a == fractionsthirddotted[j])
         {
-            snprintf(buf, 20, "(1.5/(%d*3.0))", n);
+            snprintf(buf, MAXBUFFER, "(1.5/(%d*3.0))", n);
             p_vn->lth = strdup(buf);
             return;
         }
@@ -1500,14 +1503,14 @@ static void printnotelength(struct voice_notes *p_vn, int a, int p_volume)
     {
         if (a == fractionsthird[j])
         {
-            snprintf(buf, 20, "(1.0/(%d*3.0))", n);
+            snprintf(buf, MAXBUFFER, "(1.0/(%d*3.0))", n);
             p_vn->lth = strdup(buf);
             return;
         }
         n = n * 2;
     }
 
-    snprintf(buf, 20, "?%d?", a);
+    snprintf(buf, MAXBUFFER, "?%d?", a);
     p_vn->lth = strdup(buf);
     return;
 }   /* End of printnotelength */
@@ -1519,27 +1522,42 @@ static void printpitch(int p_voice, long p_now, long p_stop, struct note *j)
     int             p;
     int             po;
     int             octave;
-    char            buf[20];
+    char            buf[MAXBUFFER];
 
+// fprintf(stderr, "entering printpitch\n");
+    bzero(buf,MAXBUFFER);
+// fprintf(stderr, "printpitch #1\n");
     p = j->pitch;
+// fprintf(stderr, "printpitch #2\n");
     if (p == -1)
     {
+// fprintf(stderr, "printpitch #3\n");
         add_note_to_voice(p_voice, p_now, p_stop, "r");
+// fprintf(stderr, "printpitch #4\n");
         return;
     }
+// fprintf(stderr, "printpitch #5\n");
     octave = (p / 12) - 2;              /* Offset so 3c = middle c. */
     po = p % 12;
 
+// fprintf(stderr, "printpitch #6\n");
     if ((back[trans[p]] != p) || (key[po] == 1))
     {
-        snprintf(buf, 20, "%d%c%c", octave, atog[p], symbol[po]);
+// fprintf(stderr, "printpitch #7\n");
+        snprintf(buf, MAXBUFFER, "%d%c%c", octave, atog[p], symbol[po]);
+// fprintf(stderr, "printpitch #8\n");
         back[trans[p]] = p;             /* pitch is not normal for key. (i.e. +/-/n) */
+// fprintf(stderr, "printpitch #9\n");
     }
     else
     {
-        snprintf(buf, 20, "%d%c", octave, atog[p]);
+// fprintf(stderr, "printpitch #10\n");
+        snprintf(buf, MAXBUFFER, "%d%c", octave, atog[p]);
+// fprintf(stderr, "printpitch #11\n");
     }
+// fprintf(stderr, "printpitch #12\n");
     add_note_to_voice(p_voice, p_now, p_stop, strdup(buf));
+// fprintf(stderr, "printpitch #13\n");
 }   /* End of printpitch */
 
 /* ------------------------------------------------------------------------ */
@@ -1561,7 +1579,9 @@ static void printchord(struct note **chords, int p_voice, long p_now, int len)
     if (i->notenext == NULL)
     {
         /* only one note in chord */
+// fprintf(stderr, "printchord #1\n");
         printpitch(p_voice, p_now, p_now + len, i);
+// fprintf(stderr, "printchord #2\n");
         printnotelength(voice_notes_last[p_voice], len, i->vel);      /* Volume of note. */
         if (len < i->playnum && i->pitch != -1)
         {
@@ -1576,7 +1596,9 @@ static void printchord(struct note **chords, int p_voice, long p_now, int len)
     j = 0;
     for ( ; i != NULL; i = i->notenext)
     {
+// fprintf(stderr, "printchord #3\n");
         printpitch(p_voice + j, p_now, p_now + len, i);
+// fprintf(stderr, "printchord #4\n");
         printnotelength(voice_notes_last[p_voice + j], len, i->vel);  /* Volume of note. */
         if (len < i->playnum && i->pitch != -1)
         {
@@ -1620,6 +1642,7 @@ static void printtrack(int p_trackno)
     meter_n = 4;                                    /* meter numerator */
     meter_d = 4;                                    /* meter denominator */
     /* Get the first time signature (last in list for this time). */
+// fprintf(stderr, "printtrack #1\n");
     while (ts != NULL && ts->timesig_time <= now)
     {
         meter_n = ts->numer;
@@ -1627,12 +1650,17 @@ static void printtrack(int p_trackno)
         ts = ts->tsnext;
     }
 
+// fprintf(stderr, "printtrack #2\n");
     i = track[p_trackno];
     tickspernotes = 0;
+
+// fprintf(stderr, "printtrack #2\n");
     while (now < maxtracktime)
     {
+// fprintf(stderr,"p_trackno=%d now=%ld maxtracktime=%ld tickspernotes=%d bars->bar_time=%ld\n",p_trackno,now,maxtracktime,tickspernotes,bars->bar_time);
         if (tickspernotes == 0)
         {
+// fprintf(stderr, "printtrack #3\n");
             if (bars != NULL && bars->bar_time <= now)
             {
                 if (bars->bar_number != (barcount+1))
@@ -1648,7 +1676,7 @@ static void printtrack(int p_trackno)
                 fprintf(stderr, "bars->bar_time(%ld) <= now(%ld)\n", bars->bar_time, now);
                 fprintf(stderr, "Beyond the last measure, but no bars?\n");
                 printtr(p_trackno, tickspernotes, barcount, now, i, "bars not correct", 0);
-                mc_exit(1);
+//                mc_exit(1);
             }
             /* Get the first time signature (last in list for this time). */
             while (ts != NULL && ts->timesig_time <= now)
@@ -1659,6 +1687,7 @@ static void printtrack(int p_trackno)
             }
             /* Set from meter_n and meter_d, etc. */
             tickspernotes = TICKSPERBAR;
+// fprintf(stderr, "printtrack #4\n");
         }
 
         /* Determine which note(s) to play, or if "nothing" (i.e. should be
@@ -1666,13 +1695,15 @@ static void printtrack(int p_trackno)
            to chord, or pull from chord. */
 
         /* Add notes to chord here. */
+// fprintf(stderr, "printtrack #5\n");
         while (i != NULL && now >= i->n_start_time)
         {
-            struct note *nn;
+// fprintf(stderr, "printtrack #6\n");
+//            struct note *nn;
 
             /* add notes to chord */
             addtochord(i, &chords);
-            nn = i;
+//            nn = i;
             i = i->notenext;
             if (i != NULL && now <= i->n_start_time)
             {
@@ -1680,6 +1711,7 @@ static void printtrack(int p_trackno)
             }
             advancechord(&chords, 0);                   /* get rid of any zero length notes */
         }
+// fprintf(stderr, "printtrack #7\n");
 
         step = findshortest(&chords);
         if (i != NULL && (now + step) > i->n_start_time)
@@ -1690,17 +1722,21 @@ static void printtrack(int p_trackno)
         {
             step = tickspernotes;
         }
+// fprintf(stderr, "printtrack #8\n");
         if (step >= 1)                                   /* This tosses off-by-1 mistakes. */
         {
+// fprintf(stderr, "printtrack #9\n");
             nl = valid_note_length(step);
-            if (nl < 0)
-            {
-                fprintf(stderr, "printtrack #not valid_note_length? step=%d nl=%d\n", step, nl);
-            }
+//            if (nl < 0)
+//            {
+//                fprintf(stderr, "printtrack #not valid_note_length? step=%d nl=%d\n", step, nl);
+//            }
             nl = abs(nl);                               /* Undo valid_note_length error return. */
+// fprintf(stderr, "printtrack #10\n");
         }
         else
         {
+// fprintf(stderr, "printtrack #11\n");
             fprintf(stderr, "step(%d) <= 0 ... ??? \n", step);
             mc_exit(1);
         }
@@ -1709,10 +1745,14 @@ static void printtrack(int p_trackno)
             fprintf(stderr, "Advancing by 0 in printtrack!\n");
             mc_exit(1);
         }
+// fprintf(stderr, "printtrack #12\n");
         printchord(&chords, voicecount, now, nl);       /* NOTDONEYET - choose voice. */
+// fprintf(stderr, "printtrack #13\n");
         advancechord(&chords, step);
+// fprintf(stderr, "printtrack #14\n");
         tickspernotes = tickspernotes - step;
         now = now + step;
+// fprintf(stderr, "printtrack #99\n");
     }
 }   /* End of printtrack */
 
@@ -1985,8 +2025,9 @@ static void print_v_mc(void)
     int             volumechanged;
     long            last_bar_time = 0;
 
-//    printf("* HORIZONTAL\n");
-    for (int j = 1; j < MC_MAXVOICE; j++)
+//    printf("* VERTICAL\n");
+    // for (int j = 1; j < MC_MAXVOICE; j++)
+    for (int j = 1; j < voicecount; j++)
     {
         last_volume[j] = 0;                  /* Volume off to start with. */
     }
@@ -2031,7 +2072,8 @@ static void print_v_mc(void)
         /* First any bars needed. */
         while (b != NULL && b->bar_time <= f + extra)
         {
-            printf("measure %d      $$ time %ld  f=%ld   delta=%ld\n", b->bar_number, b->bar_time, f, b->bar_time - last_bar_time);
+            // printf("measure %d      $$ time %ld  f=%ld   delta=%ld\n", b->bar_number, b->bar_time, f, b->bar_time - last_bar_time);
+            printf("measure %d      $$ Page X TOP/BOTTOM, Yth - time %ld  f=%ld   delta=%ld\n", b->bar_number, b->bar_time, f, b->bar_time - last_bar_time);
             last_bar_time = b->bar_time;
             if (b->bar_number == 1)
             {
@@ -2161,7 +2203,7 @@ static void print_v_mc(void)
 }   /* End of print_v_mc */
 
 /* ------------------------------------------------------------------------ */
-#define V_LINE_NOTES    50
+#define V_LINE_NOTES    256
 static void print_h_mc(void)
 {
     long            f;
@@ -2169,18 +2211,19 @@ static void print_h_mc(void)
     int             notdone;
     struct bars_location *b;
     struct time_signature *ts;
-    struct tempo_signature *tpo;
+//    struct tempo_signature *tpo;
     int             extra = 1;              /* There are off-by-ones everywhere, kludge around them. */
     int             last_volume[MC_MAXVOICE];
-    int             volumechanged;
+//     int             volumechanged;
     long            last_bar_time = 0;
-    char           v[MC_MAXVOICE][V_LINE_NOTES];
+    char            v[MC_MAXVOICE][V_LINE_NOTES];
 
 //    printf("* HORIZONTAL\n");
-    for (int j = 1; j < MC_MAXVOICE; j++)
+    // for (int j = 1; j < MC_MAXVOICE; j++)
+    for (int j = 1; j <= voicecount; j++)
     {
         last_volume[j] = 0;                  /* Volume off to start with. */
-        v[j][0] = '\0';
+        bzero(v[j], V_LINE_NOTES);
     }
     setupkey(keysig, TRUE);
     meter_n = 4;
@@ -2198,7 +2241,7 @@ static void print_h_mc(void)
     notdone = TRUE;
     b = bars_location_start;
     ts = time_signature_start;
-    tpo = tempo_signature_start;
+//    tpo = tempo_signature_start;
     while (notdone)
     {
         /* Find minimal time. */
@@ -2223,27 +2266,38 @@ static void print_h_mc(void)
         /* First any bars needed. */
         while (b != NULL && b->bar_time <= f + extra)
         {
-            for (int j = 1; j < MC_MAXVOICE; j++)
+            // for (int j = 1; j < MC_MAXVOICE; j++)
+            for (int j = 1; j <= voicecount; j++)
             {
                 if (v[j][0] != '\0')
                 {
-                    printf("v%2d: %s\n", j, v[j]);
-                    v[j][0] = '\0';
+                    printf("v%d: %s\n", j, v[j]);
+                    bzero(v[j], V_LINE_NOTES);
+                }
+                else
+                {
+                    printf("v%d: rZ\n", j);
                 }
             }
-            printf("measure %d      $$ bar_time %ld  f=%ld   delta=%ld\n", b->bar_number, b->bar_time, f, b->bar_time - last_bar_time);
+            // printf("measure %d      $$ bar_time %ld  f=%ld   delta=%ld\n", b->bar_number, b->bar_time, f, b->bar_time - last_bar_time);
+            printf("measure %d      $$ Page X TOP/BOTTOM, Yth - time %ld  f=%ld   delta=%ld\n", b->bar_number, b->bar_time, f, b->bar_time - last_bar_time);
             last_bar_time = b->bar_time;
             b = b->barsnext;
         }
         /* Second any time signatures needed. */
         while (ts != NULL && ts->timesig_time <= f + extra)
         {
-            for (int j = 1; j < MC_MAXVOICE; j++)
+            // for (int j = 1; j < MC_MAXVOICE; j++)
+            for (int j = 1; j <= voicecount; j++)
             {
                 if (v[j][0] != '\0')
                 {
-                    printf("v%2d: %s\n", j, v[j]);
-                    v[j][0] = '\0';
+                    printf("v%d: %s\n", j, v[j]);
+                    bzero(v[j], V_LINE_NOTES);
+                }
+                else
+                {
+                    printf("v%d: rZ\n", j);
                 }
             }
             if (meter_n != ts->numer || meter_d != ts->denom)   /* Only print out if it changes. */
@@ -2258,12 +2312,17 @@ static void print_h_mc(void)
         /* Third any tempo's needed. */
         while (tpo != NULL && tpo->tempo_time <= f + extra)
         {
-            for (int j = 1; j < MC_MAXVOICE; j++)
+            // for (int j = 1; j < MC_MAXVOICE; j++)
+            for (int j = 1; j <= voicecount; j++)
             {
                 if (v[j][0] != '\0')
                 {
-                    printf("v%2d: %s\n", j, v[j]);
-                    v[j][0] = '\0';
+                    printf("v%d: %s\n", j, v[j]);
+                    bzero(v[j], V_LINE_NOTES);
+                }
+                else
+                {
+                    printf("v%d: rZ\n", j);
                 }
             }
             if (tempo != tpo->tempo)                            /* Only print out if it changes. */
@@ -2275,9 +2334,9 @@ static void print_h_mc(void)
         }
 #endif /* 0 */
 
+#if 0
         /* Volume change? */
         volumechanged = 0;
-#if 0
         for (int j = 1; j <= voicecount; j++)
         {
             if (running[j])
@@ -2295,12 +2354,17 @@ static void print_h_mc(void)
         /* If it changed, print out the volume and voice line. */
         if (volumechanged)
         {
-            for (int j = 1; j < MC_MAXVOICE; j++)
+            // for (int j = 1; j < MC_MAXVOICE; j++)
+            for (int j = 1; j <= voicecount; j++)
             {
                 if (v[j][0] != '\0')
                 {
-                    printf("v%2d: %s\n", j, v[j]);
-                    v[j][0] = '\0';
+                    printf("v%d: %s\n", j, v[j]);
+                    bzero(v[j], V_LINE_NOTES);
+                }
+                else
+                {
+                    printf("v%d: rZ\n", j);
                 }
             }
             printf("volumes ");
@@ -2333,13 +2397,15 @@ static void print_h_mc(void)
         /* Print out all the same on one line sort of centered, others get blanks. */
         for (int j = 1; j <= voicecount; j++)
         {
-            char t = ' ';
+            // char t = ' ';
+            char t = '\0';
             {
                 if (running[j])
                 {
                     if (running[j]->vc_start_time <= f + extra)
                     {
                         char s[V_LINE_NOTES];
+                        bzero(s, V_LINE_NOTES);
                         if (running[j]->previous && running[j]->previous->next_tied)
                         {
                             if (strcmp(running[j]->note, "r") != 0)
@@ -2347,7 +2413,14 @@ static void print_h_mc(void)
                                 t = 't';
                             }
                         }
-                        snprintf(s, V_LINE_NOTES, "%s%s%c", running[j]->note, running[j]->lth, t);
+                        if (t == '\0')
+                        {
+                            snprintf(s, V_LINE_NOTES, "%s%s", running[j]->note, running[j]->lth);
+                        }
+                        else
+                        {
+                            snprintf(s, V_LINE_NOTES, "%s%s%c", running[j]->note, running[j]->lth, t);
+                        }
                         if (v[j][0] != '\0')
                         {
                             strncat(v[j], ",", V_LINE_NOTES);
@@ -2359,12 +2432,18 @@ static void print_h_mc(void)
             }
         }
     }
-    for (int j = 1; j < MC_MAXVOICE; j++)
+    // for (int j = 1; j < MC_MAXVOICE; j++)
+    for (int j = 1; j <= voicecount; j++)
     {
         if (v[j][0] != '\0')
         {
-            printf("v%2d: %s\n", j, v[j]);
+            printf("v%d: %s\n", j, v[j]);
             v[j][0] = '\0';
+            bzero(v[j], V_LINE_NOTES);
+        }
+        else
+        {
+            printf("v%d: rZ\n", j);
         }
     }
 }   /* End of print_h_mc */
