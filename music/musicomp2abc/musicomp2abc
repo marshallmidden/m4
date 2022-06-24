@@ -1,5 +1,4 @@
 #!/usr/bin/python3 -B
-# To do: ties into sequences and trill's -- use bufs_tie_next ... .
 # ----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 # ----------------------------------------------------------------------------
@@ -49,7 +48,7 @@
 # MIDI channel is limited to 4 bits. 10 is reserved for drums.
 # Thus, cannot have more than 0,1,2,3,4,5,6,7,8,9,11,12,13,14,15 (total 15).
 # Cannot use the MIDI file format. MIDI 2.0 has no file format yet.
-#-----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
 # A) To import an ABC into musescore, use the plugin "ABC Import".
 #    Move "X:1" to the top of the file, before any other lines. The '%' confuses it.
 # ----------------------------------------------------------------------------
@@ -1951,7 +1950,7 @@ def print_out_midi1csv_instrument(m, voiceon, lthworkingmeasure, last_instrument
         pan[m][voiceon] = default_pan
         intensity[m][voiceon] = default_intensity
     # fi
-    if len(vinstrument[m]) >= voiceon and vinstrument[m][voiceon] != 0:
+    if len(vinstrument[m]) >= voiceon:
         if last_instrument_on != vinstrument[m][voiceon]:
             last_instrument_on = vinstrument[m][voiceon] + args.offset
             if last_instrument_on not in inst:
@@ -2259,7 +2258,7 @@ def print_out_midi1csv_notes():
 
         # Nothing yet ...
         lastmeter = ''                          # Last meter put out.  l_instrument = 0 + args.offset
-        l_instrument = 0                        # Last instrument for this voice.
+        l_instrument = -1                       # Last instrument for this voice.
         lt = ''                                 # Last tempo number of beats per minute.
         ll = ''                                 # Last tempo note type (whole,half,quarter,...).
         last_keysig = ''                        # Last key signature put out.
@@ -2321,7 +2320,9 @@ def print_out_midi1csv_notes():
                         # rof
                         if note_playing < note_length:
                             # Must turn off stacatto note before moving lthworkingmeasures.
-                            print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lthworkingmeasures + note_playing, chan, n, 0))
+                            if last_note_on != '':
+                                print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lthworkingmeasures + note_playing, chan, last_note_on, 0))
+                            # fi
                             last_note_on = ''
                         # fi
                     # fi
@@ -2349,8 +2350,6 @@ def print_out_midi1csv_notes():
                         print_output("{}, {}, Control_c, {}, 68, {}".format(voice+1, lthworkingmeasures, chan, 0))
                         legato_on = False
                     # fi
-                    # Next event after this rest.
-                    #-- lthworkingmeasures = lthworkingmeasures + bufs_length[voice][m][i]
                     # To next note. While loop checks for end of measure.
                     v_vl = bufs_vol[voice][m][i]
                     i = i + 1
@@ -2378,10 +2377,10 @@ def print_out_midi1csv_notes():
                     # fi
                     # Already on, good.
                 else:
+                    # We want a note-on here.
                     if legato_on:
                         print_output("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, n, default_volume))
                     # fi
-                    # We want a note-on here.
                     if last_note_on != '':                  # If not a rest, or note off.
                         print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, last_note_on, 0))
                     # fi
@@ -2407,7 +2406,9 @@ def print_out_midi1csv_notes():
 
                 v_vl = bufs_vol[voice][m][i]
                 if last_cc11 !=  v_vl:
-                    print_output("{}, {}, Control_c, {}, 11, {}".format(voice+1, lthworkingmeasures, chan, v_vl))
+                    if last_note_on != '':
+                        print_output("{}, {}, Control_c, {}, 11, {}".format(voice+1, lthworkingmeasures, chan, v_vl))
+                    # fi
                     last_cc11 = v_vl
                 # fi
 
@@ -2457,8 +2458,6 @@ def print_out_midi1csv_notes():
                 # Do crescendo between lthworkingmeasures and lthworkingmeasures+note_playing.
                 fvol = float(v_vl)      # Previous volume
                 # Use previous values for this one.
-                #-- dv = fvol - float(v)    # New volume
-                #-- dinc = dv / float(note_length)
                 for T in range(lthworkingmeasures, lthworkingmeasures + note_playing):
                     # calculate crescendo number. If same as last, continue.
                     fvol = fvol - dinc
@@ -2469,13 +2468,17 @@ def print_out_midi1csv_notes():
                     # fi
                     ivol = int(fvol)
                     if last_cc11 !=  ivol:
-                        print_output("{}, {}, Control_c, {}, 11, {}".format(voice+1, T, chan, ivol))
+                        if last_note_on != '':
+                            print_output("{}, {}, Control_c, {}, 11, {}".format(voice+1, T, chan, ivol))
+                        # fi
                         last_cc11 = ivol
                     # fi
                 # rof
                 if note_playing < note_length:
                     # Must turn off stacatto note before moving lthworkingmeasures.
-                    print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lthworkingmeasures + note_playing, chan, last_note_on, 0))
+                    if last_note_on != '':
+                        print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lthworkingmeasures + note_playing, chan, last_note_on, 0))
+                    # fi
                     last_note_on = ''
                 # fi
             # fi
@@ -6896,7 +6899,6 @@ def get_time(therest, line):
     whqe = { 'w':'1', 'h':'2', 'q':'4', 'e':'8' }
     global bit_from_character
 
-    #-- work4 = 0       # done below.
     vwork = 0
     # Must exist. If not alphanumeric or if "whqe".
     if therest and therest[0] in whqe:          # convert whqe to 1,2,4,8.
