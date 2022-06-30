@@ -156,7 +156,7 @@ BROKEN_MID = ${BROKEN:=.mid}
 	csvmidi $< $@ \
 		|| (rm -f $@ ; exit 1)
 %.wav:  %.mid
-	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 $< \
+	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 128 $< \
 		|| (rm -f $@ ; exit 1)
 %.abc:  %.E
 	${MUSICOMP2ABC} --abc $< $@ \
