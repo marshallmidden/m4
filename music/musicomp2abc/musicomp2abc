@@ -44,6 +44,9 @@
 #   print_error("NOTDONEYET - do_flat", line)       -- no real need for this?
 #   print_error("NOTDONEYET - do_natural", line)    -- no real need for this?
 # ----------------------------------------------------------------------------
+# Note: Do not have blank lines in the file. Somehow python's readline() does
+# not return them. Yeah, insanity.
+# ----------------------------------------------------------------------------
 # --fluidsynth.  2022-06-06
 # MIDI channel is limited to 4 bits. 10 is reserved for drums.
 # Thus, cannot have more than 0,1,2,3,4,5,6,7,8,9,11,12,13,14,15 (total 15).
@@ -1015,6 +1018,12 @@ def really_print_output(strg):
     print(strg, file=output_name, flush=True)
     return
 # End of really_print_output
+
+# ----------------------------------------------------------------------------
+def print_debug(strg):
+    print("DEBUG -", strg, file=sys.stderr, flush=True)
+    return
+# End of print_debug
 
 # ----------------------------------------------------------------------------
 global fluidsynth_done
@@ -6974,14 +6983,12 @@ def get_time(therest, line):
 # End of get_time
 
 # ----------------------------------------------------------------------------
-def do_tie(onvoice, vnumber, line):
+def do_tie_on_previous_note(onvoice, line, what):
     global measure_on                   # The measure we are on.
     global meas                         # volume levels
     global bufs
+    global bufs_accidentals
 
-    if vnumber is not None:
-        return '-'
-    # fi
     m = measure_on
     if m not in bufs[onvoice] or bufs[onvoice][m] == '':
         # Do measure before.
@@ -6993,9 +7000,24 @@ def do_tie(onvoice, vnumber, line):
             m = meas[w-1]
         # fi
     # fi
-    bufs[onvoice][m] = bufs[onvoice][m] + '-'
+    if args.horizontal or args.vertical:
+        bufs_accidentals[onvoice][m][-1] += what
+    elif args.midi1csv or args.fluidsynth:
+        bufs_accidentals[onvoice][m].append(what)
+    else:                   # abc format
+        bufs[onvoice][m] = bufs[onvoice][m] + '-'
+    # fi
+    return
+# End of do_tie_on_previous_note
+
+# ----------------------------------------------------------------------------
+def do_tie_abc(onvoice, vnumber, line):
+    if vnumber is not None:             # If vertical input format.
+        return '-'
+    # fi
+    do_tie_on_previous_note(onvoice, line, '-')
     return ''
-# End of do_tie
+# End of do_tie_abc
 
 # ----------------------------------------------------------------------------
 def determine_s_vol(f1, onvoice, line):
@@ -7603,6 +7625,7 @@ def process_notes(line):
                         l = '1/1'
                     # fi
                 # fi
+# NOTDONEYET - check --vertical and not --wrongties. (But that is not the use for this argument.)
                 append_tie = bufs_tie_next[onvoice]
                 bufs_tie_next[onvoice] == ''
                 if args.horizontal or args.vertical:
@@ -7865,6 +7888,7 @@ def process_notes(line):
                         seq_num_so_far = seq_num_so_far - 1
                         numerator = numerator - put_on_lth
 
+# NOTDONEYET - check --vertical and not --wrongties. (But that is not the use of this argument.)
                         extra_t = 't' if bufs_tie_next[onvoice] == 't' else ''
                         bufs_tie_next[onvoice] = ''
                         # Tie from previous needs to go on first one, else blank it out.
@@ -7990,15 +8014,30 @@ def process_notes(line):
             if (r_accidentals & accidental_tied) != 0:
                 if vnumber is not None:         # vertical input format
                     if args.horizontal:                     # horizontal output
-                        # put tie on following note.
-                        bufs_tie_next[onvoice] = 't'
+                        if not args.wrongties:
+                            # put tie on following note.
+                            bufs_tie_next[onvoice] = 't'
+                        else:
+                            append_tie = 't'
+                        # fi
                     elif args.midi1csv or args.fluidsynth:                     # midi1csv output
-                        # put tie on following note.
-                        bufs_tie_next[onvoice] = 't'
+                        if not args.wrongties:
+                            bufs_tie_next[onvoice] = 't'
+                        else:
+                            append_tie = 't'
+                        # fi
                     elif args.vertical:                     # vertical output
-                        append_tie = 't'
+                        if not args.wrongties:
+                            append_tie = 't'
+                        else:
+                            do_tie_on_previous_note(onvoice, line, 't')
+                        # fi
                     else:           # ABC
-                        append_tie = do_tie(onvoice, vnumber, line)
+                        if not args.wrongties:
+                            append_tie = do_tie_abc(onvoice, vnumber, line)
+                        else:
+                            do_tie_on_previous_note(onvoice, line, '-')
+                        # fi
                     # fi
                 else:                           # horizontal input format
                     if args.vertical:                       # vertical output
@@ -8021,7 +8060,7 @@ def process_notes(line):
                     elif args.horizontal or args.midi1csv or args.fluidsynth:  # horizontal output
                         append_tie = 't'
                     else:           # ABC
-                        append_tie = do_tie(onvoice, vnumber, line)
+                        append_tie = do_tie_abc(onvoice, vnumber, line)
                     # fi
                 # fi
             # fi
@@ -8244,6 +8283,10 @@ def parse_args():
                         '-voices', '-voice', '-voic', '-voi', '-vo',
                         default='', action = 'store',
                         help = 'Only print voice(s) specified. (parsing done) "1,2,5" or "1,2,5-8,15".')
+    parser.add_argument('--wrongties', '--wrongtie', '--wrongti', '--wrongt', '--wrong', '--wron', '--wro', '--wr',
+                        '-wrongties', '-wrongtie', '-wrongti', '-wrongt', '-wrong', '-wron', '-wro', '-wr',
+                        default='', action = 'store_true',
+                        help = 'When reading, ties for --vertical are on the latter note, move to front.')
     parser.add_argument('--nolegato', '--no-legato', action='store_true',
                         help = 'Do not do legatos.')
     parser.add_argument('rest', nargs='*',
