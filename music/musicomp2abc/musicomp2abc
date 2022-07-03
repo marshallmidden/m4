@@ -3,10 +3,9 @@
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 # ----------------------------------------------------------------------------
 # TO DO:
-# 2) vol(sf,0.25)    -- optional 2nd argument for length of sf.
+# 1) vol(sf,0.25)    -- optional 2nd argument for length of sf.
 #    vol(fp,0.25)    -- optional 2nd argument for length of "f" before returning to "p".
-#   b-6 ... some 1/2 notes that are vol(sf) -- should they be shortened per above?
-# 3) volume and volumes ... 3 arguments -- "volume 4..7 mf" ... Can this work?
+# 2)  b-6 ... some 1/2 notes that are vol(sf) -- should they be shortened per above?
 # ----------------------------------------------------------------------------
 #    A) Put in largo and ties and spaces for note tail groupings for:
 #    +  One last check of printing - for correct notes.
@@ -1317,7 +1316,7 @@ def rests_in_empty_measure_voices(m, voice):
             txt = txt + ' z' + lengthl[i]       # entry in array
         # rof
         if txt == '':
-            print_error('% no music for voice {} in measure {}'.format(voice, m), 'pass2')
+            print_error('no music for voice {} in measure {}'.format(voice, m), 'pass2')
             return
         # fi
     # fi
@@ -5491,9 +5490,53 @@ def do_cis(t_args, line):
 # End of do_cis
 
 # ----------------------------------------------------------------------------
+def get_volume_number(name, line, command_name):
+    global vlprint
+
+    v, type_error = is_float(name)
+    if type_error is not None:
+        for j in vlprint:
+            if name == vlprint[j]:
+                v = j
+                type_error = None
+                break
+            # fi
+        # rof
+        if type_error is not None:
+            print_error(command_name + " did not get have a number or volume name. {}".format(type_error), line)
+            return None
+        # fi
+        # Fall through, because we found it via letters.
+    # fi
+    if v is None:
+        print_error(command_name + " does not have argument as a number.", line)
+        return None
+    # fi
+    v = int(round(v))
+    if v < 0:                       # If error or bad value
+        print_error(command_name + " for voice {} not good {}, making it zero.".format(i, v), line)
+        v = 0
+    # fi
+    if command_name == 'volumes':
+        if v > 127:                 # If error or bad value
+            print_error(command_name + " {} ({}) not good, making it 127.".format(name,v), line)
+            v = 127
+        # fi
+    elif command_name == 'volume' and v > 7:    # If error or bad value
+        print_error(command_name + " {} ({}) not good, making it 7 (127 for midi).".format(name,v), line)
+        v = 127
+    else:
+        v = int((v * 16) + 15)      # Convert to 0 to 127.
+    # fi
+    return v
+#   End of get_volume_number
+
+# ----------------------------------------------------------------------------
 #   volume  4,7,5                       $$ for 3 voices; mf and fff, and a touch louder.
-#       The volume is a number between 0 and 7.
+#       The volume is a number between 0 and 7, inclusive.
 #       Caution: you should use only volumes 5 through 7
+#   volumes mf,fff,f                    $$ for 3 voices; mf and fff, and a touch louder.
+#       The volumes are a number between 0 and 127, inclusive.
 def do_volume_both(t_args, line, command_name):
     global vl                           # volume levels
     global measure_on
@@ -5508,61 +5551,58 @@ def do_volume_both(t_args, line, command_name):
         print_error(command_name + " needs at least one argument", line)
         return
     # fi
-    wline = t_args[0]
-    # Get rid of all white spoce.
-    wline = ''.join(wline.split())
-    wargs = arglist(wline, line, False)
-
-    if len(wargs) == 0 or len(wargs) > MAXVOICES:
-        print_error(command_name + " needs from one to {} arguments".format(MAXVOICES), line)
+    # All spaces before or after commas is gone.
+    t_args[0] = re.sub(r'\s*,\s*', ',', t_args[0])
+    vargs = t_args[0].split()
+    if len(vargs) <= 0 or len(vargs) > 2:
+        print_error("{} does not have correct number of arguments.".format(command_name), line)
         return
     # fi
-
-    for i in range(1, len(wargs)+1):
-        v, type_error = is_float(wargs[i - 1])
-        if type_error is not None:
-            for j in vlprint:
-                if wargs[i - 1] == vlprint[j]:
-                    v = j
-                    type_error = None
-                    break
-                # fi
-            # rof
-            if type_error is not None:
-                print_error(command_name + " did not get have a number or volume name. {}".format(type_error), line)
-                return
-            # fi
-            # Fall through, because we found it via letters.
-        # fi
-        if v is None:
-            print_error(command_name + " does not have argument as a number.", line)
+    # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    if len(vargs) == 1:
+        # 1 or 1,2,3 ... .
+        wargs = arglist(vargs[0], line, False)
+        if len(wargs) == 0 or len(wargs) > MAXVOICES:
+            print_error(command_name + " needs from one to {} arguments".format(MAXVOICES), line)
             return
         # fi
-        v = int(round(v))
-        if v < 0:                       # If error or bad value
-            print_error(command_name + " for voice {} not good {}, making it zero.".format(i, v), line)
-            v = 0
-        # fi
-        if command_name == 'volumes':
-            if v > 127:                 # If error or bad value
-                print_error(command_name + " {} for voice {} not good, making it 127.".format(v, i), line)
-                v = 127
+        for i in range(1, len(wargs)+1):
+            v = get_volume_number(wargs[i - 1], line, command_name)
+            if v is None:
+                return
             # fi
-        elif command_name == 'volume' and v > 7:    # If error or bad value
-            print_error(command_name + " {} for voice {} not good, making it 7 (127 for midi).".format(v, i), line)
-            v = 127
-        else:
-            v = int((v * 16) + 15)      # Convert to 0 to 127.
-        # fi
-        if not i in vl:
-            new_voice_initialize(i, measure_on)
-        # fi
-        vl[i][measure_on] = v           # Change volume for voice.
-        running_vl[i][measure_on] = v   # Force running change - also stop crescendo.
-        cresc_volume[i] = 0
-        cresc_time[i] = 0
-        cresc_direction[i] = True
-    # rof
+            if not i in vl:
+                new_voice_initialize(i, measure_on)
+            # fi
+            vl[i][measure_on] = v           # Change volume for voice.
+            running_vl[i][measure_on] = v   # Force running change - also stop crescendo.
+            cresc_volume[i] = 0
+            cresc_time[i] = 0
+            cresc_direction[i] = True
+        # rof
+    else:
+    # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+        wargs = arglist(vargs[0], line, True)
+        v = get_volume_number(vargs[1], line, command_name)
+        for i in range(1, len(wargs)+1):
+            f1, type_error = is_float(wargs[i-1])
+            if type_error is not None:
+                return
+            # fi
+            if f1 is None:
+                print_error("voice {} is not a number.".format(wargs[i-1]), line)
+                return
+            # fi
+            f1 = int(round(f1))
+
+            vl[f1][measure_on] = v           # Change volume for voice.
+            running_vl[f1][measure_on] = v   # Force running change - also stop crescendo.
+            cresc_volume[f1] = 0
+            cresc_time[f1] = 0
+            cresc_direction[f1] = True
+        # rof
+    # fi
+
     fill_voice_mlth(False, line)               # Need to make measure for other voices up to here "mlth".
     return
 # End of do_volume_both
