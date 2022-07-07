@@ -45,7 +45,7 @@ typedef struct voice_context {
 } voice_context_t;
 
 // #define MAX_VOICES 30
-#define MAX_VOICES 64
+#define MAX_VOICES 256
 
 /* holds a fraction */
 struct fraction {

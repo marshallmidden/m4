@@ -478,7 +478,8 @@ chanmessage(status,c1,c2)
 int status;
 int c1, c2;
 {
-  int chan = status & 0xf;
+//  int chan = status & 0xf;
+  int chan = status & 0x3f;
 
   switch ( status & 0xf0 ) {
   case 0x80:

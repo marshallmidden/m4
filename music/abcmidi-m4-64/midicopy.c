@@ -1,3 +1,4 @@
+#define MAXCHANS 64
 /*
  *  This program is a clone of midifile.c created by
  *  Thompson and  Czeiszperger, 1989. As a result there
@@ -145,7 +146,8 @@ int tfocus[64];                 /* track focus    2017-11 27*/
 int cfocus[64];                 /* channel focus  2017-11-27*/
 int drmflag = 0;                /* flag indicating drums selected 2019-12-22 */
 int verbatim = 0;		/* flag for verbatim transfer 2019-06-29 */
-int haschannel[17];             /* for determining which channels are in use */
+// int haschannel[17];             /* for determining which channels are in use */
+int haschannel[MAXCHANS+1];             /* for determining which channels are in use */
 int hastempo[64];		/* indicates whether tempo command in track */
 
 FILE *F_in, *fp;
@@ -613,7 +615,7 @@ readtrack ()
   int i;                        /* [SS] 2017-10-19 */
   double delta_seconds;
 
-  for (i=0;i<17;i++) haschannel[i] = 0;
+  for (i=0;i<MAXCHANS+1;i++) haschannel[i] = 0;
 
   laststatus = 0;		/* [SS] 2013-09-10 */
   tempo_index = 0;
@@ -1907,7 +1909,7 @@ main (int argc, char *argv[])
       for (i = 0; i < 64; i++)
 	ctocopy[i] = 1;
       for (i = 0; i < xchns; i++)
-	if (chn[i] > 0 && chn[i] < 17)
+	if (chn[i] > 0 && chn[i] < MAXCHANS+1)
 	  ctocopy[chn[i] - 1] = 0;
     }
 
@@ -1922,7 +1924,7 @@ main (int argc, char *argv[])
       for (i = 0; i < 64; i++)
 	ctocopy[i] = 0;
       for (i = 0; i < chns; i++)
-	if (chn[i] > 0 && chn[i] < 17)
+	if (chn[i] > 0 && chn[i] < MAXCHANS+1)
 	  ctocopy[chn[i] - 1] = 1;
     }
 
@@ -2079,7 +2081,7 @@ main (int argc, char *argv[])
       for (i = 0; i < 64; i++)
 	cfocus[i] = 1;  /* attenuation flag */
       for (i = 0; i < chns; i++)
-	if (chn[i] > 0 && chn[i] < 17)
+	if (chn[i] > 0 && chn[i] < MAXCHANS+1)
 	  cfocus[chn[i] - 1] = 0; /* channel numbers start from 1 */
      }
   }

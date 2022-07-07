@@ -1,0 +1,97 @@
+#! /bin/sh
+
+# (automatic update)
+VERSION=8.14.13
+VDATE=2022-01-29
+
+: "${CC:=gcc}"
+: "${PKG_CONFIG:=pkg-config}"
+CFLAGS="-g -O2 -Wall -pipe $CFLAGS"
+
+srcdir=.
+: "${prefix=/usr/local}"
+
+: "${INSTALL:=/usr/bin/install -c}"
+
+if test -f ./custom; then
+	. ./custom
+fi
+
+for c in "$@"; do
+ case "$c" in
+	--*=*)
+		c="${c#--}"
+		eval "${c%%=*}='${c#*=}'"
+		;;
+ esac
+done
+
+case "$srcdir" in
+    *\ *)
+        echo "srcpath cannot contain spaces"
+        exit 1
+esac
+
+if test "x$INSTALL_DATA" = x; then
+	INSTALL_DATA='${INSTALL} -m 644'
+fi
+if test "x$INSTALL_PROGRAM" = x; then
+	INSTALL_PROGRAM='${INSTALL}'
+fi
+
+if test "x$exec_prefix" = x; then
+	exec_prefix='${prefix}'
+fi
+if test "x$bindir" = x; then
+	bindir='${exec_prefix}/bin'
+fi
+if test "x$datarootdir" = x; then
+	datarootdir='${prefix}/share'
+fi
+if test "x$docdir" = x; then
+	docdir='${prefix}/share/doc'
+fi
+if test "x$mandir" = x; then
+	mandir='${prefix}/share/man'
+fi
+if test "x$DEFAULT_FDIR" = x; then
+	DEFAULT_FDIR="$prefix/share/abcm2ps"
+fi
+
+if ! $PKG_CONFIG --exists freetype2 ; then
+	echo "pkg-config/freetype2 not found - no pango support"
+elif ! $PKG_CONFIG --exists pangocairo ; then
+	echo "pangocairo not found - no pango support"
+else
+	CPPFLAGS="$CPPFLAGS -DHAVE_PANGO=1 `$PKG_CONFIG pango cairo freetype2 --cflags`"
+	LDLIBS="`$PKG_CONFIG pangocairo pangoft2 freetype2 --libs` $LDLIBS"
+fi
+
+CPPFLAGS="$CPPFLAGS -I."
+# ./config.h will not be found in srcdir.
+
+LDLIBS="$LDLIBS -lm"
+# Useful on some architectures.
+
+sed "s+@CC@+$CC+
+s+@CPPFLAGS@+$CPPFLAGS+
+s+@CFLAGS@+$CFLAGS+
+s+@LDFLAGS@+$LDFLAGS+
+s+@LDLIBS@+$LDLIBS+
+s+@INSTALL@+$INSTALL+
+s+@INSTALL_DATA@+$INSTALL_DATA+
+s+@INSTALL_PROGRAM@+$INSTALL_PROGRAM+
+s+@prefix@+$prefix+
+s+@exec_prefix@+$exec_prefix+
+s+@srcdir@+$srcdir+
+s+@bindir@+$bindir+
+s+@datarootdir@+$datarootdir+
+s+@mandir@+$mandir+
+s+@docdir@+$docdir+" "$srcdir/Makefile.in" > Makefile
+echo "Makefile created"
+
+sed "s/define VERSION xxx/\define VERSION \"$VERSION\"/
+s/define VDATE xxx/define VDATE \"$VDATE\"/
+s+define DEFAULT_FDIR xxx+define DEFAULT_FDIR \"$DEFAULT_FDIR\"+
+" "$srcdir/config.h.in" > config.h
+echo "config.h created"

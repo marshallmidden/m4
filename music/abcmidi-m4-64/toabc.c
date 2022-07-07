@@ -47,7 +47,7 @@ extern char* strchr();
 #endif
 
 // #define MAX_VOICES 30
-#define MAX_VOICES 64
+#define MAX_VOICES 256
 /* should be plenty! */
 
 programname fileprogram = ABC2ABC;

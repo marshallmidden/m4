@@ -6,10 +6,7 @@
 # 1) vol(sf,0.25)    -- optional 2nd argument for length of sf.
 #    vol(fp,0.25)    -- optional 2nd argument for length of "f" before returning to "p".
 # 2) b-6 ... some 1/2 notes that are vol(sf) -- should they be shortened per above?
-# 3) Check if measure repeated uses meter, etc. (measures for v1, then v2, then v3)
-# 4) warning if --midi1csv goes over channels 0..8,10..15. (not --fluidsynth.
-# 5) Warning if V: goes over 32 (?) for --abc format.
-# 6) fix yaps and abcm2ps to allow 256 voices.
+# 3) fix yaps and abcm2ps to allow 256 voices.
 #   a) yaps has a limit of V:30
 #       Warning in line 348 : Number of available voices exceeded
 #       Warning in line 359 : V:32 out of sequence, treating as V:30
@@ -18,7 +15,7 @@
 #   b) abcm2ps-8.14.13 (2022-01-29)
 #       e.abc:370:2: error: Too many voices
 #        370 V:33
-# 7) Think - convert csv to fs?  Can read it and use the printout/convert routine?
+# 4) Think - convert csv to fs?  Can read it and use the printout/convert routine?
 # ----------------------------------------------------------------------------
 #    A) Put in largo and ties and spaces for note tail groupings for:
 #    +  One last check of printing - for correct notes.
@@ -463,6 +460,9 @@ import calculate
 #++ import inspect
 #++ print(inspect.currentframe().f_code.co_name, '#0', file=sys.stderr, flush=True)
 # ----------------------------------------------------------------------------
+MAXMIDICHANNELS = 32
+# MAXABCVOICES = 32
+MAXABCVOICES = 128
 MAXVOICES = 128
 NUMBER_BARS_PER_STAFF = 4
 # NUMBER_BARS_PER_STAFF = 1
@@ -1173,11 +1173,11 @@ global bufs_vol
 bufs_vol = { 1: {} }
 
 global pages_to_do
-pages_to_do = []
+pages_to_do = []                    # argument line limiting which pages to do.
 global measures_to_do
-measures_to_do = []
+measures_to_do = []                 # argument line limiting which measures to do.
 global voices_to_do
-voices_to_do = []
+voices_to_do = []                   # argument line limiting which voices to do.
 
 global iftest                       # check if after if or else.
 iftest = { 0:-1 }                   # -1 = processing in if, 0 = skip till else,
@@ -1721,6 +1721,9 @@ def print_out_abc():
                 continue
             # fi
         # fi
+        if voice > MAXABCVOICES:
+            print_error_no_line("voice ({}) > {} abc voices".format(voice,MAXABCVOICES))
+        # fi
         print_output("% --- voice " + str(voice) + '  ---')
         l_meter = l_dl = l_clef = l_instrument = l_vl = ''
         l_ky = key_default
@@ -1748,8 +1751,8 @@ def print_out_abc():
                 if print_line != '' and print_line[-1] != '\n':
                     print_line = print_line + '\n'
                 # fi
-                print_line = print_line + "%abc %%barsperstaff {}\n".format(last_bar)
                 last_bar = bars[m]
+                print_line = print_line + "%abc %%barsperstaff {}\n".format(last_bar)
             # fi
 
             if m in percents:
@@ -2249,6 +2252,8 @@ def print_out_midi1csv_instrument(m, voiceon, lthworkingmeasure, last_instrument
                 channel = channel + 1
                 if channel == 9:
                     channel = 10
+                elif channel >= MAXMIDICHANNELS and args.midi1csv:
+                    print_error_no_line("channel ({}) > {} midi channels (0 based)".format(channel,MAXMIDICHANNELS))
                 # fi
             elif voiceon not in inst[strlast_instrument_on]:
                 chan = channel                              # New instrument & voice.
@@ -2256,6 +2261,8 @@ def print_out_midi1csv_instrument(m, voiceon, lthworkingmeasure, last_instrument
                 channel = channel + 1
                 if channel == 9:
                     channel = 10
+                elif channel >= MAXMIDICHANNELS and args.midi1csv:
+                    print_error_no_line("channel ({}) > {} midi channels (0 based)".format(channel,MAXMIDICHANNELS))
                 # fi
             else:
                 chan = inst[strlast_instrument_on][voiceon]    # instrument used previously on this voice.
@@ -2475,23 +2482,24 @@ def print_header():
         return
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     else:                                   # ABC format
-        ps = "%abc\n"
-        ps = ps + "%%pageheight 10.5in\n"
-        ps = ps + "%%staffwidth 7.0in\n"
-        # ps = ps + "%%stretchlast no\n"
-        ps = ps + "%%leftmargin .25in\n"
-        ps = ps + "%%rightmargin .25in\n"
-        # ps = ps + "%%scale 0.43\n"
-        ps = ps + "%%vocalfont Times-BoldItalic 13.0\n"
-        ps = ps + "%%combinevoices 1\n"
+        header = "%abc\n" + header
 
-        header = ps + header
+        header += "%abc2mtex: yes\n"
 
         if '' in percents:
-            header = header + "%abc2mtex: yes\n"
             for p in percents['']:
                 header = header + p + '\n'
             # rof
+        else:
+            # Default printing stuff.
+            header += "%%pageheight 10.5in\n"
+            header += "%%staffwidth 7.0in\n"
+            # header += "%%stretchlast no\n"
+            header += "%%leftmargin .25in\n"
+            header += "%%rightmargin .25in\n"
+            header += "%%scale 0.42\n"
+            header += "%%vocalfont Times-BoldItalic 13.0\n"
+            header += "%%combinevoices 1\n"
         # fi
         # Must be a fraction.
         fdnl = default_note_text_fraction('')
@@ -2541,7 +2549,7 @@ def print_out_midi1csv_notes():
             # fi
         # fi
         if voice not in bufs:
-            print_error_no_line("ERROR - bufs voice dictionary is hosed (m={}, voice={}, lthworkingmeasures={})".format(m, voice, lthworkingmeasures))
+            print_error_no_line("bufs voice dictionary is hosed (m={}, voice={}, lthworkingmeasures={})".format(m, voice, lthworkingmeasures))
             sys.exit(1)
         # fi
 

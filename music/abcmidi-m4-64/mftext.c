@@ -143,6 +143,7 @@ int chan, msb, lsb;
 void txt_program(chan,program)
 int chan, program;
 {
+fprintf(stderr, "%s:%u:%s chan=%d, program=%d\n",__FILE__,__LINE__,__func__,chan,program);
   prtime();
   printf("Program, chan=%d program=%d\n",chan+1,program);
 }

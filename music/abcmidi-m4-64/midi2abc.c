@@ -1,3 +1,4 @@
+#define MAXCHANS 64
 /* midi2abc - program to convert MIDI files to abc notation.
  * Copyright (C) 1998 James Allwright
  * e-mail: J.R.Allwright@westminster.ac.uk
@@ -229,8 +230,10 @@ struct dlistx {
 
 int notechan[2048],notechanvol[2048]; /*for linking on and off midi
 					channel commands            */
-int last_tick[17]; /* for getting last pulse number in MIDI file */
-int last_on_tick[17]; /* for detecting chords [SS] 2019-08-02 */
+// int last_tick[17]; /* for getting last pulse number in MIDI file */
+// int last_on_tick[17]; /* for detecting chords [SS] 2019-08-02 */
+int last_tick[MAXCHANS+1]; /* for getting last pulse number in MIDI file */
+int last_on_tick[MAXCHANS+1]; /* for detecting chords [SS] 2019-08-02 */
 
 char *title = NULL; /* for pasting title from argv[] */
 char *origin = NULL; /* for adding O: info from argv[] */
@@ -253,16 +256,26 @@ void txt_program_type0(int,int);
  * The channel numbers go from 1 to 16 instead of 0 to 15
  */
 struct trkstat {
-  int notecount[17];
-  int chordcount[17];
-  int notemeanpitch[17];
-  int notelength[17];
-  int pitchbend[17];
-  int pressure[17];
-  int cntlparam[17];
-  int program[17];
-  int tempo[17];
-  int npulses[17];
+//  int notecount[17];
+//  int chordcount[17];
+//  int notemeanpitch[17];
+//  int notelength[17];
+//  int pitchbend[17];
+//  int pressure[17];
+//  int cntlparam[17];
+//  int program[17];
+//  int tempo[17];
+//  int npulses[17];
+  int notecount[MAXCHANS+1];
+  int chordcount[MAXCHANS+1];
+  int notemeanpitch[MAXCHANS+1];
+  int notelength[MAXCHANS+1];
+  int pitchbend[MAXCHANS+1];
+  int pressure[MAXCHANS+1];
+  int cntlparam[MAXCHANS+1];
+  int program[MAXCHANS+1];
+  int tempo[MAXCHANS+1];
+  int npulses[MAXCHANS+1];
   } trkdata;
 
 /* The trkstat references the individual channels in the midi file.
@@ -278,12 +291,16 @@ struct trkstat {
  * npulses is the number of pulses.
  */
 
-int progcolor[17]; /* used by stats_program */
+// int progcolor[17]; /* used by stats_program */
+int progcolor[MAXCHANS+1]; /* used by stats_program */
 int drumhistogram[82]; /* counts drum noteons */
 int pitchhistogram[12]; /* pitch distribution for non drum notes */
-int channel2prog[17]; /* maps channel to program */
-int channel2nnotes[17]; /*maps channel to note count */
-int chnactivity[17]; /* [SS] 2018-02-02 */
+// int channel2prog[17]; /* maps channel to program */
+// int channel2nnotes[17]; /*maps channel to note count */
+// int chnactivity[17]; /* [SS] 2018-02-02 */
+int channel2prog[MAXCHANS+1]; /* maps channel to program */
+int channel2nnotes[MAXCHANS+1]; /*maps channel to note count */
+int chnactivity[MAXCHANS+1]; /* [SS] 2018-02-02 */
 int progactivity[128]; /* [SS] 2018-02-02 */
 int pitchclass_activity[12]; /* [SS] 2018-02-02 */
 
@@ -745,8 +762,9 @@ int chan, msb, lsb;
 void txt_program(chan,program)
 int chan, program;
 {
+fprintf(stderr, "%s:%u:%s chan=%d, program=%d\n",__FILE__,__LINE__,__func__,chan,program);
 /* suppress the %%MIDI program for channel 10 */
-  if (chan == 9) return;  /* [SS] 2020-02-17 */
+//  if (chan == 9) return;  /* [SS] 2020-02-17 */
   sprintf(textbuff, "%%%%MIDI program %d", program);
   addtext(textbuff,0);
 /* abc2midi does not use the same channel number as specified in 
@@ -760,7 +778,8 @@ int chan, program;
 void txt_program_type0(chan,program)
 int chan, program;
 {
-  if (chan == 9) return;  /* [SS] 2020-02-17 */
+//  if (chan == 9) return;  /* [SS] 2020-02-17 */
+fprintf(stderr, "%s:%u:%s chan=%d, program=%d\n",__FILE__,__LINE__,__func__,chan,program);
   sprintf(textbuff, "%%%%MIDI program %d", program);
   addtext_type0(textbuff,0,chan);
 /* abc2midi does not use the same channel number as specified in 
@@ -1056,6 +1075,7 @@ int close_note(int chan, int pitch, int *initvol)
 }
 
 void print_txt_program(int chan,int program) {
+fprintf(stderr, "%s:%u:%s chan=%d program=%d\n",__FILE__,__LINE__,__func__,chan,program);
   /* [SS] 2019-11-06 */
   printf("%ld Program  %2d %d \n",Mf_currtime,chan+1, program);
   /*printf("Program  %2d %d \n",chan+1, program);*/
@@ -1144,7 +1164,7 @@ void stats_header (int format, int ntrks, int ldivision)
   trkdata.tempo[0] = 0;
   trkdata.pressure[0] = 0;
   trkdata.program[0] = 0;
-  for (i=0;i<17;i++) {
+  for (i=0;i<MAXCHANS+1;i++) {
     trkdata.npulses[i] = 0;
     trkdata.pitchbend[i] = 0;
     progcolor[i] = 0;
@@ -1161,7 +1181,7 @@ void stats_header (int format, int ntrks, int ldivision)
 void determine_progcolor ()
 {
 int i;
-for (i=0;i<17;i++) progcolor[i] =0;
+for (i=0;i<MAXCHANS+1;i++) progcolor[i] =0;
 for (i=0;i<128;i++) {
   progcolor[progmapper[i]] += progactivity[i];
   }
@@ -1193,7 +1213,7 @@ npulses = trkdata.npulses[0];
 printf("npulses %d\n",trkdata.npulses[0]);
 printf("tempocmds %d\n",trkdata.tempo[0]);
 printf("pitchbends %d\n",trkdata.pitchbend[0]);
-for (i=1;i<17;i++) {
+for (i=1;i<MAXCHANS+1;i++) {
   if (trkdata.pitchbend[i] > 0) {
     printf("pitchbendin %d %d\n",i,trkdata.pitchbend[i]); }
     }
@@ -1207,7 +1227,7 @@ for (i=1;i<128;i++)
   if(progactivity[i] >0) nprogs++;
 if (nprogs > 0) output_progs_data();
 else {
-  for (i=0;i<17;i++) 
+  for (i=0;i<MAXCHANS+1;i++) 
     if(chnactivity[i] > 0) 
        progactivity[channel2prog[i]] = chnactivity[i];
   output_progs_data();
@@ -1216,9 +1236,9 @@ else {
 determine_progcolor();
 printf("\nprogcolor ");
 if (npulses > 0)
-  for (i=0;i<17;i++) printf("%5.2f ",progcolor[i]/(double) npulses);
+  for (i=0;i<MAXCHANS+1;i++) printf("%5.2f ",progcolor[i]/(double) npulses);
 else 
-  for (i=0;i<17;i++) printf("%5.2f ",(double) progcolor[i]);
+  for (i=0;i<MAXCHANS+1;i++) printf("%5.2f ",(double) progcolor[i]);
 printf("\n");
   
 printf("drums ");
@@ -1239,9 +1259,9 @@ else
   for (i=0;i<12;i++) printf("%5.2f ",(double) pitchclass_activity[i]);
 printf("\nchnact "); /* [SS] 2018-02-08 */
 if (npulses > 0)
-  for (i=1;i<17;i++) printf("%5.2f ",chnactivity[i]/(double) trkdata.npulses[0]);
+  for (i=1;i<MAXCHANS+1;i++) printf("%5.2f ",chnactivity[i]/(double) trkdata.npulses[0]);
 else 
-  for (i=0;i<17;i++) printf("%5.2f ",(double) chnactivity[i]);
+  for (i=0;i<MAXCHANS+1;i++) printf("%5.2f ",(double) chnactivity[i]);
 printf("\npitchentropy %f\n",histogram_entropy(pitchclass_activity,12));
 printf("\n");
 }
@@ -1285,9 +1305,9 @@ char *name;
 {
 int i,sum;
 sum = 0;
-for (i=1;i<17;i++) sum += data_array[i];
+for (i=1;i<MAXCHANS+1;i++) sum += data_array[i];
 if (sum != 0) {
-      for (i=0;i<17;i++)
+      for (i=0;i<MAXCHANS+1;i++)
         if(data_array[i]>0) {
           printf("%s ",name);
           printf("%d %d ",i,data_array[i]);
@@ -1301,7 +1321,7 @@ if (sum != 0) {
 void output_track_summary () {
 int i;
 /* find first channel containing data */
-for (i=0;i<17;i++) {
+for (i=0;i<MAXCHANS+1;i++) {
    if(trkdata.notecount[i] == 0 && trkdata.chordcount[i] == 0) continue; 
    printf("trkinfo ");
    printf("%d %d ",i,trkdata.program[i]); /* channel number and program*/
@@ -1320,7 +1340,7 @@ void stats_trackstart()
 {
   int i;
   tracknum++;
-  for (i=0;i<17;i++) {
+  for (i=0;i<MAXCHANS+1;i++) {
      trkdata.notecount[i] = 0;
      trkdata.notemeanpitch[i] = 0;
      trkdata.notelength[i] = 0;
@@ -1496,6 +1516,7 @@ static char *patches[] = {
  "Guitar Fret Noise", "Breath Noise", "Seashore", "Bird Tweet",
  "Telephone ring", "Helicopter", "Applause", "Gunshot"};
 /*
+fprintf(stderr, "%s:%u:%s chan=%d program=%d\n",__FILE__,__LINE__,__func__,chan,program);
   if (onlychan >=0 && chan != onlychan) return;
 */
   if (prtime(timeunits)) return;
@@ -1507,6 +1528,7 @@ void stats_program(chan,program)
 int chan, program;
 {
 int beatnumber;
+fprintf(stderr, "%s:%u:%s chan=%d program=%d\n",__FILE__,__LINE__,__func__,chan,program);
 if (program <0 || program > 127) return; /* [SS] 2018-03-06 */
 if (trkdata.program[chan+1] != 0) {
   beatnumber = Mf_currtime/division;
@@ -4055,12 +4077,12 @@ int i;
 int verylasttick;
 initfunc_for_midinotes();
 init_notechan();
-for (i=0;i<17;i++) {last_tick[i]=0;}
+for (i=0;i<MAXCHANS+1;i++) {last_tick[i]=0;}
 /*F = efopen(argv[argc -1],"rb");*/
 Mf_getc = filegetc;
 mfread();
 verylasttick = 0;
-for (i=0;i<17;i++) {
+for (i=0;i<MAXCHANS+1;i++) {
   if(verylasttick < last_tick[i]) verylasttick = last_tick[i];
   }
 printf("%d\n",verylasttick);
@@ -4073,7 +4095,7 @@ int argc;
 int i;
 initfunc_for_mftext();
 init_notechan();
-for (i=0;i<17;i++) {last_tick[i]=0;}
+for (i=0;i<MAXCHANS+1;i++) {last_tick[i]=0;}
 /*F = efopen(argv[argc -1],"rb");*/
 Mf_getc = filegetc;
 mfread();
