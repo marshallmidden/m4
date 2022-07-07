@@ -6,16 +6,6 @@
 # 1) vol(sf,0.25)    -- optional 2nd argument for length of sf.
 #    vol(fp,0.25)    -- optional 2nd argument for length of "f" before returning to "p".
 # 2) b-6 ... some 1/2 notes that are vol(sf) -- should they be shortened per above?
-# 3) fix yaps and abcm2ps to allow 256 voices.
-#   a) yaps has a limit of V:30
-#       Warning in line 348 : Number of available voices exceeded
-#       Warning in line 359 : V:32 out of sequence, treating as V:30
-#       Warning in line 359 : Number of available voices exceeded
-#       Warning in line 370 : V:33 out of sequence, treating as V:30
-#   b) abcm2ps-8.14.13 (2022-01-29)
-#       e.abc:370:2: error: Too many voices
-#        370 V:33
-# 4) Think - convert csv to fs?  Can read it and use the printout/convert routine?
 # ----------------------------------------------------------------------------
 #    A) Put in largo and ties and spaces for note tail groupings for:
 #    +  One last check of printing - for correct notes.
@@ -44,6 +34,7 @@
 # ./musicomp --vertical song.gcs song.v     # Either v or h (or mixed) input, vertical output.
 # ./musicomp --horizontal song.gcs song.h   # Either v or h (or mixed) input, horizontal output.
 # ./musicomp --fluidsynth song.gcs song.fs  # Input to fluidsynth.
+# ./musicomp --fluidsynth song.csv song.fs  # Input can be CSV file, output can ONLY be fluidsynth.
 # ----------------------------------------------------------------------------
 # NOTDONEYET - Note processing:
 #   print_error("NOTDONEYET - doing gsw_operand type of note", line)    - Not related to MIDI.
@@ -1222,7 +1213,7 @@ global default_note_length          # length of a beat (note)
 default_note_length = { '': 1.0 / 4.0 } # before a measure.
 global tempo_speed_now              # beats per minute for each measure.
 tempo_speed_now = { '': tempo_speed_default }
-global tempo_now_note_length          # length of a beat (note)
+global tempo_now_note_length        # length of a beat (note)
 tempo_now_note_length = { '': 1.0 / 4.0 } # before a measure.
 
 global file_name                    # None = use tty.
@@ -1230,6 +1221,17 @@ global output_name                  # File to print to (default is sys.stdout).
 
 global array_of_lines               # For fluidsynth output, have an array of lines.
 array_of_lines = []
+
+global fluidsynth_done
+fluidsynth_done = False             # Set True if done with midi1csv printing into array and 'quit'.
+
+global first_reset_voice
+first_reset_voice = True            # Only do a reset controller with first voice.
+
+global do_csv_read
+do_csv_read = False                 # Set true if first line says it is a csv file. :)
+
+# ----------------------------------------------------------------------------
 # ----------------------------------------------------------------------------
 def print_error(strg, line):
     global linecount
@@ -1278,12 +1280,7 @@ def print_debug(strg):
 # End of print_debug
 
 # ----------------------------------------------------------------------------
-global fluidsynth_done
-fluidsynth_done = False
-
-# ----------------------------------------------------------------------------
 def print_output(strg):
-    global output_name
     global args
     global array_of_lines
     global fluidsynth_done
@@ -1292,7 +1289,7 @@ def print_output(strg):
         really_print_output(strg)
     else:
         if strg == "quit":
-            fluidsynth_done = False
+            fluidsynth_done = True
         else:
             array_of_lines.append(strg)
         # fi
@@ -2175,9 +2172,6 @@ def print_out_v_or_h():
 # End of print_out_v_or_h
 
 # ----------------------------------------------------------------------------
-global first_reset_voice
-first_reset_voice = True
-# ----------------------------------------------------------------------------
 def print_out_midi1csv_start(voiceon):
     global first_reset_voice
     print_output('{}, 0, Start_track'.format(voiceon+1))
@@ -2841,7 +2835,16 @@ def process_fs_check(what, lth, min_next, vtlines, tempo_s, tempo_l):
             elif str[0:5] == 'prog ':
                 really_print_output("{}".format(str))
             elif str[0:6] == 'tempo ':
-                tempo_s, tempo_l = str[6:].split()
+                x = str[6:].split()
+                if len(x) < 1 or len(x) > 2:
+                    print_error_no_line("Tempo needs a speed - line={}".format(t))
+                elif len(x) == 1:
+                    #    1/(### / (60.0 * 1000000.0)) = 60.02400 = t              for l = 4 (quarter note).
+                    tempo_s = int(1/(int(x[0]) / (60.0 * 1000000.0)))
+                    tempo_l = 4
+                else:
+                    tempo_s, tempo_l = str[6:].split()
+                # fi
 #--                really_print_output("echo tempo {} {}".format(tempo_s, tempo_l))
             elif str[0:3] == 'cc ':
                 break
@@ -2850,6 +2853,7 @@ def process_fs_check(what, lth, min_next, vtlines, tempo_s, tempo_l):
             elif str[0:7] == 'noteon ':
                 break
             else:
+                print_error_no_line("Unrecognized - line={}".format(t))
                 error_now = error_now + 1
                 break
             # fi
@@ -2886,6 +2890,8 @@ def print_out_fluidsynth():
         'Time_signature': 'echo meter',
         'Key_signature': 'echo key',
         'Control_c': 'cc',
+        'End_of_file': 'echo End_of_file',
+        'Title_t': 'echo Title_t',
     }
 
     v_t_lines = { }
@@ -2973,12 +2979,9 @@ def print_out_fluidsynth():
         current_time = min_next
         # Move all this_time voices forward past min_next.
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-        while True:
-            tempo_s, tempo_l = process_fs_check('cc ', 3, min_next, v_t_lines, tempo_s, tempo_l)
-            tempo_s, tempo_l = process_fs_check('noteoff ', 8, min_next, v_t_lines, tempo_s, tempo_l)
-            tempo_s, tempo_l = process_fs_check('noteon ', 7, min_next, v_t_lines, tempo_s, tempo_l)
-            break
-        # elihw
+        tempo_s, tempo_l = process_fs_check('cc ', 3, min_next, v_t_lines, tempo_s, tempo_l)
+        tempo_s, tempo_l = process_fs_check('noteoff ', 8, min_next, v_t_lines, tempo_s, tempo_l)
+        tempo_s, tempo_l = process_fs_check('noteon ', 7, min_next, v_t_lines, tempo_s, tempo_l)
     # elihw
 
     really_print_output("quit")
@@ -3336,8 +3339,10 @@ def do_pass2():
     if args.vertical or args.horizontal:
         print_out_v_or_h()
     elif args.midi1csv or args.fluidsynth:
-        print_out_midi1csv_notes()
-        check_voices_without_notes()
+        if not do_csv_read:
+            print_out_midi1csv_notes()
+            check_voices_without_notes()
+        # fi
     else:       # ABC
         print_out_abc()
         print_output("")
@@ -8482,6 +8487,14 @@ def process_notes(line):
 # End of process_notes
 
 # ============================================================================
+def read_csv_file(l):
+    global array_of_lines
+
+    array_of_lines.append(l)
+    return
+# End of read_csv_file
+
+# ============================================================================
 # Parse and process line.
 def process_line(t, line):
     global iftest                       # check if after if or else.
@@ -8740,6 +8753,8 @@ def main():
     global key_voice
     global commentonline
     global precomment
+    global linecount
+    global do_csv_read
 
     parse_args()
     if args.vertical or args.horizontal:
@@ -8787,7 +8802,18 @@ def main():
     precomment = ''
     while True:
         line, commentonline = get_line()
+        # fi
         if line:
+            if do_csv_read:
+                read_csv_file(line)
+                continue
+            # fi
+            if (linecount == 1 and args.fluidsynth):
+                if line[:17] == '0, 0, Header, 1, ':
+                    do_csv_read = True
+                    continue
+                # fi
+            # fi
             # Split line on spaces, then process line.
             while True:
                 if macro_defining is None:
