@@ -6,6 +6,7 @@
 # 1) vol(sf,0.25)    -- optional 2nd argument for length of sf.
 #    vol(fp,0.25)    -- optional 2nd argument for length of "f" before returning to "p".
 # 2) b-6 ... some 1/2 notes that are vol(sf) -- should they be shortened per above?
+# 3) --fluidsynth input of a .csv file -- MIDI_port commands -- WTF?
 # ----------------------------------------------------------------------------
 #    A) Put in largo and ties and spaces for note tail groupings for:
 #    +  One last check of printing - for correct notes.
@@ -2892,6 +2893,11 @@ def print_out_fluidsynth():
         'Control_c': 'cc',
         'End_of_file': 'echo End_of_file',
         'Title_t': 'echo Title_t',
+        # Track, Time, MIDI_port, Number This meta-event specifies that subsequent events in
+        # the Track should be sent to MIDI port (bus) Number, between 0 and 255. This meta-event 
+        # usually appears at the start of a track with Time zero, but may appear within a track
+        # should the need arise to change the port while the track is being played.
+        'MIDI_port': 'echo MIDI_port',
     }
 
     v_t_lines = { }
@@ -3192,12 +3198,19 @@ def check_staves_notes_order():
                         args.fluidsynth = False
                         args.abc = False
                         key_voice[measure_on][1] = k
+                        prenote = ''
+                        postnote = ''
+                        onenotevolume = None
+                        m4_note, onenotevolume, prenote, postnote = do_vol_cresc(m4_note, voice, 'check_staves_notes_order', prenote, postnote, onenotevolume)
                         m4_therest, m4_thenote, m4_typenote = getnote(m4_note, 1, 'check_staves_notes_order')
                         args.horizontal = saveargsh
                         args.vertical = saveargsv
                         args.midi1csv = saveargsm
                         args.abc = saveargabc
                         args.fluidsynth = saveargfluidsynth
+#                        if onenotevolume is None:
+#                            return
+#                        # fi
                         key_voice[measure_on][1] = savekeyvoice
                         m4_note = m4_thenote
                     #-- elif args.midi1csv or args.fluidsynth:
@@ -7598,6 +7611,83 @@ def get_cresc(temp1, line):
 # End of get_cresc
 
 # ----------------------------------------------------------------------------
+# Returns:
+#   prenote - things to put in front of a note.
+#   postnote - things to put after the note
+def do_vol_cresc(temp1, onvoice, line, prenote, postnote, onenotevolume):
+    global running_vl
+    global args
+    global measure_on
+    global vlprint
+
+    while True:
+        if temp1[0:4] == 'vol(' or temp1[0:5] == ' vol(':
+            therest, onenotevolume, f2, s1 = get_vol_note(temp1, onvoice, line)
+            # onenotevolume for midi1csv format.
+            if onenotevolume is None:
+                return temp1, None, prenote, postnote
+            # fi
+            if f2 != -1:
+                running_vl[onvoice][measure_on] = f2
+            # fi
+            if args.vertical or args.horizontal or args.midi1csv or args.fluidsynth:
+                prenote = prenote + 'vol(' + str(s1) + ') '
+                # onenotevole already set for below.
+            else:           # ABC
+                # Cannot do sfp and such. Boo His.
+                j = vol_to_vlprint_round(onenotevolume)
+                prenote = prenote + DECORATIONS + vlprint[j] + DECORATIONS
+                if f2 == -1:
+                    j = vol_to_vlprint_round(running_vl[onvoice][measure_on])
+                    postnote = postnote + DECORATIONS + vlprint[j] + DECORATIONS
+                elif f2 != onenotevolume:
+                    j = vol_to_vlprint_round(f2)
+                    postnote = postnote + DECORATIONS + vlprint[j] + DECORATIONS
+                # fi
+            # fi
+            temp1 = therest
+            continue
+        # fi
+        if (temp1[0:5] == 'cres(' or temp1[0:4] == 'cre(' or temp1[0:3] == 'cr(' or
+            temp1[0:6] == ' cres(' or temp1[0:5] == ' cre(' or temp1[0:4] == ' cr(' or
+            temp1[0:5] == 'dimi(' or temp1[0:4] == 'dim(' or temp1[0:3] == 'di(' or
+            temp1[0:6] == ' dimi(' or temp1[0:5] == ' dim(' or temp1[0:4] == ' di('):
+            print_error("cresc() and dimin() are incorrectly written.", line)
+            return temp1, None, prenote, postnote
+        # fi
+
+        if (temp1[0:6] == 'cresc(' or temp1[0:6] == 'dimin(' or
+            temp1[0:7] == ' cresc(' or temp1[0:7] == ' dimin('):
+            # cresc(ff,5.25)    # volume to go to, 5.25 = time in floating.
+            therest, newvolume, newtime = get_cresc(temp1, line)
+            if newvolume is None:
+                return temp1, None, prenote, postnote
+            # fi
+            cresc_volume[onvoice] = newvolume
+            if args.vertical or args.horizontal:
+                prenote = prenote + 'cresc(' + str(newvolume) + ',' + str(newtime) + ') '
+                cresc_time[onvoice] = newtime + 0.0
+            elif args.midi1csv or args.fluidsynth:
+                cresc_time[onvoice] = int(round(newtime * MIDICLICKSPERQUARTER * 4))
+            else:           # ABC
+                if newvolume > running_vl[onvoice][measure_on]:
+                    cresc_direction[onvoice] = True
+                    prenote = prenote + DECORATIONS + 'crescendo(' + DECORATIONS
+                else:
+                    cresc_direction[onvoice] = False
+                    prenote = prenote + DECORATIONS + 'diminuendo(' + DECORATIONS
+                # fi
+                cresc_time[onvoice] = newtime + 0.0
+            # fi
+            temp1 = therest
+            continue
+        # fi
+        break
+    # elihw
+    return temp1, onenotevolume, prenote, postnote
+#   End of do_vol_cresc
+
+# ----------------------------------------------------------------------------
 # Parse and process possible notes line.
 # All have ,'s as separators.
 # old way is: voice1,voice2,voice3,voice4   -- 3c4, 3e4, 3g4, 4c4
@@ -7771,67 +7861,8 @@ def process_notes(line):
                         return                                      # Go out and read line for macro.
                     # fi
                 # rof
-                if temp1[0:4] == 'vol(' or temp1[0:5] == ' vol(':
-                    therest, onenotevolume, f2, s1 = get_vol_note(temp1, onvoice, line)
-                    # onenotevolume for midi1csv format.
-                    if onenotevolume is None:
-                        return
-                    # fi
-                    if f2 != -1:
-                        running_vl[onvoice][measure_on] = f2
-                    # fi
-                    if args.vertical or args.horizontal or args.midi1csv or args.fluidsynth:
-                        prenote = prenote + 'vol(' + str(s1) + ') '
-                        # onenotevole already set for below.
-                    else:           # ABC
-                        # Cannot do sfp and such. Boo His.
-                        j = vol_to_vlprint_round(onenotevolume)
-                        prenote = prenote + DECORATIONS + vlprint[j] + DECORATIONS
-                        if f2 == -1:
-                            j = vol_to_vlprint_round(running_vl[onvoice][measure_on])
-                            postnote = postnote + DECORATIONS + vlprint[j] + DECORATIONS
-                        elif f2 != onenotevolume:
-                            j = vol_to_vlprint_round(f2)
-                            postnote = postnote + DECORATIONS + vlprint[j] + DECORATIONS
-                        # fi
-                    # fi
-                    temp1 = therest
-                    continue
-                # fi
-                if (temp1[0:5] == 'cres(' or temp1[0:4] == 'cre(' or temp1[0:3] == 'cr(' or
-                    temp1[0:6] == ' cres(' or temp1[0:5] == ' cre(' or temp1[0:4] == ' cr(' or
-                    temp1[0:5] == 'dimi(' or temp1[0:4] == 'dim(' or temp1[0:3] == 'di(' or
-                    temp1[0:6] == ' dimi(' or temp1[0:5] == ' dim(' or temp1[0:4] == ' di('):
-                    print_error("cresc() and dimin() are incorrectly written.", line)
-                    return
-                # fi
 
-                if (temp1[0:6] == 'cresc(' or temp1[0:6] == 'dimin(' or
-                    temp1[0:7] == ' cresc(' or temp1[0:7] == ' dimin('):
-                    # cresc(ff,5.25)    # volume to go to, 5.25 = time in floating.
-                    therest, newvolume, newtime = get_cresc(temp1, line)
-                    if newvolume is None:
-                        return
-                    # fi
-                    cresc_volume[onvoice] = newvolume
-                    if args.vertical or args.horizontal:
-                        prenote = prenote + 'cresc(' + str(newvolume) + ',' + str(newtime) + ') '
-                        cresc_time[onvoice] = newtime + 0.0
-                    elif args.midi1csv or args.fluidsynth:
-                        cresc_time[onvoice] = int(round(newtime * MIDICLICKSPERQUARTER * 4))
-                    else:           # ABC
-                        if newvolume > running_vl[onvoice][measure_on]:
-                            cresc_direction[onvoice] = True
-                            prenote = prenote + DECORATIONS + 'crescendo(' + DECORATIONS
-                        else:
-                            cresc_direction[onvoice] = False
-                            prenote = prenote + DECORATIONS + 'diminuendo(' + DECORATIONS
-                        # fi
-                        cresc_time[onvoice] = newtime + 0.0
-                    # fi
-                    temp1 = therest
-                    continue
-                # fi
+                temp1, onenotevolume, prenote, postnote = do_vol_cresc(temp1, onvoice, line, prenote, postnote, onenotevolume)
                 break
             # elihw
             therest, thenote, typenote = getnote(temp1, onvoice, line) # get next note
@@ -8815,11 +8846,17 @@ def main():
                 # fi
             # fi
             # Split line on spaces, then process line.
+            num_putd = 0
             while True:
                 if macro_defining is None:
                     if line and line[0] == '=':
                         line = process_putd(line)
                         if len(line) > 0 and line[0] == '=':
+                            num_putd += 1
+                            if num_putd > 100:
+                                print_error("Over 100 putd's done on line", line)
+                                break
+                            # fi
                             continue
                         # fi
                     # fi
