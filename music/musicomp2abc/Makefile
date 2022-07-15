@@ -17,6 +17,8 @@ TESTS += TEMPO
 TESTS += RANGE1
 TESTS += RANGE2
 TESTS += CRESC
+TESTS += XPOSE1
+TESTS += XPOSE2
 #-----------------------------------------------------------------------------
 # SONGS_GCS = ${SONGS:=.gcs}
 SONGS_E = ${SONGS:=.E}
