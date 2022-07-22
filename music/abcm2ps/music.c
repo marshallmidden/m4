@@ -2814,6 +2814,7 @@ static void set_pitch(struct SYMBOL *last_s)
 	smallest_duration = dur;
 }
 
+#define VOICESPERSTAFF	6
 /* -- set the stem direction when multi-voices -- */
 /* this function is called only once per tune */
 static void set_stem_dir(void)
@@ -2827,7 +2828,7 @@ static void set_stem_dir(void)
 			int voice;
 			short ymn;
 			short ymx;
-		} st[4];		/* (no more than 4 voices per staff) */
+		} st[VOICESPERSTAFF];		/* (no more than 4 voices per staff) */
 	} stb[MAXSTAFF];
 	struct {
 		signed char st1, st2;	/* (a voice cannot be on more than 2 staves) */
@@ -2839,7 +2840,7 @@ static void set_stem_dir(void)
 	while (s) {
 		for (staff = nst; staff >= 0; staff--) {
 			stb[staff].nvoice = -1;
-			for (i = 4; --i >= 0; ) {
+			for (i = VOICESPERSTAFF; --i >= 0; ) {
 				stb[staff].st[i].voice = -1;
 				stb[staff].st[i].ymx = 0;
 				stb[staff].st[i].ymn = 24;
@@ -2859,7 +2860,7 @@ static void set_stem_dir(void)
 				sy = sy->next;
 				for (staff = nst; staff <= sy->nstaff; staff++) {
 					stb[staff].nvoice = -1;
-					for (i = 4; --i >= 0; ) {
+					for (i = VOICESPERSTAFF; --i >= 0; ) {
 						stb[staff].st[i].voice = -1;
 						stb[staff].st[i].ymx = 0;
 						stb[staff].st[i].ymn = 24;
@@ -2896,7 +2897,7 @@ if (staff > nst) {
 					break;
 			}
 			if (i < 0) {
-				if (++stb[staff].nvoice >= 4)
+				if (++stb[staff].nvoice >= VOICESPERSTAFF)
 					bug("Too many voices per staff", 1);
 				for (i = 0; i < stb[staff].nvoice; i++) {
 					if (rvoice < stb[staff].st[i].voice) {
@@ -4404,11 +4405,13 @@ static void set_stems(void)
 			    if (s2->nflags > nflags)
 				nflags = s2->nflags;
 		} else if ((s->sflags & (S_BEAM_ST | S_BEAM_END)) == S_BEAM_END) {
-			for (s2 = s->prev; /*s2*/; s2 = s2->prev) {
+//			for (s2 = s->prev; /*s2*/; s2 = s2->prev) {
+			for (s2 = s->prev; s2; s2 = s2->prev) {
 				if (s2->sflags & S_BEAM_ST)
 					break;
 			}
 /*			if (s2) */
+			if (s2)
 			    if (s2->nflags > nflags)
 				nflags = s2->nflags;
 		}
