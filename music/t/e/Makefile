@@ -21,8 +21,11 @@ ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 #-----------------------------------------------------------------------------
 #-- PAGES = --pages 6..75
 #-- MEASURES = --measures 48..422
+# VOICES = --voices 42..62
 PAGES =
 MEASURES =
+VOICES =
+#++ VOICES = --voices 42..62
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
@@ -30,7 +33,7 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 .SUFFIXES: .mid .csv .ps .abc _m.ps .E .wav
 # output $@   -- input $<
 %.fs:  %.E
-	${MUSICOMP2ABC} --fluidsynth $< $@ ${PAGES} ${MEASURES} \
+	${MUSICOMP2ABC} --fluidsynth $< $@ ${PAGES} ${MEASURES} ${VOICES} \
 		|| (rm -f $@ ; exit 1)
 %.csv:  %.E
 	${MUSICOMP2ABC} --midi1csv $< $@ \
@@ -42,7 +45,7 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-- 	fluidsynth -F $@ -a coreaudio -d -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 $< \
 #-- 		|| (rm -f $@ ; exit 1)
 %.abc:  %.E
-	${MUSICOMP2ABC} --abc $< $@ \
+	${MUSICOMP2ABC} --abc $< $@ ${PAGES} ${MEASURES} ${VOICES} \
 		|| (rm -f $@ ; exit 1)
 %.ps:   %.abc
 	${YAPS} $< -o $@ -k \
