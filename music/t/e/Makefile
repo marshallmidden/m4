@@ -19,13 +19,14 @@ ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 #-- ABCM2PS_ARGS = "-s 0.42 -M -b 1 $< -i -N 2 -j 1"
 #-- ABCM2PS_ARGS = -s 0.43 -M -b 1 $< -i -N 2 -j 1
 #-----------------------------------------------------------------------------
-#-- PAGES = --pages 6..75
-#-- MEASURES = --measures 48..422
-# VOICES = --voices 42..62
+#-DOC-	PAGES = --pages 6..75
+#-DOC-	MEASURES = --measures 48..422
+#-DOC-	VOICES = --voices 42..62
 PAGES =
-MEASURES =
-VOICES =
-#++ VOICES = --voices 42..62
+#-- MEASURES =
+MEASURES = --measure 61..100
+#-- VOICES =
+VOICES = --voices 42..62
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
@@ -57,6 +58,11 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 		|| (rm -f $@ ; exit 1)
 %.E: %.gcs
 	${CPP} $< -o $@ \
+		|| (rm -f $@ ; exit 1)
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+.SUFFIXES: .v
+%.v:  %.E
+	${MUSICOMP2ABC} --vertical $< $@ ${PAGES} ${MEASURES} ${VOICES} \
 		|| (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 #-- .PRECIOUS: %.A_abc
@@ -118,7 +124,7 @@ clean:
 #--	rm -f *.wav
 	rm -f *.E
 	rm -f A.[0123]* B.[0123]* C.[0123]*
-	rm -f X X.v
+	rm -f *.v
 #-----------------------------------------------------------------------------
 #-- $(foreach e,$(s),$(eval $(call many_targets,$(e))))
 #-----------------------------------------------------------------------------
