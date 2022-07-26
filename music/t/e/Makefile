@@ -1,7 +1,6 @@
 V            = e
 #-----------------------------------------------------------------------------
 #-- SEPARATE     = ./A.separate
-#-- MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc --pages 20
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 YAPS         = yaps
 ABCM2PS      = abcm2ps
@@ -19,14 +18,26 @@ ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 #-- ABCM2PS_ARGS = "-s 0.42 -M -b 1 $< -i -N 2 -j 1"
 #-- ABCM2PS_ARGS = -s 0.43 -M -b 1 $< -i -N 2 -j 1
 #-----------------------------------------------------------------------------
+# Limit processing... some done in compiling, others with output.
 #-DOC-	PAGES = --pages 6..75
 #-DOC-	MEASURES = --measures 48..422
 #-DOC-	VOICES = --voices 42..62
 PAGES =
-#-- MEASURES =
-MEASURES = --measure 61..100
-#-- VOICES =
-VOICES = --voices 42..62
+MEASURES =
+VOICES =
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# Stringed instruments only.
+#-- PAGES += --pages 13..15
+#-- MEASURES += --measure 73..422
+#-- VOICES += --voices 42..62
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# Horned instruments only, except for brass.
+VOICES += --voices 13..35
+#-- MEASURES += --measure 0,23..422
+MEASURES += --measure 34..422
+#-- MEASURES += --measure 1..422
+#-- PAGES += --pages 4
+#-- PAGES += --pages 5..75
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
