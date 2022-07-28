@@ -1,6 +1,5 @@
 V            = e
 #-----------------------------------------------------------------------------
-#-- SEPARATE     = ./A.separate
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 YAPS         = yaps
 ABCM2PS      = abcm2ps
@@ -11,12 +10,7 @@ ABCM2PS      = abcm2ps
 # -M = suppress lyrics
 # -N 2  = number pages in upper right.
 # -s nn = page scale to (default 0.75) = %%scale.
-#-- ABCM2PS_ARGS = "-l -s 0.42 -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@)
-#-- ABCM2PS_ARGS = -s 0.40 -M -b 1 $< -i -N 2 -j 1
-#-- ABCM2PS_ARGS = -s 0.41 -M -b 1 $< -i -N 2 -j 1
 ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
-#-- ABCM2PS_ARGS = "-s 0.42 -M -b 1 $< -i -N 2 -j 1"
-#-- ABCM2PS_ARGS = -s 0.43 -M -b 1 $< -i -N 2 -j 1
 #-----------------------------------------------------------------------------
 # Limit processing... some done in compiling, others with output.
 #-DOC-	PAGES = --pages 6..75
@@ -25,18 +19,21 @@ ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 PAGES =
 MEASURES =
 VOICES =
+WHICH = "-DWHICH=0"
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Stringed instruments only.
+#-- WHICH = "-DWHICH=1"
 #-- PAGES += --pages 13..15
 #-- MEASURES += --measure 73..422
 #-- VOICES += --voices 42..62
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Clarinet A/B and English Horn A.
-#-- VOICES += --voices 18..20
+WHICH = "-DWHICH=3"
+VOICES = --voices 18..20
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Horned instruments only, except for brass.
+#-- WHICH = "-DWHICH=2"
 # VOICES += --voices 13..35
-#++ VOICES += --voices 18..20
 #-- MEASURES += --measure 0,23..422
 #-- MEASURES += --measure 34..422
 #++ MEASURES += --measure 49..422
@@ -44,105 +41,86 @@ VOICES =
 #-- PAGES += --pages 4
 #-- PAGES += --pages 5..75
 #-----------------------------------------------------------------------------
-CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
+CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC ${WHICH}
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.csv %.mid %.E
 .SUFFIXES: .mid .csv .ps .abc _m.ps .E .wav
-# output $@   -- input $<
+# Output $@  -- input $< (first dependency -- after the :).
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+%.E: %.gcs Makefile
+	${CPP} $< -o $@ \
+		|| (rm -f $@ ; exit 1)
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 %.fs:  %.E
 	${MUSICOMP2ABC} --fluidsynth $< $@ ${PAGES} ${MEASURES} ${VOICES} \
 		|| (rm -f $@ ; exit 1)
-%.csv:  %.E
-	${MUSICOMP2ABC} --midi1csv $< $@ \
-		|| (rm -f $@ ; exit 1)
-#-- %.mid:  %.csv
-#-- 	csvmidi $< $@ \
-#-- 		|| (rm -f $@ ; exit 1)
-#-- %.wav:  %.mid
-#-- 	fluidsynth -F $@ -a coreaudio -d -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 $< \
-#-- 		|| (rm -f $@ ; exit 1)
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 %.abc:  %.E
 	${MUSICOMP2ABC} --abc $< $@ ${PAGES} ${MEASURES} ${VOICES} \
 		|| (rm -f $@ ; exit 1)
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 %.ps:   %.abc
 	${YAPS} $< -o $@ -k \
 		|| (rm -f $@ ; exit 1)
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 %_m.ps: %.abc
-#--	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@)
-#--		|| (rm -f $@ ; exit 1)
 	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) \
 		|| (rm -f $@ ; exit 1)
-%.E: %.gcs
-	${CPP} $< -o $@ \
+#-----------------------------------------------------------------------------
+# Manually invokable rules follow.
+%.csv:  %.E
+	${MUSICOMP2ABC} --midi1csv $< $@ \
 		|| (rm -f $@ ; exit 1)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 .SUFFIXES: .v
 %.v:  %.E
 	${MUSICOMP2ABC} --vertical $< $@ ${PAGES} ${MEASURES} ${VOICES} \
 		|| (rm -f $@ ; exit 1)
-#-----------------------------------------------------------------------------
-#-- .PRECIOUS: %.A_abc
-#-- .SUFFIXES: _A.ps .A_abc _m_A.ps
-# output $@   -- input $<
-#-- %.A_abc:  %.E
-#-- 	${MUSICOMP2ABC} --abc $< $@
-#-- %_A.ps:   %.A_abc
-#-- 	${YAPS} $< -o $@ -k
-#-- %_m_A.ps: %.A_abc
-#-- 	${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@
-#-----------------------------------------------------------------------------
-#-- As = 01 02 03 04 05 06 07 08 09 10 11 12
-#-- w_A := ${words $(As)}
-#-- s := $(shell seq 1 $(w_A))
-#-----------------------------------------------------------------------------
-#-- define many_targets
-#--     help::
-#-- #	@echo "  a${word $1,${As}}    - Use '${SEPARATE} to create A.${word $1,${As}}, and yaps&abcm2ps for staff $1"
-#-- #    A.${word $1,${As}}: ${V}.E ${SEPARATE}
-#-- #	${SEPARATE}
-#--     .PHONY: a.${word $1,${As}}
-#--     a${word $1,${As}}: A.${word $1,${As}} a.${word $1,${As}}_A.ps a.${word $1,${As}}_m_A.ps
-#-- 	open a.${word $1,${As}}_A.ps a.${word $1,${As}}_m_A.ps
-#--     a.${word $1,${As}}.E: A.${word $1,${As}}
-#-- 	ln -sf A.${word $1,${As}} a.${word $1,${As}}.E
-#-- endef
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+.SUFFIXES: .horizontal
+%.horizontal:  %.E
+	${MUSICOMP2ABC} --horizontal $< $@ ${PAGES} ${MEASURES} ${VOICES} \
+		|| (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help
 help::
 	@echo "Targets:"
 	@echo "  clean  - Remove postscript (ps), csv, and mid files."
 	@echo ""
-	@echo "  all    - create ${V}.abc from ${V} (via 'musicomp2abc')"
+	@echo "  all    - create ${V}.E from ${V}.gcs (via 'cpp')"
+	@echo "         - and ${V}.abc from ${V}.E (via 'musicomp2abc --abc')"
 	@echo "         - and ${V}.ps from ${V}.abc (via 'yaps')"
-	@echo "         - and Out.ps from ${V}.abc (via 'abcm2ps')"
-#--	@echo "         - and ${V}.mid from ${V} (via 'musicomp2abc --midicsv')"
+	@echo "         - and ${V}_m.ps from ${V}.abc (via 'abcm2ps')"
+	@echo "         - and ${V}.fs from ${V}.E (via 'musicomp2abc --fluidsynth')"
 	@echo ""
 #-----------------------------------------------------------------------------
 .PHONY: check
 check:
 	@echo "V=${V}"
-#	@echo "SEPARATE=${SEPARATE}"
+	@echo "CPP=${CPP}"
 	@echo "MUSICOMP2ABC=${MUSICOMP2ABC}"
 	@echo "YAPS=${YAPS}"
 	@echo "ABCM2PS=${ABCM2PS}"
+	@echo "ABCM2PS_ARGS=${ABCM2PS_ARGS}"
+	@echo "PAGES=${PAGES}"
+	@echo "MEASURES=${MEASURES}"
+	@echo "VOICES=${VOICES}"
+	@echo "WHICH=${WHICH}"
 #=============================================================================
-#-- all: ${V}.mid ${V}.ps ${V}_m.ps ${V}.wav ${V}.fs
-#-- all: ${V}.fs
 all: ${V}.ps ${V}_m.ps ${V}.abc ${V}.fs
 #=============================================================================
 .PHONY: clean
 clean:
-	rm -f *.ps
-	rm -f *.stdout *.stderr
-#--	rm -f *.csv *.mid *.fs
-	rm -f *.csv *.fs
-	rm -f *.abc *.A_abc
-#--	rm -f *.wav
 	rm -f *.E
-	rm -f A.[0123]* B.[0123]* C.[0123]*
-	rm -f *.v
-#-----------------------------------------------------------------------------
-#-- $(foreach e,$(s),$(eval $(call many_targets,$(e))))
+	rm -f *.abc
+	rm -f *.ps
+	rm -f *.fs
+#--	rm -f *.A_abc
+#--	rm -f *.stdout *.stderr
+#--	rm -f *.csv *.mid
+#--	rm -f *.wav
+#--	rm -f A.[0123]* B.[0123]* C.[0123]*
+#--	rm -f *.v
 #-----------------------------------------------------------------------------
 # End of Makefile
 #-----------------------------------------------------------------------------
