@@ -31,10 +31,15 @@ VOICES =
 #-- MEASURES += --measure 73..422
 #-- VOICES += --voices 42..62
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# Clarinet A/B and English Horn A.
+#-- VOICES += --voices 18..20
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Horned instruments only, except for brass.
-VOICES += --voices 13..35
+# VOICES += --voices 13..35
+#++ VOICES += --voices 18..20
 #-- MEASURES += --measure 0,23..422
-MEASURES += --measure 34..422
+#-- MEASURES += --measure 34..422
+#++ MEASURES += --measure 49..422
 #-- MEASURES += --measure 1..422
 #-- PAGES += --pages 4
 #-- PAGES += --pages 5..75
