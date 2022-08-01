@@ -8,7 +8,7 @@ ABCM2PS      = abcm2ps
 # -j nn = number every this many bars.
 # -l = landscape mode
 # -M = suppress lyrics
-# -N 2  = number pages in upper right.
+# -N 2 = number pages in upper right.
 # -s nn = page scale to (default 0.75) = %%scale.
 ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 #-----------------------------------------------------------------------------
@@ -28,8 +28,8 @@ WHICH = "-DWHICH=0"
 #-- VOICES += --voices 42..62
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Clarinet A/B and English Horn A.
-WHICH = "-DWHICH=3"
-VOICES = --voices 18..20
+#-- WHICH = "-DWHICH=3"
+#-- VOICES = --voices 18..20
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Horned instruments only, except for brass.
 #-- WHICH = "-DWHICH=2"
@@ -41,25 +41,25 @@ VOICES = --voices 18..20
 #-- PAGES += --pages 4
 #-- PAGES += --pages 5..75
 #-----------------------------------------------------------------------------
-CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC ${WHICH}
+#-- CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC ${WHICH}
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.abc %.csv %.mid %.E
-.SUFFIXES: .mid .csv .ps .abc _m.ps .E .wav
-# Output $@  -- input $< (first dependency -- after the :).
+.PRECIOUS: %.abc %.csv %.mid
+.SUFFIXES: .mid .csv .ps .abc _m.ps
+# Output $@ -- input $< (first dependency -- after the :).
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-%.E: %.gcs Makefile
-	${CPP} $< -o $@ \
-		|| (rm -f $@ ; exit 1)
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-%.fs:  %.E
+#-- %.E: %.gcs Makefile
+#-- 	${CPP} $< -o $@ \
+#-- 		|| (rm -f $@ ; exit 1)
+#-- # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+%.fs: %.gcs
 	${MUSICOMP2ABC} --fluidsynth $< $@ ${PAGES} ${MEASURES} ${VOICES} \
 		|| (rm -f $@ ; exit 1)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-%.abc:  %.E
+%.abc: %.gcs Makefile
 	${MUSICOMP2ABC} --abc $< $@ ${PAGES} ${MEASURES} ${VOICES} \
 		|| (rm -f $@ ; exit 1)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-%.ps:   %.abc
+%.ps: %.abc
 	${YAPS} $< -o $@ -k \
 		|| (rm -f $@ ; exit 1)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
@@ -68,18 +68,26 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 		|| (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 # Manually invokable rules follow.
-%.csv:  %.E
+%.csv: %.gcs Makefile
 	${MUSICOMP2ABC} --midi1csv $< $@ \
 		|| (rm -f $@ ; exit 1)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 .SUFFIXES: .v
-%.v:  %.E
+%.v: %.gcs Makefile
 	${MUSICOMP2ABC} --vertical $< $@ ${PAGES} ${MEASURES} ${VOICES} \
 		|| (rm -f $@ ; exit 1)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 .SUFFIXES: .horizontal
-%.horizontal:  %.E
+%.horizontal: %.gcs Makefile
 	${MUSICOMP2ABC} --horizontal $< $@ ${PAGES} ${MEASURES} ${VOICES} \
+		|| (rm -f $@ ; exit 1)
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+%.mid: %.csv
+	csvmidi $< $@ \
+		|| (rm -f $@ ; exit 1)
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+%.wav: %.mid
+	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 128 $< \
 		|| (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help
@@ -97,7 +105,7 @@ help::
 .PHONY: check
 check:
 	@echo "V=${V}"
-	@echo "CPP=${CPP}"
+#-- 	@echo "CPP=${CPP}"
 	@echo "MUSICOMP2ABC=${MUSICOMP2ABC}"
 	@echo "YAPS=${YAPS}"
 	@echo "ABCM2PS=${ABCM2PS}"
@@ -111,16 +119,10 @@ all: ${V}.ps ${V}_m.ps ${V}.abc ${V}.fs
 #=============================================================================
 .PHONY: clean
 clean:
-	rm -f *.E
 	rm -f *.abc
 	rm -f *.ps
 	rm -f *.fs
-#--	rm -f *.A_abc
-#--	rm -f *.stdout *.stderr
-#--	rm -f *.csv *.mid
-#--	rm -f *.wav
-#--	rm -f A.[0123]* B.[0123]* C.[0123]*
-#--	rm -f *.v
+#--	rm -f *.v *.h *.csv *.mid *.wav
 #-----------------------------------------------------------------------------
 # End of Makefile
 #-----------------------------------------------------------------------------
