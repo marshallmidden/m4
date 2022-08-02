@@ -19,20 +19,20 @@ ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 PAGES =
 MEASURES =
 VOICES =
-WHICH = "-DWHICH=0"
+WHICH = "-D WHICH=0"
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Stringed instruments only.
-#-- WHICH = "-DWHICH=1"
+#-- WHICH = "-D WHICH=1"
 #-- PAGES += --pages 13..15
 #-- MEASURES += --measure 73..422
 #-- VOICES += --voices 42..62
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Clarinet A/B and English Horn A.
-#-- WHICH = "-DWHICH=3"
-#-- VOICES = --voices 18..20
+WHICH = "-D WHICH=3"
+VOICES = --voices 18..20
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Horned instruments only, except for brass.
-#-- WHICH = "-DWHICH=2"
+#-- WHICH = "-D WHICH=2"
 # VOICES += --voices 13..35
 #-- MEASURES += --measure 0,23..422
 #-- MEASURES += --measure 34..422
@@ -41,7 +41,7 @@ WHICH = "-DWHICH=0"
 #-- PAGES += --pages 4
 #-- PAGES += --pages 5..75
 #-----------------------------------------------------------------------------
-#-- CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC ${WHICH}
+#-- CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.csv %.mid
 .SUFFIXES: .mid .csv .ps .abc _m.ps
@@ -52,11 +52,11 @@ WHICH = "-DWHICH=0"
 #-- 		|| (rm -f $@ ; exit 1)
 #-- # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 %.fs: %.gcs
-	${MUSICOMP2ABC} --fluidsynth $< $@ ${PAGES} ${MEASURES} ${VOICES} \
+	${MUSICOMP2ABC} --fluidsynth $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
 		|| (rm -f $@ ; exit 1)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 %.abc: %.gcs Makefile
-	${MUSICOMP2ABC} --abc $< $@ ${PAGES} ${MEASURES} ${VOICES} \
+	${MUSICOMP2ABC} --abc $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
 		|| (rm -f $@ ; exit 1)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 %.ps: %.abc
@@ -74,12 +74,12 @@ WHICH = "-DWHICH=0"
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 .SUFFIXES: .v
 %.v: %.gcs Makefile
-	${MUSICOMP2ABC} --vertical $< $@ ${PAGES} ${MEASURES} ${VOICES} \
+	${MUSICOMP2ABC} --vertical $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
 		|| (rm -f $@ ; exit 1)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 .SUFFIXES: .horizontal
 %.horizontal: %.gcs Makefile
-	${MUSICOMP2ABC} --horizontal $< $@ ${PAGES} ${MEASURES} ${VOICES} \
+	${MUSICOMP2ABC} --horizontal $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
 		|| (rm -f $@ ; exit 1)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 %.mid: %.csv

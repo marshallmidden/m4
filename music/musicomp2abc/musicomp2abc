@@ -3212,7 +3212,7 @@ def check_staves_notes_order():
                         postnote = ''
                         onenotevolume = None
                         m4_note, onenotevolume, prenote, postnote = do_vol_cresc(m4_note, voice, 'check_staves_notes_order', prenote, postnote, onenotevolume)
-                        m4_therest, m4_thenote, m4_typenote = getnote(m4_note, 1, 'check_staves_notes_order')
+                        m4_therest, m4_thenote, m4_typenote = getnote(m4_note, 1, 'check_staves_notes_order', True)
                         args.horizontal = saveargsh
                         args.vertical = saveargsv
                         args.midi1csv = saveargsm
@@ -4820,7 +4820,7 @@ def do_decode(t_args, line):
         w_note = wargs[3]
     # fi
     # Ignore leading space.
-    therest, thenote, typenote = getnote(w_note, 1, line)
+    therest, thenote, typenote = getnote(w_note, 1, line, False)
 
     # Restore type of processing we are doing.
     args.horizontal = saveargsh
@@ -6879,7 +6879,7 @@ for o in range(0, 9):        # 0 thru 8
 #       thenote         Convert to abc format for note, octave.
 #       typenote:       -2 gsw oprnd, -1 freq, 0 note, 1 trill, 2 sequence
 
-def getnote(note_to_decode, voice, line):
+def getnote(note_to_decode, voice, line, update_defaults):
     global oct                                  # default octave
     global accidentals
     global allkeys
@@ -6963,8 +6963,13 @@ def getnote(note_to_decode, voice, line):
         return '', None, normal_note
     # fi
     if note_to_decode[0] in [ '0', '1', '2', '3', '4', '5', '6', '7', '8' ]:    # check octave
-        oct[voice] = int(note_to_decode[0])                                     # save octave
+        oct_voice = int(note_to_decode[0])
+        if not update_defaults:
+            oct[voice] = oct_voice                                              # save octave
+        # fi
         temp3 = temp3 + 1
+    else:
+        oct_voice = oct[voice]
     # fi
     if len(note_to_decode) <= temp3 or note_to_decode[temp3] is None:
         print_error("m:{} v{} no note_to_decode '{}' temp3={} len(note_to_decode)={}".format(measure_on, voice, note_to_decode, temp3, len(note_to_decode)), line)
@@ -7107,7 +7112,7 @@ def getnote(note_to_decode, voice, line):
         A = a = ''
     # fi
     octaves = { 0:',,,', 1:',,', 2:',', 3:'', 4:'', 5:"'", 6:"''", 7:"'''", 8:"'''" }
-    o = oct[voice]
+    o = oct_voice
     if o not in octaves:
         print_error("m:{} v{} Note is not legal '{}' oct strange {}".format(measure_on, voice, note_to_decode, o), line)
         return '', None, normal_note
@@ -7117,19 +7122,21 @@ def getnote(note_to_decode, voice, line):
         return '', None, normal_note
     # fi
 
-    if a == '' and voice in acc_m and N in acc_m[voice] and acc_m[voice][N] != '' and line != 'check_staves_notes_order':
-        # Check if default from last potential problem.
-        print_warning("previous note '{}' voice {} in measure {} was '{}' and this note is default - FIXING".format(n, voice, measure_on, acc_m[voice][N]), line)
-        a = acc_m[voice][N]
-        if args.horizontal or args.vertical:
-            A = a
-        elif args.midi1csv or args.fluidsynth:
-            A = a
-        else:       # ABC
-            A = accidentals[a]          # Convert to abc format.
+    if update_defaults:
+        if a == '' and voice in acc_m and N in acc_m[voice] and acc_m[voice][N] != '' and line != 'check_staves_notes_order':
+            # Check if default from last potential problem.
+            print_warning("previous note '{}' voice {} in measure {} was '{}' and this note is default - FIXING".format(n, voice, measure_on, acc_m[voice][N]), line)
+            a = acc_m[voice][N]
+            if args.horizontal or args.vertical:
+                A = a
+            elif args.midi1csv or args.fluidsynth:
+                A = a
+            else:       # ABC
+                A = accidentals[a]          # Convert to abc format.
+            # fi
         # fi
-    # if
-    acc_m[voice][N] = a                 # Save for next note for voice.
+        acc_m[voice][N] = a                 # Save for next note for voice.
+    # fi
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     # Have o(ctave),a(ccidental),and n(ote).
     # Convert for key.
@@ -7258,15 +7265,19 @@ def getnote(note_to_decode, voice, line):
         if len(k) == 1:
             j = key_convert[new_key.lower()][t]
             if j == t:          # 3 chars match 3 chars.
-                acc_m_xpose[voice][new_N] = new_A
+                if update_defaults:
+                    acc_m_xpose[voice][new_N] = new_A
+                # fi
             else:
-                if acc_m_xpose[voice][new_N] != '':
+                if update_defaults and acc_m_xpose[voice][new_N] != '':
                     acc_m_xpose[voice][new_N] = new_A
                 # fi
             # fi
         else:
-            if acc_m_xpose[voice][new_N] != '':
-                acc_m_xpose[voice][new_N] = new_A
+            if new_N in acc_m_xpose[voice] and acc_m_xpose[voice][new_N] != '':
+                if update_defaults:
+                    acc_m_xpose[voice][new_N] = new_A
+                # fi
             else:
                 new_A = new_a = ''
             # fi
@@ -7277,15 +7288,20 @@ def getnote(note_to_decode, voice, line):
         #   (Reverse of key.)
 
         # If do not need the n/= for this voice and measure ...
-        if acc_m_xpose[voice][new_N] == '':
+        if new_N in acc_m_xpose[voice] and acc_m_xpose[voice][new_N] == '':
             if new_a == 'n':
                 new_A = ''
                 new_a = ''
             else:
-                acc_m_xpose[voice][new_N] = new_A
+                if update_defaults:
+                    acc_m_xpose[voice][new_N] = new_A
+                # fi
             # fi
         else:
-            acc_m_xpose[voice][new_N] = new_A
+            # If decode or anything such, do not update acc_m_xpose.
+            if update_defaults and new_N in acc_m_xpose[voice]:
+                acc_m_xpose[voice][new_N] = new_A
+            # fi
         # fi
         o = new_o
         n = new_n
@@ -7944,7 +7960,7 @@ def process_notes(line):
                 temp1, onenotevolume, prenote, postnote = do_vol_cresc(temp1, onvoice, line, prenote, postnote, onenotevolume)
                 break
             # elihw
-            therest, thenote, typenote = getnote(temp1, onvoice, line) # get next note
+            therest, thenote, typenote = getnote(temp1, onvoice, line, True) # get next note
 
             if thenote is None:
                 print_error("m:{} no note? therest='{}' thenote='{}' typenote='{}'".format(measure_on, therest, thenote, typenote), line)
@@ -7973,7 +7989,7 @@ def process_notes(line):
                 # fi
             # fi
             if typenote == trill_note:
-                therest, thenote, typenote = getnote(therest, onvoice, line)
+                therest, thenote, typenote = getnote(therest, onvoice, line, True)
                 leading_space = False
                 if thenote and type(thenote) is str and len(thenote) > 0 and thenote[0] == ' ':
                     thenote = thenote[1:]
@@ -8006,7 +8022,7 @@ def process_notes(line):
                     return
                 # fi
                 therest = therest[1:]                                       # comma removed
-                therest, thenote, typenote = getnote(therest, onvoice, line) # get second note
+                therest, thenote, typenote = getnote(therest, onvoice, line, True) # get second note
                 if thenote is None or thenote == 0 or thenote == '':
                     print_error("m:{} trill is not legal, second note missing".format(measure_on), line)
                     return
@@ -8280,7 +8296,7 @@ def process_notes(line):
                         # fi
                     # fi
 
-                    therest, thenote, typenote = getnote(therest, onvoice, line)
+                    therest, thenote, typenote = getnote(therest, onvoice, line, True)
                     if thenote is None or thenote == '':
                         print_error("m:{} sequence is not legal, no note".format(measure_on), line)
                         return
@@ -8833,6 +8849,10 @@ def parse_args():
                         help = 'When reading, ties for --vertical are on the latter note, move to front.')
     parser.add_argument('--nolegato', '--no-legato', action='store_true',
                         help = 'Do not do legatos.')
+#--    parser.add_argument('--D', '-D', action='append', type=ascii, 
+#--                        help = 'Example: "-D WHICH=5" Define variable in calculator.')
+    parser.add_argument('--D', '-D', action='append', type=str, 
+                        help = 'Example: "-D WHICH=5" Define variable in calculator.')
     parser.add_argument('rest', nargs='*',
                         help='Optional command to execute')
     args = parser.parse_args()
@@ -8895,6 +8915,25 @@ def parse_args():
 #        print_error_no_line("Only may have one of --vertical, --horizontal, --abc, --midi1 or --fluidsynth")
 #        sys.exit(1)
     # fi
+
+    if args.D:
+        errs = False
+        for D in args.D:                    # If any defines, try to do them.
+            f1, type_error = is_float(D)
+            if type_error is not None:
+                errs = True
+                print_error_no_line("#1 Could not compute '-D {}' as a floating point number.".format(D))
+                continue
+            # fi
+            if f1 is None:
+                errs = True
+                print_error_no_line("#2 Could not compute '-D {}' as a floating point number.".format(D))
+                continue
+            # fi
+        # rof
+        if errs:
+            sys.exit(1)
+        # fi
     return
 # End of parse_args
 
