@@ -28,8 +28,8 @@ WHICH = "-D WHICH=0"
 #-- VOICES += --voices 42..62
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Clarinet A/B and English Horn A.
-WHICH = "-D WHICH=3"
-VOICES = --voices 18..20
+# WHICH = "-D WHICH=3"
+# VOICES = --voices 18..20
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Horned instruments only, except for brass.
 #-- WHICH = "-D WHICH=2"
