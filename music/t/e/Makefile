@@ -19,6 +19,8 @@ ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 PAGES =
 MEASURES =
 VOICES =
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# All voices & staves.
 WHICH = "-D WHICH=0"
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Stringed instruments only.
@@ -26,10 +28,6 @@ WHICH = "-D WHICH=0"
 #-- PAGES += --pages 13..15
 #-- MEASURES += --measure 73..422
 #-- VOICES += --voices 42..62
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-# Clarinet A/B and English Horn A.  -- Done fixing, and reviewing (viewing).
-#xx WHICH = "-D WHICH=3"
-#xx VOICES = --voices 18..20
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Horned instruments only, except for brass.
 #-- WHICH = "-D WHICH=2"
@@ -40,6 +38,42 @@ WHICH = "-D WHICH=0"
 #-- MEASURES += --measure 1..422
 #-- PAGES += --pages 4
 #-- PAGES += --pages 5..75
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# Clarinet A/B and English Horn A.  -- Done fixing, and reviewing (viewing).
+#xx WHICH = "-D WHICH=3"
+#xx VOICES = --voices 18..20
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# All brass section (top two staves).
+#xx WHICH = "-D WHICH=4"
+#xx VOICES = --voices 1..12
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# piccolo, flute1, flute2 -- 3rd, 4th, 5th staves.
+#? WHICH = "-D WHICH=5"
+#? VOICES = --voices 13..15
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# [(oboeA oboeB) (bassoonA bassoonB bassoonC)]
+#? WHICH = "-D WHICH=6"
+#? VOICES = --voices 16..17,21..23
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# [(french_horn1A french_horn1B) (french_horn2A french_horn2B)]
+#? WHICH = "-D WHICH=7"
+#? VOICES = --voices 24..27
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# [(cornet1A cornet1A) (trumpet1A trumpet1A)]
+#? WHICH = "-D WHICH=8"
+#? VOICES = --voices 28..31
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# [(trombone1A trombone1B) (trombone2A trombone2B)]
+#? WHICH = "-D WHICH=9"
+#? VOICES = --voices 32..35
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# timpaniA [(tambourineA triangleA snaredrumA)]
+#? WHICH = "-D WHICH=10"
+#? VOICES = --voices 36..39
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# [cymbalA bassdrumA]
+#? WHICH = "-D WHICH=11"
+#? VOICES = --voices 40..41
 #-----------------------------------------------------------------------------
 #-- CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
