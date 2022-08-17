@@ -15,7 +15,7 @@ ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 # Limit processing... some done in compiling, others with output.
 #-DOC-	PAGES = --pages 6..75
 #-DOC-	MEASURES = --measures 48..422
-#-DOC-	VOICES = --voices 42..62
+#-DOC-	VOICES = --voices 42..61
 PAGES =
 MEASURES =
 VOICES =
@@ -27,7 +27,7 @@ WHICH = "-D WHICH=0"
 #-- WHICH = "-D WHICH=1"
 #-- PAGES += --pages 13..15
 #-- MEASURES += --measure 73..422
-#-- VOICES += --voices 42..62
+#-- VOICES += --voices 42..61
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Horned instruments only, except for brass.
 #-- WHICH = "-D WHICH=2"
@@ -48,12 +48,12 @@ WHICH = "-D WHICH=0"
 #xx VOICES = --voices 1..12
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # piccolo, flute1, flute2 -- 3rd, 4th, 5th staves.
-#? WHICH = "-D WHICH=5"
-#? VOICES = --voices 13..15
+#xx WHICH = "-D WHICH=5"
+#xx VOICES = --voices 13..15
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # [(oboeA oboeB) (bassoonA bassoonB bassoonC)]
-#? WHICH = "-D WHICH=6"
-#? VOICES = --voices 16..17,21..23
+#+ WHICH = "-D WHICH=6"
+#+ VOICES = --voices 16..17,21..23
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # [(french_horn1A french_horn1B) (french_horn2A french_horn2B)]
 #? WHICH = "-D WHICH=7"
@@ -74,6 +74,10 @@ WHICH = "-D WHICH=0"
 # [cymbalA bassdrumA]
 #? WHICH = "-D WHICH=11"
 #? VOICES = --voices 40..41
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# [canon cloches]
+#? WHICH = "-D WHICH=12"
+#? VOICES = --voices ??..??
 #-----------------------------------------------------------------------------
 #-- CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
