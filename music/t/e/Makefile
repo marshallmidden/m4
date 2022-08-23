@@ -26,10 +26,6 @@ WHICH = "-D WHICH=0"
 #? WHICH = "-D WHICH=10"
 #? VOICES = --voices 35..38
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-# [cymbalA bassdrumA]
-#? WHICH = "-D WHICH=11"
-#? VOICES = --voices 39..40
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # [canon cloches]
 #? WHICH = "-D WHICH=12"
 #? VOICES = --voices ??..??
@@ -40,7 +36,7 @@ WHICH = "-D WHICH=0"
 #-- MEASURES += --measure 73..422
 #-- VOICES += --voices 41..61
 #..............................................................................
-# Below edited, and reviewed by viewing.
+# "xx" Below edited, and reviewed by viewing e_m.ps compared to 1812.pdf.
 #..............................................................................
 # Horned instruments only, except for brass.
 #xx WHICH = "-D WHICH=2"
@@ -74,6 +70,10 @@ WHICH = "-D WHICH=0"
 # [(trombone1A trombone1B) (tuba1A tuba1B)]
 #xx WHICH = "-D WHICH=9"
 #xx VOICES = --voices 31..32,33..34
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# [cymbalA bassdrumA]
+#xx WHICH = "-D WHICH=11"
+#xx VOICES = --voices 39..40
 #-----------------------------------------------------------------------------
 #-- CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
