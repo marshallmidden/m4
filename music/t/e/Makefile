@@ -13,31 +13,38 @@ ABCM2PS      = abcm2ps
 ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 #-----------------------------------------------------------------------------
 # Limit processing... some done in compiling, others with output.
-#-DOC-	PAGES = --pages 6..75
-#-DOC-	MEASURES = --measures 48..422
-#-DOC-	VOICES = --voices 42..61
+#-DOC-	PAGES = --pages 6..15			# cstop processing
+#-DOC-	MEASURES = --measures 48..70		# cstop processing
+#-DOC-	VOICES = --voices 42..45,55..61		# output limiting.
 PAGES =
 MEASURES =
 VOICES =
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # All voices & staves.
 WHICH = "-D WHICH=0"
+#-----------------------------------------------------------------------------
+# timpaniA [(tambourineA triangleA tambourine snaredrumA)]
+#? WHICH = "-D WHICH=10"
+#? VOICES = --voices 35..38
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# [cymbalA bassdrumA]
+#? WHICH = "-D WHICH=11"
+#? VOICES = --voices 39..40
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# [canon cloches]
+#? WHICH = "-D WHICH=12"
+#? VOICES = --voices ??..??
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Stringed instruments only.
 #-- WHICH = "-D WHICH=1"
 #-- PAGES += --pages 13..15
 #-- MEASURES += --measure 73..422
-#-- VOICES += --voices 42..61
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#-- VOICES += --voices 41..61
+#..............................................................................
+# Below edited, and reviewed by viewing.
+#..............................................................................
 # Horned instruments only, except for brass.
-#-- WHICH = "-D WHICH=2"
-# VOICES += --voices 13..35
-#-- MEASURES += --measure 0,23..422
-#-- MEASURES += --measure 34..422
-#++ MEASURES += --measure 49..422
-#-- MEASURES += --measure 1..422
-#-- PAGES += --pages 4
-#-- PAGES += --pages 5..75
+#xx WHICH = "-D WHICH=2"
+#xx VOICES += --voices 13..34
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Clarinet A/B and English Horn A.  -- Done fixing, and reviewing (viewing).
 #xx WHICH = "-D WHICH=3"
@@ -52,32 +59,21 @@ WHICH = "-D WHICH=0"
 #xx VOICES = --voices 13..15
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # [(oboeA oboeB) (bassoonA bassoonB bassoonC)]
-#+ WHICH = "-D WHICH=6"
-#+ VOICES = --voices 16..17,21..23
+#xx WHICH = "-D WHICH=6"
+#xx VOICES = --voices 16..17,21..23
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # [(french_horn1A french_horn1B) (french_horn2A french_horn2B)]
-#? WHICH = "-D WHICH=7"
-#? VOICES = --voices 24..27
+# Needs fixing via viewing.
+#xx WHICH = "-D WHICH=7"
+#xx VOICES = --voices 23..26
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # [(cornet1A cornet1A) (trumpet1A trumpet1A)]
-#? WHICH = "-D WHICH=8"
-#? VOICES = --voices 28..31
+#xx WHICH = "-D WHICH=8"
+#xx VOICES = --voices 27..30
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-# [(trombone1A trombone1B) (trombone2A trombone2B)]
-#? WHICH = "-D WHICH=9"
-#? VOICES = --voices 32..35
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-# timpaniA [(tambourineA triangleA snaredrumA)]
-#? WHICH = "-D WHICH=10"
-#? VOICES = --voices 36..39
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-# [cymbalA bassdrumA]
-#? WHICH = "-D WHICH=11"
-#? VOICES = --voices 40..41
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-# [canon cloches]
-#? WHICH = "-D WHICH=12"
-#? VOICES = --voices ??..??
+# [(trombone1A trombone1B) (tuba1A tuba1B)]
+#xx WHICH = "-D WHICH=9"
+#xx VOICES = --voices 31..32,33..34
 #-----------------------------------------------------------------------------
 #-- CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
