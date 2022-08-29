@@ -8,6 +8,7 @@ SONGS += promenade
 SONGS += promenade-musicomp2abc
 #-----------------------------------------------------------------------------
 TESTS  =
+TESTS += KEYg-
 TESTS += DECODE
 TESTS += LEGATO1
 TESTS += TIES
@@ -43,7 +44,20 @@ MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 YAPS	     = yaps
 ABCM2PS	     = abcm2ps
 #-----------------------------------------------------------------------------
-CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
+# -E			Only run the preprocessor.
+# -x c			Treat input file(s) as having <language> 'c'.
+# -Wno-invalid-pp-token
+# -undef
+# -Wundef
+# -Werror		Turn warnings into errors.
+# -nostdinc		No standard include directory.
+# -P			Disable linemarker output in -E mode.
+# -C			Include comments in preprocessed output.
+# -CC			Include comments from within macros in preprocessed output.
+# -traditional-cpp	Enable some traditional CPP emulation.
+#
+# CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC -traditional-cpp
+CPP=gcc -E -x c -nostdinc -P -C -CC -Wno-error -Wno-extra -traditional-cpp
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.csv %.mid %.E
 .SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E .fs
