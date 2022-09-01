@@ -15,26 +15,23 @@ ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 # Limit processing... some done in compiling, others with output.
 #-DOC-	PAGES = --pages 6..15			# cstop processing
 #-DOC-	MEASURES = --measures 48..70		# cstop processing
-#-DOC-	VOICES = --voices 42..45,55..61		# output limiting.
+#-DOC-	VOICES = --voices 43..50,55..62		# output limiting.
 PAGES =
 MEASURES =
 VOICES =
 # All voices & staves.
 WHICH = "-D WHICH=0"
 #-----------------------------------------------------------------------------
-# timpaniA [(tambourineA triangleA tambourine snaredrumA)]
-#? WHICH = "-D WHICH=10"
-#? VOICES = --voices 35..38
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # [canon cloches]
 #? WHICH = "-D WHICH=12"
-#? VOICES = --voices ??..??
+#? VOICES = --voices 41..42
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Stringed instruments only.
-#-- WHICH = "-D WHICH=1"
-#-- PAGES += --pages 13..15
+#? WHICH = "-D WHICH=1"
+#? VOICES += --voices 43..63
+#+ PAGES += --pages 12..75
 #-- MEASURES += --measure 73..422
-#-- VOICES += --voices 41..61
 #..............................................................................
 # "xx" Below edited, and reviewed by viewing e_m.ps compared to 1812.pdf.
 #..............................................................................
@@ -71,6 +68,9 @@ WHICH = "-D WHICH=0"
 #xx WHICH = "-D WHICH=9"
 #xx VOICES = --voices 31..32,33..34
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# timpaniA [(timpaniA tambourineA triangleA snaredrumA)]
+#xx WHICH = "-D WHICH=10"
+#xx VOICES = --voices 35..38
 # [cymbalA bassdrumA]
 #xx WHICH = "-D WHICH=11"
 #xx VOICES = --voices 39..40
