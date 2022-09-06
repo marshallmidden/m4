@@ -17,31 +17,32 @@ TESTS += TRILLS
 TESTS += TEMPO
 TESTS += RANGE1
 TESTS += RANGE2
-TESTS += CRESC
+TESTS += CRESC1
+TESTS += CRESC2
 TESTS += XPOSE1
 TESTS += XPOSE2
 #-----------------------------------------------------------------------------
 # SONGS_GCS = ${SONGS:=.gcs}
 SONGS_E = ${SONGS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
-SONGS_CSV = ${SONGS:=.csv}
+#+ SONGS_CSV = ${SONGS:=.csv}
 SONGS_FS = ${SONGS:=.fs}
-SONGS_MID = ${SONGS:=.mid}
+#+ SONGS_MID = ${SONGS:=.mid}
 SONGS_M_PS = ${SONGS:=_m.ps}
-SONGS_PS = ${SONGS:=.ps}
-SONGS_WAV = ${SONGS:=.wav}
+#+ SONGS_PS = ${SONGS:=.ps}
+#+ SONGS_WAV = ${SONGS:=.wav}
 #-----------------------------------------------------------------------------
 TESTS_E = ${TESTS:=.E}
 TESTS_ABC = ${TESTS:=.abc}
-TESTS_CSV = ${TESTS:=.csv}
+#+ TESTS_CSV = ${TESTS:=.csv}
 TESTS_FS = ${TESTS:=.fs}
-TESTS_MID = ${TESTS:=.mid}
+#+ TESTS_MID = ${TESTS:=.mid}
 TESTS_M_PS = ${TESTS:=_m.ps}
-TESTS_PS = ${TESTS:=.ps}
-TESTS_WAV = ${TESTS:=.wav}
+#+ TESTS_PS = ${TESTS:=.ps}
+#+ TESTS_WAV = ${TESTS:=.wav}
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
-YAPS	     = yaps
+#+ YAPS	     = yaps
 ABCM2PS	     = abcm2ps
 #-----------------------------------------------------------------------------
 # -E			Only run the preprocessor.
@@ -59,24 +60,26 @@ ABCM2PS	     = abcm2ps
 # CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC -traditional-cpp
 CPP=gcc -E -x c -nostdinc -P -C -CC -Wno-error -Wno-extra -traditional-cpp
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.abc %.csv %.mid %.E
-.SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E .fs
+#+.PRECIOUS: %.abc %.csv %.mid %.E
+#+ .SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E .fs
+.PRECIOUS: %.abc %.E
+.SUFFIXES: .abc _m.ps .E .fs
 # output $@   -- input $<
 %.fs:  %.E
 	${MUSICOMP2ABC} --fluidsynth $< $@ || rm -f $@
-%.csv:  %.E
-	${MUSICOMP2ABC} --midi1csv $< $@ || rm -f $@
-%.mid:  %.csv
-	csvmidi $< $@ || (rm -f $@ ; exit 1)
-%.wav:  %.mid
-	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 128 $<
+#+ %.csv:  %.E
+#+ 	${MUSICOMP2ABC} --midi1csv $< $@ || rm -f $@
+#+ %.mid:  %.csv
+#+ 	csvmidi $< $@ || (rm -f $@ ; exit 1)
+#+ %.wav:  %.mid
+#+ 	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 128 $<
 %.abc:  %.E
 	${MUSICOMP2ABC} --abc $< $@ || (rm -f $@ ; exit 1)
-%.ps:   %.abc
-	${YAPS} $< -o $@ -k || (rm -f $@ ; exit 1)
+#+ %.ps:   %.abc
+#+ 	${YAPS} $< -o $@ -k || (rm -f $@ ; exit 1)
 %_m.ps: %.abc
-	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@)
-#-- %.E: %.gcs beethoven.macros
+#-	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@)
+	(${ABCM2PS} -l -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@)
 %.E: %.gcs
 	${CPP} $< -o $@ \
 		|| (rm -f $@ ; exit 1)
@@ -92,20 +95,22 @@ help:
 	@echo "TESTS: ${TESTS}"
 #-----------------------------------------------------------------------------
 .PHONY: all songs ${SONGS}
-all songs ${SONGS}: ${SONGS_MID} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV} ${SONGS_FS}
+#+ all songs ${SONGS}: ${SONGS_MID} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV} ${SONGS_FS}
+all songs ${SONGS}: ${SONGS_M_PS} ${SONGS_FS}
 #-----------------------------------------------------------------------------
 .PHONY: tests ${TESTS}
-tests ${TESTS}: ${TESTS_MID} ${TESTS_PS} ${TESTS_M_PS} ${TESTS_WAV} ${TESTS_FS}
+#+ tests ${TESTS}: ${TESTS_MID} ${TESTS_PS} ${TESTS_M_PS} ${TESTS_WAV} ${TESTS_FS}
+tests ${TESTS}: ${TESTS_M_PS} ${TESTS_FS}
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -f ${SONGS_CSV} ${TESTS_CSV}
+#+	rm -f ${SONGS_CSV} ${TESTS_CSV}
 	rm -f ${SONGS_FS} ${TESTS_FS}
-	rm -f ${SONGS_MID} ${TESTS_MID}
+#+	rm -f ${SONGS_MID} ${TESTS_MID}
 	rm -f ${SONGS_ABC} ${TESTS_ABC}
-	rm -f ${SONGS_PS} ${TESTS_PS}
+#+	rm -f ${SONGS_PS} ${TESTS_PS}
 	rm -f ${SONGS_M_PS} ${TESTS_M_PS}
-	rm -f ${SONGS_WAV} ${TESTS_WAV}
+#+	rm -f ${SONGS_WAV} ${TESTS_WAV}
 	rm -f ${SONGS_E} ${TESTS_E}
 	rm -f *.stderr
 #-----------------------------------------------------------------------------
