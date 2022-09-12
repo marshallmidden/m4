@@ -21,8 +21,9 @@ MEASURES =
 VOICES =
 # All voices & staves.
 WHICH = "-D WHICH=0"
+#-- PAGES = --pages 0,12..14
+#-- PAGES = --pages 0,69..100
 #-----------------------------------------------------------------------------
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # [canon cloches]
 #? WHICH = "-D WHICH=12"
 #? VOICES = --voices 41..42
