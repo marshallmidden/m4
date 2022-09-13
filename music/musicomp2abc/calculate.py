@@ -120,14 +120,8 @@ def next_token(string):
         # fi
         return None, c, 'OPER'
     # fi
-    if c.isalpha():                         # First is [a-zA-Z].
-        # 'pause': 4,                       # NOTE: lpause -> pause
-        # 'stac': 4,                        # NOTE: lstac -> stac
-        # 'grace': 4,                       # NOTE: lgrace -> grace
-        # 's': 1, 'd': 1, 'b': 1, 't': 1,
-        # 'w': 1, 'h': 2, 'q': 4, 'e': 8,
-        # 'th': 1,
-        m = re.match(r'[a-zA-Z0-9]+', string)
+    if c.isalpha():                         # First character is [a-zA-Z].
+        m = re.match(r'[_a-zA-Z0-9]+', string)
         ret = strg = m.group(0)             # We know there is at least one character.
         if strg == 'lpause':                 # convert a few names to the other name.
             ret = 'pause'
@@ -135,10 +129,6 @@ def next_token(string):
             ret = 'stac'
         elif strg == 'lgrace':
             ret = 'grace'
-        elif strg == 'page':
-            ret = 'page'
-        elif strg == 'measure':
-            ret = 'measure'
         # fi
         if len(string) > len(strg):         # Something after this alphabetic string.
             return string[len(strg):], ret, 'ID'
@@ -954,11 +944,6 @@ variables = {
     'e': math.e,
     'tau': math.tau,
 #   1   .   .   .   2   .   .   .   3   .   .   .   4   .   .   .   5   .   .   .
-    'pause': 4,                 # NOTE: lpause -> pause     NOTUSED
-    'stac': 4,                  # NOTE: lstac -> stac       NOTUSED
-    'grace': 4,                 # NOTE: lgrace -> grace     NOTUSED
-    'page': 0,                  # NOTE: Page number. (do_page)
-    'measure': 0,               # NOTE: Measure number. (do_measure)
     'w': 1, 'h': 2, 'q': 4, 'e': 8,
 
     's': 1, 'd': 1, 'b': 1, 't': 1, 'l': 1,
