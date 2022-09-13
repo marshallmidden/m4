@@ -529,8 +529,8 @@ calculate.variables['measure'] = '-1'
 # Default MIDI control values.
 calculate.variables['default_reverb'] = 0       # No reverb.
 calculate.variables['default_pan'] = 64         # Center of left<->right balance.
-calculate.variables['default_intensity'] = 127  # 
-calculate.variables['default_volume'] = 120     # Note attack (when played. (Leave 7)
+calculate.variables['default_intensity'] = 127  # Volume = intensity% * velocity% * vol(ff)%.
+calculate.variables['default_velocity'] = 120   # Note attack (when played. (Leave 7) Appears to be volume.
 # ----------------------------------------------------------------------------
 #++ import inspect
 #++ print(inspect.currentframe().f_code.co_name, '#0', file=sys.stderr, flush=True)
@@ -1268,7 +1268,10 @@ bufs = { 1 : {} }
 global bufs_length                  # bufs_length[voice][measure][#] ... number= 0..#commas-1 above.
 bufs_length = { 1 : {} }
 
-global bufs_accidental              # bufs_length[voice][measure][#] ... number= 0..#commas-1 above.
+global bufs_velocity                # bufs_velocity[voice][measure][#] ... number= 0..#commas-1 above.
+bufs_velocity = { 1 : {} }
+
+global bufs_accidental              # bufs_accidental[voice][measure][#] ... number= 0..#commas-1 above.
 bufs_accidentals = { 1: {} }
 
 global bufs_tie_next                # The --horizontal and --verticle have "t" (ties) swapped on where
@@ -1512,6 +1515,7 @@ def new_voice_initialize(voice, m):
     global tlth                         # #or 60ths/voice
     global bufs
     global bufs_length
+    global bufs_velocity
     global bufs_accidentals
     global bufs_tie_next
     global bufs_legato_next
@@ -1540,6 +1544,7 @@ def new_voice_initialize(voice, m):
     if voice not in bufs:
         bufs[voice] = {}
         bufs_length[voice] = {}
+        bufs_velocity[voice] = {}
         bufs_accidentals[voice] = {}
         bufs_tie_next[voice] = ''
         bufs_legato_next[voice] = ''
@@ -1638,6 +1643,7 @@ def rests_in_empty_measure_voices(m, voice):
     global mlth
     global bufs
     global bufs_length
+    global bufs_velocity
     global bufs_accidentals
     global bufs_tie_next
     global bufs_legato_next
@@ -1663,6 +1669,7 @@ def rests_in_empty_measure_voices(m, voice):
         if args.horizontal or args.vertical or args.midi1csv or args.fluidsynth:
             bufs[voice][m] = []
             bufs_length[voice][m] = []
+            bufs_velocity[voice][m] = []
             bufs_accidentals[voice][m] = []
             bufs_tie_next[voice] = ''
             bufs_legato_next[voice] = ''
@@ -1699,10 +1706,12 @@ def rests_in_empty_measure_voices(m, voice):
     if args.horizontal or args.vertical:
         bufs[voice][m].append('r')
         bufs_length[voice][m].append(l)
+        bufs_velocity[voice][m].append(calculate.variables['default_velocity'])
         bufs_accidentals[voice][m].append('')
     elif args.midi1csv or args.fluidsynth:
         bufs[voice][m].append(0)
         bufs_length[voice][m].append(l)
+        bufs_velocity[voice][m].append(calculate.variables['default_velocity'])
         bufs_accidentals[voice][m].append('')
     else:       # ABC
         bufs[voice][m] = bufs[voice][m] + txt   # Append the sleeps.
@@ -2112,6 +2121,7 @@ def print_out_notes_v_or_h(m, print_line):
     global vl
     global bufs
     global bufs_length
+    global bufs_velocity
     global bufs_accidentals
     global args
     global voices_to_do
@@ -2133,6 +2143,7 @@ def print_out_notes_v_or_h(m, print_line):
                     txt = txt + ','
                 # fi
                 l =  bufs_length[voice][m][i]
+                # NOTDONEYET - bufs_velocity[voice][m][i]
                 if l in legal_mc_notes:
                     lth = legal_mc_notes[l]
                 else:
@@ -2189,6 +2200,7 @@ def print_out_notes_v_or_h(m, print_line):
             if i <= now:
                 j = working[voice]
                 l =  bufs_length[voice][m][j]
+                # NOTDONEYET - bufs_velocity[voice][m][j]
 
                 if l in legal_mc_notes:
                     lth = legal_mc_notes[l] + bufs_accidentals[voice][m][j].replace('c','')
@@ -2766,6 +2778,7 @@ def print_out_midi1csv_notes():
                 # If a rest - no accidentals/volumes/ can be on it.
                 last_acc = bufs_accidentals[voice][m][i]    # accidental for the next note.
                 note_length = bufs_length[voice][m][i]
+                note_velocity = bufs_velocity[voice][m][i]
 
                 if n == '0' or n == 0:
                     # If a note is turned on, turn it off.
@@ -2800,8 +2813,8 @@ def print_out_midi1csv_notes():
                             print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, last_note_on, 0))
                         # fi
                         voices_having_notes[voice] = True
-                        print_debug("#1 default_volume={}".format(calculate.variables['default_volume']))
-                        print_output("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, n, int(calculate.variables['default_volume'])))
+#                        print_debug("#1 velocity={}".format(note_velocity))
+                        print_output("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, n, note_velocity))
                         last_note_on = n
                     # fi
                     # Already on, good.
@@ -2809,16 +2822,16 @@ def print_out_midi1csv_notes():
                     # We want a note-on here.
                     if legato_on:
                         voices_having_notes[voice] = True
-                        print_debug("#2 default_volume={}".format(calculate.variables['default_volume']))
-                        print_output("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, n, int(calculate.variables['default_volume'])))
+#                        print_debug("#2 velocity={}".format(note_velocity))
+                        print_output("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, n, note_velocity))
                     # fi
                     if last_note_on != '':                  # If not a rest, or note off.
                         print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, last_note_on, 0))
                     # fi
                     if not legato_on:
                         voices_having_notes[voice] = True
-                        print_debug("#3 default_volume={}".format(calculate.variables['default_volume']))
-                        print_output("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, n, int(calculate.variables['default_volume'])))
+#                        print_debug("#3 velocity={}".format(note_velocity))
+                        print_output("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, n, note_velocity))
                     # fi
                     last_note_on = n
                     # fi
@@ -3144,9 +3157,10 @@ def print_out_fluidsynth():
 #   End of print_out_fluidsynth
 
 # ----------------------------------------------------------------------------
-def pre_move_note_before(prev_m, m, voice, l, n, a, v):
+def pre_move_note_before(prev_m, m, voice, l, vel, n, a, v):
     global bufs
     global bufs_length
+    global bufs_velocity
     global bufs_vol
     global bufs_accidentals
     global mlth                         # measure length dictionary
@@ -3154,6 +3168,7 @@ def pre_move_note_before(prev_m, m, voice, l, n, a, v):
 
     bufs[voice][prev_m].append(n)
     bufs_length[voice][prev_m].append(l)
+    bufs_velocity[voice][prev_m].append(vel)
     bufs_accidentals[voice][prev_m].append(a)
     bufs_vol[voice][prev_m].append(v)
 
@@ -3171,6 +3186,7 @@ def pre_shift_measure(prev_m, m):
     global vl
     global bufs
     global bufs_length
+    global bufs_velocity
     global bufs_vol
     global bufs_accidentals
     global mlth                         # measure length dictionary
@@ -3184,19 +3200,21 @@ def pre_shift_measure(prev_m, m):
         # fi
         while s > 0:
             l =  bufs_length[voice][m][0]       # Length of note.
+            vel =  bufs_velocity[voice][m][0]   # Velocity of note.
             n =  bufs[voice][m][0]              # Note (plus pre and post?).
             a = bufs_accidentals[voice][m][0]   # Accidentals -- oh my ...
             v = bufs_vol[voice][m][0]
             if l <= s:
                 if prev_m is not None:
                     # Move to previous measure.
-                    pre_move_note_before(prev_m, m, voice, l, n, a, v)
+                    pre_move_note_before(prev_m, m, voice, l, vel, n, a, v)
                 else:
                     print_warning("pre_shift_measure - tossing voice={} m={} n={} l={} a={} v={}".  format(voice, m, n, l, a, v), 'pass2')
                 # fi
                 # Remove from current measure.
                 bufs[voice][m].pop(0)
                 bufs_length[voice][m].pop(0)
+                bufs_velocity[voice][m].pop(0)
                 bufs_accidentals[voice][m].pop(0)
                 bufs_vol[voice][m].pop(0)
                 tlth[voice] = tlth[voice] - l
@@ -3225,10 +3243,12 @@ def pre_shift_measure(prev_m, m):
                     a = a + 't'
                 # fi
             # fi
-            pre_move_note_before(prev_m, m, voice, s, n, a, v)
+            pre_move_note_before(prev_m, m, voice, s, vel, n, a, v)
             # Reduce length in current measure.
             # bufs[voice][m][0]                     # note remains the same.
             bufs_length[voice][m][0] = l - s        # Reduce note length.
+# NOTDONEYET - bufs_velocity -- think it is just duplicate... .
+            bufs_velocity[voice][m][0] = vel        # velocity remains the same?
             if args.horizontal:
                 if 't' not in a:                    # if not tied, tie this one.
                     bufs_accidentals[voice][m][0] = a + 't'
@@ -3730,6 +3750,7 @@ def put_on_bufs(onvoice, p_meas, prenote, abc_note, timeofnote, append_tie, onet
     global mlth
     global bufs
     global bufs_length
+    global bufs_velocity
     global bufs_accidentals
     global bufs_tie_next
     global bufs_legato_next
@@ -3758,6 +3779,7 @@ def put_on_bufs(onvoice, p_meas, prenote, abc_note, timeofnote, append_tie, onet
     if onvoice not in bufs:
         bufs[onvoice] = {}
         bufs_length[onvoice] = {}
+        bufs_velocity[onvoice] = {}
         bufs_accidentals[onvoice] = {}
         bufs_tie_next[onvoice] = ''
         bufs_legato_next[onvoice] = ''
@@ -3775,10 +3797,12 @@ def put_on_bufs(onvoice, p_meas, prenote, abc_note, timeofnote, append_tie, onet
         if args.horizontal or args.vertical:
             bufs[onvoice][p_meas] = [prenote + abc_note]
             bufs_length[onvoice][p_meas] = [timeofnote]
+            bufs_velocity[onvoice][p_meas] = [ int(calculate.variables['default_velocity']) ]
             bufs_accidentals[onvoice][p_meas] = [append_tie]
         elif args.midi1csv or args.fluidsynth:
             bufs[onvoice][p_meas] = [abc_note]
             bufs_length[onvoice][p_meas] = [timeofnote]
+            bufs_velocity[onvoice][p_meas] = [ int(calculate.variables['default_velocity']) ]
             if cresc_time[onvoice] != 0:
                 append_tie = append_tie + 'c'
             # fi
@@ -3791,16 +3815,19 @@ def put_on_bufs(onvoice, p_meas, prenote, abc_note, timeofnote, append_tie, onet
         if args.vertical or args.horizontal:
             bufs[onvoice][p_meas].append(prenote + abc_note)
             bufs_length[onvoice][p_meas].append(timeofnote)
+            bufs_velocity[onvoice][p_meas].append(int(calculate.variables['default_velocity']))
             bufs_accidentals[onvoice][p_meas].append(append_tie)
         elif args.midi1csv or args.fluidsynth:
             bufs[onvoice][p_meas].append(abc_note)
             bufs_length[onvoice][p_meas].append(timeofnote)
+            bufs_velocity[onvoice][p_meas].append(int(calculate.variables['default_velocity']))
             if cresc_time[onvoice] != 0:
                 append_tie = append_tie + 'c'
             # fi
             bufs_accidentals[onvoice][p_meas].append(append_tie)
         else:           # ABC
             bufs[onvoice][p_meas] = bufs[onvoice][p_meas] + prenote + abc_note + postnote
+# NOTDONEYET - bufs_velocity
         # fi
     # fi
 
