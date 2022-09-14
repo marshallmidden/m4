@@ -15,6 +15,8 @@
 # 5) ppppp and fffff as lilypond.
 # 6) lilypond output for printing.
 # ----------------------------------------------------------------------------
+# Need to put out intensity values when they change. (Like cc 11 -> vol(xx).)
+# ----------------------------------------------------------------------------
 #    A) Put in largo and ties and spaces for note tail groupings for:
 #    +  One last check of printing - for correct notes.
 #        B1 - 1 - Done largo, ties, spaces. Checking how it looks.
@@ -1199,15 +1201,15 @@ staves = [ ]
 
 global reverb
 reverb = { }                        # Reverb value for voice.
-reverb[''] = {}
+reverb[''] = {}                     # Index by measure then voice.
 
 global pan
 pan = { }                           # Pan (balance 0=left, 126=right, 64=center) for voice.
-pan[''] = {}
+pan[''] = {}                        # Index by measure then voice.
 
 global intensity
 intensity = { }                     # Instrument intensity (volume).
-intensity[''] = {}
+intensity[''] = {}                  # Index by measure then voice.
 
 global pitch                        # Pitch change up or down by semitones.
 pitch = {}                          # Index by measure.
@@ -1280,8 +1282,11 @@ bufs_tie_next = { 1: '' }           #    the "t" goes on which notes.
 global bufs_legato_next
 bufs_legato_next = { 1: '' }
 
-global bufs_vol
+global bufs_vol                     # vol(xx) for each note.
 bufs_vol = { 1: {} }
+
+global bufs_intensity               # intensity VOICE XXX for each note.
+bufs_intensity = { 1: {} }
 
 global pages_to_do
 pages_to_do = []                    # argument line limiting which pages to do.
@@ -1520,6 +1525,7 @@ def new_voice_initialize(voice, m):
     global bufs_tie_next
     global bufs_legato_next
     global bufs_vol
+    global bufs_intensity
     global acc_m
     global acc_m_xpose
     global acc_v_init                   # Last accidental on a note in measure.
@@ -1549,6 +1555,7 @@ def new_voice_initialize(voice, m):
         bufs_tie_next[voice] = ''
         bufs_legato_next[voice] = ''
         bufs_vol[voice] = {}
+        bufs_intensity[voice] = {}
     # fi
 
     if m not in vl[voice]:
@@ -1648,6 +1655,7 @@ def rests_in_empty_measure_voices(m, voice):
     global bufs_tie_next
     global bufs_legato_next
     global bufs_vol
+    global bufs_intensity
     global args
     global running_vl
 
@@ -1666,6 +1674,7 @@ def rests_in_empty_measure_voices(m, voice):
     # fi
     if m not in bufs[voice]:
         bufs_vol[voice][m] = []
+        bufs_intensity[voice][m] = []
         if args.horizontal or args.vertical or args.midi1csv or args.fluidsynth:
             bufs[voice][m] = []
             bufs_length[voice][m] = []
@@ -1683,6 +1692,7 @@ def rests_in_empty_measure_voices(m, voice):
         tt = 127                            # Probably a rest, put as full volume.
     # fi
     bufs_vol[voice][m].append(tt)
+    bufs_intensity[voice][m].append(intensity[m][voice])
     # Put out rests.
     if l <= 0:                              # if nothing to do.
         return
@@ -2664,6 +2674,7 @@ def print_out_midi1csv_notes():
     global bufs_length                          # Lengths for notes.
     global bufs_accidentals                     # Accidentals for notes.
     global bufs_vol                             # Volumes for notes.
+    global bufs_intensity
 
     global goto_table
     global goto_variables
@@ -2714,6 +2725,7 @@ def print_out_midi1csv_notes():
         legato_on = False                       # Legato is not on yet.
         last_note_on = ''                       # There is no note that is currently on.
         last_cc11 = 0                           # The last control 11 volume put out for voice.
+        last_cc7 = 0                            # The last control 7 volume put out for "channel".
         note_playing = 0                        # There is no note length to '4c4s' rest (staccato/portamento).
         note_length = 0                         # The length of the last note (4c4).
         last_acc = ''                           # No accidental to start with.
@@ -2733,12 +2745,18 @@ def print_out_midi1csv_notes():
             else:
                 v_vl = 127                      # Probably a rest, put as full volume.
             # fi
+            if m in intensity and voice in intensity[m]:
+                v_intens = intensity[m][voice]  # "channel" volume level for this voice/measure
+            else:
+                v_intens = 127                  # Probably a rest, put as full volume.
+            # fi
 
             # Starting with first note in measure (i).
             i = 0
             while i < len(bufs[voice][m]):      # while there are notes in measure
                 n = bufs[voice][m][i]           # note number
                 v = bufs_vol[voice][m][i]       # volume for the next note.
+                v_intens = bufs_intensity[voice][m][i]       # "channel" volume for the next note.
                 if note_length > 0:             # If there is a previous note to update length, or ...
                     # Crescendo needs current volume and next notes starting volume.
                     if 'c' in last_acc:
@@ -2792,6 +2810,7 @@ def print_out_midi1csv_notes():
                     # fi
                     # To next note. While loop checks for end of measure.
                     v_vl = bufs_vol[voice][m][i]
+                    v_intens = bufs_intensity[voice][m][i]
                     i = i + 1
                     continue
                 # fi
@@ -2851,11 +2870,18 @@ def print_out_midi1csv_notes():
                 # fi
 
                 v_vl = bufs_vol[voice][m][i]
+                v_intens = bufs_intensity[voice][m][i]
                 if last_cc11 !=  v_vl:
                     if last_note_on != '':
                         print_output("{}, {}, Control_c, {}, 11, {}".format(voice+1, lthworkingmeasures, chan, v_vl))
                     # fi
                     last_cc11 = v_vl
+                # fi
+                if last_cc7 !=  v_intens:
+                    if last_note_on != '':
+                        print_output("{}, {}, Control_c, {}, 7, {}".format(voice+1, lthworkingmeasures, chan, v_intens))
+                    # fi
+                    last_cc7 = v_intens
                 # fi
 
                 # note_playing will eventually be when to turn note off.
@@ -3157,11 +3183,12 @@ def print_out_fluidsynth():
 #   End of print_out_fluidsynth
 
 # ----------------------------------------------------------------------------
-def pre_move_note_before(prev_m, m, voice, l, vel, n, a, v):
+def pre_move_note_before(prev_m, m, voice, l, vel, intens, n, a, v):
     global bufs
     global bufs_length
     global bufs_velocity
     global bufs_vol
+    global bufs_intensity
     global bufs_accidentals
     global mlth                         # measure length dictionary
     global tlth
@@ -3171,6 +3198,7 @@ def pre_move_note_before(prev_m, m, voice, l, vel, n, a, v):
     bufs_velocity[voice][prev_m].append(vel)
     bufs_accidentals[voice][prev_m].append(a)
     bufs_vol[voice][prev_m].append(v)
+    bufs_intensity[voice][m].append(intens)
 
     tlth[voice] = tlth[voice] + l
     if prev_m not in mlth[voice]:
@@ -3188,6 +3216,7 @@ def pre_shift_measure(prev_m, m):
     global bufs_length
     global bufs_velocity
     global bufs_vol
+    global bufs_intensity
     global bufs_accidentals
     global mlth                         # measure length dictionary
     global tlth
@@ -3204,10 +3233,11 @@ def pre_shift_measure(prev_m, m):
             n =  bufs[voice][m][0]              # Note (plus pre and post?).
             a = bufs_accidentals[voice][m][0]   # Accidentals -- oh my ...
             v = bufs_vol[voice][m][0]
+            intens = bufs_intensity[voice][m][0]
             if l <= s:
                 if prev_m is not None:
                     # Move to previous measure.
-                    pre_move_note_before(prev_m, m, voice, l, vel, n, a, v)
+                    pre_move_note_before(prev_m, m, voice, l, vel, intens, n, a, v)
                 else:
                     print_warning("pre_shift_measure - tossing voice={} m={} n={} l={} a={} v={}".  format(voice, m, n, l, a, v), 'pass2')
                 # fi
@@ -3217,6 +3247,7 @@ def pre_shift_measure(prev_m, m):
                 bufs_velocity[voice][m].pop(0)
                 bufs_accidentals[voice][m].pop(0)
                 bufs_vol[voice][m].pop(0)
+                bufs_intensity[voice][m].pop(0)
                 tlth[voice] = tlth[voice] - l
                 mlth[voice][m] = mlth[voice][m] - l
                 s = s - l
@@ -3255,6 +3286,7 @@ def pre_shift_measure(prev_m, m):
                 # fi
             # fi
             # bufs_vol[voice][m][0]                 # volume remains the same.
+# NOTDONEYET - bufs_intensity[voice][m][i]
             tlth[voice] = tlth[voice] - s           # Length reduced.
             mlth[voice][m] = mlth[voice][m] - s
             return
@@ -3758,6 +3790,7 @@ def put_on_bufs(onvoice, p_meas, prenote, abc_note, timeofnote, append_tie, onet
     global DECORATIONS
     global args
     global bufs_vol
+    global bufs_intensity
     global cresc_direction
     global cresc_time
     global cresc_volume
@@ -3784,6 +3817,7 @@ def put_on_bufs(onvoice, p_meas, prenote, abc_note, timeofnote, append_tie, onet
         bufs_tie_next[onvoice] = ''
         bufs_legato_next[onvoice] = ''
         bufs_vol[onvoice] = {}
+        bufs_intensity[onvoice] = {}
     # fi
     if onetimevolume is None:
         if onvoice in running_vl and p_meas in running_vl[onvoice]:
@@ -3794,6 +3828,7 @@ def put_on_bufs(onvoice, p_meas, prenote, abc_note, timeofnote, append_tie, onet
     # fi
     if p_meas not in bufs[onvoice]:
         bufs_vol[onvoice][p_meas] = [ onetimevolume ]
+        bufs_intensity[onvoice][p_meas] = [ intensity[p_meas][onvoice] ]
         if args.horizontal or args.vertical:
             bufs[onvoice][p_meas] = [prenote + abc_note]
             bufs_length[onvoice][p_meas] = [timeofnote]
@@ -3812,6 +3847,7 @@ def put_on_bufs(onvoice, p_meas, prenote, abc_note, timeofnote, append_tie, onet
         # fi
     else:
         bufs_vol[onvoice][p_meas].append(onetimevolume)
+        bufs_intensity[onvoice][p_meas].append(intensity[p_meas][onvoice])
         if args.vertical or args.horizontal:
             bufs[onvoice][p_meas].append(prenote + abc_note)
             bufs_length[onvoice][p_meas].append(timeofnote)

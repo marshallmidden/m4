@@ -12,7 +12,6 @@ SONGS += loudness.flute
 SONGS += loudness.frenchhorn
 SONGS += loudness.gunshot
 SONGS += loudness.oboe
-SONGS += loudness.piano
 SONGS += loudness.piccolo
 SONGS += loudness.pizz
 SONGS += loudness.snaredrum
@@ -23,9 +22,16 @@ SONGS += loudness.trombone
 SONGS += loudness.tuba
 SONGS += loudness.viola
 SONGS += loudness.violin
-SONGS += loudness.piano.atten
 #-----------------------------------------------------------------------------
 SONGS_FS = ${SONGS:=.fs}
+#-----------------------------------------------------------------------------
+FOUR = 
+FOUR += loudness.piano
+FOUR += loudness.piano.intensity
+FOUR += loudness.piano.velocity
+FOUR += loudness.piano.3
+#-----------------------------------------------------------------------------
+FOUR_FS = ${FOUR:=.fs}
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 #-----------------------------------------------------------------------------
@@ -36,15 +42,20 @@ MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 .PHONY: help
 help:
 	@echo 'Targets:'
-	@echo '  all       - Convert SONGS.gcs files to .mid files, etc.'
-	@echo '  clean     - Remove intermediate .csv,.mid,.abc,.ps,_m.ps,.fs, and .wav files.'
+	@echo '  all       - Convert SONGS.gcs files to .fs files, etc.'
+	@echo '  four      - Convert FOUR.gcs files to .fs files, etc.'
+	@echo '  clean     - Remove resulting files: *.fs'
 	@echo "SONGS: ${SONGS}"
+	@echo "FOUR: ${FOUR}"
 #-----------------------------------------------------------------------------
 .PHONY: all songs ${SONGS}
 all songs ${SONGS}: ${SONGS_FS}
 #-----------------------------------------------------------------------------
+.PHONY: songs ${FOUR}
+four ${FOUR}: ${FOUR_FS}
+#-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -f ${SONGS_FS}
+	rm -f ${SONGS_FS} ${FOUR_FS}
 	rm -f *.stderr
 #-----------------------------------------------------------------------------
