@@ -66,7 +66,7 @@ CPP=gcc -E -x c -nostdinc -P -C -CC -Wno-error -Wno-extra -traditional-cpp
 .SUFFIXES: .abc _m.ps .E .fs
 # output $@   -- input $<
 %.fs:  %.E
-	${MUSICOMP2ABC} --fluidsynth $< $@ || rm -f $@
+	${MUSICOMP2ABC} --two --fluidsynth $< $@ || rm -f $@
 #+ %.csv:  %.E
 #+ 	${MUSICOMP2ABC} --midi1csv $< $@ || rm -f $@
 #+ %.mid:  %.csv

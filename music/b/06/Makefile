@@ -15,13 +15,13 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 	${MUSICOMP2ABC} --midi1csv $< $@ \
 		|| (rm -f $@ ; exit 1)
 %.fs:	%.E
-	${MUSICOMP2ABC} --fluidsynth $< $@ \
+	${MUSICOMP2ABC} --two --fluidsynth $< $@ \
 		|| ( rm -f $@ ; exit 1)
 %.mid:	%.csv
 	csvmidi $< $@ \
 		|| (rm -f $@ ; exit 1)
 %.wav:	%.mid
-	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 128 $< \
+	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser/GeneralUser.sf2 -K 128 $< \
 		|| (rm -f $@ ; exit 1)
 %.abc:	%.E
 	${MUSICOMP2ABC} --abc $< $@ \
@@ -86,9 +86,6 @@ check:
 	@echo "ABCM2PS=${ABCM2PS}"
 #=============================================================================
 all: ${V}.mid ${V}.ps ${V}_m.ps ${V}.wav ${V}.fs
-	#++ open ${V}.ps ${V}_m.ps
-	#-- fluidsynth -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 128 ${V}.mid
-	#-- fluidsynth -F "${V}.wav" -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 128 "${V}.mid"
 #=============================================================================
 .PHONY: clean
 clean::

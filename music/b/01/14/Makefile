@@ -11,7 +11,7 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 .PRECIOUS: %.abc %.csv %.mid %.E .fs
 .SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E
 %.fs:	%.E
-	${MUSICOMP2ABC} --fluidsynth $< $@ \
+	${MUSICOMP2ABC} --two --fluidsynth $< $@ \
 		|| (rm -f $@ ; exit 1)
 %.csv:	%.E
 	${MUSICOMP2ABC} --midi1csv $< $@ \
@@ -20,7 +20,7 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 	csvmidi $< $@ \
 		|| (rm -f $@ ; exit 1)
 %.wav:	%.mid
-	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 128 $< \
+	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser/GeneralUser.sf2 -K 128 $< \
 		|| (rm -f $@ ; exit 1)
 %.abc:	%.E
 	${MUSICOMP2ABC} --abc $< $@ \
