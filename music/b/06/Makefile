@@ -5,33 +5,32 @@ MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 #- YAPS         = yaps
 ABCM2PS      = abcm2ps
 #-----------------------------------------------------------------------------
+# -b nn = starting bar number
+# -i = put red circle around errors.
+# -j nn = number every this many bars.
+# -l = landscape mode
+# -M = suppress lyrics
+# -N 2 = number pages in upper right.
+# -s nn = page scale to (default 0.75) = %%scale.
+ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
+#-----------------------------------------------------------------------------
+PAGES =
+MEASURES =
+VOICES =
+#-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
-#- .PRECIOUS: %.abc %.csv %.mid %.E
-.PRECIOUS: %.abc %.csv %.E
-#- .SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E .fs
-.SUFFIXES: .csv .abc _m.ps ..E .fs
+.PRECIOUS: %.abc %.E
+.SUFFIXES: .abc _m.ps .E .fs
 # output $@   -- input $<
-%.csv:	%.E
-	${MUSICOMP2ABC} --midi1csv $< $@ \
-		|| (rm -f $@ ; exit 1)
 %.fs:	%.E
-	${MUSICOMP2ABC} --two --fluidsynth $< $@ \
+	${MUSICOMP2ABC} --two --fluidsynth $< $@ ${PAGES} ${MEASURES} ${VOICES} \
 		|| ( rm -f $@ ; exit 1)
-#- %.mid:	%.csv
-#- 	csvmidi $< $@ \
-#- 		|| (rm -f $@ ; exit 1)
-#- %.wav:	%.mid
-#- 	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser/GeneralUser.sf2 -K 128 $< \
-#- 		|| (rm -f $@ ; exit 1)
 %.abc:	%.E
-	${MUSICOMP2ABC} --abc $< $@ \
+	${MUSICOMP2ABC} --abc $< $@ ${PAGES} ${MEASURES} ${VOICES} \
 		|| (rm -f $@ ; exit 1)
-#- %.ps:	%.abc
-#- 	${YAPS} $< -o $@ -k \
-#- 		|| (rm -f $@ ; exit 1)
 %_m.ps:	%.abc
-	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@) \
+	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) \
 		|| (rm -f $@ ; exit 1)
 %.E: %.gcs ../instruments.include
 	${CPP} $< -o $@ \
@@ -82,6 +81,7 @@ check:
 	@echo "MUSICOMP2ABC=${MUSICOMP2ABC}"
 	@echo "YAPS=${YAPS}"
 	@echo "ABCM2PS=${ABCM2PS}"
+	@echo "ABCM2PS_ARGS=${ABCM2PS_ARGS}"
 #=============================================================================
 all: ${V}_m.ps ${V}.fs
 #=============================================================================
