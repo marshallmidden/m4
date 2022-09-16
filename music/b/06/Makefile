@@ -2,38 +2,38 @@ V            = b-6
 #-----------------------------------------------------------------------------
 SEPARATE     = ./A.separate
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
-YAPS         = yaps
+#- YAPS         = yaps
 ABCM2PS      = abcm2ps
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.abc %.csv %.mid %.E
-.SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E .fs
+#- .PRECIOUS: %.abc %.csv %.mid %.E
+.PRECIOUS: %.abc %.csv %.E
+#- .SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E .fs
+.SUFFIXES: .csv .abc _m.ps ..E .fs
 # output $@   -- input $<
-#	${MUSICOMP2ABC} --midi1csv --nolegato $< $@
 %.csv:	%.E
 	${MUSICOMP2ABC} --midi1csv $< $@ \
 		|| (rm -f $@ ; exit 1)
 %.fs:	%.E
 	${MUSICOMP2ABC} --two --fluidsynth $< $@ \
 		|| ( rm -f $@ ; exit 1)
-%.mid:	%.csv
-	csvmidi $< $@ \
-		|| (rm -f $@ ; exit 1)
-%.wav:	%.mid
-	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser/GeneralUser.sf2 -K 128 $< \
-		|| (rm -f $@ ; exit 1)
+#- %.mid:	%.csv
+#- 	csvmidi $< $@ \
+#- 		|| (rm -f $@ ; exit 1)
+#- %.wav:	%.mid
+#- 	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser/GeneralUser.sf2 -K 128 $< \
+#- 		|| (rm -f $@ ; exit 1)
 %.abc:	%.E
 	${MUSICOMP2ABC} --abc $< $@ \
 		|| (rm -f $@ ; exit 1)
-%.ps:	%.abc
-	${YAPS} $< -o $@ -k \
-		|| (rm -f $@ ; exit 1)
+#- %.ps:	%.abc
+#- 	${YAPS} $< -o $@ -k \
+#- 		|| (rm -f $@ ; exit 1)
 %_m.ps:	%.abc
 	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@) \
 		|| (rm -f $@ ; exit 1)
-#-- %.E: %.gcs beethoven.macros
-%.E: %.gcs
+%.E: %.gcs ../instruments.include
 	${CPP} $< -o $@ \
 		|| (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
@@ -71,10 +71,8 @@ help::
 	@echo "  clean  - Remove postscript (ps), csv, fs, and mid files."
 	@echo ""
 	@echo "  all    - create ${V}.abc from ${V} (via 'musicomp2abc')"
-	@echo "         - and ${V}.ps from ${V}.abc (via 'yaps')"
-	@echo "         - and Out.ps from ${V}.abc (via 'abcm2ps')"
-	@echo "         - and ${V}.mid from ${V} (via 'musicomp2abc --midicsv')"
-	@echo "         - and ${V}.mid from ${V} (via 'musicomp2abc --fluidsynth')"
+	@echo "         - and ${V}_m.ps from ${V}.abc (via 'abcm2ps')"
+	@echo "         - and ${V}.fs from ${V} (via 'musicomp2abc --fluidsynth')"
 	@echo ""
 #-----------------------------------------------------------------------------
 .PHONY: check
@@ -85,7 +83,7 @@ check:
 	@echo "YAPS=${YAPS}"
 	@echo "ABCM2PS=${ABCM2PS}"
 #=============================================================================
-all: ${V}.mid ${V}.ps ${V}_m.ps ${V}.wav ${V}.fs
+all: ${V}_m.ps ${V}.fs
 #=============================================================================
 .PHONY: clean
 clean::
