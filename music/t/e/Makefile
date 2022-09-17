@@ -1,8 +1,8 @@
 V            = e
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
-# YAPS         = yaps
 ABCM2PS      = abcm2ps
+#-----------------------------------------------------------------------------
 # -b nn = starting bar number
 # -i = put red circle around errors.
 # -j nn = number every this many bars.
@@ -76,55 +76,39 @@ WHICH = "-D WHICH=0"
 #xx WHICH = "-D WHICH=11"
 #xx VOICES = --voices 39..40
 #-----------------------------------------------------------------------------
-#-- CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
+CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.csv %.mid
 #- .SUFFIXES: .mid .csv .ps .abc _m.ps
 .SUFFIXES: .mid .csv .abc _m.ps
 # Output $@ -- input $< (first dependency -- after the :).
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-#-- %.E: %.gcs Makefile
-#-- 	${CPP} $< -o $@ \
-#-- 		|| (rm -f $@ ; exit 1)
-#-- # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-%.fs: %.gcs
+%.fs: %.E
 	${MUSICOMP2ABC} --two --fluidsynth $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
 		|| (rm -f $@ ; exit 1)
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-%.abc: %.gcs Makefile
+%.abc: %.E Makefile
 	${MUSICOMP2ABC} --abc $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
 		|| (rm -f $@ ; exit 1)
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-# %.ps: %.abc
-# 	${YAPS} $< -o $@ -k \
-# 		|| (rm -f $@ ; exit 1)
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 %_m.ps: %.abc
 	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) \
 		|| (rm -f $@ ; exit 1)
+%.E: %.gcs ../../b/instruments.include
+	${CPP} $< -o $@ \
+		|| (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 # Manually invokable rules follow.
-%.csv: %.gcs Makefile
+%.csv: %.E Makefile
 	${MUSICOMP2ABC} --midi1csv $< $@ \
 		|| (rm -f $@ ; exit 1)
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 .SUFFIXES: .v
-%.v: %.gcs Makefile
+%.v: %.E Makefile
 	${MUSICOMP2ABC} --vertical $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
 		|| (rm -f $@ ; exit 1)
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 .SUFFIXES: .horizontal
-%.horizontal: %.gcs Makefile
+%.horizontal: %.E Makefile
 	${MUSICOMP2ABC} --horizontal $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
 		|| (rm -f $@ ; exit 1)
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 %.mid: %.csv
 	csvmidi $< $@ \
-		|| (rm -f $@ ; exit 1)
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-%.wav: %.mid
-#--	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 128 $< \
-	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser/GeneralUser.sf2 -K 128 $< \
 		|| (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help
@@ -134,7 +118,6 @@ help::
 	@echo ""
 	@echo "  all    - create ${V}.E from ${V}.gcs (via 'cpp')"
 	@echo "         - and ${V}.abc from ${V}.E (via 'musicomp2abc --abc')"
-#	@echo "         - and ${V}.ps from ${V}.abc (via 'yaps')"
 	@echo "         - and ${V}_m.ps from ${V}.abc (via 'abcm2ps')"
 	@echo "         - and ${V}.fs from ${V}.E (via 'musicomp2abc --fluidsynth')"
 	@echo ""
@@ -142,9 +125,8 @@ help::
 .PHONY: check
 check:
 	@echo "V=${V}"
-#-- 	@echo "CPP=${CPP}"
+	@echo "CPP=${CPP}"
 	@echo "MUSICOMP2ABC=${MUSICOMP2ABC}"
-# 	@echo "YAPS=${YAPS}"
 	@echo "ABCM2PS=${ABCM2PS}"
 	@echo "ABCM2PS_ARGS=${ABCM2PS_ARGS}"
 	@echo "PAGES=${PAGES}"
@@ -152,15 +134,14 @@ check:
 	@echo "VOICES=${VOICES}"
 	@echo "WHICH=${WHICH}"
 #=============================================================================
-# all: ${V}.ps ${V}_m.ps ${V}.abc ${V}.fs
-all: ${V}_m.ps ${V}.abc ${V}.fs
+all: ${V}_m.ps ${V}.fs
 #=============================================================================
 .PHONY: clean
 clean:
 	rm -f *.abc
 	rm -f *.ps
 	rm -f *.fs
-#--	rm -f *.v *.h *.csv *.mid *.wav
+	rm -f *.v *.h *.csv *.mid *.wav
 #-----------------------------------------------------------------------------
 # End of Makefile
 #-----------------------------------------------------------------------------
