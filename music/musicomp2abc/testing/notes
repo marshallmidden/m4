@@ -1,0 +1,241 @@
+#!/usr/bin/python3 -B
+# ----------------------------------------------------------------------------
+# vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
+# ----------------------------------------------------------------------------
+import os
+import sys
+# ----------------------------------------------------------------------------
+WHOLE_NOTE = 120 * 4        # 120 = quarter note from csv "Header".
+# ----------------------------------------------------------------------------
+#    octave  2      3      4       5
+#  c/b+     48     60     72      84
+#  c+/d-    49     61     73      85
+#  d        50     62     74      86
+#  d+/e-    51     63     75      87
+#  e/f-     52     64     76      88
+#  f/e+     53     65     77      89
+#  f+/g-    54     66     78      90
+#  g        55     67     79      91
+#  g+/a-    56     68     80      92
+#  a        57     69     81      93
+#  a+/b-    58     70     82      94
+#  b/c-     59     71     83      95
+
+# For octave 3c = 60.
+note_in_octave_value = {
+   'c': 60,
+   'd-':61,
+   'd': 62,
+   'e-':63,
+   'e': 64,
+   'f': 65,
+   'g-':66,
+   'g': 67,
+   'a-':68,
+   'a': 69,
+   'b-':70,
+   'b': 71,
+}
+
+global note_to_midi_value
+note_to_midi_value = { }
+global midi_value_to_note_flat
+midi_value_to_note_flat = { }
+global midi_value_to_note_sharp
+midi_value_to_note_sharp = { }
+
+for o in range(0, 9):        # 0 thru 8
+    for n in note_in_octave_value:
+        x = str(o) + n
+        v = (note_in_octave_value[n] - (60-24)) + 12*o      # 60-36=24 = '0c'
+        note_to_midi_value[v] = x
+    # rof
+# rof
+
+#-----------------------------------------------------------------------------
+# Make this be comments.
+Comments = ['Control_c',
+            'End_of_file',
+            'End_track',
+            'Header',
+            'MIDI_port',
+            'Pitch_bend_c',
+            'Program_c',
+            'Start_track',
+            'Tempo',
+            'Title_t']
+# ----------------------------------------------------------------------------
+# Main program follows.
+def main():
+
+    prev_time = 0
+#-    print("prev_time={}".format(prev_time), file=sys.stderr)
+
+    voice = -1              # So initialized with first line.
+    number_notes_on_list = 0
+    max_voices = 0
+    #
+    for line in sys.stdin:
+        line = line.rstrip()
+        if line[0] and line[0] == '*':
+            print(line, file=sys.stderr)
+            continue
+        # fi
+        # Get rid of commas, and leading/trailing spaces
+        nline = line.replace(',', '').strip()
+        a = nline.split()            # Get everything.
+#--        print("a={}".format(a), file=sys.stderr)
+        if a[0] != voice:
+            # Initialize voice information.
+            last_lth = 0
+            voice_names = [ ]
+            measure = 0
+            print("measure {}".format(measure), file=sys.stderr)
+            measure_lth = 0
+            voice = a[0]
+            if number_notes_on_list > 0:
+                print("notes left turned on={}  times={}".format(notes_on_list, notes_on_list_start), file=sys.stderr)
+            # fi
+            number_notes_on_list = 0
+            notes_on_list = []
+            notes_on_list_start = []
+            max_voices = 0
+        # fi
+        if a[2] in Comments:
+            print("* {}".format(line), file=sys.stderr)
+            continue
+        # fi
+        if a[2] != 'Note_on_c':
+            print("* -unrecognized- {}".format(line), file=sys.stderr)
+            continue
+        # fi
+        time = int(a[1])
+        channel = int(a[3])
+        freq = int(a[4])
+        volume = int(a[5])
+        # Ignore channel.
+#  a0   a1    a2      a3  a4  a5
+#   2, 481, Note_on_c, 0, 88, 55
+        
+        print("* {}".format(line), file=sys.stderr)
+        if volume != 0:
+            print("here#0 number_notes_on_list={} notes_on_list={} prev_time={} time={}".format(number_notes_on_list,notes_on_list,prev_time,time), file=sys.stderr)
+            print("here#0 type(prev_time)={} type(time)={}".format(type(prev_time),type(time)), file=sys.stderr)
+            if (prev_time + 5) <= time:     # put in a rest
+                d = time - prev_time
+                print("here#1a number_notes_on_list={} notes_on_list={} prev_time={} time={} d={} type(WHOLE_NOTE)={} WHOLE_NOTE={}".format(number_notes_on_list,notes_on_list,prev_time,time,d,type(WHOLE_NOTE),WHOLE_NOTE), file=sys.stderr)
+                while d > WHOLE_NOTE:
+                    for i in range(0, max_voices):
+                        if i > 0:
+                            voiceletter = chr(ord('A') + i - 1)
+                        else:
+                            voiceletter = ''
+                        # fi
+                        print("=v VOICE{}{}: r1".format(voice,voiceletter), file=sys.stderr)
+                    # rof
+                    d = d - WHOLE_NOTE
+                    measure = measure + 1
+                    print("measure {}".format(measure), file=sys.stderr)
+                    measure_lth = 0
+                # elihw
+                if d < 5 and d > 0:
+                    print("d ({}) < 5".format(d), file=sys.stderr)
+                elif d > 0:
+                    lth = (WHOLE_NOTE / d) + 0.05
+                    l1 = int(lth * 10)
+                    l2 = int(l1 / 10)
+                    for i in range(0, max_voices):
+                        if i > 0:
+                            voiceletter = chr(ord('A') + i - 1)
+                        else:
+                            voiceletter = ''
+                        # fi
+                        print("=v VOICE{}{}: r{}".format(voice, voiceletter, l2), file=sys.stderr)
+                    # rof
+                    measure_lth = measure_lth + d
+                # fi
+                if measure_lth >= WHOLE_NOTE:
+                    measure = measure + 1
+                    print("measure {}".format(measure), file=sys.stderr)
+                    measure_lth = 0
+                # fi
+            # fi
+            notes_on_list.append(freq)
+            notes_on_list_start.append(time)
+            number_notes_on_list = number_notes_on_list + 1
+            if max_voices < number_notes_on_list:
+                max_voices = number_notes_on_list
+            # fi
+            continue
+        # fi
+        flag = False
+        print("here#1 number_notes_on_list={} notes_on_list={}".format(number_notes_on_list,notes_on_list), file=sys.stderr)
+        for i in range(number_notes_on_list-1,-1,-1):
+            print("i={} number_notes_on_list={}".format(i,number_notes_on_list), file=sys.stderr)
+            if notes_on_list[i] == freq:
+                flag = True
+                break
+            # fi
+        # rof
+        if not flag:
+            print("note {} not already turned on, cannot turn it off. time={}".format(freq, time), file=sys.stderr)
+            continue
+        # fi
+        #-----------------------------------------------------------------------------
+        # Note was on, turn it off, print voice.
+        d = int(time) - (notes_on_list_start[i])
+        if i == 0:
+            notes_on_list = notes_on_list[i+1:]
+        elif i == number_notes_on_list -1:
+            notes_on_list = notes_on_list[0:i]
+        else:
+            notes_on_list = notes_on_list[0:i] + notes_on_list[i+1:]
+        # fi
+        number_notes_on_list = number_notes_on_list - 1
+        if i > 0:
+            voiceletter = chr(ord('A') + i)
+        else:
+            voiceletter = ''
+        # fi
+        n = int(freq)
+        gcs = note_to_midi_value[n]
+        if d <= 0:
+            l1 = l2 = lth = 0
+        else:
+            while d > WHOLE_NOTE:
+                print("lth=1 d={} ".format(d), file=sys.stderr)
+                print("=v VOICE{}{}: {}1".format(voice,voiceletter, gcs), file=sys.stderr)
+                d = d - WHOLE_NOTE
+                measure = measure + 1
+                print("measure {}".format(measure), file=sys.stderr)
+                measure_lth = 0
+            # elihw
+            if d < 5 and d > 0:
+                print("d ({}) < 5".format(d), file=sys.stderr)
+                continue
+            # fi
+            lth = (WHOLE_NOTE / d) + 0.05
+            l1 = int(lth * 10)
+            l2 = int(l1 / 10)
+            print("=v VOICE{}{}: {}{}".format(voice,voiceletter, gcs, l2), file=sys.stderr)
+            measure_lth = measure_lth + d
+            if measure_lth >= WHOLE_NOTE:
+                measure = measure + 1
+                print("measure {}".format(measure), file=sys.stderr)
+                measure_lth = 0
+            # fi
+        # fi
+        print("lth={} l1={} l2={} WHOLE_NOTE={} / d={} ".format(lth,l1,l2,WHOLE_NOTE,d), file=sys.stderr)
+        prev_time = time            # for rests
+    # rof
+    return
+# End of main
+
+# ----------------------------------------------------------------------------
+if __name__ == '__main__':
+    main()
+# fi
+# ----------------------------------------------------------------------------
+exit(0)
+# ----------------------------------------------------------------------------
+# End of file musicomp2abc
