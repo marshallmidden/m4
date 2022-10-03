@@ -4,6 +4,9 @@
 # ----------------------------------------------------------------------------
 import os
 import sys
+
+#- OUTPUT = sys.stdout
+OUTPUT = sys.stderr
 # ----------------------------------------------------------------------------
 WHOLE_NOTE = 120 * 4        # 120 = quarter note from csv "Header".
 # ----------------------------------------------------------------------------
@@ -39,10 +42,6 @@ note_in_octave_value = {
 
 global note_to_midi_value
 note_to_midi_value = { }
-global midi_value_to_note_flat
-midi_value_to_note_flat = { }
-global midi_value_to_note_sharp
-midi_value_to_note_sharp = { }
 
 for o in range(0, 9):        # 0 thru 8
     for n in note_in_octave_value:
@@ -52,8 +51,57 @@ for o in range(0, 9):        # 0 thru 8
     # rof
 # rof
 
-#-----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+legal_mc_notes = [ 1/64, 1/32, 1/16, 1/8, 1/4, 1/2, 1/1 ]
+
+def convert_fraction_note_remainder(v, n, frac, tie):
+    q = frac + (1/48)
+#--     q = int(q * 32) - 1
+    q = int(q * 32)
+    r = q / 32
+
+    print("convert_fraction_note_remainder(v={}, n={}, frac={}, r={}, tie={})".format(v, n, frac, r, tie), file=sys.stderr)
+
+    if tie == 't' or n != 'r':
+        print_tie = 't'
+    else:
+        print_tie = ''
+    # fi
+    while r > (1 + (1/64)):
+        print("=v {}: {}1{}".format(v, n, print_tie), file=OUTPUT)
+        r = r - 1
+    # elihw
+
+    start_over = True
+    while start_over:
+        start_over = False
+        print("convert_fraction_note_remainder #A r={}".format(r), file=sys.stderr)
+        for i in range(0, len(legal_mc_notes)):
+            if r < legal_mc_notes[i]:
+                print("convert_fraction_note_remainder #B r={} < legal_mc_notes[{}]={}".format(r,i,legal_mc_notes[i]), file=sys.stderr)
+                if i == 0:
+                    print("convert_fraction_note_remainder - too small a value: r={}".format(r), file=OUTPUT)
+                    # Too small a value, ignore ??
+                    return
+                # fi
+                note_val = round(1.0 / legal_mc_notes[i - 1])
+                print("=v {}: {}{}{}".format(v, n, note_val, print_tie), file=OUTPUT)
+                r = r - legal_mc_notes[i - 1]
+                start_over = True
+                break
+            elif r == legal_mc_notes[i]:
+                print("convert_fraction_note_remainder #C r={} == legal_mc_notes[{}]={}".format(r,i,legal_mc_notes[i]), file=sys.stderr)
+                note_val = round(1.0 / legal_mc_notes[i])
+                print("=v {}: {}{}{}".format(v, n, note_val, tie), file=OUTPUT)
+                return
+            # fi
+        # rof
+    # elihw
+# End of convert_fraction_note_remainder
+
+# ----------------------------------------------------------------------------
 # Make this be comments.
+global Comments
 Comments = ['Control_c',
             'End_of_file',
             'End_track',
@@ -65,16 +113,208 @@ Comments = ['Control_c',
             'Tempo',
             'Title_t']
 # ----------------------------------------------------------------------------
+global working_voice
+working_voice = -1              # Initialized with first line.
+
+global notes_on
+notes_on = {}                   # Voice name, and notes on it [time, freq, vol, lth] (lth=0 if on, but not off).
+global max_notes
+max_notes = {}                  # Voice name, and notes on it [time, freq, vol, lth] (lth=0 if on, but not off).
+global notes_on_list
+notes_on_list = {}              # Voice name - on it [time, freq, vol, lth] (lth=0 if on, but not off).
+
+global max_voices
+max_voices = 0
+
+# ----------------------------------------------------------------------------
+def do_note_start(voice, time, freq, volume):
+    global notes_on
+    global notes_on_list
+    global max_notes
+
+    print("here#0a voice={} time={} freq={} volume={}".format(voice, time, freq, volume), file=sys.stderr)
+    if voice not in notes_on:
+        notes_on[voice] = 0                             # No notes on for this voice yet.
+        max_notes[voice] = 0                            # No notes on for this voice yet.
+    # fi
+    voiceletter = chr(ord('A') + notes_on[voice])
+    v = 'VOICE{}{}'.format(voice, voiceletter)
+    print("here#0b v={}".format(v), file=sys.stderr)
+    print("here#0c notes_on_list={}".format(notes_on_list), file=sys.stderr)
+    if v not in notes_on_list:
+        notes_on_list[v] = []
+    # fi
+    notes_on_list[v].append([time, freq, volume, 0])    # lth (last) of 0 for not turned off yet.
+    notes_on[voice] = notes_on[voice] + 1
+    if max_notes[voice] < notes_on[voice]:
+        max_notes[voice] = notes_on[voice]
+    # fi
+    print("here#0d notes_on_list={}".format(notes_on_list), file=sys.stderr)
+    return
+# End of do_note_start
+
+# ----------------------------------------------------------------------------
+def do_note_stop(voice, time, freq):
+    global notes_on
+    global notes_on_list
+    global max_notes
+
+    print("here#1a voice={} time={} freq={}".format(voice, time, freq), file=sys.stderr)
+    if voice not in notes_on:
+        print("No voice ({}) in notes_on={}".format(voice, notes_on), file=sys.stderr)
+        return
+    # fi
+    v = ''
+    t = f = vol = off = -1                # I hate python.
+    flag = False
+    for i in range(max_notes[voice]-1, -1, -1):
+        voiceletter = chr(ord('A') + i)
+        v = 'VOICE{}{}'.format(voice, voiceletter)
+        print("here#1b v={} notes_on_list={}".format(v, notes_on_list), file=sys.stderr)
+        print("here#1b notes_on_list[{}][-1]={}".format(v, notes_on_list[v][-1]), file=sys.stderr)
+        (t,f,vol,off) = notes_on_list[v][-1]
+        if off != 0:
+            continue
+        # fi
+        if f != freq:
+            continue
+        # fi
+        flag = True
+        break
+    # rof
+    if not flag:
+        print("note {} not already turned on, cannot turn it off. time={}".format(freq, time), file=sys.stderr)
+        return
+    # fi
+    print("here#1c (t={},f={},vol={},off={}) v={} i={}".format(t,f,vol,time,v,i), file=sys.stderr)
+    notes_on_list[v][-1] = (t,f,vol,time)       # Make unchangeable with ()'s. :)
+    notes_on[voice] = notes_on[voice] - 1
+    return
+# End of do_note_stop
+
+# ----------------------------------------------------------------------------
+def process_note_on_c(a):
+    global max_voices
+
+    voice = int(a[0])
+    time = int(a[1])
+#       channel = int(a[3])                 # Ignore channel.
+    freq = int(a[4])
+    volume = int(a[5])
+    if max_voices < voice:
+        max_voices = voice
+    # fi
+    # If note is being turned on.
+    if volume != 0:
+        do_note_start(voice, time, freq, volume)
+    else:
+        do_note_stop(voice, time, freq)
+    # fi
+    return  # End of process_note_on_c
+# End of process_note_on_c
+
+# ----------------------------------------------------------------------------
+def print_measure_rests_and_notes(measure_lth, measure, v, f, t, off):
+
+    print("print_measure_rests_and_notes #9a - measure_lth={} measure={} v={} f={} t={} off={}".format(measure_lth, measure, v, f, t, off), file=sys.stderr)
+
+    # Do rests before note starts. And any measures that need to occur.
+    start_this_measure = int(measure_lth / WHOLE_NOTE)
+    end_this_measure = (start_this_measure + 1) * WHOLE_NOTE
+    print("print_measure_rests_and_notes #9b - end_this_measure={} t={}".format(end_this_measure, t), file=sys.stderr)
+    while end_this_measure < t:
+        print("print_measure_rests_and_notes #9c", file=sys.stderr)
+        d = end_this_measure - measure_lth
+        lth = d / WHOLE_NOTE          # give fraction of a note.
+        convert_fraction_note_remainder(v, 'r', lth, '')
+        measure = measure + 1
+        measure_lth = end_this_measure
+        print("measure {}".format(measure), file=OUTPUT)
+        end_this_measure = end_this_measure + WHOLE_NOTE
+    # elihw
+
+    if t > (measure_lth + 5):
+        d = t - measure_lth
+        lth = d / WHOLE_NOTE          # give fraction of a note.
+        convert_fraction_note_remainder(v, 'r', lth, '')
+    # fi
+    measure_lth = t
+
+    # How long note is on.
+    n = int(f)
+    gcs = note_to_midi_value[n]
+    d = (int(off) - int(t))
+
+    # end_this_measure already set.
+    # First, is it on longer than what is left in this measure?
+    # NOTE: Tie goes on note before for v: format.
+    print("print_measure_rests_and_notes #9d - end_this_measure={} off={}".format(end_this_measure,off), file=sys.stderr)
+    while end_this_measure <= off:
+        d = end_this_measure - measure_lth
+        print("print_measure_rests_and_notes #9d - d={}".format(d), file=sys.stderr)
+        lth = d / WHOLE_NOTE          # give fraction of a note.
+        convert_fraction_note_remainder(v, gcs, lth, 't')   # ?? 't' ??
+        measure = measure + 1
+        measure_lth = end_this_measure
+        print("measure {}".format(measure), file=OUTPUT)
+        end_this_measure = end_this_measure + WHOLE_NOTE
+    # elihw
+
+    # If note length < WHOLE_NOTE:
+    d = off - measure_lth
+    print("print_measure_rests_and_notes #9e - d={}  off={} measure_lth={}".format(d,off,measure_lth), file=sys.stderr)
+    if d > 0:
+        lth = d / WHOLE_NOTE          # give fraction of a note.
+        convert_fraction_note_remainder(v, gcs, lth, '')
+    # fi
+    measure_lth = off
+    print("print_measure_rests_and_notes #9f - measure_lth={} measure={}".format(measure_lth, measure), file=sys.stderr)
+    return (measure_lth, measure)
+# End of print_measure_rests_and_notes
+
+# ----------------------------------------------------------------------------
+def print_voices():
+    global max_voices
+    global notes_on
+    global notes_on_list
+    global max_notes
+
+#--    print("print_voices - here#8a", file=sys.stderr)
+
+    print("voice   {}".format(len(notes_on_list.keys())), file=OUTPUT)
+    for v in notes_on_list.keys():
+        measure = 0
+        measure_lth = 0
+#--        print("print_voices - here#8b v={}".format(v), file=sys.stderr)
+#--        print("print_voices - here#8c notes_on_list={}".format(notes_on_list), file=sys.stderr)
+        if v not in notes_on_list:
+#--            print("print_voices - here#8d v={} notes_on_list={}".format(v,notes_on_list), file=sys.stderr)
+            continue
+        # fi
+        a = notes_on_list[v]
+#--        print("print_voices - here#8e a={}".format(a), file=sys.stderr)
+        print("measure {}".format(measure), file=OUTPUT)
+        for i in a:
+#--            print("print_voices - here#8f v={} i={}".format(v,i), file=sys.stderr)
+            (t,f,vol,off) = i
+#--            print("print_voices - here#8g (t={},f={},vol={},off={}) v={} i={}".format(t,f,vol,off,v,i), file=sys.stderr)
+            (measure_lth, measure) = print_measure_rests_and_notes(measure_lth, measure, v, f, t, off)
+        # rof
+    # rof
+    return
+# End of print_voices
+
+# ----------------------------------------------------------------------------
 # Main program follows.
 def main():
+    global working_voice
+    global max_voices
+    global notes_on_list
+    global number_notes_on_list
+    global notes_on_list_start
+    global last_lth
+    global Comments
 
-    prev_time = 0
-#-    print("prev_time={}".format(prev_time), file=sys.stderr)
-
-    voice = -1              # So initialized with first line.
-    number_notes_on_list = 0
-    max_voices = 0
-    #
     for line in sys.stdin:
         line = line.rstrip()
         if line[0] and line[0] == '*':
@@ -84,150 +324,43 @@ def main():
         # Get rid of commas, and leading/trailing spaces
         nline = line.replace(',', '').strip()
         a = nline.split()            # Get everything.
-#--        print("a={}".format(a), file=sys.stderr)
-        if a[0] != voice:
+        print("* a={}".format(a), file=sys.stderr)
+        # Next voice starts.
+        if a[0] != working_voice:
             # Initialize voice information.
-            last_lth = 0
-            voice_names = [ ]
-            measure = 0
-            print("measure {}".format(measure))
-            measure_lth = 0
-            voice = a[0]
-            if number_notes_on_list > 0:
-                print("notes left turned on={}  times={}".format(notes_on_list, notes_on_list_start), file=sys.stderr)
-            # fi
-            number_notes_on_list = 0
-            notes_on_list = []
-            notes_on_list_start = []
-            max_voices = 0
+            working_voice = a[0]
         # fi
+        # Ignore a bunch of lines.
         if a[2] in Comments:
-            print("* {}".format(line))
+            print("* {}".format(line), file=OUTPUT)
             continue
         # fi
+        # Only thing that should be left is Note_on_c.
         if a[2] != 'Note_on_c':
-            print("* -unrecognized- {}".format(line))
+            print("* -unrecognized- {}".format(line), file=OUTPUT)
             continue
         # fi
-        time = int(a[1])
-        channel = int(a[3])
-        freq = int(a[4])
-        volume = int(a[5])
-        # Ignore channel.
-#  a0   a1    a2      a3  a4  a5
-#   2, 481, Note_on_c, 0, 88, 55
-        
-        print("* {}".format(line))
-        if volume != 0:
-            print("here#0 number_notes_on_list={} notes_on_list={} prev_time={} time={}".format(number_notes_on_list,notes_on_list,prev_time,time), file=sys.stderr)
-            print("here#0 type(prev_time)={} type(time)={}".format(type(prev_time),type(time)), file=sys.stderr)
-            if (prev_time + 5) <= time:     # put in a rest
-                d = time - prev_time
-                print("here#1a number_notes_on_list={} notes_on_list={} prev_time={} time={} d={} type(WHOLE_NOTE)={} WHOLE_NOTE={}".format(number_notes_on_list,notes_on_list,prev_time,time,d,type(WHOLE_NOTE),WHOLE_NOTE), file=sys.stderr)
-                while d > WHOLE_NOTE:
-                    for i in range(0, max_voices):
-                        if i > 0:
-                            voiceletter = chr(ord('A') + i - 1)
-                        else:
-                            voiceletter = ''
-                        # fi
-                        print("=v VOICE{}{}: r1".format(voice,voiceletter))
-                    # rof
-                    d = d - WHOLE_NOTE
-                    measure = measure + 1
-                    print("measure {}".format(measure))
-                    measure_lth = 0
-                # elihw
-                if d < 5 and d > 0:
-                    print("d ({}) < 5".format(d), file=sys.stderr)
-                elif d > 0:
-                    lth = (WHOLE_NOTE / d) + 0.05
-                    l1 = int(lth * 10)
-                    l2 = int(l1 / 10)
-                    for i in range(0, max_voices):
-                        if i > 0:
-                            voiceletter = chr(ord('A') + i - 1)
-                        else:
-                            voiceletter = ''
-                        # fi
-                        print("=v VOICE{}{}: r{}".format(voice, voiceletter, l2))
-                    # rof
-                    measure_lth = measure_lth + d
-                # fi
-                if measure_lth >= WHOLE_NOTE:
-                    measure = measure + 1
-                    print("measure {}".format(measure))
-                    measure_lth = 0
-                # fi
-            # fi
-            notes_on_list.append(freq)
-            notes_on_list_start.append(time)
-            number_notes_on_list = number_notes_on_list + 1
-            if max_voices < number_notes_on_list:
-                max_voices = number_notes_on_list
-            # fi
-            continue
-        # fi
-        flag = False
-        print("here#1 number_notes_on_list={} notes_on_list={}".format(number_notes_on_list,notes_on_list), file=sys.stderr)
-        for i in range(number_notes_on_list-1,-1,-1):
-            print("i={} number_notes_on_list={}".format(i,number_notes_on_list), file=sys.stderr)
-            if notes_on_list[i] == freq:
-                flag = True
-                break
-            # fi
-        # rof
-        if not flag:
-            print("note {} not already turned on, cannot turn it off. time={}".format(freq, time), file=sys.stderr)
-            continue
-        # fi
-        #-----------------------------------------------------------------------------
-        # Note was on, turn it off, print voice.
-        d = int(time) - (notes_on_list_start[i])
-        if i == 0:
-            notes_on_list = notes_on_list[i+1:]
-        elif i == number_notes_on_list -1:
-            notes_on_list = notes_on_list[0:i]
-        else:
-            notes_on_list = notes_on_list[0:i] + notes_on_list[i+1:]
-        # fi
-        number_notes_on_list = number_notes_on_list - 1
-        if i > 0:
-            voiceletter = chr(ord('A') + i)
-        else:
-            voiceletter = ''
-        # fi
-        n = int(freq)
-        gcs = note_to_midi_value[n]
-        if d <= 0:
-            l1 = l2 = lth = 0
-        else:
-            while d > WHOLE_NOTE:
-                print("lth=1 d={} ".format(d), file=sys.stderr)
-                print("=v VOICE{}{}: {}1".format(voice,voiceletter, gcs))
-                d = d - WHOLE_NOTE
-                measure = measure + 1
-                print("measure {}".format(measure))
-                measure_lth = 0
-            # elihw
-            if d < 5 and d > 0:
-                print("d ({}) < 5".format(d), file=sys.stderr)
-                continue
-            # fi
-            lth = (WHOLE_NOTE / d) + 0.05
-            l1 = int(lth * 10)
-            l2 = int(l1 / 10)
-            print("=v VOICE{}{}: {}{}".format(voice,voiceletter, gcs, l2))
-            measure_lth = measure_lth + d
-            if measure_lth >= WHOLE_NOTE:
-                measure = measure + 1
-                print("measure {}".format(measure))
-                measure_lth = 0
-            # fi
-        # fi
-        print("lth={} l1={} l2={} WHOLE_NOTE={} / d={} ".format(lth,l1,l2,WHOLE_NOTE,d), file=sys.stderr)
-        prev_time = time            # for rests
+
+        print("* {}".format(line), file=OUTPUT)
+        process_note_on_c(a)
     # rof
+
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    print_voices()
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# NOTDONEYET --
+    # Second print out notes for measures.
+    #   for (measure_lth = 0; measure_lth <= time_end; measure_lth = measure_lth + WHOLE_NOTE)
+    #     for (v = 0; v < max_voices; v = v + 1):
+    #   rof
+# Go through saved array and print all the v#: out and put measures/rests in.
+    # There are problems with figuring out note going on, and then off.
+    # a) Where do measures go? (When printed?)
+    # b) If a note starts, is a rest needed before it?
+    # c) If a note off is more than the rest of this measure away, break it into before measure and
+    #    after.
+    # d) If two notes start/end at same time (effectively -- figure out ignoring factors).
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     return
 # End of main
 
