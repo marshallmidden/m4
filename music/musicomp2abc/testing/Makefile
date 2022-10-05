@@ -46,7 +46,7 @@ ${TESTS}.gcs:	${TESTS}.csv Makefile notes ${MUSICOMP2ABC}
 	echo "meter   4/4" >> ${TESTS}.gcs
 	echo "tempo   88,8" >> ${TESTS}.gcs
 	echo "bars    6+1" >> ${TESTS}.gcs
-	echo "voice   32" >> ${TESTS}.gcs
+	echo "voice   30" >> ${TESTS}.gcs
 	echo "*-----------------------------------------------------------------------------" >> ${TESTS}.gcs
 	echo "putd    =VOICE2A=1=" >> ${TESTS}.gcs
 	echo "putd    =VOICE2B=2=" >> ${TESTS}.gcs
@@ -56,30 +56,28 @@ ${TESTS}.gcs:	${TESTS}.csv Makefile notes ${MUSICOMP2ABC}
 	echo "putd    =VOICE4B=6=" >> ${TESTS}.gcs
 	echo "putd    =VOICE5A=7=" >> ${TESTS}.gcs
 	echo "putd    =VOICE5B=8=" >> ${TESTS}.gcs
-	echo "putd    =VOICE5C=9=" >> ${TESTS}.gcs
-	echo "putd    =VOICE5D=10=" >> ${TESTS}.gcs
-	echo "putd    =VOICE5E=11=" >> ${TESTS}.gcs
-	echo "putd    =VOICE6A=12=" >> ${TESTS}.gcs
-	echo "putd    =VOICE7A=13=" >> ${TESTS}.gcs
-	echo "putd    =VOICE8A=14=" >> ${TESTS}.gcs
-	echo "putd    =VOICE8B=15=" >> ${TESTS}.gcs
-	echo "putd    =VOICE9A=16=" >> ${TESTS}.gcs
-	echo "putd    =VOICE10A=17=" >> ${TESTS}.gcs
-	echo "putd    =VOICE10B=18=" >> ${TESTS}.gcs
-	echo "putd    =VOICE10C=19=" >> ${TESTS}.gcs
-	echo "putd    =VOICE10D=20=" >> ${TESTS}.gcs
-	echo "putd    =VOICE10E=21=" >> ${TESTS}.gcs
-	echo "putd    =VOICE10F=22=" >> ${TESTS}.gcs
-	echo "putd    =VOICE10G=23=" >> ${TESTS}.gcs
-	echo "putd    =VOICE10H=24=" >> ${TESTS}.gcs
-	echo "putd    =VOICE11A=25=" >> ${TESTS}.gcs
-	echo "putd    =VOICE11B=26=" >> ${TESTS}.gcs
-	echo "putd    =VOICE11C=27=" >> ${TESTS}.gcs
-	echo "putd    =VOICE11D=28=" >> ${TESTS}.gcs
-	echo "putd    =VOICE11E=29=" >> ${TESTS}.gcs
-	echo "putd    =VOICE12A=30=" >> ${TESTS}.gcs
-	echo "putd    =VOICE13A=31=" >> ${TESTS}.gcs
-	echo "putd    =VOICE14A=32=" >> ${TESTS}.gcs
+	echo "putd    =VOICE6A=9=" >> ${TESTS}.gcs
+	echo "putd    =VOICE7A=10=" >> ${TESTS}.gcs
+	echo "putd    =VOICE8A=11=" >> ${TESTS}.gcs
+	echo "putd    =VOICE8B=12=" >> ${TESTS}.gcs
+	echo "putd    =VOICE9A=13=" >> ${TESTS}.gcs
+	echo "putd    =VOICE10A=14=" >> ${TESTS}.gcs
+	echo "putd    =VOICE10B=15=" >> ${TESTS}.gcs
+	echo "putd    =VOICE10C=16=" >> ${TESTS}.gcs
+	echo "putd    =VOICE10D=17=" >> ${TESTS}.gcs
+	echo "putd    =VOICE10E=18=" >> ${TESTS}.gcs
+	echo "putd    =VOICE10F=19=" >> ${TESTS}.gcs
+	echo "putd    =VOICE11A=20=" >> ${TESTS}.gcs
+	echo "putd    =VOICE11B=21=" >> ${TESTS}.gcs
+	echo "putd    =VOICE11C=22=" >> ${TESTS}.gcs
+	echo "putd    =VOICE11D=23=" >> ${TESTS}.gcs
+	echo "putd    =VOICE12A=24=" >> ${TESTS}.gcs
+	echo "putd    =VOICE12B=25=" >> ${TESTS}.gcs
+	echo "putd    =VOICE12C=26=" >> ${TESTS}.gcs
+	echo "putd    =VOICE13A=27=" >> ${TESTS}.gcs
+	echo "putd    =VOICE13B=28=" >> ${TESTS}.gcs
+	echo "putd    =VOICE14A=29=" >> ${TESTS}.gcs
+	echo "putd    =VOICE14B=30=" >> ${TESTS}.gcs
 	echo "*-----------------------------------------------------------------------------" >> ${TESTS}.gcs
 	./notes < ${TESTS}.csv >> ${TESTS}.gcs 2> Y.stderr
 	echo "*-----------------------------------------------------------------------------" >> ${TESTS}.gcs

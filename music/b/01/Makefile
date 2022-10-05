@@ -39,6 +39,9 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 %.E: %.gcs ../instruments.include
 	${CPP} $< -o $@ \
 		|| (rm -f $@ ; exit 1)
+%.csv:	%.E
+	${MUSICOMP2ABC} --midi1csv $< $@ ${PAGES} ${MEASURES} ${VOICES} \
+		|| (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help
 help::
@@ -68,16 +71,16 @@ clean:
 	rm -f *.E
 	rm -f A.[012]* B.[012]*
 #-----------------------------------------------------------------------------
-.PHONY: s1
+.PHONY: s1 Makefile ${MUSICOMP2ABC}
 s1: ${V1}_m.ps ${V1}.fs
 #-----------------------------------------------------------------------------
-.PHONY: s2
+.PHONY: s2 Makefile ${MUSICOMP2ABC}
 s2: ${V2}_m.ps ${V2}.fs
 #-----------------------------------------------------------------------------
-.PHONY: s3
+.PHONY: s3 Makefile ${MUSICOMP2ABC}
 s3: ${V3}_m.ps ${V3}.fs
 #-----------------------------------------------------------------------------
-.PHONY: s4
+.PHONY: s4 Makefile ${MUSICOMP2ABC}
 s4: ${V4}_m.ps ${V4}.fs
 #-----------------------------------------------------------------------------
 # End of Makefile
