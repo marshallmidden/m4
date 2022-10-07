@@ -8,7 +8,15 @@ import sys
 OUTPUT = sys.stdout
 # OUTPUT = sys.stderr
 # ----------------------------------------------------------------------------
-WHOLE_NOTE = 120 * 4        # 120 = quarter note from csv "Header".
+global MEASURE_TICKS
+MEASURE_TICKS = 120
+
+global WHOLE_NOTE
+WHOLE_NOTE = MEASURE_TICKS * 4        # 120 = quarter note from csv "Header".
+
+#+ METER = 4
+METER = 3
+MEASURE_LTH = METER * (MEASURE_TICKS)
 # ----------------------------------------------------------------------------
 #    octave  2      3      4       5
 #  c/b+     48     60     72      84
@@ -105,7 +113,6 @@ global Comments
 Comments = ['Control_c',
             'End_of_file',
             'End_track',
-            'Header',
             'MIDI_port',
             'Pitch_bend_c',
             'Program_c',
@@ -157,7 +164,7 @@ def print_on(s, voice):
         if off != 0:
             continue
         # fi
-        print("  {} notes_on_list[{}][-1]={}".format(s, q, notes_on_list[q][-1]), file=sys.stderr)
+#--        print("  {} notes_on_list[{}][-1]={}".format(s, q, notes_on_list[q][-1]), file=sys.stderr)
     # rof
 # End of print_on
 
@@ -168,7 +175,7 @@ def do_note_start(voice, time, freq, volume):
     global max_notes
 
 #--    print("do_note_start - here#0a voice={} time={} freq={} volume={}".format(voice, time, freq, volume), file=sys.stderr)
-    print_on("  do_note_start#0a", voice)
+#--    print_on("  do_note_start#0a", voice)
 
     # Initialize for new voice.
     if voice not in notes_on:
@@ -210,7 +217,7 @@ def do_note_start(voice, time, freq, volume):
         if max_notes[voice] < notes_on[voice]:
             max_notes[voice] = notes_on[voice]
         # fi
-        print_on("  do_note_start#0b", voice)
+#--        print_on("  do_note_start#0b", voice)
         return
     # rof
 #--    print("  do_note_start here -- after for", file=sys.stderr)
@@ -225,7 +232,7 @@ def do_note_start(voice, time, freq, volume):
     # fi
     notes_on_list[v].append([time, freq, volume, 0])        # lth (last) of 0 for not turned off yet.
 
-    print_on("  do_note_start#99", voice)
+#--    print_on("  do_note_start#99", voice)
     return
 # End of do_note_start
 
@@ -242,7 +249,7 @@ def do_note_stop(voice, time, freq):
         return
     # fi
 
-    print_on("  do_note_start#1a", voice)
+#--    print_on("  do_note_start#1a", voice)
 
     for i in range(0, max_notes[voice]):
         voiceletter = ord_voice[i]
@@ -260,13 +267,13 @@ def do_note_stop(voice, time, freq):
         notes_on_list[v][-1] = (t,f,vol,time)       # Make unchangeable with ()'s. :)
         notes_on[voice] = notes_on[voice] - 1
 
-        print_on("  do_note_stop#1b", voice)
+#--        print_on("  do_note_stop#1b", voice)
         
         return
     # rof
 
     print("note {} not already turned on, cannot turn it off. time={}".format(freq, time), file=sys.stderr)
-    print_on("  do_note_stop#99", voice)
+#--    print_on("  do_note_stop#99", voice)
 
     return
 # End of do_note_stop
@@ -294,12 +301,13 @@ def process_note_on_c(a):
 
 # ----------------------------------------------------------------------------
 def print_measure_rests_and_notes(measure_lth, measure, v, f, t, off):
+    global WHOLE_NOTE
 
 #--    print("print_measure_rests_and_notes #9a - measure_lth={} measure={} v={} f={} t={} off={}".format(measure_lth, measure, v, f, t, off), file=sys.stderr)
 
     # Do rests before note starts. And any measures that need to occur.
-    start_this_measure = int(measure_lth / WHOLE_NOTE)
-    end_this_measure = (start_this_measure + 1) * WHOLE_NOTE
+    start_this_measure = int(measure_lth / MEASURE_LTH)
+    end_this_measure = (start_this_measure + 1) * MEASURE_LTH
 #--    print("print_measure_rests_and_notes #9b - end_this_measure={} t={}".format(end_this_measure, t), file=sys.stderr)
     while end_this_measure < t:
 #--        print("print_measure_rests_and_notes #9c", file=sys.stderr)
@@ -309,7 +317,7 @@ def print_measure_rests_and_notes(measure_lth, measure, v, f, t, off):
         measure = measure + 1
         measure_lth = end_this_measure
         print("measure {}".format(measure), file=OUTPUT)
-        end_this_measure = end_this_measure + WHOLE_NOTE
+        end_this_measure = end_this_measure + MEASURE_LTH
     # elihw
 
     if t > (measure_lth + 5):
@@ -389,6 +397,19 @@ def print_voices():
 # End of print_voices
 
 # ----------------------------------------------------------------------------
+# Process Header.
+def process_header(a):
+    global WHOLE_NOTE
+    global MEASURE_TICKS
+    global MEASURE_LTH
+    global WHOLE_NOTE
+
+    MEASURE_TICKS = int(a[5])
+    WHOLE_NOTE = MEASURE_TICKS * 4        # 5th argument is number of midi ticks per quarter note.
+    MEASURE_LTH = METER * MEASURE_TICKS
+# End of process_header
+
+# ----------------------------------------------------------------------------
 # Main program follows.
 def main():
     global working_voice
@@ -409,7 +430,9 @@ def main():
         # Get rid of commas, and leading/trailing spaces
         nline = line.replace(',', '').strip()
         a = nline.split()            # Get everything.
+
 #--        print("* a={}".format(a), file=sys.stderr)
+
         # Next voice starts.
         if a[0] != working_voice:
             # Initialize voice information.
@@ -420,8 +443,12 @@ def main():
             print("* {}".format(line), file=OUTPUT)
             continue
         # fi
+        if a[2] == 'Header':
+            process_header(a)
+        # fi
+
         # Only thing that should be left is Note_on_c.
-        if a[2] != 'Note_on_c':
+        if a[2] != 'Note_on_c' and a[2] != 'Note_off_c':
             print("* -unrecognized- {}".format(line), file=OUTPUT)
             continue
         # fi
@@ -430,22 +457,7 @@ def main():
         process_note_on_c(a)
     # rof
 
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     print_voices()
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-# NOTDONEYET --
-    # Second print out notes for measures.
-    #   for (measure_lth = 0; measure_lth <= time_end; measure_lth = measure_lth + WHOLE_NOTE)
-    #     for (v = 0; v < max_voices; v = v + 1):
-    #   rof
-# Go through saved array and print all the v#: out and put measures/rests in.
-    # There are problems with figuring out note going on, and then off.
-    # a) Where do measures go? (When printed?)
-    # b) If a note starts, is a rest needed before it?
-    # c) If a note off is more than the rest of this measure away, break it into before measure and
-    #    after.
-    # d) If two notes start/end at same time (effectively -- figure out ignoring factors).
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     return
 # End of main
 
