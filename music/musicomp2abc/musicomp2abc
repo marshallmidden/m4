@@ -2,6 +2,9 @@
 # ----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 # ----------------------------------------------------------------------------
+# MIDI_port if > mod(15).
+# If instrument in drum_sounds{} then do channel=9, and if more than one, increment MIDI_port.
+# ----------------------------------------------------------------------------
 # XPOSE2.gcs -- some don't translate as expected.  i.e. xpose V -4 c  ... if -4 is first note (after # -+n)...
 # ----------------------------------------------------------------------------
 # vol(xxx) the spaces before/after are missing for --abc format. Also cresc/dimin. This separates note bars.
@@ -1112,28 +1115,58 @@ instruments = {
     'SFX'.lower() : [56, 128],
 }
 
-global extrainfo
-extrainfo = {
-#--     #                           91   10    7
-#--     # control_c            Reverb, Pan, Volume
-#--      '73,0': ["flute",             52,  37, 120],
-#--      '71,0': ["clarinet",          57,  60,  95],
-#--      '68,0': ["oboe",              55,  64, 100],
-#--      '60,0': ["french horn",       62,  46,  95],
-#--      '48,0': ["string ensemble",   60,  48, 127],
-#--      '40,0': ["violin",            60,  16, 105],
-#--    '40-1,0': ["violin1",           60, 110, 105],
-#--    '40-2,0': ["violin2",           60,  44, 105],
-#--      '41,0': ["viola",             60,  64, 115],
-#--      '42,0': ["cello",             60,  94, 100],
-#--      '70,0': ["bassoon",           57,  89, 100],
-#--      '44,0': ["tremola strings",   72, 112, 127],
-#--      '45,0': ["pizzicato strings", 72, 112, 127],
-#--      '43,0': ["contrabass",        72, 102, 100],
-#--       '0,0': ["default",            0,  64, 100],
+# ------------------------------------------------------------------------------
+global drum_sounds
+drum_sounds = {
+    'Acoustic Bass Drum'.lower(): 35,
+    'Bass Drum 1'.lower(): 36,
+    'Side Stick'.lower(): 37,
+    'Acoustic Snare'.lower(): 38,
+    'Hand Clap'.lower(): 39,
+    'Electric Snare'.lower(): 40,
+    'Low Floor Tom'.lower(): 41,
+    'Closed Hi Hat'.lower(): 42,
+    'High Floor Tom'.lower(): 43,
+    'Pedal Hi-Hat'.lower(): 44,
+    'Low Tom'.lower(): 45,
+    'Open Hi-Hat'.lower(): 46,
+    'Low-Mid Tom'.lower(): 47,
+    'Hi Mid Tom'.lower(): 48,
+    'Crash Cymbal 1'.lower(): 49,
+    'High Tom'.lower(): 50,
+    'Ride Cymbal 1'.lower(): 51,
+    'Chinese Cymbal'.lower(): 52,
+    'Ride Bell'.lower(): 53,
+    'Tambourine'.lower(): 54,
+    'Splash Cymbal'.lower(): 55,
+    'Cowbell'.lower(): 56,
+    'Crash Cymbal 2'.lower(): 57,
+    'Vibraslap'.lower(): 58,
+    'Ride Cymbal 2'.lower(): 59,
+    'Hi Bongo'.lower(): 60,
+    'Low Bongo'.lower(): 61,
+    'Mute Hi Conga'.lower(): 62,
+    'Open Hi Conga'.lower(): 63,
+    'Low Conga'.lower(): 64,
+    'High Timbale'.lower(): 65,
+    'Low Timbale'.lower(): 66,
+    'High Agogo'.lower(): 67,
+    'Low Agogo'.lower(): 68,
+    'Cabasa'.lower(): 69,
+    'Maracas'.lower(): 70,
+    'Short Whistle'.lower(): 71,
+    'Long Whistle'.lower(): 72,
+    'Short Guiro'.lower(): 73,
+    'Long Guiro'.lower(): 74,
+    'Claves'.lower(): 75,
+    'Hi Wood Block'.lower(): 76,
+    'Low Wood Block'.lower(): 77,
+    'Mute Cuica'.lower(): 78,
+    'Open Cuica'.lower(): 79,
+    'Mute Triangle'.lower(): 80,
+    'Open Triangle'.lower(): 81,
 }
 
-# ----------------------------------------------------------------------------
 # ----------------------------------------------------------------------------
 global args
 global errors_happened
@@ -1191,9 +1224,13 @@ global clef
 clef = { }                          # no clef specified [measure][voice].
 clef[''] = { }
 
-global vinstrument
+global vinstrument                  # vinstrument[1234][3] = 'Acoustic Grand Piano'
 vinstrument = { }                   # no instruments specified [measure][voice].
 vinstrument[''] = {}                # blank measure.
+global MIDI_port                    # Which midi port to use for next channel.
+MIDI_port = 0
+global drums_MIDI_port              # For drums, which midi port to use for next usage.
+drums_MIDI_port = 0
 
 global percents
 percents = { }                      # no %% passthru commands for start of [measure] (for abc).
@@ -1229,7 +1266,7 @@ global voices_having_notes
 voices_having_notes = {}
 
 for i in range(1, MAXVOICES+1):     # This is used as [1] .. [MAXVOICES]
-    vinstrument[''][i] = [0, 0]     # No instrument. (measure, voice)
+    vinstrument[''][i] = 'Acoustic Grand Piano'.lower()
     reverb[''][i] = calculate.variables['default_reverb']
     pan[''][i] = calculate.variables['default_pan']
     intensity[''][i] = calculate.variables['default_intensity']
@@ -1242,8 +1279,9 @@ for i in range(1, MAXVOICES+1):     # This is used as [1] .. [MAXVOICES]
     cresc_direction.append(True)
 # rof
 
+# NOTDONEYET - inst
 global inst
-inst = { }                          # track using instrument by instrument.
+inst = { }                          # track using instrument by voice.
 
 global oct                          # default octave
 oct = { 1 : 0 }
@@ -1572,7 +1610,7 @@ def new_voice_initialize(voice, m):
         intensity[m] = {}
     # fi
     if voice not in vinstrument[m]:
-        vinstrument[m][voice] = [0, 0]
+        vinstrument[m][voice] = 'Acoustic Grand Piano'.lower()
         reverb[m][voice] = calculate.variables['default_reverb']
         pan[m][voice] = calculate.variables['default_pan']
         intensity[m][voice] = calculate.variables['default_intensity']
@@ -1638,11 +1676,6 @@ def get_volume_level(m, voice):
     # fi
     j = vol_to_vlprint_round(j)
     p = vlprint[j]
-#-    if p == 'fffff':
-#-        p = 'ffff'
-#-    elif p == 'ppppp':
-#-        p = 'pppp'
-#-    # fi
     return (DECORATIONS + p + DECORATIONS)
 # End of get_volume_level
 
@@ -1775,22 +1808,23 @@ def print_measure_abc(m, print_V, voice, l_meter, l_tempo, l_dl, l_clef, l_instr
     # fi
 
     if voice not in vinstrument[m]:
-        vinstrument[m][voice] = [0, 0]
+        vinstrument[m][voice] = 'Acoustic Grand Piano'.lower()
         reverb[m][voice] = calculate.variables['default_reverb']
         pan[m][voice] = calculate.variables['default_pan']
         intensity[m][voice] = calculate.variables['default_intensity']
     # fi
 
-    if len(vinstrument[m]) >= voice and vinstrument[m][voice] != 0:
+# NOTDONEYET - vinstrument[m][voice] == 'Acoustic Grand Piano'.lower()
+    if len(vinstrument[m]) >= voice and vinstrument[m][voice] != 'Acoustic Grand Piano'.lower():
         if l_instrument != vinstrument[m][voice]:
             l_instrument = vinstrument[m][voice]
             if pr != '' and pr[-1] != '\n':
                 pr = pr + '\\\n'
             # fi
-            if vinstrument[m][voice][1] != 0:
+            if instrument[vinstrument[m][voice]][1] != 0:
                 print_warning_no_line("print_measure_abc - voice#{} measure#{} instrument {} not acceptable!".format(voice, m, vinstrument[m][voice]))
             # fi
-            pr = pr + "%%MIDI program {}\n".format(l_instrument[0])
+            pr = pr + "%%MIDI program {}\n".format((instrument[linstrument])[0])
         # fi
     # fi
 
@@ -2056,6 +2090,7 @@ def print_measure_vh_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l_ky,
         # fi
         if voice in vinstrument[m]:
             stri = ''
+# NOTDONEYET - vinstrument[m][voice] == 'Acoustic Grand Piano'.lower()
             if vinstrument[m][voice] in instruments.values():
                 for x in instruments:
                     if vinstrument[m][voice] == instruments[x]:
@@ -2063,16 +2098,30 @@ def print_measure_vh_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l_ky,
                         break
                     # fi
                 # rof
+                if stri == '':
+# NOTDONEYET - Do drum_sounds here.
+                    for x in drum_sounds:
+# NOTDONEYET - vinstrument[m][voice] == 'Acoustic Grand Piano'.lower()
+                        if vinstrument[m][voice] == x:
+                            stri = x
+                            break
+                        # fi
+                    # rof
+                # fi
             else:
 # Not tested for vinstrument change to have bank.
 #--                print_debug("#87c vinstrument[m][voice]='{}'".format(vinstrument[m][voice]))
+# NOTDONEYET - vinstrument[m][voice] == 'Acoustic Grand Piano'.lower()
                 if vinstrument[m][voice][1] != 0:
                     print_warning_no_line("print_measure_vh_header - voice#{} measure#{} instrument {} not acceptable!".format(voice, m, vinstrument[m][voice]))
                 # fi
+# NOTDONEYET - vinstrument[m][voice] == 'Acoustic Grand Piano'.lower()
                 stri = '{}'.format(vinstrument[m][voice][0])
             # fi
+# NOTDONEYET - vinstrument[m][voice] == 'Acoustic Grand Piano'.lower()
             n_instrument.append('instrument {} '.format(voice) + stri)
         else:
+# NOTDONEYET - vinstrument[m][voice] == 'Acoustic Grand Piano'.lower()
             n_instrument.append('instrument {} 0'.format(voice))
         # fi
     # rof
@@ -2377,14 +2426,16 @@ def print_out_midi1csv_instrument(m, voiceon, lthworkingmeasure, last_instrument
     global intensity
     global meas
     global inst
-    global extrainfo
     global mlth
     global args
     global offset
+    global MIDI_port
+    global drums_MIDI_port
+    global drum_sounds
     offset = 0
 
     if voiceon not in vinstrument[m]:
-        vinstrument[m][voiceon] = [0, 0]
+        vinstrument[m][voiceon] = 'Acoustic Grand Piano'.lower()
         reverb[m][voiceon] = calculate.variables['default_reverb']
         pan[m][voiceon] = calculate.variables['default_pan']
         intensity[m][voiceon] = calculate.variables['default_intensity']
@@ -2392,41 +2443,65 @@ def print_out_midi1csv_instrument(m, voiceon, lthworkingmeasure, last_instrument
     if len(vinstrument[m]) >= voiceon:
         if last_instrument_on != vinstrument[m][voiceon]:
             last_instrument_on = vinstrument[m][voiceon]
-            strlast_instrument_on = '{}, {}'.format(last_instrument_on[0], last_instrument_on[1])
-            if strlast_instrument_on not in inst:
-                inst[strlast_instrument_on] = {}
-                chan = channel                              # New instrument & voice.
-                inst[strlast_instrument_on][voiceon] = chan
-                channel = channel + 1
-                if channel == 9:
-                    channel = 10
-                elif channel >= MAXMIDICHANNELS and args.midi1csv:
-                    print_error_no_line("channel ({}) > {} midi channels (0 based)".format(channel,MAXMIDICHANNELS))
+            this_drum_on = False
+            lit = None
+            for q in instruments:
+                if q == last_instrument_on:
+                    lit = instruments[last_instrument_on]
+                    break
                 # fi
-            elif voiceon not in inst[strlast_instrument_on]:
-                chan = channel                              # New instrument & voice.
-                inst[strlast_instrument_on][voiceon] = chan
-                channel = channel + 1
-                if channel == 9:
-                    channel = 10
-                elif channel >= MAXMIDICHANNELS and args.midi1csv:
-                    print_error_no_line("channel ({}) > {} midi channels (0 based)".format(channel,MAXMIDICHANNELS))
+            # rof
+            if lit is None:
+                for q in drum_sounds:
+                    if q == last_instrument_on:
+                        lit = drum_sounds[last_instrument_on]
+                        this_drum_on = True
+                        break
+                    # fi
+            # rof
+            if lit is None:
+                print_error_no_line("Instrument {} not found.".format(last_instrument_on))
+                return
+            # fi
+            if voiceon not in inst:
+                inst[voiceon] = {}
+            # fi
+            if last_instrument_on not in inst[voiceon]:
+                if this_drum_on:
+                    # MIDI_port -- channel = 9, get note to play from instruments[last_instrument_on].
+                    inst[voiceon][last_instrument_on] = [drums_MIDI_port, 9]
+                    drums_MIDI_port = drums_MIDI_port + 1
+                    chan = 9
+                else:
+                    chan = channel
+                    # MIDI_port, channel to use for notes. (chan != 9 to play note as it is.)
+                    inst[voiceon][last_instrument_on] = [MIDI_port, chan]
+                    channel = channel + 1
+                    if channel == 9:
+                        channel = 10
+                    elif channel >= MAXMIDICHANNELS and args.midi1csv:
+                        MIDI_port = MIDI_port + 1
+                        channel = 0
+                    # fi
                 # fi
-            else:
-                chan = inst[strlast_instrument_on][voiceon]    # instrument used previously on this voice.
-#--                if last_instrument_on < 0:
-#--                    last_instrument_on = 0
-#--                # fi
             # fi
             q = mlth[voiceon][m]
-            print_output('{}, {}, Control_c, {}, 0, {}'.format(voiceon+1, lthworkingmeasure, chan, last_instrument_on[1] >> 5))
-            print_output('{}, {}, Control_c, {}, 32, {}'.format(voiceon+1, lthworkingmeasure, chan, last_instrument_on[1] & 0x1f))
-            if not args.fluidsynth:
-                print_output('{}, {}, Program_c, {}, {}'.format(voiceon+1, lthworkingmeasure, chan, last_instrument_on[0]))
+            [midiport, chan] = inst[voiceon][last_instrument_on]    # previously on this voice.
+            if last_instrument_on in instruments:
+                lit = instruments[last_instrument_on]
+                print_output('{}, {}, Control_c, {}, 0, {}'.format(voiceon+1, lthworkingmeasure, chan, lit[1] >> 5))
+                print_output('{}, {}, Control_c, {}, 32, {}'.format(voiceon+1, lthworkingmeasure, chan, lit[1] & 0x1f))
+                if not args.fluidsynth:
+                    print_output('{}, {}, MIDI_port, {}'.format(voiceon+1, lthworkingmeasure, midiport))
+                    print_output('{}, {}, Program_c, {}, {}'.format(voiceon+1, lthworkingmeasure, chan, lit[0]))
+                else:
+                    print_output('{}, {}, Program_c, {}, {}, {}'.format(voiceon+1, lthworkingmeasure, chan, last_instrument_on[0], last_instrument_on[1]))
+                # fi
+            elif last_instrument_on in drum_sounds:
+                print_output('{}, {}, MIDI_port, {}'.format(voiceon+1, lthworkingmeasure, midiport))
+                print_output('{}, {}, Program_c, {}, {}'.format(voiceon+1, lthworkingmeasure, 9, 0))
             else:
-                print_output('{}, {}, Program_c, {}, {}, {}'.format(voiceon+1, lthworkingmeasure, chan, last_instrument_on[0], last_instrument_on[1]))
-            if strlast_instrument_on in extrainfo:
-                print_output('{}, {}, Text_t, "{}"'.format(voiceon+1, lthworkingmeasure, extrainfo[strlast_instrument_on][0]))
+                print_error_no_line("instrument not in instruments nor drum_sounds.")
             # fi
             # 125   Omni Mode On (and all notes off).
             print_output('{}, {}, Control_c, {}, 125, 0'.format(voiceon+1, lthworkingmeasure, chan))
@@ -2715,7 +2790,7 @@ def print_out_midi1csv_notes():
 
         # Nothing yet ...
         lastmeter = ''                          # Last meter put out.  l_instrument = 0 + args.offset
-        l_instrument = -1                       # Last instrument for this voice.
+        l_instrument = None                     # Last instrument for this voice.
         lt = ''                                 # Last tempo number of beats per minute.
         ll = ''                                 # Last tempo note type (whole,half,quarter,...).
         last_keysig = ''                        # Last key signature put out.
@@ -2846,22 +2921,36 @@ def print_out_midi1csv_notes():
                             print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, last_note_on, 0))
                         # fi
                         voices_having_notes[voice] = True
-                        print_output("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, n, note_velocity))
-                        last_note_on = n
+                        if l_instrument in instruments:
+                            last_note_on = n
+                        else:
+                            last_note_on = drum_sounds[l_instrument]
+                        # fi
+                        print_output("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, last_note_on, note_velocity))
                     # fi
                     # Already on, good.
                 else:
                     # We want a note-on here.
                     if legato_on:
                         voices_having_notes[voice] = True
-                        print_output("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, n, note_velocity))
+                        if l_instrument in instruments:
+                            last_note_on = n
+                        else:
+                            last_note_on = drum_sounds[l_instrument]
+                        # fi
+                        print_output("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, last_note_on, note_velocity))
                     # fi
                     if last_note_on != '':                  # If not a rest, or note off.
                         print_output("{}, {}, Note_off_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, last_note_on, 0))
                     # fi
                     if not legato_on:
                         voices_having_notes[voice] = True
-                        print_output("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, n, note_velocity))
+                        if l_instrument in instruments:
+                            last_note_on = n
+                        else:
+                            last_note_on = drum_sounds[l_instrument]
+                        # fi
+                        print_output("{}, {}, Note_on_c, {}, {}, {}".format(voice+1, lthworkingmeasures, chan, last_note_on, note_velocity))
                     # fi
                     last_note_on = n
                     # fi
@@ -3093,7 +3182,7 @@ def print_out_fluidsynth():
         'End_of_file': 'echo End_of_file',
         'Title_t': 'echo Title_t',
         # Track, Time, MIDI_port, Number This meta-event specifies that subsequent events in
-        # the Track should be sent to MIDI port (bus) Number, between 0 and 255. This meta-event 
+        # the Track should be sent to MIDI port (bus) Number, between 0 and 255. This meta-event
         # usually appears at the start of a track with Time zero, but may appear within a track
         # should the need arise to change the port while the track is being played.
         'MIDI_port': 'echo MIDI_port',
@@ -6048,9 +6137,12 @@ def do_cis(t_args, line):
         i = str(vargs[1]).lower()
 # NOTDONEYET - Not tested cis and instrument.
 #--        print_debug("#1 i={}".format(i))
+# NOTDONEYET - Do drum_sounds here.
+# NOTDONEYET - Need to loop through instruments here, then drum_sounds.
         if [i,0] in instruments:
 # NOTDONEYET - Not tested cis and instrument.
 #--            print_debug("#1 instruments[{}][0]={}".format(i,instruments[i][0]))
+# NOTDONEYET - vinstrument[m][voice] == 'Acoustic Grand Piano'.lower()
             vinstrument[measure_on][cis] = instruments[i][0]
             vinstrument[measure_on][cis][0] += args.offset
             reverb[measure_on][cis] = int(calculate.variables['default_reverb'])
@@ -6069,10 +6161,12 @@ def do_cis(t_args, line):
 # NOTDONEYET - Not tested cis and instrument.
 #--            print_debug("#2 f1={}".format(f1))
 #--            print_debug("#2 instruments[{}][0]={}".format(f1,instruments[f1][0]))
+# NOTDONEYET - Do drum_sounds here.
             if [f1,0] not in instruments.values():
                 print_error("instrument value {} not in instrument table.".format(f1), line)
                 return
             # fi
+# NOTDONEYET - vinstrument[m][voice] == 'Acoustic Grand Piano'.lower()
             vinstrument[measure_on][cis][0] = f1 + args.offset
             reverb[measure_on][cis] = int(calculate.variables['default_reverb'])
             pan[measure_on][cis] = int(calculate.variables['default_pan'])
@@ -6285,7 +6379,9 @@ def do_voice(t_args, line):
         for i in range(0, len(wargs)):
             j = str(wargs[i])    # No checking.
             j = str(j).lower()
+# NOTDONEYET - Do drum_sounds here.
             if j in instruments:
+# NOTDONEYET - vinstrument[m][voice] == 'Acoustic Grand Piano'.lower()
                 vinstrument[measure_on][i+1] = instruments[j]
                 vinstrument[measure_on][i+1][0] += args.offset
                 reverb[measure_on][i+1] = int(calculate.variables['default_reverb'])
@@ -6305,6 +6401,7 @@ def do_voice(t_args, line):
                     print_error("instrument value {} not in instrument table.".format(f1), line)
                     return
                 # fi
+# NOTDONEYET - vinstrument[m][voice] == 'Acoustic Grand Piano'.lower()
                 vinstrument[measure_on][i+1] = [f1, 0]
                 vinstrument[measure_on][i+1][0] += args.offset
                 reverb[measure_on][i+1] = int(calculate.variables['default_reverb'])
@@ -6537,7 +6634,7 @@ def do_instrument(t_args, line):
     global intensity
     global measure_on
     global instruments
-    global extrainfo
+    global drum_sound
     global mlth
 
     if t_args is None or len(t_args) != 1:
@@ -6552,9 +6649,23 @@ def do_instrument(t_args, line):
     vargs = t_args[0].split()
 
     INST = " ".join(vargs[1:]).lower()
-    if INST in instruments:
-        INST = instruments[INST]        # Convert to number.
-    else:
+# NOTDONEYET - Do drum_sounds here.
+    foundinstrument = None
+    for i in instruments:
+        if i.lower() == INST:
+            foundinstrument = i
+            break
+        # fi
+    # rof
+    if foundinstrument is None:
+        for i in drum_sounds:
+            if i.lower() == INST:
+                foundinstrument = i
+                break
+            # fi
+        # rof
+    # fi
+    if foundinstrument is None:
         print_warning("do_instrument - instruments does not have INST={}".format(INST), line)
         f1, type_error = is_float(INST)
         if type_error is not None:
@@ -6565,11 +6676,17 @@ def do_instrument(t_args, line):
             return
         # fi
         f1 = int(round(f1))
-        if f1 not in instruments.values():
+        for i in instruments:
+            if instruments[i] == [f1,0]:
+                foundinstrument = i
+                break
+            # fi
+        # rof
+        if foundinstrument is None:
             print_error("instrument value {} not in instrument table.".format(f1), line)
             return
         # fi
-        INST = [f1,0]
+        INST = foundinstrument
     # fi
 
     jkl = "".join(vargs[0])
@@ -6596,32 +6713,7 @@ def do_instrument(t_args, line):
             print_error("instrument in the middle of measure '{}' not allowed, voice '{}'".format(measure_on, f1), line)
             return
         # fi
-
-        strINST = '{}, {}'.format(INST[0], INST[1])
-        if strINST not in extrainfo:
-            extrainfo[strINST] = []
-            j = None
-            for k in instruments:
-                strk = '{}, {}'.format(instruments[k][0], instruments[k][1])
-                if strk == strINST:
-                    j = k
-                    break
-                # fi
-            # rof
-#--             if j is None:
-#--                 print_error("instrument not in dictionary instruments {}".format(INST), line)
-#--                 return
-#--             # fi
-            extrainfo[strINST].append(j)       # The instrument number
-#--             extrainfo[strINST].append(0)       # The reverb setting.
-#--             extrainfo[strINST].append(64)      # The pan setting (left/right % for stereo).
-#--             extrainfo[strINST].append(100)     # The intensity (volume, kind of) setting.
-        # fi
-        vinstrument[measure_on][f1] = INST
-        vinstrument[measure_on][f1][0] += args.offset
-#--         reverb[measure_on][f1] = extrainfo[strINST][1]
-#--         intensity[measure_on][f1] = extrainfo[strINST][3]
-#--         pan[measure_on][f1] = extrainfo[strINST][2]
+        vinstrument[measure_on][f1] = foundinstrument
     # rof
 
     return
@@ -6630,9 +6722,7 @@ def do_instrument(t_args, line):
 # ----------------------------------------------------------------------------
 def do_reverb(t_args, line):
     global reverb
-# - MUST NOT CHANGE FOR OTHER VOICES    global extrainfo
     global measure_on
-#--    global vinstrument
 
     if t_args is None or len(t_args) != 1:
         print_error("reverb does not have arguments.", line)
@@ -6683,8 +6773,6 @@ def do_reverb(t_args, line):
         # fi
         f1 = int(round(f1))
 
-#--        INST = vinstrument[measure_on][f1]
-# - MUST NOT CHANGE FOR OTHER VOICES        extrainfo[INST][1] = r
         reverb[measure_on][f1] = r
     # rof
     return
@@ -6693,9 +6781,7 @@ def do_reverb(t_args, line):
 # ----------------------------------------------------------------------------
 def do_intensity(t_args, line):
     global intensity
-# - MUST NOT CHANGE FOR OTHER VOICES    global extrainfo
     global measure_on
-#--    global vinstrument
 
     if t_args is None or len(t_args) != 1:
         print_error("intensity does not have arguments.", line)
@@ -6748,8 +6834,6 @@ def do_intensity(t_args, line):
             print_error("intensity with too many voices not allowed, voice {} is too many".format(f1), line)
             return
         # fi
-#--        INST = vinstrument[measure_on][f1]
-# - MUST NOT CHANGE FOR OTHER VOICES        extrainfo[INST][1] = intens
         intensity[measure_on][f1] = intens
     # rof
     return
@@ -6758,9 +6842,7 @@ def do_intensity(t_args, line):
 # ----------------------------------------------------------------------------
 def do_pan(t_args, line):
     global pan
-# - MUST NOT CHANGE FOR OTHER VOICES    global extrainfo
     global measure_on
-#--    global vinstrument
 
     if t_args is None or len(t_args) != 1:
         print_error("pan does not have arguments.", line)
@@ -6809,8 +6891,6 @@ def do_pan(t_args, line):
         # fi
         f1 = int(round(f1))
 
-#--        INST = vinstrument[measure_on][f1]
-# - MUST NOT CHANGE FOR OTHER VOICES        extrainfo[INST][1] = p
         pan[measure_on][f1] = p
     # rof
     return
@@ -9155,7 +9235,7 @@ def parse_args():
                         help = 'Do not do legatos.')
     parser.add_argument('--multiplemeasures', action='store_true',
                         help = 'If measure appears multiple times, do not fill in voices with rests.')
-    parser.add_argument('--D', '-D', action='append', type=str, 
+    parser.add_argument('--D', '-D', action='append', type=str,
                         help = 'Example: "-D WHICH=5" Define variable in calculator. (e.g. "if WHICH==5")')
     parser.add_argument('--two', '-two', '--2', '-2', action='store_true',
                         help = 'Use soundfont number 2.')

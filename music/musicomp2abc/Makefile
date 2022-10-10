@@ -12,6 +12,7 @@ TESTS += KEYg-
 TESTS += DECODE
 TESTS += LEGATO1
 TESTS += TIES
+TESTS += DRUMS
 TESTS += WRONGTIES
 TESTS += TRILLS
 TESTS += TEMPO
@@ -62,15 +63,15 @@ CPP=gcc -E -x c -nostdinc -P -C -CC -Wno-error -Wno-extra -traditional-cpp
 #-----------------------------------------------------------------------------
 #+.PRECIOUS: %.abc %.csv %.mid %.E
 #+ .SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E .fs
-.PRECIOUS: %.abc %.E
-.SUFFIXES: .abc _m.ps .E .fs
+.PRECIOUS: %.abc %.E .csv
+.SUFFIXES: .abc _m.ps .E .fs .csv .mid
 # output $@   -- input $<
 %.fs:  %.E
 	${MUSICOMP2ABC} --two --fluidsynth $< $@ || rm -f $@
-#+ %.csv:  %.E
-#+ 	${MUSICOMP2ABC} --midi1csv $< $@ || rm -f $@
-#+ %.mid:  %.csv
-#+ 	csvmidi $< $@ || (rm -f $@ ; exit 1)
+%.csv:  %.E
+	${MUSICOMP2ABC} --midi1csv $< $@ || rm -f $@
+%.mid:  %.csv
+	csvmidi $< $@ || (rm -f $@ ; exit 1)
 #+ %.wav:  %.mid
 #+ 	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 128 $<
 %.abc:  %.E
