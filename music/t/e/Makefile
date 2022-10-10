@@ -78,7 +78,7 @@ WHICH = "-D WHICH=0"
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.abc %.csv %.mid
+.PRECIOUS: %.abc %.csv %.mid %.E
 #- .SUFFIXES: .mid .csv .ps .abc _m.ps
 .SUFFIXES: .mid .csv .abc _m.ps
 # Output $@ -- input $< (first dependency -- after the :).
@@ -97,7 +97,7 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
 # Manually invokable rules follow.
 %.csv: %.E Makefile
-	${MUSICOMP2ABC} --midi1csv $< $@ \
+	${MUSICOMP2ABC} --midi1csv $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
 		|| (rm -f $@ ; exit 1)
 .SUFFIXES: .v
 %.v: %.E Makefile
@@ -138,7 +138,7 @@ all: ${V}_m.ps ${V}.fs
 #=============================================================================
 .PHONY: clean
 clean:
-	rm -f *.abc
+	rm -f *.abc *.E
 	rm -f *.ps
 	rm -f *.fs
 	rm -f *.v *.h *.csv *.mid *.wav
