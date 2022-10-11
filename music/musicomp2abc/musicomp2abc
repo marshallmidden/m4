@@ -4,6 +4,15 @@
 # ----------------------------------------------------------------------------
 # MIDI_port if > mod(15).
 # If instrument in drum_sounds{} then do channel=9, and if more than one, increment MIDI_port.
+# fluidsynth - 
+#               prog chan num              Sends program-change message
+#               select chan sfont bank prog  Combination of bank-select and program-change
+#               settuning chan bank prog   Set the tuning for a MIDI channel
+#               tune bank prog key pitch   Tune a key
+#               tuning name bank prog      Create a tuning with name, bank number,
+#                                          and program number (0 <= bank,prog <= 127)
+#               dumptuning bank prog       Print the pitch details of the tuning
+#  Drums are channel 9, bank 128, program 0.
 # ----------------------------------------------------------------------------
 # XPOSE2.gcs -- some don't translate as expected.  i.e. xpose V -4 c  ... if -4 is first note (after # -+n)...
 # ----------------------------------------------------------------------------
@@ -1083,7 +1092,7 @@ instruments = {
     'Saw Lead 2'.lower() : [81, 12],
     'Fantasia 2'.lower() : [88, 12],
     'Solar Wind 2'.lower() : [89, 12],
-#--    'Tambourine'.lower() : [119, 12],
+#--    'Tambourine'.lower() : [119, 12],        # In the drum_sounds section.
     'White Noise Wave'.lower() : [122, 12],
     'Shooting Star'.lower() : [127, 12],
     'Woodwind Choir'.lower() : [48, 13],
@@ -1813,17 +1822,19 @@ def print_measure_abc(m, print_V, voice, l_meter, l_tempo, l_dl, l_clef, l_instr
         intensity[m][voice] = calculate.variables['default_intensity']
     # fi
 
-# NOTDONEYET - vinstrument[m][voice] == 'Acoustic Grand Piano'.lower()
     if len(vinstrument[m]) >= voice and vinstrument[m][voice] != 'Acoustic Grand Piano'.lower():
         if l_instrument != vinstrument[m][voice]:
             l_instrument = vinstrument[m][voice]
             if pr != '' and pr[-1] != '\n':
                 pr = pr + '\\\n'
             # fi
-            if instruments[vinstrument[m][voice]][1] != 0:
+            if l_instrument in instruments:
+                pr = pr + "%%MIDI program {}\n".format((instruments[l_instrument])[0])
+            elif l_instrument in drum_sounds:
+                pr = pr + "%%MIDI program {}\n".format((drum_sounds[l_instrument]))
+            else:
                 print_warning_no_line("print_measure_abc - voice#{} measure#{} instrument {} not acceptable!".format(voice, m, vinstrument[m][voice]))
             # fi
-            pr = pr + "%%MIDI program {}\n".format((instruments[linstrument])[0])
         # fi
     # fi
 
@@ -2413,11 +2424,9 @@ def print_out_midi1csv_instrument(m, voiceon, lthworkingmeasure, last_instrument
     global inst
     global mlth
     global args
-    global offset
     global MIDI_port
     global drums_MIDI_port
     global drum_sounds
-    offset = 0
 
     if voiceon not in vinstrument[m]:
         vinstrument[m][voiceon] = 'Acoustic Grand Piano'.lower()
@@ -2474,17 +2483,22 @@ def print_out_midi1csv_instrument(m, voiceon, lthworkingmeasure, last_instrument
             [midiport, chan] = inst[voiceon][last_instrument_on]    # previously on this voice.
             if last_instrument_on in instruments:
                 lit = instruments[last_instrument_on]
+                print_debug("print_out_midi1csv_instrument - lit='{}'".format(lit))
                 print_output('{}, {}, Control_c, {}, 0, {}'.format(voiceon+1, lthworkingmeasure, chan, lit[1] >> 5))
                 print_output('{}, {}, Control_c, {}, 32, {}'.format(voiceon+1, lthworkingmeasure, chan, lit[1] & 0x1f))
                 if not args.fluidsynth:
                     print_output('{}, {}, MIDI_port, {}'.format(voiceon+1, lthworkingmeasure, midiport))
                     print_output('{}, {}, Program_c, {}, {}'.format(voiceon+1, lthworkingmeasure, chan, lit[0]))
                 else:
-                    print_output('{}, {}, Program_c, {}, {}, {}'.format(voiceon+1, lthworkingmeasure, chan, last_instrument_on[0], last_instrument_on[1]))
+                    print_output('{}, {}, Program_c, {}, {}, {}'.format(voiceon+1, lthworkingmeasure, chan, lit[0], lit[1]))
                 # fi
             elif last_instrument_on in drum_sounds:
-                print_output('{}, {}, MIDI_port, {}'.format(voiceon+1, lthworkingmeasure, midiport))
-                print_output('{}, {}, Program_c, {}, {}'.format(voiceon+1, lthworkingmeasure, 9, 0))
+                if not args.fluidsynth:
+                    print_output('{}, {}, MIDI_port, {}'.format(voiceon+1, lthworkingmeasure, midiport))
+                    print_output('{}, {}, Program_c, {}, {}'.format(voiceon+1, lthworkingmeasure, 9, 0))
+                else:
+                    print_output('{}, {}, Program_c, {}, {}, {}'.format(voiceon+1, lthworkingmeasure, 9, 0, 0))
+                # fi
             else:
                 print_error_no_line("instrument not in instruments nor drum_sounds.")
             # fi
@@ -2774,7 +2788,7 @@ def print_out_midi1csv_notes():
         # fi
 
         # Nothing yet ...
-        lastmeter = ''                          # Last meter put out.  l_instrument = 0 + args.offset
+        lastmeter = ''                          # Last meter put out.
         l_instrument = None                     # Last instrument for this voice.
         lt = ''                                 # Last tempo number of beats per minute.
         ll = ''                                 # Last tempo note type (whole,half,quarter,...).
@@ -3207,6 +3221,7 @@ def print_out_fluidsynth():
             t[2] = 'select'
             t[3] = t[3].strip()
             s = t[3].split(", ", 2)     # 3 elements - channel, bank, program.
+            print_debug("t={}   s={}".format(t,s))
             if args.two:
                 t[3] = '{} 2 {} {}'.format(s[0], s[2], s[1])
             else:
@@ -6136,12 +6151,24 @@ def do_cis(t_args, line):
 #--        print_debug("#1 i={}".format(i))
 # NOTDONEYET - Do drum_sounds here.
 # NOTDONEYET - Need to loop through instruments here, then drum_sounds.
-        if [i,0] in instruments:
+        flg = False
+        for q in instruments:
+            if i == q:
+                flg = True
+                break
+            # fi
+        # rof
+        if not flg:
+            for q in drum_sounds:
+                if i == q:
+                    flg = True
+                    break
+                # fi
+            # rof
+        # fi
+        if flg:
 # NOTDONEYET - Not tested cis and instrument.
-#--            print_debug("#1 instruments[{}][0]={}".format(i,instruments[i][0]))
-# NOTDONEYET - vinstrument[m][voice] == 'Acoustic Grand Piano'.lower()
-            vinstrument[measure_on][cis] = instruments[i][0]
-            vinstrument[measure_on][cis][0] += args.offset
+            vinstrument[measure_on][cis] = i
             reverb[measure_on][cis] = int(calculate.variables['default_reverb'])
             pan[measure_on][cis] = int(calculate.variables['default_pan'])
             intensity[measure_on][cis] = int(calculate.variables['default_intensity'])
@@ -6158,13 +6185,19 @@ def do_cis(t_args, line):
 # NOTDONEYET - Not tested cis and instrument.
 #--            print_debug("#2 f1={}".format(f1))
 #--            print_debug("#2 instruments[{}][0]={}".format(f1,instruments[f1][0]))
-# NOTDONEYET - Do drum_sounds here.
-            if [f1,0] not in instruments.values():
+# NOTDONEYET - Cannot do drum_sounds here.
+            flg = False
+            for q in instruments:
+                if instruments[q] == [f1, 0]:
+                    flg = True
+                    break
+                # fi
+            # rof
+            if not flg:
                 print_error("instrument value {} not in instrument table.".format(f1), line)
                 return
             # fi
-# NOTDONEYET - vinstrument[m][voice] == 'Acoustic Grand Piano'.lower()
-            vinstrument[measure_on][cis][0] = f1 + args.offset
+            vinstrument[measure_on][cis] = q
             reverb[measure_on][cis] = int(calculate.variables['default_reverb'])
             pan[measure_on][cis] = int(calculate.variables['default_pan'])
             intensity[measure_on][cis] = int(calculate.variables['default_intensity'])
@@ -6379,13 +6412,11 @@ def do_voice(t_args, line):
             j = str(j).lower()
             if j in instruments:
                 vinstrument[measure_on][i+1] = j
-#?HUH                vinstrument[measure_on][i+1][0] += args.offset
                 reverb[measure_on][i+1] = int(calculate.variables['default_reverb'])
                 pan[measure_on][i+1] = int(calculate.variables['default_pan'])
                 intensity[measure_on][i+1] = int(calculate.variables['default_intensity'])
             elif j in drum_sounds:
                 vinstrument[measure_on][i+1] = j
-#?HUH                vinstrument[measure_on][i+1][0] += args.offset
                 reverb[measure_on][i+1] = int(calculate.variables['default_reverb'])
                 pan[measure_on][i+1] = int(calculate.variables['default_pan'])
                 intensity[measure_on][i+1] = int(calculate.variables['default_intensity'])
@@ -6412,7 +6443,6 @@ def do_voice(t_args, line):
                     return
                 # fi
                 vinstrument[measure_on][i+1] = q
-#?HUH                vinstrument[measure_on][i+1][0] += args.offset
                 reverb[measure_on][i+1] = int(calculate.variables['default_reverb'])
                 pan[measure_on][i+1] = int(calculate.variables['default_pan'])
                 intensity[measure_on][i+1] = int(calculate.variables['default_intensity'])
@@ -9174,20 +9204,20 @@ def parse_args():
     global measures_to_do
     global voices_to_do
 
-    def offset_value(v):
-        if len(v) > 0:
-            if v[0] == '=':
-                v = v[1:]
-            # fi
-        # fi
-        return v
-    # End of offset_value
+#--    def offset_value(v):
+#--        if len(v) > 0:
+#--            if v[0] == '=':
+#--                v = v[1:]
+#--            # fi
+#--        # fi
+#--        return v
+#--    # End of offset_value
 
-    for indx in range(len(sys.argv) - 1):
-        if '--offset' in sys.argv[indx]:
-            sys.argv[indx + 1] = '={0}'.format(sys.argv[indx + 1])
-        # fi
-    # rof
+#--    for indx in range(len(sys.argv) - 1):
+#--        if '--offset' in sys.argv[indx]:
+#--            sys.argv[indx + 1] = '={0}'.format(sys.argv[indx + 1])
+#--        # fi
+#--    # rof
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -9221,8 +9251,8 @@ def parse_args():
                         '-noxpose', '-noxpos', '-noxpo', '-noxp', '-nox',
                         action='store_true',
                         help = 'Do not parse xpose commands, ignore them.')
-    parser.add_argument('--offset', default=0, action = 'store', type=offset_value,
-                        help = 'Offset for midi instruments +1, -1, -12 -- because they CAN differ for playing.')
+#--    parser.add_argument('--offset', default=0, action = 'store', type=offset_value,
+#--                        help = 'Offset for midi instruments +1, -1, -12 -- because they CAN differ for playing.')
     parser.add_argument('--shift', type=float, default=0.0,
                         help = 'Shift all measures before printing (0.5 = 1/2 note to left/earlier measure).')
     parser.add_argument('--pages', '--page', '-pages', '-page',
@@ -9252,9 +9282,9 @@ def parse_args():
                         help='Optional command to execute')
     args = parser.parse_args()
 
-    if args.offset is not None:
-        args.offset = int(args.offset)
-    # fi
+#--    if args.offset is not None:
+#--        args.offset = int(args.offset)
+#--    # fi
 
     if args.pages is not None and args.pages != '':
         # global pages_to_do
