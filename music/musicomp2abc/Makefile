@@ -120,7 +120,7 @@ clean:
 #+	rm -f ${SONGS_WAV} ${TESTS_WAV}
 	rm -f ${SONGS_E} ${TESTS_E}
 	rm -f *.stderr
-	rm -f *.h *.v *.csv
+	rm -f *.h *.v *.csv *.mid
 #-----------------------------------------------------------------------------
 .PHONY: tags ctags
 tags ctags:
