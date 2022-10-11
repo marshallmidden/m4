@@ -43,6 +43,8 @@ TESTS_M_PS = ${TESTS:=_m.ps}
 #+ TESTS_WAV = ${TESTS:=.wav}
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
+MC_ARGS =
+#-- MC_ARGS = --noxpose --voices=9
 #+ YAPS	     = yaps
 ABCM2PS	     = abcm2ps
 #-----------------------------------------------------------------------------
@@ -67,15 +69,15 @@ CPP=gcc -E -x c -nostdinc -P -C -CC -Wno-error -Wno-extra -traditional-cpp
 .SUFFIXES: .abc _m.ps .E .fs .csv .mid
 # output $@   -- input $<
 %.fs:  %.E
-	${MUSICOMP2ABC} --two --fluidsynth $< $@ || rm -f $@
+	${MUSICOMP2ABC} ${MC_ARGS} --two --fluidsynth $< $@ || rm -f $@
 %.csv:  %.E
-	${MUSICOMP2ABC} --midi1csv $< $@ || rm -f $@
+	${MUSICOMP2ABC} ${MC_ARGS} --midi1csv $< $@ || rm -f $@
 %.mid:  %.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 #+ %.wav:  %.mid
 #+ 	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 128 $<
 %.abc:  %.E
-	${MUSICOMP2ABC} --abc $< $@ || (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
 #+ %.ps:   %.abc
 #+ 	${YAPS} $< -o $@ -k || (rm -f $@ ; exit 1)
 %_m.ps: %.abc
@@ -84,6 +86,10 @@ CPP=gcc -E -x c -nostdinc -P -C -CC -Wno-error -Wno-extra -traditional-cpp
 %.E: %.gcs
 	${CPP} $< -o $@ \
 		|| (rm -f $@ ; exit 1)
+%.v:    %.E ${MUSICOMP2ABC}
+	${MUSICOMP2ABC} ${MC_ARGS} --vert $< $@ || (rm -f $@ ; exit 1)
+%.h:    %.E ${MUSICOMP2ABC}
+	${MUSICOMP2ABC} ${MC_ARGS} --hori $< $@ || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help
 help:
@@ -114,6 +120,7 @@ clean:
 #+	rm -f ${SONGS_WAV} ${TESTS_WAV}
 	rm -f ${SONGS_E} ${TESTS_E}
 	rm -f *.stderr
+	rm -f *.h *.v *.csv
 #-----------------------------------------------------------------------------
 .PHONY: tags ctags
 tags ctags:
