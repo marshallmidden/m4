@@ -78,13 +78,16 @@ WHICH = "-D WHICH=0"
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.abc %.csv %.mid %.E
-#- .SUFFIXES: .mid .csv .ps .abc _m.ps
-.SUFFIXES: .mid .csv .abc _m.ps
+.PRECIOUS: %.abc %.csv %.mid %.E .fs
+.SUFFIXES: .mid .csv .abc _m.ps .fs
 # Output $@ -- input $< (first dependency -- after the :).
 %.fs: %.E
 	${MUSICOMP2ABC} --two --fluidsynth $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
 		|| (rm -f $@ ; exit 1)
+%.csv:  %.E
+	${MUSICOMP2ABC} ${MC_ARGS} --midi1csv $< $@ || rm -f $@
+%.mid:  %.csv
+	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.abc: %.E Makefile
 	${MUSICOMP2ABC} --abc $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
 		|| (rm -f $@ ; exit 1)
@@ -96,9 +99,6 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 		|| (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 # Manually invokable rules follow.
-%.csv: %.E Makefile
-	${MUSICOMP2ABC} --midi1csv $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
-		|| (rm -f $@ ; exit 1)
 .SUFFIXES: .v
 %.v: %.E Makefile
 	${MUSICOMP2ABC} --vertical $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
@@ -106,9 +106,6 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 .SUFFIXES: .horizontal
 %.horizontal: %.E Makefile
 	${MUSICOMP2ABC} --horizontal $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
-		|| (rm -f $@ ; exit 1)
-%.mid: %.csv
-	csvmidi $< $@ \
 		|| (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help
@@ -134,14 +131,16 @@ check:
 	@echo "VOICES=${VOICES}"
 	@echo "WHICH=${WHICH}"
 #=============================================================================
-all: ${V}_m.ps ${V}.fs
+all: ${V}_m.ps ${V}.fs ${V}.mid
 #=============================================================================
 .PHONY: clean
 clean:
 	rm -f *.abc *.E
 	rm -f *.ps
 	rm -f *.fs
-	rm -f *.v *.h *.csv *.mid *.wav
+	rm -f *.mid
+	rm -f *.csv
+	rm -f *.v *.h *.wav
 #-----------------------------------------------------------------------------
 # End of Makefile
 #-----------------------------------------------------------------------------

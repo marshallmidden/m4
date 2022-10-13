@@ -24,12 +24,17 @@ VOICES =
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.abc %.E
-.SUFFIXES: .abc _m.ps .E .fs
+.PRECIOUS: %.abc %.E %.csv
+.SUFFIXES: .abc _m.ps .E .fs .csv .mid
 # output $@   -- input $<
 %.fs:	%.E
 	${MUSICOMP2ABC} --two --fluidsynth $< $@ ${PAGES} ${MEASURES} ${VOICES} \
 		|| (rm -f $@ ; exit 1)
+%.csv:	%.E
+	${MUSICOMP2ABC} --two --midi1csv $< $@ ${PAGES} ${MEASURES} ${VOICES} \
+		|| (rm -f $@ ; exit 1)
+%.mid:  %.csv
+	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.abc:	%.E
 	${MUSICOMP2ABC} --abc $< $@ ${PAGES} ${MEASURES} ${VOICES} \
 		|| (rm -f $@ ; exit 1)
@@ -38,9 +43,6 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 		|| (rm -f $@ ; exit 1)
 %.E: %.gcs ../instruments.include
 	${CPP} $< -o $@ \
-		|| (rm -f $@ ; exit 1)
-%.csv:	%.E
-	${MUSICOMP2ABC} --midi1csv $< $@ ${PAGES} ${MEASURES} ${VOICES} \
 		|| (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help
@@ -72,16 +74,16 @@ clean:
 	rm -f A.[012]* B.[012]*
 #-----------------------------------------------------------------------------
 .PHONY: s1 Makefile ${MUSICOMP2ABC}
-s1: ${V1}_m.ps ${V1}.fs
+s1: ${V1}_m.ps ${V1}.fs ${V1}.mid
 #-----------------------------------------------------------------------------
 .PHONY: s2 Makefile ${MUSICOMP2ABC}
-s2: ${V2}_m.ps ${V2}.fs
+s2: ${V2}_m.ps ${V2}.fs ${V2}.mid
 #-----------------------------------------------------------------------------
 .PHONY: s3 Makefile ${MUSICOMP2ABC}
-s3: ${V3}_m.ps ${V3}.fs
+s3: ${V3}_m.ps ${V3}.fs ${V3}.mid
 #-----------------------------------------------------------------------------
 .PHONY: s4 Makefile ${MUSICOMP2ABC}
-s4: ${V4}_m.ps ${V4}.fs
+s4: ${V4}_m.ps ${V4}.fs ${V4}.mid
 #-----------------------------------------------------------------------------
 # End of Makefile
 #-----------------------------------------------------------------------------

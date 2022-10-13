@@ -20,12 +20,16 @@ VOICES =
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.abc %.E
-.SUFFIXES: .abc _m.ps .E .fs
+.PRECIOUS: %.abc %.E %.csv
+.SUFFIXES: .abc _m.ps .E .fs .csv .mid
 # output $@   -- input $<
 %.fs:	%.E
 	${MUSICOMP2ABC} --two --fluidsynth $< $@ ${PAGES} ${MEASURES} ${VOICES} \
 		|| ( rm -f $@ ; exit 1)
+%.csv:  %.E
+	${MUSICOMP2ABC} --midi1csv $< $@ ${PAGES} ${MEASURES} ${VOICES} || rm -f $@
+%.mid:  %.csv
+	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.abc:	%.E
 	${MUSICOMP2ABC} --abc $< $@ ${PAGES} ${MEASURES} ${VOICES} \
 		|| (rm -f $@ ; exit 1)
@@ -83,7 +87,7 @@ check:
 	@echo "ABCM2PS=${ABCM2PS}"
 	@echo "ABCM2PS_ARGS=${ABCM2PS_ARGS}"
 #=============================================================================
-all: ${V}_m.ps ${V}.fs
+all: ${V}_m.ps ${V}.fs ${V}.mid
 #=============================================================================
 .PHONY: clean
 clean::

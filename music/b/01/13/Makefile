@@ -9,7 +9,7 @@ ABCM2PS      = abcm2ps
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.csv %.mid %.E
-.SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E
+.SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E .fs
 # output $@   -- input $<
 %.fs:	%.E
 	${MUSICOMP2ABC} --two --fluidsynth $< $@ \
