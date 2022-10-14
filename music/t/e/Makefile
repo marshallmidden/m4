@@ -78,14 +78,14 @@ WHICH = "-D WHICH=0"
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.abc %.csv %.mid %.E .fs
+.PRECIOUS: %.abc %.csv %.mid %.E %.fs
 .SUFFIXES: .mid .csv .abc _m.ps .fs
 # Output $@ -- input $< (first dependency -- after the :).
 %.fs: %.E
 	${MUSICOMP2ABC} --two --fluidsynth $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
 		|| (rm -f $@ ; exit 1)
 %.csv:  %.E
-	${MUSICOMP2ABC} ${MC_ARGS} --midi1csv $< $@ || rm -f $@
+	${MUSICOMP2ABC} ${MC_ARGS} --midi1csv $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} || rm -f $@
 %.mid:  %.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.abc: %.E Makefile

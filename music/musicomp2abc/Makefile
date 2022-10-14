@@ -65,7 +65,7 @@ CPP=gcc -E -x c -nostdinc -P -C -CC -Wno-error -Wno-extra -traditional-cpp
 #-----------------------------------------------------------------------------
 #+.PRECIOUS: %.abc %.csv %.mid %.E
 #+ .SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E .fs
-.PRECIOUS: %.abc %.E .csv
+.PRECIOUS: %.abc %.E %.csv
 .SUFFIXES: .abc _m.ps .E .fs .csv .mid
 # output $@   -- input $<
 %.fs:  %.E
