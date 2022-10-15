@@ -3,7 +3,7 @@ V            = v1-4
 MCOMP        = ~/src/abc/mcomp/mcomp
 SEPARATE     = ./A.separate
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
-YAPS         = yaps
+#-- YAPS         = yaps
 ABCM2PS      = abcm2ps
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
@@ -25,9 +25,9 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 %.abc:	%.E
 	${MUSICOMP2ABC} --abc $< $@ \
 		|| (rm -f $@ ; exit 1)
-%.ps:	%.abc
-	${YAPS} $< -o $@ -k \
-		|| (rm -f $@ ; exit 1)
+#-- %.ps:	%.abc
+#-- 	${YAPS} $< -o $@ -k \
+#-- 		|| (rm -f $@ ; exit 1)
 %_m.ps:	%.abc
 	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@) \
 		|| (rm -f $@ ; exit 1)
@@ -41,8 +41,8 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 # output $@   -- input $<
 %.A_abc:  %
 	${MUSICOMP2ABC} --abc $< $@
-%_A.ps:   %.A_abc
-	${YAPS} $< -o $@ -k
+#-- %_A.ps:   %.A_abc
+#-- 	${YAPS} $< -o $@ -k
 %_m_A.ps: %.A_abc
 	${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@
 #-----------------------------------------------------------------------------
@@ -81,7 +81,7 @@ check:
 	@echo "MCOMP=${MCOMP}"
 	@echo "SEPARATE=${SEPARATE}"
 	@echo "MUSICOMP2ABC=${MUSICOMP2ABC}"
-	@echo "YAPS=${YAPS}"
+#-- 	@echo "YAPS=${YAPS}"
 	@echo "ABCM2PS=${ABCM2PS}"
 #=============================================================================
 all: ${V}.mid ${V}.ps ${V}_m.ps ${V}.wav ${V}.fs

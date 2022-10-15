@@ -6,7 +6,6 @@ V4 = v1-4
 MCOMP        = ~/src/abc/mcomp/mcomp
 SEPARATE     = ./A.separate
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
-#- YAPS         = yaps
 ABCM2PS      = abcm2ps
 #-----------------------------------------------------------------------------
 # -b nn = starting bar number

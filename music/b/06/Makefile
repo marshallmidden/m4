@@ -45,8 +45,8 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 # output $@   -- input $<
 %.A_abc:  %
 	${MUSICOMP2ABC} --abc $< $@
-%_A.ps:   %.A_abc
-	${YAPS} $< -o $@ -k
+#-- %_A.ps:   %.A_abc
+#-- 	${YAPS} $< -o $@ -k
 %_m_A.ps: %.A_abc
 	${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@
 #-----------------------------------------------------------------------------
@@ -83,7 +83,7 @@ check:
 	@echo "V=${V}"
 	@echo "SEPARATE=${SEPARATE}"
 	@echo "MUSICOMP2ABC=${MUSICOMP2ABC}"
-	@echo "YAPS=${YAPS}"
+#-- 	@echo "YAPS=${YAPS}"
 	@echo "ABCM2PS=${ABCM2PS}"
 	@echo "ABCM2PS_ARGS=${ABCM2PS_ARGS}"
 #=============================================================================

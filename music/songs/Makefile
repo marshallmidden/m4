@@ -126,7 +126,7 @@ BROKEN += slidall
 
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ../musicomp2abc/musicomp2abc
-YAPS         = yaps
+#-- YAPS         = yaps
 ABCM2PS      = abcm2ps
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
@@ -138,13 +138,13 @@ SONGS_CSV = ${SONGS:=.csv} ${SONGS_NO_PS:=.csv}
 SONGS_MID = ${SONGS:=.mid} ${SONGS_NO_PS:=.mid}
 SONGS_FS = ${SONGS:=.fs} ${SONGS_NO_PS:=.fs}
 SONGS_M_PS = ${SONGS:=_m.ps}
-SONGS_PS = ${SONGS:=.ps}
+#-- SONGS_PS = ${SONGS:=.ps}
 SONGS_WAV = ${SONGS:=.wav} ${SONGS_NO_PS:=.wav}
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 BROKEN_MID = ${BROKEN:=.mid}
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.csv %.abc %.mid %.E
-.SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E
+.SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E .fs
 # output $@   -- input $<
 %.fs:  %.E
 	${MUSICOMP2ABC} --two --fluidsynth $< $@ \
@@ -161,9 +161,9 @@ BROKEN_MID = ${BROKEN:=.mid}
 %.abc:  %.E
 	${MUSICOMP2ABC} --abc $< $@ \
 		|| (rm -f $@ ; exit 1)
-%.ps:   %.abc
-	${YAPS} $< -o $@ -k \
-		|| (rm -f $@ ; exit 1)
+#-- %.ps:   %.abc
+#-- 	${YAPS} $< -o $@ -k \
+#-- 		|| (rm -f $@ ; exit 1)
 %_m.ps: %.abc
 	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@) \
 		|| (rm -f $@ ; exit 1)
@@ -177,7 +177,7 @@ help:
 	@echo 'Targets:'
 	@echo '  all       - Convert all working (?) .gcs songs to .mid files.'
 	@echo '  broken    - Attempt to convert all broken .gcs songs to .mid files.'
-	@echo "  all_ps    - Use ${YAPS} to create .ps (postscript) files from .gcs files."
+#-- 	@echo "  all_ps    - Use ${YAPS} to create .ps (postscript) files from .gcs files."
 	@echo "  all_m_ps  - Use ${ABCM2PS} to create .ps (postscript) files from .gcs files."
 	@echo '  all_wav   - Use fluidsynth to create .wav (audio) files from .gcs files.'
 	@echo '  clean     - Remove intermediate .csv,.mid,.abc,.ps,_m.ps, and .wav files.'
@@ -189,8 +189,8 @@ all all_mid: ${SONGS_MID} all_fs
 .PHONY: broken
 broken: ${BROKEN_MID}
 #-----------------------------------------------------------------------------
-.PHONY: all_ps
-all_ps: ${SONGS_PS}
+#-- .PHONY: all_ps
+#-- all_ps: ${SONGS_PS}
 #-----------------------------------------------------------------------------
 .PHONY: all_m_ps
 all_m_ps: ${SONGS_M_PS}
