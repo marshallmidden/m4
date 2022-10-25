@@ -641,6 +641,7 @@ int main(int argc, char *argv[])
 
 	    case Event(ProgramChange):
 	    case Event(ChannelPressure):
+//++	    case Event(PitchBend):
 		Nfields(2);
 		ClampChannel;
 		Clamp(5, 0, 127, "Value");

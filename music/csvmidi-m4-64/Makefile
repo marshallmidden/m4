@@ -2,7 +2,8 @@
 CC = gcc
 CFLAGS = -g -Wall
 
-INSTALL_DEST = /usr/local
+#-- INSTALL_DEST = /usr/local
+INSTALL_DEST = /Users/m4
 
 #	You shouldn't need to change anything after this line
 
@@ -64,6 +65,7 @@ torture: all
 	@rm /tmp/w.mid /tmp/w1.mid
 	
 install:	all
+	root install -m 755 $(PROGRAMS) $(INSTALL_DEST)/bin
 	root install -m 755 $(PROGRAMS) $(INSTALL_DEST)/bin
 	
 uninstall:

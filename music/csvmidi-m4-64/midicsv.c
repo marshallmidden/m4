@@ -165,6 +165,8 @@ static void trackcsv(FILE *fo, const int trackno, unsigned char *trk, long trkle
                 fprintf(fo, "Control_c, %d, %d, %d\n", channel, control, value);
                 continue;
 
+//++            case ChannelPressure:              /* Channel pressure (aftertouch) */
+//++            case PitchBend:                    /* Pitch bend */
             case ProgramChange:                /* Program change */
                 if (trklen < 1)
                 {
@@ -172,6 +174,7 @@ static void trackcsv(FILE *fo, const int trackno, unsigned char *trk, long trkle
                 }
                 trklen--;
                 note = *trk++;
+		channel = evt & 0x3F;
                 fprintf(fo, "Program_c, %d, %d\n", channel, note);
                 continue;
 
@@ -356,9 +359,9 @@ int main(int argc, char *argv[])
     struct mhead    mh;
     FILE           *fp;
     FILE           *fo;
-    long            track1;
+//??    long            track1;
     int             i;
-    int             track1l;
+//??    int             track1l;
 
 
     if (argc == 3)
@@ -415,10 +418,10 @@ fprintf(stderr, "argv[1] = '%s'\n", argv[1]);
         struct mtrack   mt;
         unsigned char  *trk;
 
-        if (i == 0)
-        {
-            track1 = ftell(fp);
-        }
+//??        if (i == 0)
+//??        {
+//??            track1 = ftell(fp);
+//??        }
 
         readMidiTrackHeader(fp, &mt);
         if (memcmp(mt.chunktype, "MTrk", sizeof mt.chunktype) != 0)
@@ -441,10 +444,10 @@ fprintf(stderr, "argv[1] = '%s'\n", argv[1]);
         }
 
         fread((char *)trk, (int)mt.length, 1, fp);
-        if (i == 0)
-        {
-            track1l = (int)(ftell(fp) - track1);
-        }
+//??        if (i == 0)
+//??        {
+//??            track1l = (int)(ftell(fp) - track1);
+//??        }
 
         trackcsv(fo, i + 1, trk, mt.length, mh.division);
         free(trk);
