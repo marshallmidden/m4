@@ -7,6 +7,7 @@ MCOMP        = ~/src/abc/mcomp/mcomp
 SEPARATE     = ./A.separate
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 ABCM2PS      = abcm2ps
+PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------
 # -b nn = starting bar number
 # -i = put red circle around errors.
@@ -23,8 +24,8 @@ VOICES =
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.abc %.E %.csv
-.SUFFIXES: .abc _m.ps .E .fs .csv .mid
+.PRECIOUS: %.abc %.E %.csv %_m.ps
+.SUFFIXES: .abc _m.ps .E .fs .csv .mid .pdf
 # output $@   -- input $<
 %.fs:	%.E
 	${MUSICOMP2ABC} --two --fluidsynth $< $@ ${PAGES} ${MEASURES} ${VOICES} \
@@ -40,6 +41,8 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 %_m.ps:	%.abc
 	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) \
 		|| (rm -f $@ ; exit 1)
+%.pdf:	%_m.ps
+	${PS2PDF} $< $@  || (rm -f $@ ; exit 1)
 %.E: %.gcs ../instruments.include
 	${CPP} $< -o $@ \
 		|| (rm -f $@ ; exit 1)
@@ -66,24 +69,31 @@ all: s1 s2 s3 s4
 clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
-	rm -f *.csv *.mid *.fs
-	rm -f *.abc
-	rm -f *.wav
-	rm -f *.E
+	rm -f ${V1}.{csv,mid,fs,pdf}
+	rm -f ${V2}.{csv,mid,fs,pdf}
+	rm -f ${V3}.{csv,mid,fs,pdf}
+	rm -f ${V4}.{csv,mid,fs,pdf}
+	rm -f ${V1}.{csv,mid,fs,pdf}
+	rm -f ${V2}.{csv,mid,fs,pdf}
+	rm -f ${V3}.{csv,mid,fs,pdf}
+	rm -f ${V4}.{csv,mid,fs,pdf}
+	rm -f ${V1}.{abc,wav,E}
+	rm -f ${V2}.{abc,wav,E}
+	rm -f ${V3}.{abc,wav,E}
+	rm -f ${V4}.{abc,wav,E}
 	rm -f A.[012]* B.[012]*
 #-----------------------------------------------------------------------------
-.PHONY: s1 Makefile ${MUSICOMP2ABC}
-#-- s1: ${V1}_m.ps ${V1}.fs ${V1}.mid
-s1: ${V1}_m.ps ${V1}.fs
+.PHONY: s1
+s1: ${V1}_m.ps ${V1}.fs ${V1}.pdf      Makefile ${MUSICOMP2ABC}
 #-----------------------------------------------------------------------------
-.PHONY: s2 Makefile ${MUSICOMP2ABC}
-s2: ${V2}_m.ps ${V2}.fs ${V2}.mid
+.PHONY: s2
+s2: ${V2}_m.ps ${V2}.fs ${V2}.pdf      Makefile ${MUSICOMP2ABC}
 #-----------------------------------------------------------------------------
-.PHONY: s3 Makefile ${MUSICOMP2ABC}
-s3: ${V3}_m.ps ${V3}.fs ${V3}.mid
+.PHONY: s3
+s3: ${V3}_m.ps ${V3}.fs ${V3}.pdf      Makefile ${MUSICOMP2ABC}
 #-----------------------------------------------------------------------------
-.PHONY: s4 Makefile ${MUSICOMP2ABC}
-s4: ${V4}_m.ps ${V4}.fs ${V4}.mid
+.PHONY: s4
+s4: ${V4}_m.ps ${V4}.fs ${V4}.pdf      Makefile ${MUSICOMP2ABC}
 #-----------------------------------------------------------------------------
 # End of Makefile
 #-----------------------------------------------------------------------------
