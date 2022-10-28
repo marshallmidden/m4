@@ -18,7 +18,7 @@ PAGES =
 MEASURES =
 VOICES =
 #-----------------------------------------------------------------------------
-CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
+CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.E %.csv
 .SUFFIXES: .abc _m.ps .E .fs .csv .mid

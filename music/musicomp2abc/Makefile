@@ -60,8 +60,7 @@ ABCM2PS	     = abcm2ps
 # -CC			Include comments from within macros in preprocessed output.
 # -traditional-cpp	Enable some traditional CPP emulation.
 #
-# CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC -traditional-cpp
-CPP=gcc -E -x c -nostdinc -P -C -CC -Wno-error -Wno-extra -traditional-cpp
+CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp
 #-----------------------------------------------------------------------------
 #+.PRECIOUS: %.abc %.csv %.mid %.E
 #+ .SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E .fs

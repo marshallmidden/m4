@@ -76,7 +76,7 @@ WHICH = "-D WHICH=0"
 #xx WHICH = "-D WHICH=11"
 #xx VOICES = --voices 39..40
 #-----------------------------------------------------------------------------
-CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
+CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.csv %.mid %.E %.fs
 .SUFFIXES: .mid .csv .abc _m.ps .fs

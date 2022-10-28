@@ -15,7 +15,7 @@ MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 YAPS	     = yaps
 ABCM2PS	     = abcm2ps
 #-----------------------------------------------------------------------------
-CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
+CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.csv %.mid %.E
 .SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E
