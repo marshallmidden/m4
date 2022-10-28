@@ -33,7 +33,7 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 %.csv:	%.E
 	${MUSICOMP2ABC} --two --midi1csv $< $@ ${PAGES} ${MEASURES} ${VOICES} \
 		|| (rm -f $@ ; exit 1)
-%.mid:  %.csv
+%.mid:	%.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.abc:	%.E
 	${MUSICOMP2ABC} --abc $< $@ ${PAGES} ${MEASURES} ${VOICES} \
@@ -42,7 +42,7 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -P -C -CC
 	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) \
 		|| (rm -f $@ ; exit 1)
 %.pdf:	%_m.ps
-	${PS2PDF} $< $@  || (rm -f $@ ; exit 1)
+	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E: %.gcs ../instruments.include
 	${CPP} $< -o $@ \
 		|| (rm -f $@ ; exit 1)
@@ -69,18 +69,10 @@ all: s1 s2 s3 s4
 clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
-	rm -f ${V1}.{csv,mid,fs,pdf}
-	rm -f ${V2}.{csv,mid,fs,pdf}
-	rm -f ${V3}.{csv,mid,fs,pdf}
-	rm -f ${V4}.{csv,mid,fs,pdf}
-	rm -f ${V1}.{csv,mid,fs,pdf}
-	rm -f ${V2}.{csv,mid,fs,pdf}
-	rm -f ${V3}.{csv,mid,fs,pdf}
-	rm -f ${V4}.{csv,mid,fs,pdf}
-	rm -f ${V1}.{abc,wav,E}
-	rm -f ${V2}.{abc,wav,E}
-	rm -f ${V3}.{abc,wav,E}
-	rm -f ${V4}.{abc,wav,E}
+	rm -f ${V1}.{csv,mid,fs,pdf,abc,wav,E}
+	rm -f ${V2}.{csv,mid,fs,pdf,abc,wav,E}
+	rm -f ${V3}.{csv,mid,fs,pdf,abc,wav,E}
+	rm -f ${V4}.{csv,mid,fs,pdf,abc,wav,E}
 	rm -f A.[012]* B.[012]*
 #-----------------------------------------------------------------------------
 .PHONY: s1
