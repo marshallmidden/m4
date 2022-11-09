@@ -20,7 +20,7 @@ MEASURES =
 VOICES =
 # All voices & staves.
 #-- WHICH = "-D WHICH=0"
-WHICH = "-D WHICH=1"
+WHICH = "-D WHICH=2"
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 #-----------------------------------------------------------------------------
