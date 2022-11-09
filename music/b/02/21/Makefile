@@ -18,29 +18,32 @@ ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 PAGES =
 MEASURES =
 VOICES =
+# All voices & staves.
+#-- WHICH = "-D WHICH=0"
+WHICH = "-D WHICH=1"
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.E %.csv %_m.ps
 .SUFFIXES: .abc _m.ps .E .fs .csv .mid .pdf
 # output $@   -- input $<
-%.fs:	%.E
-	${MUSICOMP2ABC} --two --fluidsynth $< $@ ${PAGES} ${MEASURES} ${VOICES} \
+%.fs:	%.E ${MUSICOMP2ABC}
+	${MUSICOMP2ABC} --two --fluidsynth $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
 		|| (rm -f $@ ; exit 1)
-%.csv:	%.E
-	${MUSICOMP2ABC} --two --midi1csv $< $@ ${PAGES} ${MEASURES} ${VOICES} \
+%.csv:	%.E ${MUSICOMP2ABC}
+	${MUSICOMP2ABC} --two --midi1csv $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
 		|| (rm -f $@ ; exit 1)
 %.mid:	%.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
-%.abc:	%.E
-	${MUSICOMP2ABC} --abc $< $@ ${PAGES} ${MEASURES} ${VOICES} \
+%.abc:	%.E ${MUSICOMP2ABC}
+	${MUSICOMP2ABC} --abc $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
 		|| (rm -f $@ ; exit 1)
 %_m.ps:	%.abc
 	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) \
 		|| (rm -f $@ ; exit 1)
 %.pdf:	%_m.ps
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
-%.E: %.gcs ../../instruments.include
+%.E: %.gcs ../../instruments.include Makefile
 	${CPP} $< -o $@ \
 		|| (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
@@ -55,6 +58,18 @@ help::
 	@echo "  clean  - Remove postscript (ps), csv, and mid files."
 	@echo ""
 	@echo "  s1     - create ${V1}.abc, ${V1}_m.ps, and ${V1}.fs from ${V1}."
+#-----------------------------------------------------------------------------
+.PHONY: check
+check:
+	@echo "V1=${V1}"
+	@echo "CPP=${CPP}"
+	@echo "MUSICOMP2ABC=${MUSICOMP2ABC}"
+	@echo "ABCM2PS=${ABCM2PS}"
+	@echo "ABCM2PS_ARGS=${ABCM2PS_ARGS}"
+	@echo "PAGES=${PAGES}"
+	@echo "MEASURES=${MEASURES}"
+	@echo "VOICES=${VOICES}"
+	@echo "WHICH=${WHICH}"
 #=============================================================================
 .PHONY: all
 all: s1
@@ -67,7 +82,7 @@ clean:
 	rm -f A.[012]* B.[012]*
 #-----------------------------------------------------------------------------
 .PHONY: s1
-s1: ${V1}_m.ps ${V1}.fs ${V1}.pdf      Makefile ${MUSICOMP2ABC}
+s1: ${V1}_m.ps ${V1}.fs ${V1}.pdf
 #-----------------------------------------------------------------------------
 # End of Makefile
 #-----------------------------------------------------------------------------
