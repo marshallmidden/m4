@@ -20,7 +20,31 @@ MEASURES =
 VOICES =
 # All voices & staves.
 #-- WHICH = "-D WHICH=0"
-WHICH = "-D WHICH=2"
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#++ WHICH = "-D WHICH=1"
+#++ VOICES = --voices 1..2
+#++ WHICH = "-D WHICH=2"
+#++ VOICES = --voices 3..4
+#++ WHICH = "-D WHICH=3"
+#++ VOICES = --voices 5..6
+WHICH = "-D WHICH=4"
+VOICES = --voices 7..8
+# WHICH = "-D WHICH=5"
+# VOICES = --voices 9..10
+# WHICH = "-D WHICH=6"
+# VOICES = --voices 11..12
+# WHICH = "-D WHICH=7"
+# VOICES = --voices 13
+# WHICH = "-D WHICH=8"
+# VOICES = --voices 14..17
+# WHICH = "-D WHICH=9"
+# VOICES = --voices 18..20
+# WHICH = "-D WHICH=10"
+# VOICES = --voices 21..23
+# WHICH = "-D WHICH=11"
+# VOICES = --voices 24..25
+# WHICH = "-D WHICH=12"
+# VOICES = --voices 26
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 #-----------------------------------------------------------------------------
@@ -71,7 +95,7 @@ check:
 	@echo "VOICES=${VOICES}"
 	@echo "WHICH=${WHICH}"
 #=============================================================================
-.PHONY: all
+#-- .PHONY: all
 all: s1
 #-----------------------------------------------------------------------------
 .PHONY: clean
@@ -81,8 +105,8 @@ clean:
 	rm -f ${V1}.{csv,mid,fs,pdf,abc,wav,E}
 	rm -f A.[012]* B.[012]*
 #-----------------------------------------------------------------------------
-.PHONY: s1
-s1: ${V1}_m.ps ${V1}.fs ${V1}.pdf
+#-- .PHONY: s1
+s1: ${V1}.fs ${V1}.pdf
 #-----------------------------------------------------------------------------
 # End of Makefile
 #-----------------------------------------------------------------------------
