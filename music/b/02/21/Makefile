@@ -19,7 +19,7 @@ PAGES =
 MEASURES =
 VOICES =
 # All voices & staves.
-#-- WHICH = "-D WHICH=0"
+#++ WHICH = "-D WHICH=0"
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 #++ WHICH = "-D WHICH=1"
 #++ VOICES = --voices 1..2
@@ -27,24 +27,22 @@ VOICES =
 #++ VOICES = --voices 3..4
 #++ WHICH = "-D WHICH=3"
 #++ VOICES = --voices 5..6
-WHICH = "-D WHICH=4"
-VOICES = --voices 7..8
-# WHICH = "-D WHICH=5"
-# VOICES = --voices 9..10
-# WHICH = "-D WHICH=6"
-# VOICES = --voices 11..12
-# WHICH = "-D WHICH=7"
-# VOICES = --voices 13
-# WHICH = "-D WHICH=8"
-# VOICES = --voices 14..17
-# WHICH = "-D WHICH=9"
-# VOICES = --voices 18..20
-# WHICH = "-D WHICH=10"
-# VOICES = --voices 21..23
-# WHICH = "-D WHICH=11"
-# VOICES = --voices 24..25
-# WHICH = "-D WHICH=12"
-# VOICES = --voices 26
+#++ WHICH = "-D WHICH=4"
+#++ VOICES = --voices 7..8
+#++ WHICH = "-D WHICH=5"
+#++ VOICES = --voices 9..10
+#++ WHICH = "-D WHICH=6"
+#++ VOICES = --voices 11..12
+#++ WHICH = "-D WHICH=7"
+#++ VOICES = --voices 13
+#++ WHICH = "-D WHICH=8"
+#++ VOICES = --voices 14..17
+#++ WHICH = "-D WHICH=9"
+#++ VOICES = --voices 18..20
+#++ WHICH = "-D WHICH=10"
+#++ VOICES = --voices 21..23
+WHICH = "-D WHICH=11"
+VOICES = --voices 24..26
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 #-----------------------------------------------------------------------------
