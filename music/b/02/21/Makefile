@@ -45,29 +45,26 @@ WHICH = "-D WHICH=11"
 VOICES = --voices 24..26
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
+#++ MC_ARGS = ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
+MC_ARGS = --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.E %.csv %_m.ps
 .SUFFIXES: .abc _m.ps .E .fs .csv .mid .pdf
 # output $@   -- input $<
 %.fs:	%.E ${MUSICOMP2ABC}
-	${MUSICOMP2ABC} --two --fluidsynth $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
-		|| (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
 %.csv:	%.E ${MUSICOMP2ABC}
-	${MUSICOMP2ABC} --two --midi1csv $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
-		|| (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --two --midi1csv $< $@ || (rm -f $@ ; exit 1)
 %.mid:	%.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.abc:	%.E ${MUSICOMP2ABC}
-	${MUSICOMP2ABC} --abc $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
-		|| (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
 %_m.ps:	%.abc
-	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) \
-		|| (rm -f $@ ; exit 1)
+	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) || (rm -f $@ ; exit 1)
 %.pdf:	%_m.ps
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E: %.gcs ../../instruments.include Makefile
-	${CPP} $< -o $@ \
-		|| (rm -f $@ ; exit 1)
+	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help
 help::
@@ -86,6 +83,7 @@ check:
 	@echo "V1=${V1}"
 	@echo "CPP=${CPP}"
 	@echo "MUSICOMP2ABC=${MUSICOMP2ABC}"
+	@echo "MC_ARGS=${MC_ARGS}"
 	@echo "ABCM2PS=${ABCM2PS}"
 	@echo "ABCM2PS_ARGS=${ABCM2PS_ARGS}"
 	@echo "PAGES=${PAGES}"

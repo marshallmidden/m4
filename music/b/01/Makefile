@@ -23,29 +23,26 @@ MEASURES =
 VOICES =
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
+#++ MC_ARGS = ${PAGES} ${MEASURES} ${VOICES}
+MC_ARGS = --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES}
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.E %.csv %_m.ps
 .SUFFIXES: .abc _m.ps .E .fs .csv .mid .pdf
 # output $@   -- input $<
 %.fs:	%.E
-	${MUSICOMP2ABC} --two --fluidsynth $< $@ ${PAGES} ${MEASURES} ${VOICES} \
-		|| (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
 %.csv:	%.E
-	${MUSICOMP2ABC} --two --midi1csv $< $@ ${PAGES} ${MEASURES} ${VOICES} \
-		|| (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --two --midi1csv $< $@ || (rm -f $@ ; exit 1)
 %.mid:	%.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.abc:	%.E
-	${MUSICOMP2ABC} --abc $< $@ ${PAGES} ${MEASURES} ${VOICES} \
-		|| (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
 %_m.ps:	%.abc
-	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) \
-		|| (rm -f $@ ; exit 1)
+	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) || (rm -f $@ ; exit 1)
 %.pdf:	%_m.ps
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E: %.gcs ../instruments.include
-	${CPP} $< -o $@ \
-		|| (rm -f $@ ; exit 1)
+	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help
 help::

@@ -1,8 +1,8 @@
 #-----------------------------------------------------------------------------
 SONGS  =
 SONGS += b-6
-#- SONGS += inv15-example
-#- SONGS += inv15-example.working
+# SONGS += inv15-example			# Measures do not have meter corrections.
+# SONGS += inv15-example.working		# Measures do not have meter corrections.
 SONGS += loudness.mcomp
 SONGS += promenade
 SONGS += promenade-musicomp2abc
@@ -43,7 +43,8 @@ TESTS_M_PS = ${TESTS:=_m.ps}
 #+ TESTS_WAV = ${TESTS:=.wav}
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
-MC_ARGS =
+#++ MC_ARGS =
+MC_ARGS = --warn_octave_accidental
 #-- MC_ARGS = --noxpose --voices=9
 #+ YAPS	     = yaps
 ABCM2PS	     = abcm2ps

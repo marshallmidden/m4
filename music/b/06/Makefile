@@ -19,19 +19,21 @@ MEASURES =
 VOICES =
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
+#++ MC_ARGS = ${PAGES} ${MEASURES} ${VOICES}
+MC_ARGS = --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES}
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.E %.csv
 .SUFFIXES: .abc _m.ps .E .fs .csv .mid
 # output $@   -- input $<
 %.fs:	%.E
-	${MUSICOMP2ABC} --two --fluidsynth $< $@ ${PAGES} ${MEASURES} ${VOICES} \
+	${MUSICOMP2ABC} ${MC_ARGS} --two --fluidsynth $< $@ \
 		|| ( rm -f $@ ; exit 1)
 %.csv:  %.E
-	${MUSICOMP2ABC} --midi1csv $< $@ ${PAGES} ${MEASURES} ${VOICES} || rm -f $@
+	${MUSICOMP2ABC} ${MC_ARGS} --midi1csv $< $@ || rm -f $@
 %.mid:  %.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.abc:	%.E
-	${MUSICOMP2ABC} --abc $< $@ ${PAGES} ${MEASURES} ${VOICES} \
+	${MUSICOMP2ABC} ${MC_ARGS} --abc $< $@ \
 		|| (rm -f $@ ; exit 1)
 %_m.ps:	%.abc
 	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) \
@@ -83,6 +85,7 @@ check:
 	@echo "V=${V}"
 	@echo "SEPARATE=${SEPARATE}"
 	@echo "MUSICOMP2ABC=${MUSICOMP2ABC}"
+	@echo "MC_ARGS=${MC_ARGS}"
 #-- 	@echo "YAPS=${YAPS}"
 	@echo "ABCM2PS=${ABCM2PS}"
 	@echo "ABCM2PS_ARGS=${ABCM2PS_ARGS}"

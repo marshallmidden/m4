@@ -77,20 +77,20 @@ WHICH = "-D WHICH=0"
 #xx VOICES = --voices 39..40
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
+#++ MC_ARGS = ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
+MC_ARGS = --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.csv %.mid %.E %.fs
 .SUFFIXES: .mid .csv .abc _m.ps .fs
 # Output $@ -- input $< (first dependency -- after the :).
 %.fs: %.E
-	${MUSICOMP2ABC} --two --fluidsynth $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
-		|| (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
 %.csv:  %.E
-	${MUSICOMP2ABC} ${MC_ARGS} --midi1csv $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} || rm -f $@
+	${MUSICOMP2ABC} ${MC_ARGS} --midi1csv $< $@ || rm -f $@
 %.mid:  %.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.abc: %.E Makefile
-	${MUSICOMP2ABC} --abc $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
-		|| (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
 %_m.ps: %.abc
 	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) \
 		|| (rm -f $@ ; exit 1)
@@ -101,12 +101,10 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 # Manually invokable rules follow.
 .SUFFIXES: .v
 %.v: %.E Makefile
-	${MUSICOMP2ABC} --vertical $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
-		|| (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --vertical $< $@ || (rm -f $@ ; exit 1)
 .SUFFIXES: .horizontal
 %.horizontal: %.E Makefile
-	${MUSICOMP2ABC} --horizontal $< $@ ${PAGES} ${MEASURES} ${VOICES} ${WHICH} \
-		|| (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --horizontal $< $@ || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help
 help::
@@ -124,6 +122,7 @@ check:
 	@echo "V=${V}"
 	@echo "CPP=${CPP}"
 	@echo "MUSICOMP2ABC=${MUSICOMP2ABC}"
+	@echo "MC_ARGS=${MC_ARGS}"
 	@echo "ABCM2PS=${ABCM2PS}"
 	@echo "ABCM2PS_ARGS=${ABCM2PS_ARGS}"
 	@echo "PAGES=${PAGES}"
