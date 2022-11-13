@@ -19,7 +19,7 @@ PAGES =
 MEASURES =
 VOICES =
 # All voices & staves.
-#++ WHICH = "-D WHICH=0"
+WHICH = "-D WHICH=0"
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 #++ WHICH = "-D WHICH=1"
 #++ VOICES = --voices 1..2
@@ -41,12 +41,12 @@ VOICES =
 #++ VOICES = --voices 18..20
 #++ WHICH = "-D WHICH=10"
 #++ VOICES = --voices 21..23
-WHICH = "-D WHICH=11"
-VOICES = --voices 24..26
+#? WHICH = "-D WHICH=11"
+#? VOICES = --voices 24..26
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
-#++ MC_ARGS = ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
-MC_ARGS = --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
+MC_ARGS = ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
+#-- MC_ARGS = --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.E %.csv %_m.ps
 .SUFFIXES: .abc _m.ps .E .fs .csv .mid .pdf
