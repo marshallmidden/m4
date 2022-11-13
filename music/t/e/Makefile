@@ -77,8 +77,8 @@ WHICH = "-D WHICH=0"
 #xx VOICES = --voices 39..40
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
-#++ MC_ARGS = ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
-MC_ARGS = --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
+MC_ARGS = ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
+#-- MC_ARGS = --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.csv %.mid %.E %.fs
 .SUFFIXES: .mid .csv .abc _m.ps .fs
