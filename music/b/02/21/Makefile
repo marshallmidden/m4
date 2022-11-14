@@ -41,8 +41,8 @@ WHICH = "-D WHICH=0"
 #++ VOICES = --voices 18..20
 #++ WHICH = "-D WHICH=10"
 #++ VOICES = --voices 21..23
-#? WHICH = "-D WHICH=11"
-#? VOICES = --voices 24..26
+#++ WHICH = "-D WHICH=11"
+#++ VOICES = --voices 24..26
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 MC_ARGS = ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
