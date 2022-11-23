@@ -43,8 +43,8 @@ TESTS_M_PS = ${TESTS:=_m.ps}
 #+ TESTS_WAV = ${TESTS:=.wav}
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
-#++ MC_ARGS =
-MC_ARGS = --warn_octave_accidental
+MC_ARGS =
+#++ MC_ARGS = --warn_octave_accidental
 #-- MC_ARGS = --noxpose --voices=9
 #+ YAPS	     = yaps
 ABCM2PS	     = abcm2ps

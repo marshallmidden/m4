@@ -1,7 +1,10 @@
-V1 = v2-1
+V            = v2-2
+SORIG        = b2m2-orig
+#-- STARTORIG    = start.gcs
+STARTORIG    = IGNORE
 #-----------------------------------------------------------------------------
-# MCOMP        = ~/src/abc/mcomp/mcomp
-# SEPARATE     = ./A.separate
+MCOMP        = ~/src/abc/mcomp/mcomp
+SEPARATE     = ./A.separate
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 ABCM2PS      = abcm2ps
@@ -64,22 +67,46 @@ MC_ARGS = ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) || (rm -f $@ ; exit 1)
 %.pdf:	%_m.ps
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
-%.E: %.gcs ../../instruments.include Makefile
+%.E: %.gcs ../../instruments.include Makefile start.gcs
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
+#-----------------------------------------------------------------------------
+.PRECIOUS: %.A_abc
+.SUFFIXES: _A.ps .A_abc _m_A.ps
+# output $@   -- input $<
+%.A_abc:  %.E
+	${MUSICOMP2ABC} --abc $< $@
+%_m_A.ps: %.A_abc
+	${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@
+#-----------------------------------------------------------------------------
+As = 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19
+w_A := ${words $(As)}
+s := $(shell seq 1 $(w_A))
+#-----------------------------------------------------------------------------
+define many_targets
+    help::
+	@echo "  a${word $1,${As}}    - Use '${SEPARATE} to create A.${word $1,${As}}, and abcm2ps for staff $1"
+    A.${word $1,${As}}: ${V}.E ${SEPARATE}
+	${SEPARATE}
+    .PHONY: a.${word $1,${As}}
+    a${word $1,${As}}: A.${word $1,${As}} a.${word $1,${As}}_A.ps a.${word $1,${As}}_m_A.ps
+	open a.${word $1,${As}}_A.ps a.${word $1,${As}}_m_A.ps
+    a.${word $1,${As}}.E: A.${word $1,${As}}
+	ln -sf A.${word $1,${As}} a.${word $1,${As}}.E
+endef
 #-----------------------------------------------------------------------------
 .PHONY: help
 help::
 	@echo "Example:"
-	@echo "  Use '${MUSICOMP2ABC} ${MC_ARGS} --midi1csv ${V1} to get ${V1}.abc."
-	@echo "  Use '${ABCM2PS} ${V1}.abc > ${V1}_m.ps'."
-	@echo "  Use '${PS2PDF} ${V1}_m.ps > ${V1}.pdf'."
-	@echo "  Use '${MUSICOMP2ABC} ${MC_ARGS} --fluidsynth ${V1} to get ${V1}.fs."
+	@echo "  Use '${MUSICOMP2ABC} ${MC_ARGS} --midi1csv ${V} to get ${V}.abc."
+	@echo "  Use '${ABCM2PS} ${V}.abc > ${V}_m.ps'."
+	@echo "  Use '${PS2PDF} ${V}_m.ps > ${V}.pdf'."
+	@echo "  Use '${MUSICOMP2ABC} ${MC_ARGS} --fluidsynth ${V} to get ${V}.fs."
 	@echo ""
 	@echo "Targets:"
-	@echo "  all    - create music files for ${V1}."
+	@echo "  all    - create music files for ${V}."
 	@echo "  clean  - Remove postscript (ps), pdf, csv, and fs files."
 	@echo ""
-	@echo "  s1     - create ${V1}.abc, ${V1}_m.ps, and ${V1}.fs from ${V1}."
+	@echo "  s1     - create ${V}.abc, ${V}_m.ps, and ${V}.fs from ${V}."
 #-----------------------------------------------------------------------------
 .PHONY: check
 check:
@@ -97,16 +124,21 @@ check:
 #=============================================================================
 #-- .PHONY: all		#-- There is a bug in gmake. I don't understand.
 all: s1
-#-----------------------------------------------------------------------------
+#=============================================================================
+${STARTORIG}:
+	${MCOMP} ${SORIG} vertical > ${STARTORIG}
+#=============================================================================
 .PHONY: clean
 clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
-	rm -f ${V1}.{csv,mid,fs,pdf,abc,wav,E}
-	rm -f A.[012]* B.[012]*
+	rm -f ${V}.{csv,mid,fs,pdf,abc,wav,E}
+	rm -f A.[0123]* B.[0123]* C.[0123]*
+	rm -f X X.v
 #-----------------------------------------------------------------------------
-#-- .PHONY: s1
-s1: ${V1}.fs ${V1}.pdf
+s1: ${V}.fs ${V}.pdf
+#-----------------------------------------------------------------------------
+$(foreach e,$(s),$(eval $(call many_targets,$(e))))
 #-----------------------------------------------------------------------------
 # End of Makefile
 #-----------------------------------------------------------------------------
