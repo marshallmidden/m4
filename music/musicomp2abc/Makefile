@@ -120,7 +120,24 @@ clean:
 #+	rm -f ${SONGS_WAV} ${TESTS_WAV}
 	rm -f ${SONGS_E} ${TESTS_E}
 	rm -f *.stderr
-	rm -f *.h *.v *.csv *.mid
+	rm -f *.h *.v *.csv *.mid *.E
+#-----------------------------------------------------------------------------
+.PHONY: check
+check:
+	echo "SONGS=${SONGS}"
+	echo "SONGS_E=${SONGS_E}"
+	echo "SONGS_ABC=${SONGS_ABC}"
+	echo "SONGS_FS=${SONGS_FS}"
+	echo "SONGS__M_PS=${SONGS__M_PS}"
+	echo "TESTS=${TESTS}"
+	echo "TESTS_E=${TESTS_E}"
+	echo "TESTS_ABC=${TESTS_ABC}"
+	echo "TESTS_FS=${TESTS_FS}"
+	echo "TESTS_M_PS=${TESTS_M_PS}"
+	echo "MUSICOMP2ABC=${MUSICOMP2ABC}"
+	echo "MC_ARGS=${MC_ARGS}"
+	echo "ABCM2PS=${ABCM2PS}"
+	echo "CPP=${CPP}"
 #-----------------------------------------------------------------------------
 .PHONY: tags ctags
 tags ctags:

@@ -938,6 +938,19 @@ functions = {
     }
 
 #-----------------------------------------------------------------------------
+from itertools import permutations
+
+def the_perms(pre, mystr):
+    d = {}
+    for i in range(1,len(mystr)+1):
+        for comb in permutations(mystr, i):
+            d[pre + ''.join(comb)] = 1
+        # rof
+    # rof
+    return d
+# End of the_perms
+
+#-----------------------------------------------------------------------------
 global variables
 variables = {
     'pi': math.pi,
@@ -946,21 +959,7 @@ variables = {
 #   1   .   .   .   2   .   .   .   3   .   .   .   4   .   .   .   5   .   .   .
     'w': 1, 'h': 2, 'q': 4, 'e': 8,
 
-    's': 1, 'd': 1, 'b': 1, 't': 1, 'l': 1,
-
-             'sd': 1, 'sb': 1, 'st': 1, 'sl': 1,
-    'ds': 1, 'dd': 1, 'db': 1, 'dt': 1, 'dl': 1,
-             'ddl': 1,
-    'bs': 1, 'bd': 1,          'bt': 1, 'bl': 1,
-    'ts': 1, 'td': 1, 'tb': 1,          'tl': 1,
-    'ls': 1, 'ld': 1, 'lb': 1, 'lt': 1,
-
-    'sdb': 1, 'sdt': 1, 'sdl': 1, 'sbt': 1, 'sbl': 1, 'stl': 1, 'dbt': 1,
-    'dbl': 1, 'dtl': 1, 'dsb': 1, 'dst': 1, 'dsl': 1, 'bsd': 1, 'bst': 1,
-    'bsl': 1, 'bds': 1, 'bdt': 1, 'bdl': 1, 'btl': 1, 'blt': 1, 'tsd': 1,
-    'tsb': 1, 'tsl': 1, 'tds': 1, 'tdb': 1, 'tdl': 1, 'tbs': 1, 'tbd': 1,
-    'tbl': 1, 'lsd': 1, 'lsb': 1, 'lst': 1, 'lds': 1, 'ldb': 1, 'ldt': 1,
-    'lbs': 1, 'lbd': 1, 'lbt': 1, 'lts': 1, 'ltd': 1, 'ltb': 1, 'dls': 1, 'sld':1,
+    'd': 1, 'dd': 1,
 
     'th': 1,
 #   1   .   .   .   2   .   .   .   3   .   .   .   4   .   .   .   5   .   .   .
@@ -975,6 +974,14 @@ variables = {
     'm41': 0,       'm42': 0,       'm43': 0,       'm44': 0,       'm45': 0,
     'm46': 0,       'm47': 0,       'm48': 0,       'm49': 0,       'm50': 0,
     }
+# For suffix on time -- many variations, but do not duplicate z's with l's. 
+# This makes each permuation evaluate to '1'.
+variables.update(the_perms('', 'sbtaz'))
+variables.update(the_perms('d', 'sbtaz'))
+variables.update(the_perms('dd', 'sbtaz'))
+variables.update(the_perms('', 'sbtal'))
+variables.update(the_perms('d', 'sbtal'))
+variables.update(the_perms('dd', 'sbtal'))
 
 #-----------------------------------------------------------------------------
 def cexp_parser():
