@@ -4184,6 +4184,8 @@ def fill_voice_mlth(meter_check, line):
 # Separate arguments for argument.
 def arglist(wline, line, integers):
     newline = []
+    splitter = [ ',' ]
+    firstcolon = 0
     # break into arguments.
     newstr = ''
     np = 0                              # ()
@@ -4193,7 +4195,17 @@ def arglist(wline, line, integers):
     l = 0
     while (l < lth):
         c = wline[l]
-        if c == ',' and np == 0 and nb == 0 and nc == 0:    # we want to split on commas
+        if c == ':' and firstcolon == 0:
+            firstcolon = 1
+        elif firstcolon == 1 and 'c' != ' ':
+            firstcolon = 2
+        elif firstcolon == 2:
+            if args.spaces:
+                splitter.append(' ')
+            # fi
+            firstcolon = 3
+        # fi
+        if c in splitter and np == 0 and nb == 0 and nc == 0:    # we want to split on commas
             if integers:
                 n, msg = is_float(newstr)
                 if msg is not None:
@@ -4368,6 +4380,12 @@ def do_change(t_args, line):
 # End of do_change
 
 # ----------------------------------------------------------------------------
+# Do nothing for a comment.
+def do_comment(t_args, line):
+    return
+# End of do_comment
+
+# ----------------------------------------------------------------------------
 # copy -- make another name for existing name/copy, replace existing with warning.
 #         copy    measure to unit   $$ or:
 #         copy    command measure to unit
@@ -4407,6 +4425,10 @@ def do_copy(t_args, line):
     elif new in macro_buffer:
         print_error("copy new name already exists as macro.", line)
         return
+    # fi
+    if old == '*' or old == '#':
+        old = 'comment'
+    # fi
     if old not in commands:
         print_error("copy old name does not exist.", line)
         return
@@ -5368,6 +5390,7 @@ def do_meter(t_args, line):
     # rof
 
     m = t_args[0]
+    m = re.sub(r',', r'/', m)
 
     f, type_error = is_float(m)
     if type_error is not None:
@@ -7108,6 +7131,7 @@ commands = {
              'change'  : do_change,
              'cis'     : do_cis,
              'clef'    : do_clef,
+             'comment' : do_comment,
              'copy'    : do_copy,
              'cstart'  : do_cstart,
              'cstop'   : do_cstop,
@@ -8249,6 +8273,7 @@ def do_vol_cresc(temp1, onvoice, line, prenote, postnote, onenotevolume):
 # old way is: voice1,voice2,voice3,voice4   -- 3c4, 3e4, 3g4, 4c4
 # new way: v#:3c4,d,e,f,g,a,b,4c
 # Both have measure terminate them.  NOTE: a second measure the same is allowed.
+# --spaces means allow: " " between notes, instead of commas. No pre/post spacing.
 
 def process_notes(line):
     global voices                       # number of voices
@@ -8281,9 +8306,15 @@ def process_notes(line):
         return
     # fi
     wline = re.sub(r'\s+', ' ', line)           # multiple spaces to single space, multiple times.
-    wline = re.sub(r'([^,)]) ', r'\1', wline)    # ', ' left alone, elsewise strip spaces.
-    wline = re.sub(r'^  *v', 'v', wline)          # 'no ' left alone, elsewise strip spaces.
+    if not args.spaces:
+        wline = re.sub(r'([^,)]) ', r'\1', wline)    # ', ' left alone, elsewise strip spaces.
+    # fi
+    wline = re.sub(r'^  *v', 'v', wline)          # strip spaces before "v" (for voice number).
     wargs = arglist(wline, line, False)
+
+# NOTDONEYET --spaces
+#--    print("line='{}' wline='{}' wargs='{}'".format(line,wline,wargs),file=sys.stderr, flush=True)
+#--    sys.exit(1)
 
     if not wargs or len(wargs) < 1:
         print_error("m:{} no arguments on note line".format(measure_on), line)
@@ -9322,6 +9353,8 @@ def parse_args():
                         help = 'Use soundfont number 2.')
     parser.add_argument('--warn_octave_accidental', '-warn_octave_accidental', action='store_true',
                         help = 'Warn if accidental in other octave set/used.')
+    parser.add_argument('--spaces', '-spaces', action='store_true',
+                        help = 'Use spaces as note separators in addition to commas (input only, not printing vertical/horizontal).')
     parser.add_argument('rest', nargs='*',
                         help='Optional command to execute')
     args = parser.parse_args()
@@ -9508,11 +9541,11 @@ def main():
                     # fi
                 # fi
                 line = re.sub(r'   *', r' ', line)                      # multiple spaces to single.
-                t0 = re.sub(r'(^ *[^ ]*).*$', r'\1', line, count=1)
-                t1 = re.sub(r'^ *[^ ]*', '', line, count=1)
+                t0 = re.sub(r'(^ *[^ ]*).*$', r'\1', line, count=1)     # First non-space thing on line.
+                t1 = re.sub(r'^ *[^ ]*', '', line, count=1)             # Everything after first thing.
                 t_tmp = t0.lstrip()                                     # For command lookup.
                 t = [ t0, t1 ]                                          # Note: a leading space.
-                if t_tmp and t_tmp == '.':
+                if t_tmp and t_tmp == '.':                              # Indented lines - plato "."
                     # If command == '.' toss '.'
                     if len(t) == 2 and t[1]:
                         line = t[1]
@@ -9521,7 +9554,7 @@ def main():
                         line = None
                         break
                     # fi
-                    continue
+                    continue                                            # Try again to get line.
                 # fi
                 break
             # elihw
