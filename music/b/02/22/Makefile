@@ -52,7 +52,7 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 MC_ARGS = ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 #-- MC_ARGS = --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.abc %.E %.csv %_m.ps
+.PRECIOUS: %.abc %.E %.csv %_m.ps %.mid %.fs
 .SUFFIXES: .abc _m.ps .E .fs .csv .mid .pdf
 # output $@   -- input $<
 %.fs:	%.E ${MUSICOMP2ABC}
@@ -110,7 +110,7 @@ help::
 #-----------------------------------------------------------------------------
 .PHONY: check
 check:
-	@echo "V1=${V1}"
+	@echo "V=${V}"
 	@echo "CPP=${CPP}"
 	@echo "MUSICOMP2ABC=${MUSICOMP2ABC}"
 	@echo "MC_ARGS=${MC_ARGS}"

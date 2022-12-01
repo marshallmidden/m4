@@ -4,6 +4,7 @@ SEPARATE     = ./A.separate
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 #- YAPS         = yaps
 ABCM2PS      = abcm2ps
+PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------
 # -b nn = starting bar number
 # -i = put red circle around errors.
@@ -22,25 +23,23 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 MC_ARGS = ${PAGES} ${MEASURES} ${VOICES}
 #++ MC_ARGS = --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES}
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.abc %.E %.csv
-.SUFFIXES: .abc _m.ps .E .fs .csv .mid
+.PRECIOUS: %.abc %.E %.csv %.mid %.fs %_m.ps
+.SUFFIXES: .abc _m.ps .E .fs .csv .mid .pdf
 # output $@   -- input $<
 %.fs:	%.E
-	${MUSICOMP2ABC} ${MC_ARGS} --two --fluidsynth $< $@ \
-		|| ( rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --two --fluidsynth $< $@ || ( rm -f $@ ; exit 1)
 %.csv:  %.E
 	${MUSICOMP2ABC} ${MC_ARGS} --midi1csv $< $@ || rm -f $@
 %.mid:  %.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.abc:	%.E
-	${MUSICOMP2ABC} ${MC_ARGS} --abc $< $@ \
-		|| (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
 %_m.ps:	%.abc
-	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) \
-		|| (rm -f $@ ; exit 1)
+	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) || (rm -f $@ ; exit 1)
+%.pdf:	%_m.ps
+	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E: %.gcs ../instruments.include
-	${CPP} $< -o $@ \
-		|| (rm -f $@ ; exit 1)
+	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.A_abc
 .SUFFIXES: _A.ps .A_abc _m_A.ps
@@ -89,8 +88,9 @@ check:
 #-- 	@echo "YAPS=${YAPS}"
 	@echo "ABCM2PS=${ABCM2PS}"
 	@echo "ABCM2PS_ARGS=${ABCM2PS_ARGS}"
+	@echo "PS2PDF=${PS2PDF}"
 #=============================================================================
-all: ${V}_m.ps ${V}.fs ${V}.mid
+all: ${V}_m.ps ${V}.fs ${V}.mid ${V}.pdf
 #=============================================================================
 .PHONY: clean
 clean::
@@ -101,6 +101,7 @@ clean::
 	rm -f *.wav
 	rm -f *.E
 	rm -f A.[012]* B.[012]*
+	rm -f ${V}.pdf
 #-----------------------------------------------------------------------------
 $(foreach e,$(s),$(eval $(call many_targets,$(e))))
 #-----------------------------------------------------------------------------

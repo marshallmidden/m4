@@ -2,6 +2,7 @@ V            = e
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 ABCM2PS      = abcm2ps
+PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------
 # -b nn = starting bar number
 # -i = put red circle around errors.
@@ -80,8 +81,8 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 MC_ARGS = ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 #-- MC_ARGS = --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.abc %.csv %.mid %.E %.fs
-.SUFFIXES: .mid .csv .abc _m.ps .fs
+.PRECIOUS: %.abc %.csv %.mid %.E %.fs %_m.ps
+.SUFFIXES: .mid .csv .abc _m.ps .fs .pdf %.E
 # Output $@ -- input $< (first dependency -- after the :).
 %.fs: %.E
 	${MUSICOMP2ABC} ${MC_ARGS} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
@@ -92,11 +93,11 @@ MC_ARGS = ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 %.abc: %.E Makefile
 	${MUSICOMP2ABC} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
 %_m.ps: %.abc
-	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) \
-		|| (rm -f $@ ; exit 1)
+	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) || (rm -f $@ ; exit 1)
+%.pdf:	%_m.ps
+	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E: %.gcs ../../b/instruments.include
-	${CPP} $< -o $@ \
-		|| (rm -f $@ ; exit 1)
+	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 # Manually invokable rules follow.
 .SUFFIXES: .v
@@ -125,12 +126,13 @@ check:
 	@echo "MC_ARGS=${MC_ARGS}"
 	@echo "ABCM2PS=${ABCM2PS}"
 	@echo "ABCM2PS_ARGS=${ABCM2PS_ARGS}"
+	@echo "PS2PDF=${PS2PDF}"
 	@echo "PAGES=${PAGES}"
 	@echo "MEASURES=${MEASURES}"
 	@echo "VOICES=${VOICES}"
 	@echo "WHICH=${WHICH}"
 #=============================================================================
-all: ${V}_m.ps ${V}.fs ${V}.mid
+all: ${V}_m.ps ${V}.fs ${V}.mid ${V}.pdf
 #=============================================================================
 .PHONY: clean
 clean:
@@ -140,6 +142,7 @@ clean:
 	rm -f *.mid
 	rm -f *.csv
 	rm -f *.v *.h *.wav
+	rm -f ${V}.pdf
 #-----------------------------------------------------------------------------
 # End of Makefile
 #-----------------------------------------------------------------------------

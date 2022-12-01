@@ -6,6 +6,7 @@ SONGS += b-6
 SONGS += loudness.mcomp
 SONGS += promenade
 SONGS += promenade-musicomp2abc
+SONGS += tc
 #-----------------------------------------------------------------------------
 TESTS  =
 TESTS += KEYg-
@@ -30,6 +31,7 @@ SONGS_ABC = ${SONGS:=.abc}
 SONGS_FS = ${SONGS:=.fs}
 #+ SONGS_MID = ${SONGS:=.mid}
 SONGS_M_PS = ${SONGS:=_m.ps}
+SONGS_PDF= ${SONGS:=.pdf}
 #+ SONGS_PS = ${SONGS:=.ps}
 #+ SONGS_WAV = ${SONGS:=.wav}
 #-----------------------------------------------------------------------------
@@ -39,6 +41,7 @@ TESTS_ABC = ${TESTS:=.abc}
 TESTS_FS = ${TESTS:=.fs}
 #+ TESTS_MID = ${TESTS:=.mid}
 TESTS_M_PS = ${TESTS:=_m.ps}
+TESTS_PDF= ${TESTS:=.pdf}
 #+ TESTS_PS = ${TESTS:=.ps}
 #+ TESTS_WAV = ${TESTS:=.wav}
 #-----------------------------------------------------------------------------
@@ -48,6 +51,7 @@ MC_ARGS =
 #-- MC_ARGS = --noxpose --voices=9
 #+ YAPS	     = yaps
 ABCM2PS	     = abcm2ps
+PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------
 # -E			Only run the preprocessor.
 # -x c			Treat input file(s) as having <language> 'c'.
@@ -65,8 +69,8 @@ CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp
 #-----------------------------------------------------------------------------
 #+.PRECIOUS: %.abc %.csv %.mid %.E
 #+ .SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E .fs
-.PRECIOUS: %.abc %.E %.csv
-.SUFFIXES: .abc _m.ps .E .fs .csv .mid
+.PRECIOUS: %.abc %.E %.csv %_m.ps
+.SUFFIXES: .abc _m.ps .E .fs .csv .mid .pdf
 # output $@   -- input $<
 %.fs:  %.E
 	${MUSICOMP2ABC} ${MC_ARGS} --two --fluidsynth $< $@ || rm -f $@
@@ -81,11 +85,11 @@ CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp
 #+ %.ps:   %.abc
 #+ 	${YAPS} $< -o $@ -k || (rm -f $@ ; exit 1)
 %_m.ps: %.abc
-#-	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@)
 	(${ABCM2PS} -l -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@)
+%.pdf:	%_m.ps
+	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E: %.gcs
-	${CPP} $< -o $@ \
-		|| (rm -f $@ ; exit 1)
+	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
 %.v:    %.E ${MUSICOMP2ABC}
 	${MUSICOMP2ABC} ${MC_ARGS} --vert $< $@ || (rm -f $@ ; exit 1)
 %.h:    %.E ${MUSICOMP2ABC}
@@ -103,11 +107,11 @@ help:
 #-----------------------------------------------------------------------------
 .PHONY: all songs ${SONGS}
 #+ all songs ${SONGS}: ${SONGS_MID} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV} ${SONGS_FS}
-all songs ${SONGS}: ${SONGS_M_PS} ${SONGS_FS}
+all songs ${SONGS}: ${SONGS_M_PS} ${SONGS_FS} ${SONGS_PDF}
 #-----------------------------------------------------------------------------
 .PHONY: tests ${TESTS}
 #+ tests ${TESTS}: ${TESTS_MID} ${TESTS_PS} ${TESTS_M_PS} ${TESTS_WAV} ${TESTS_FS}
-tests ${TESTS}: ${TESTS_M_PS} ${TESTS_FS}
+tests ${TESTS}: ${TESTS_M_PS} ${TESTS_FS} ${TESTS_PDF}
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
@@ -117,6 +121,7 @@ clean:
 	rm -f ${SONGS_ABC} ${TESTS_ABC}
 #+	rm -f ${SONGS_PS} ${TESTS_PS}
 	rm -f ${SONGS_M_PS} ${TESTS_M_PS}
+	rm -f ${SONGS_PDF} ${TESTS_PDF}
 #+	rm -f ${SONGS_WAV} ${TESTS_WAV}
 	rm -f ${SONGS_E} ${TESTS_E}
 	rm -f *.stderr
@@ -137,6 +142,7 @@ check:
 	echo "MUSICOMP2ABC=${MUSICOMP2ABC}"
 	echo "MC_ARGS=${MC_ARGS}"
 	echo "ABCM2PS=${ABCM2PS}"
+	echo "PS2PDF=${PS2PDF}"
 	echo "CPP=${CPP}"
 #-----------------------------------------------------------------------------
 .PHONY: tags ctags
