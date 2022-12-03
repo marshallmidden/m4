@@ -23,6 +23,7 @@ TESTS += CRESC1
 TESTS += CRESC2
 TESTS += XPOSE1
 TESTS += XPOSE2
+TESTS += SHARPFLAT
 #-----------------------------------------------------------------------------
 # SONGS_GCS = ${SONGS:=.gcs}
 SONGS_E = ${SONGS:=.E}
