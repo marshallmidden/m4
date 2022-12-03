@@ -10,6 +10,7 @@ SONGS += tc
 #-----------------------------------------------------------------------------
 TESTS  =
 TESTS += KEYg-
+TESTS += KEYS
 TESTS += DECODE
 TESTS += LEGATO1
 TESTS += TIES
