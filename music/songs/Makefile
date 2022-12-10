@@ -128,6 +128,7 @@ BROKEN += slidall
 MUSICOMP2ABC = ../musicomp2abc/musicomp2abc
 #-- YAPS         = yaps
 ABCM2PS      = abcm2ps
+PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 #-----------------------------------------------------------------------------
@@ -139,38 +140,37 @@ SONGS_MID = ${SONGS:=.mid} ${SONGS_NO_PS:=.mid}
 SONGS_FS = ${SONGS:=.fs} ${SONGS_NO_PS:=.fs}
 SONGS_M_PS = ${SONGS:=_m.ps}
 #-- SONGS_PS = ${SONGS:=.ps}
+SONGS_PDF= ${SONGS:=.pdf}
 SONGS_WAV = ${SONGS:=.wav} ${SONGS_NO_PS:=.wav}
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 BROKEN_MID = ${BROKEN:=.mid}
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.csv %.abc %.mid %.E
-.SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E .fs
+.PRECIOUS: %.csv %.abc %.mid %.E .fs _m.ps
+.SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E .fs .pdf
 # output $@   -- input $<
 %.fs:  %.E
-	${MUSICOMP2ABC} --two --fluidsynth $< $@ \
-		|| (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
 %.csv:  %.E
-	${MUSICOMP2ABC} --midi1csv $< $@ \
-		|| (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} --midi1csv $< $@ || (rm -f $@ ; exit 1)
 %.mid:  %.csv
-	csvmidi $< $@ \
-		|| (rm -f $@ ; exit 1)
+	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.wav:  %.mid
 	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser/GeneralUser.sf2 -K 128 $< \
 		|| (rm -f $@ ; exit 1)
 %.abc:  %.E
-	${MUSICOMP2ABC} --abc $< $@ \
-		|| (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} --abc $< $@ || (rm -f $@ ; exit 1)
 #-- %.ps:   %.abc
-#-- 	${YAPS} $< -o $@ -k \
-#-- 		|| (rm -f $@ ; exit 1)
+#-- 	${YAPS} $< -o $@ -k || (rm -f $@ ; exit 1)
 %_m.ps: %.abc
-	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@) \
-		|| (rm -f $@ ; exit 1)
-#-- %.E: %.gcs beethoven.macros
+	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@) || (rm -f $@ ; exit 1)
+%.pdf:	%_m.ps
+	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E: %.gcs
-	${CPP} $< -o $@ \
-		|| (rm -f $@ ; exit 1)
+	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
+%.v:    %.E ${MUSICOMP2ABC}
+	${MUSICOMP2ABC} ${MC_ARGS} --vert $< $@ || (rm -f $@ ; exit 1)
+%.h:    %.E ${MUSICOMP2ABC}
+	${MUSICOMP2ABC} ${MC_ARGS} --hori $< $@ || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help
 help:
@@ -184,7 +184,7 @@ help:
 	@echo "SONGS: ${SONGS}"
 #-----------------------------------------------------------------------------
 .PHONY: all all_mid
-all all_mid: ${SONGS_MID} all_fs
+all all_mid: ${SONGS_MID} all_fs all_pdf
 #-----------------------------------------------------------------------------
 .PHONY: broken
 broken: ${BROKEN_MID}
@@ -195,6 +195,10 @@ broken: ${BROKEN_MID}
 .PHONY: all_m_ps
 all_m_ps: ${SONGS_M_PS}
 #-----------------------------------------------------------------------------
+.PHONY: all_pdf
+all_pdf: ${SONGS_PDF}
+#-----------------------------------------------------------------------------
+.PHONY: all_wav
 .PHONY: all_wav
 all_wav: ${SONGS_WAV}
 #-----------------------------------------------------------------------------
@@ -203,7 +207,9 @@ all_fs: ${SONGS_FS}
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -f ${SONGS_CSV} ${SONGS_MID} ${SONGS_ABC} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV} ${SONGS_E} ${SONGS_FS}
+	rm -f ${SONGS_E}
+	rm -f ${SONGS_CSV} ${SONGS_MID} ${SONGS_WAV} ${SONGS_FS}
+	rm -f ${SONGS_ABC} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_PDF}
 	rm -f *.stderr
 #-----------------------------------------------------------------------------
 # End of Makefile
