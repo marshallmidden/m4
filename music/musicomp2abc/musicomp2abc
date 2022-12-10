@@ -6722,6 +6722,8 @@ def do_pan(t_args, line):
 # End of do_pan
 
 # ----------------------------------------------------------------------------
+# NOTE/WARNING: if you have xpose without a key, it goes to key_default.
+# This is UGLY.
 #       =xpose  clarinetA..clarinetB -2     $$ clarinett in B ...  C, B-, B  ->  -2
 #       xpose   c-                          $$ all voices, from current key to key c-.
 #       xpose   1 c-                        $$ voice 1, from current key to key c-.
@@ -6744,7 +6746,6 @@ def do_xpose(t_args, line):
     global key_sig
     global key_sig_int
     global key_default
-    global key_voice
     global args
 
     if args.noxpose:
@@ -7144,7 +7145,6 @@ def getnote(note_to_decode, voice, line, update_defaults):
     global key_sig
     global key_sig_int
     global key_convert
-    global key_default
     global key_voice
     global xpose
     global xpose_new_key
@@ -7406,13 +7406,21 @@ def getnote(note_to_decode, voice, line, update_defaults):
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     # Have o(ctave), a(ccidental), and n(ote).
     # Convert for key.
-
     ky = key_voice[measure_on][voice]
-    if args.horizontal or args.vertical:
-        if ky not in key_sig:
-            print_error("m:{} v{} key name='{}' not in key_sig.".format(measure_on, voice, ky), line)
-            sys.exit(1)
+    if args.horizontal or args.vertical or args.midi1csv or args.fluidsynth:
+        if args.horizontal or args.vertical:
+            if ky not in key_sig:
+                print_error("m:{} v{} key name='{}' not in key_sig.".format(measure_on, voice, ky), line)
+                sys.exit(1)
+            # fi
+        else:
+            if ky not in key_sig_int:
+                print_error("m:{} v{} key number='{}' not in key_sig_int={}".format(measure_on, voice, ky, key_sig_int.keys()), line)
+                sys.exit(1)
+            # fi
+            ky = key_sig_int[ky]
         # fi
+
         thenote = "{}".format(o) + n + a
         thenote = thenote.lower()
         if thenote not in key_convert[ky]:
@@ -7423,31 +7431,9 @@ def getnote(note_to_decode, voice, line, update_defaults):
             print_error("m:{} v{} note {} is not legal for musicomp2abc".format(measure_on, voice, thenote), line)
             return '', None, normal_note
         # fi
-#-- Must not convert!        thenote = key_convert[ky][thenote]      -- 2022-12-02 (should be same output)
-        o = thenote[0]
-        n = thenote[1].lower()
-        if len(thenote) > 2:
-            A = a = thenote[2:]
-        else:
-            A = a = ''
+        if xpose[voice] != 0 or xpose_new_key[voice] != '': # Ignore pitch, that is done at the last moment.
+            thenote = key_convert[ky][thenote]      # 2022-12-06 Convert if xpose happening!
         # fi
-    elif args.midi1csv or args.fluidsynth:
-        if ky not in key_sig_int:
-            print_error("m:{} v{} key number='{}' not in key_sig_int={}".format(measure_on, voice, ky, key_sig_int.keys()), line)
-            sys.exit(1)
-        # fi
-        thenote = "{}".format(o) + n + a
-        ky = key_sig_int[ky]
-        if thenote not in key_convert[ky]:
-            print_error("m:{} v{} thenote='{}' not in key_convert[{}] dictionary.".format(measure_on, voice, thenote, ky), line)
-            sys.exit(1)
-        # fi
-        if key_convert[ky][thenote] is None:
-            print_error("m:{} v{} note {} is not legal for musicomp2abc".format(measure_on, voice, thenote), line)
-            return '', None, normal_note
-        # fi
-#--        print("getnote ky={} thenote={} key_convert[ky][thenote]={}".format(ky,thenote,key_convert[ky][thenote]), file=sys.stderr, flush=True)
-        thenote = key_convert[ky][thenote]
         o = thenote[0]
         n = thenote[1].lower()
         if len(thenote) > 2:
@@ -7467,6 +7453,7 @@ def getnote(note_to_decode, voice, line, update_defaults):
         # Do not convert it, already in ABC format.
         pass
     # fi
+
     # Have translated key of o(ctave),a(ccidental),and n(ote). -- Original for ABC.
     # 1) xpose added to the note.
     # 2) xpose_new_key converted back to o/n/a
@@ -7485,100 +7472,74 @@ def getnote(note_to_decode, voice, line, update_defaults):
             print_error("note jkl={} lkj='{}' for m:{} voice {} not in midi_value_to_note_flat array".format(jkl,lkj, measure_on, voice), line)
             return '', None, normal_note
         # fi
-        if type(xpose_new_key[voice]) is str:
-            ksxnk = key_sig[xpose_new_key[voice]]
-        else:
-            ksxnk = xpose_new_key[voice]
+        ksxnk = xpose_new_key[voice]
+        if ksxnk == '':
+            ksxnk = ky                              # Convert back to key it was in.
         # fi
+        if type(ksxnk) is str:
+            nksxnk = key_sig[ksxnk]
+        else:
+            nksxnk = ksxnk
+            ksxnk = key_sig_int[ksxnk]
+        # fi
+        # ksxnk is text for xpose new key.  nksxnk is numeric sharp/flat toggle (negative = flats).
+
         if xpose_new_key[voice] == 'cn':            # Special case "cn" to mean use sharps. 'c' uses flats.
             lkj = midi_value_to_note_sharp[lkj]
-        elif xpose_new_key[voice] == '' or ksxnk <= 0:
+        elif nksxnk <= 0:                            # If flat's on stave for key.
             lkj = midi_value_to_note_flat[lkj]
-        else:
+        else:                                       # If sharps's on stave for key.
             lkj = midi_value_to_note_sharp[lkj]
         # fi
-        # Convert lkj to new_o, new_n, new_a.
-        new_o = int(lkj[0])
-        new_n = lkj[1].lower()
 
+        # Convert lkj to playing_o, playing_n, playing_a.
+        playing_o = int(lkj[0])
+        playing_n = lkj[1].lower()
         if len(lkj) > 2:
-            new_a = lkj[2:]
+            playing_a = lkj[2:]
         else:
-            new_a = ''
+            playing_a = ''
         # fi
 
-        # Here with new:o/n/a set for note after midi up/down change.
-
-        t = str(new_o) + new_n + new_a
-        # new_key = 'f' (for key f major) -- example.
-        new_key = xpose_new_key[voice]
-
-        if type(new_key) is str:
-            ksxnk = new_key
-        else:
-            ksxnk = key_sig_int[new_key]
-        # fi
-
-        if ksxnk in key_convert and t in key_convert[ksxnk]:
-            k = key_convert[ksxnk][t]
-        else:
-            k = key_convert['error']        # Crash.
-        # fi
-
-        #            t         new_key    t                 k         NEW                 NEW
-        # Examples: 3b xposed to key f : 3b in key of f is 3b-  thus: 3bn  and 3b acc_m = 'n'
-        #            t          new_key    t                 k                     ?       k         t
-        # Examples: 3b- xposed to key f : 3b- in key of f is 3b  thus: if acc_m == '' then 3b. Else 3b-.
-        # k = what "t" means by default in new_key.
-        k_o = k[0]
-        k_n = k[1]
-        k_a = k[2:]
-
-        the_xposed_note = str(k_o) + k_n
-        # The changed +/-/n for this note if default.
-        # Set if in this measure, this voice and note has a +/-/n already. Must have one for all notes.
-        xposed_key_acc_note = acc_m_xpose[voice][the_xposed_note]
-        # xposed_key_acc_note = what the default will give.
-
-        if t == k:
-            if k_a == new_a:
-                if xposed_key_acc_note == '':
-                    xposed_key_acc_note = new_a
-                else:
-                    if new_a == '':
-                        xposed_key_acc_note = 'n'
-                    else:
-                        xposed_key_acc_note = new_a
-                    # fi
-                # fi
-            else:
-                print_error("getnote error - t={} k={} k_o={} k_n={} k_a={}".format(t,k,k_o,k_n,k_a), line)
-            # fi
-        else:
-            # new_a != k_a
-            # k = "what default note for key means" Like 3b -> 3b- for key f.
-            if new_a == '':
+        # Here with playing:o/n/a set for note after midi up/down semi-tone change.
+        playing_on = str(playing_o) + playing_n
+        # See if this note in measure already has +/-/n. 
+        xposed_key_acc_note = acc_m_xpose[voice][playing_on]
+        if xposed_key_acc_note != '':               # This note already has sharp/flat/nature
+            if playing_a == '':                     # Set to n.
                 xposed_key_acc_note = 'n'
             else:
-                xposed_key_acc_note = new_a
+                xposed_key_acc_note = playing_a
+            # fi
+        else:                                       # Default not set.
+            # The default note played for a space/line on staff will be kc.
+            kc = key_convert[ksxnk][playing_on]         # What does default note give for this new key?
+            if kc == lkj:                               # The Default is this note.
+                playing_a = ''
+                # leave xposed_key_acc_note alone.
+            else:
+                if playing_a == '':                     # Set to n.
+                    xposed_key_acc_note = 'n'
+                else:
+                    xposed_key_acc_note = playing_a
+                # fi
             # fi
         # fi
-
-        new_o = k_o
-        new_n = k_n
+        new_o = playing_o
+        new_n = playing_n
         if update_defaults:
-            acc_m_xpose[voice][the_xposed_note] = xposed_key_acc_note
+            acc_m_xpose[voice][playing_on] = xposed_key_acc_note
         # fi
-        k_a = new_a = xposed_key_acc_note
+        new_a = xposed_key_acc_note
         # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
         o = new_o
         n = new_n
         a = new_a
         A = new_a
     else:             # ABC format - do nothing.
-        k = []
+        pass
     # fi
-    # .............................................................................
+# .............................................................................
     # Convert to right format.
     if args.horizontal or args.vertical:
         n = n.lower()
@@ -7598,14 +7559,6 @@ def getnote(note_to_decode, voice, line, update_defaults):
         # fi
     elif args.midi1csv or args.fluidsynth:
         thenote = "{}".format(o) + n + a
-        k = ky if xpose[voice] == 0 else xpose_new_key[voice]
-        if type(k) is str:
-            nthenote = key_convert[k.lower()][thenote]
-        else:
-            nthenote = key_convert[key_sig_int[k]][thenote]
-        # fi
-        abc = note_to_midi_value[nthenote]
-        thenote = abc
     else:           # ABC
         # Do not convert it in ABC format.
         thenote = A + n + octaves[o]
@@ -7613,7 +7566,6 @@ def getnote(note_to_decode, voice, line, update_defaults):
             thenote = ' ' + thenote
         # fi
     # fi
-# .............................................................................
     therest = note_to_decode[temp3:]
     return therest, thenote, normal_note
 # End of getnote
