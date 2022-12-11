@@ -1461,7 +1461,7 @@ def really_print_output(strg):
 def print_debug(strg):
     print("DEBUG -", strg, file=sys.stderr, flush=True)
     return
-# End of print_debug
+# End of erint_debug
 
 # ----------------------------------------------------------------------------
 def print_output(strg):
@@ -6761,30 +6761,13 @@ def do_xpose(t_args, line):
     # fi
     if args.abc:
         print_warning("Ignoring xpose parsing for --abc output format. ", line)
+        return
     # fi
-
     if t_args is None or len(t_args) != 1:
         print_error("xpose does not have arguments.", line)
         return
     # fi
-
     t_args[0] = re.sub(r'\s*,\s*', ',', t_args[0])
-
-    if args.vertical or args.horizontal:
-        kprint_lc = key_default             # printing and used in xpose are the same.
-    elif args.midi1csv or args.fluidsynth:
-        kprint_lc = key_sig_int[key_default]            # Key name extracted.
-    else:                   # ABC -> 
-        kprint_lc = key_default.replace('b', '-')   # Does multiple flats
-        kprint_lc = kprint_lc.replace('#', '+')     # Does multiple sharps.
-        kprint_lc = kprint_lc.replace('-', 'n')     # Does multiple naturals.
-        kprint_lc = kprint_lc.lower()
-        if kprint_lc not in key_sig:
-            print_error("default key {}, not in key_sig -- unconvert ABC format".format(key_default), line)
-            return
-        # fi
-    # fi
-
     vargs = t_args[0].split()
     if len(vargs) <= 0 or len(vargs) > 4:
         print_error("xpose does not have correct number of arguments.", line)
@@ -6840,7 +6823,7 @@ def do_xpose(t_args, line):
                     return
                 # fi
                 x = str(int(round(f1))) # Must be an integer as a string.
-                kl = kprint_lc
+                kl = None
             # fi
         else:
             print_error("xpose has a problem.", line)
@@ -6855,7 +6838,7 @@ def do_xpose(t_args, line):
             x = '0'                 # shifting amount
         else:       # is a number?
             x = kl
-            kl = kprint_lc
+            kl = None
             f1, type_error = is_float(x)
             if type_error is not None:
                 print_error("xpose error#2 - {}".format(type_error), line)
@@ -6870,12 +6853,6 @@ def do_xpose(t_args, line):
         vs = '{}..{}'.format(1, len(vl))    # all voices
     # fi
     if type(kl) is str:
-        if kl[0] != kl[0].lower():
-            kl = kl.replace('b', '-')             # Does multiple flats
-            kl = kl.replace('#', '+')             # Does multiple sharps.
-            kl = kl.replace('=', 'n')             # Does multiple naturals.
-            kl = kl.lower()
-        # fi
         if kl not in key_sig:
             print_error("no key '{}' in key_sig({})".format(kl, key_sig), line)
             return
@@ -6894,13 +6871,19 @@ def do_xpose(t_args, line):
     x = int(round(f1))              # Must be an integer.
 
     # kl is used in getnote via xpose_new_key (musicomp text)
-
+    # kl is None means to use current key for voice.
 
     jkl = "".join(vs)
     wargs = arglist(jkl, line, True)
     if not wargs or len(wargs) < 1:
         print_error("no voice arguments on xpose", line)
         return
+    # fi
+    # If kl is None, use key_default.
+    if args.vertical or args.horizontal:
+        kprint_lc = key_default                 # printing and used in xpose are the same.
+    else:
+        kprint_lc = key_sig_int[key_default]    # Key name extracted.
     # fi
     for w in wargs:
         f1, type_error = is_float(w)
@@ -6913,7 +6896,15 @@ def do_xpose(t_args, line):
             return
         # fi
         f1 = int(round(f1))
-        xpose_new_key[f1] = kl
+        if kl is None:
+            if measure_on in key_voice and f1 in key_voice[measure_on]:
+                xpose_new_key[f1] = key_voice[measure_on][f1]   # Use current key for voice
+            else:
+                xpose_new_key[f1] = kprint_lc
+            # fi
+        else:
+            xpose_new_key[f1] = kl
+        # fi
         xpose[f1] = x
     # rof
     return
@@ -7411,6 +7402,8 @@ def getnote(note_to_decode, voice, line, update_defaults):
         acc_m[voice][str(o) + N] = a             # Save for next note for voice.
     # fi
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    #-- print_debug("getnote#0 - o={} n={} a={} key_voice[{}][{}]={} xpose[{}]={} xpose_new_key[{}]={}".format(o, n, a, measure_on, voice, key_voice[measure_on][voice], voice,xpose[voice], voice,xpose_new_key[voice]))
+    # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     # Have o(ctave), a(ccidental), and n(ote).
     # Convert for key.
     ky = key_voice[measure_on][voice]
@@ -7438,8 +7431,8 @@ def getnote(note_to_decode, voice, line, update_defaults):
             print_error("m:{} v{} note {} is not legal for musicomp2abc".format(measure_on, voice, thenote), line)
             return '', None, normal_note
         # fi
-        if xpose[voice] != 0 or xpose_new_key[voice] != '': # Ignore pitch, that is done at the last moment.
-            thenote = key_convert[ky][thenote]      # 2022-12-06 Convert if xpose happening!
+        if (args.midi1csv or args.fluidsynth) or xpose_new_key[voice] != '':      # So can print transpose.
+            thenote = key_convert[ky][thenote]
         # fi
         o = thenote[0]
         n = thenote[1].lower()
@@ -7460,7 +7453,7 @@ def getnote(note_to_decode, voice, line, update_defaults):
         # Do not convert it, already in ABC format.
         pass
     # fi
-
+    # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     # Have translated key of o(ctave),a(ccidental),and n(ote). -- Original for ABC.
     # 1) xpose added to the note.
     # 2) xpose_new_key converted back to o/n/a
@@ -7562,26 +7555,22 @@ def getnote(note_to_decode, voice, line, update_defaults):
     # Convert to right format.
     if args.horizontal or args.vertical:
         n = n.lower()
-    elif args.midi1csv or args.fluidsynth:
-        n = n.lower()
-    else:                           # ABC
-        if o <= 3:                                      # uppercase letter
-            n = n.upper()
-        else:                                           # lowercase letter
-            n = n.lower()
-        # fi
-    # fi
-    if args.horizontal or args.vertical:
         thenote = "{}".format(o) + n + a
         if leading_space:
             thenote = ' ' + thenote
         # fi
     elif args.midi1csv or args.fluidsynth:
+        n = n.lower()
         thenote = "{}".format(o) + n + a
         abc = note_to_midi_value[thenote]
         thenote = abc
     else:           # ABC
         # Do not convert it in ABC format.
+        if o <= 3:                                      # uppercase letter
+            n = n.upper()
+        else:                                           # lowercase letter
+            n = n.lower()
+        # fi
         thenote = A + n + octaves[o]
         if leading_space:
             thenote = ' ' + thenote
