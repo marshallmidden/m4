@@ -130,6 +130,15 @@ MUSICOMP2ABC = ../musicomp2abc/musicomp2abc
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------
+# -b nn = starting bar number
+# -i = put red circle around errors.
+# -j nn = number every this many bars.
+# -l = landscape mode
+# -M = suppress lyrics
+# -N 2 = number pages in upper right.
+# -s nn = page scale to (default 0.75) = %%scale.
+ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
+#-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 #-----------------------------------------------------------------------------
 # SONGS_GCS = ${SONGS:=.gcs}
@@ -162,7 +171,7 @@ BROKEN_MID = ${BROKEN:=.mid}
 #-- %.ps:   %.abc
 #-- 	${YAPS} $< -o $@ -k || (rm -f $@ ; exit 1)
 %_m.ps: %.abc
-	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 && mv Out.ps $@) || (rm -f $@ ; exit 1)
+	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) || (rm -f $@ ; exit 1)
 %.pdf:	%_m.ps
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E: %.gcs
@@ -202,8 +211,8 @@ all_pdf: ${SONGS_PDF}
 .PHONY: all_wav
 all_wav: ${SONGS_WAV}
 #-----------------------------------------------------------------------------
-.PHONY: all_fs
-all_fs: ${SONGS_FS}
+.PHONY: fs all_fs
+fs all_fs: ${SONGS_FS}
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:

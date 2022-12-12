@@ -88,6 +88,8 @@ all: ${V}.mid ${V}.ps ${V}_m.ps ${V}.wav ${V}.fs
 	#++ open ${V}.ps ${V}_m.ps
 	#-- fluidsynth -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 128 ${V}.mid
 	#-- fluidsynth -F "${V}.wav" -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 128 "${V}.mid"
+#-----------------------------------------------------------------------------
+fs: ${V}.fs
 #=============================================================================
 #-- S14 = b14-orig
 #=============================================================================
