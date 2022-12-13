@@ -6,7 +6,8 @@ SONGS += b-6
 SONGS += loudness.mcomp
 SONGS += promenade
 SONGS += promenade-musicomp2abc
-SONGS += tc
+# SONGS += tc
+SONGS += Aflatmajor
 #-----------------------------------------------------------------------------
 TESTS  =
 TESTS += KEYg-
