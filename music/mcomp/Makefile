@@ -42,8 +42,8 @@ CFLAGS   +=-O0
 #-- else
 #-- CFLAGS   +=-O3
 #-- endif
-CFLAGS += -mtune=corei7
-CFLAGS += -march=corei7
+#-- CFLAGS += -mtune=corei7
+#-- CFLAGS += -march=corei7
 
 CFLAGS += -W
 CFLAGS += -Wall
@@ -118,7 +118,7 @@ LD = ${CC}
 # LDLIBS += -lcurses
 # LDLIBS += -lncurses++
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-LDFLAGS += -m64
+#-- LDFLAGS += -m64
 ifneq (${OS},Darwin)
 # Optimize output file
 LDFLAGS += -Xlinker -O

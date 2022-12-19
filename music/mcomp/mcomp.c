@@ -1149,6 +1149,9 @@ static void setupkey(int p_sharps, int printit)
     int             issharp;
     int             minkey;
 
+//--    minkey = (p_sharps + 12) % 12;
+    p_sharps = 0;                         /* No keys! */
+
     minkey = (p_sharps + 12) % 12;
     if (minkey % 2 != 0)
     {
@@ -1170,11 +1173,11 @@ static void setupkey(int p_sharps, int printit)
         {
             if (p_sharps == 6)
             {
-                printf("key    f+");
+                printf("* key    f+");
             }
             else
             {
-                printf("key     %c", sharp[minkey]);
+                printf("* key     %c", sharp[minkey]);
             }
         }
         issharp = 1;
@@ -1185,11 +1188,11 @@ static void setupkey(int p_sharps, int printit)
         {
             if (p_sharps == -1)
             {
-                printf("key     %c", flat[minkey]);
+                printf("* key     %c", flat[minkey]);
             }
             else
             {
-                printf("key     %c-", flat[minkey]);
+                printf("* key     %c-", flat[minkey]);
             }
         }
         issharp = 0;
@@ -2600,6 +2603,10 @@ int main(int argc, char *argv[])
     long            f;
     int             vertical = TRUE;
 
+int i;
+for(i=0; i< argc; i++){
+fprintf(stderr, "argv[%d]='%s'\n", i, argv[i]);
+}
     if (argc == 3)
     {
         /* For now, assume want V: lines, and not note#,note#,note#,... */
