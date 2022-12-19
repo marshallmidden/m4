@@ -1,5 +1,5 @@
 V            = v2-2
-SORIG        = b2m2-orig
+SORIG        = b2m2-orig.mid
 #-- STARTORIG    = start.gcs
 STARTORIG    = IGNORE
 #-----------------------------------------------------------------------------
@@ -67,7 +67,7 @@ MC_ARGS = ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) || (rm -f $@ ; exit 1)
 %.pdf:	%_m.ps
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
-%.E: %.gcs ../../instruments.include Makefile start.gcs
+%.E: %.gcs Makefile
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.A_abc
