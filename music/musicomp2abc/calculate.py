@@ -788,6 +788,20 @@ def f_m(arg):
 # End of f_m
 
 #-----------------------------------------------------------------------------
+def f_ceil(arg):
+    a = float(arg)
+    a = math.ceil(a)
+    return [ 'NUMBER', a ]
+# End of f_ceil
+
+#-----------------------------------------------------------------------------
+def f_floor(arg):
+    a = float(arg)
+    a = math.floor(a)
+    return [ 'NUMBER', a ]
+# End of f_floor
+
+#-----------------------------------------------------------------------------
 def f_freq(arg):
     a = float(arg)
     a = 968000.0 / a
@@ -921,20 +935,28 @@ def f_print(arg):
 global functions
 functions = {
 #...............................................................................
-    'm': f_m,                           # Array of m1, m2, m3, ...
+    'm':        f_m,                        # Array of m1, m2, m3, ...
 #...............................................................................
-    'freq': f_freq,         'nearest': f_nearest,
+    'abs':      f_abs,
+    'arctan':   f_arctan,
+    'ceil':     f_ceil,
+    'cos':      f_cos,
+    'exp':      f_exp,
+    'floor':    f_floor,
+    'frac':     f_frac,
+    'freq':     f_freq,
+    'int':      f_int,
+    'log':      f_log,
+    'ln':       f_ln,
+    'nearest':  f_nearest,
+    'not':      f_not,
+    'print':    f_print,
+    'round':    f_round,
+    'sign':     f_sign,
+    'sin':      f_sin,
+    'sqrt':     f_sqrt,
 #...............................................................................
-    'abs': f_abs,           'arctan': f_arctan,             'cos': f_cos,
-    'exp': f_exp,           'frac': f_frac,                 'int': f_int,
-    'log': f_log,           'ln': f_ln,                     'round': f_round,
-    'sign': f_sign,         'sin': f_sin,                   'sqrt': f_sqrt,
-#...............................................................................
-    'not': f_not,
-#...............................................................................
-    'print': f_print,
-#...............................................................................
-#--     'pal': f_pal,                       # For testing purposes only.
+#--     'pal':  f_pal,                      # For testing purposes only.
     }
 
 #-----------------------------------------------------------------------------
