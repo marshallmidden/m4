@@ -1,10 +1,4 @@
 V            = v2-2
-SORIG        = b2m2-orig.mid
-#-- STARTORIG    = start.gcs
-STARTORIG    = IGNORE
-#-----------------------------------------------------------------------------
-MCOMP        = ~/src/abc/mcomp/mcomp
-SEPARATE     = ./A.separate
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 ABCM2PS      = abcm2ps
@@ -26,27 +20,23 @@ VOICES =
 WHICH = "-D WHICH=0"
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 #++ WHICH = "-D WHICH=1"
-#++ VOICES = --voices 1..2
+#++ VOICES = --voices 1,2
 #++ WHICH = "-D WHICH=2"
-#++ VOICES = --voices 3..4
+#++ VOICES = --voices 3,4
 #++ WHICH = "-D WHICH=3"
-#++ VOICES = --voices 5..6
+#++ VOICES = --voices 5,6
 #++ WHICH = "-D WHICH=4"
-#++ VOICES = --voices 7..8
+#++ VOICES = --voices 7,8
 #++ WHICH = "-D WHICH=5"
-#++ VOICES = --voices 9..10
+#++ VOICES = --voices 9,10
 #++ WHICH = "-D WHICH=6"
-#++ VOICES = --voices 11..12
+#++ VOICES = --voices 11..13
 #++ WHICH = "-D WHICH=7"
-#++ VOICES = --voices 13
+#++ VOICES = --voices 14..16
 #++ WHICH = "-D WHICH=8"
-#++ VOICES = --voices 14..17
+#++ VOICES = --voices 17,18
 #++ WHICH = "-D WHICH=9"
-#++ VOICES = --voices 18..20
-#++ WHICH = "-D WHICH=10"
-#++ VOICES = --voices 21..23
-#++ WHICH = "-D WHICH=11"
-#++ VOICES = --voices 24..26
+#++ VOICES = --voices 19,20
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 MC_ARGS = ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
@@ -67,32 +57,8 @@ MC_ARGS = ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) || (rm -f $@ ; exit 1)
 %.pdf:	%_m.ps
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
-%.E: %.gcs Makefile
+%.E: %.gcs Makefile ../../instruments.include music-2-2.gcs
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
-#-----------------------------------------------------------------------------
-.PRECIOUS: %.A_abc
-.SUFFIXES: _A.ps .A_abc _m_A.ps
-# output $@   -- input $<
-%.A_abc:  %.E
-	${MUSICOMP2ABC} --abc $< $@
-%_m_A.ps: %.A_abc
-	${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@
-#-----------------------------------------------------------------------------
-As = 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19
-w_A := ${words $(As)}
-s := $(shell seq 1 $(w_A))
-#-----------------------------------------------------------------------------
-define many_targets
-    help::
-	@echo "  a${word $1,${As}}    - Use '${SEPARATE} to create A.${word $1,${As}}, and abcm2ps for staff $1"
-    A.${word $1,${As}}: ${V}.E ${SEPARATE}
-	${SEPARATE}
-    .PHONY: a.${word $1,${As}}
-    a${word $1,${As}}: A.${word $1,${As}} a.${word $1,${As}}_A.ps a.${word $1,${As}}_m_A.ps
-	open a.${word $1,${As}}_A.ps a.${word $1,${As}}_m_A.ps
-    a.${word $1,${As}}.E: A.${word $1,${As}}
-	ln -sf A.${word $1,${As}} a.${word $1,${As}}.E
-endef
 #-----------------------------------------------------------------------------
 .PHONY: help
 help::
@@ -125,22 +91,15 @@ check:
 #-- .PHONY: all		#-- There is a bug in gmake. I don't understand.
 all: s1
 #=============================================================================
-${STARTORIG}:
-	${MCOMP} ${SORIG} vertical > ${STARTORIG}
-#=============================================================================
 .PHONY: clean
 clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
 	rm -f ${V}.{csv,mid,fs,pdf,abc,wav,E}
-	rm -f A.[0123]* B.[0123]* C.[0123]*
-	rm -f X X.v
 #-----------------------------------------------------------------------------
 s1: ${V}.fs ${V}.pdf
 #-----------------------------------------------------------------------------
 fs: ${V}.fs
-#-----------------------------------------------------------------------------
-$(foreach e,$(s),$(eval $(call many_targets,$(e))))
 #-----------------------------------------------------------------------------
 # End of Makefile
 #-----------------------------------------------------------------------------
