@@ -1,0 +1,197 @@
+#!/usr/bin/perl -w
+# vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
+# ----------------------------------------------------------------------------
+use strict;
+use warnings;
+# ----------------------------------------------------------------------------
+# First three arguments are:
+#   1) The modified file after --vertical with xpose done.
+#   2) The original big file before extraction and --vertical run.
+#   3) The file to create after merging modified (and more modifications) into big file.
+# Next ones are in groups of two:
+#   4) Voice #, and name of putd.
+#      31  clarinetA
+#      32  clarinetB
+# ----------------------------------------------------------------------------
+my $modified = shift(@ARGV);
+if (!defined($modified)) { die "First argument should be the xpose-d file name.\n"; }
+my $original = shift(@ARGV);
+if (!defined($original)) { die "Second argument should be the original file name.\n"; }
+my $newfile = shift(@ARGV);
+if (!defined($newfile)) { die "Third argument should be the new file name.\n"; }
+
+my $s_num = 0;
+my %substitute_number;
+while (1)
+{
+    my $num = shift(@ARGV);
+    if (!defined($num)) { last; }   # done
+    my $name = shift(@ARGV);
+    if (!defined($num)) { die "voice number & name comes in pairs.\n"; }
+    $substitute_number{$num} = $name;
+    $s_num++;
+}
+if (scalar %substitute_number <= 0) { die "Expected at lease voice number/name pair.\n"; }
+# ----------------------------------------------------------------------------
+my $k;
+my $v;
+# ----------------------------------------------------------------------------
+# Open the modified file.
+my $m_file = `cat $modified`;
+my @m_lines = split(/\n/, $m_file);
+
+my $middle = 0;
+my $m_l = 0;					# Line count in file.
+foreach my $i (@m_lines)
+{
+    my $line = $i;
+    $m_l++;					# Line count.
+    if ($line =~ /^measure 0$/)
+    {
+	$middle = 1;
+	last;
+    }
+}
+if ($middle == 0) { die "Did not find 'measure 0' in modified file.\n"; }
+#-- print STDERR "modified file at line number ${m_l}'\n";
+# ----------------------------------------------------------------------------
+# Open the original file. Put lines into @n_lines.
+my $o_file = `cat $original`;
+my @o_lines = split(/\n/, $o_file);
+
+my $o_l = 0;					# Line count in file.
+my @n_lines;
+$middle = 0;
+foreach my $i (@o_lines)
+{
+    my $line = $i;
+    $o_l++;					# Line count.
+    push(@n_lines, $line);
+    if ($line =~ /^measure 0$/)
+    {
+	$middle = 1;
+	last;
+    }
+}
+if ($middle == 0) { die "Did not find 'measure 0' in original file.\n"; }
+#-- print STDERR "original file at line number ${o_l}'\n";
+# ----------------------------------------------------------------------------
+my $o_last = scalar @o_lines;
+my $m_last = scalar @m_lines;
+# ----------------------------------------------------------------------------
+# Open and write the first part of newfile.
+open(DST, '>', $newfile) or die "Cannot open $newfile - $!\n";
+
+foreach my $l (@n_lines)
+{
+    print DST "$l\n";
+}
+# ----------------------------------------------------------------------------
+# Two parts within a while loop:
+# 1) Grab lines from m_lines[$m_last] till next measure line.
+#   A) If it matches one of the $substitute_number[],
+#       a) save it in w{$substitute_name[]}.
+#       b) Check duplicate - error.
+#   B) Any non-measure or not in $substitute_number lines are errors.
+#   C) At next measure line in m_lines, make sure all were found.
+# Then:
+# 2) Grab lines from o_lines[$o_last] till next measure line.
+#   A) If it matches one of the $substitute_name[]
+#       a) Check duplicate - error.
+#       b) Replace line with w{$substitute_number[]}.
+#       c) write to  new file.
+#   B) put any non-measure line into new file.
+#   C) at next measure line - see that all were done.
+#   end while
+# ----------------------------------------------------------------------------
+my $measure_m = '0';
+my $measure_o = '0';
+my $subst = 0;
+
+# Start of new measure if here.
+while (($m_l < $m_last) and ($o_l < $o_last))
+{
+    my %repl_lines;
+    my $mod_line;
+    my $orig_line;
+
+    my $last_m = $measure_m;
+    my $last_o = $measure_o;
+
+    while ($m_l < $m_last)
+    {
+        $mod_line = $m_lines[$m_l];
+        $m_l++;
+        my ($m) = ($mod_line =~ /^measure  *([^ ]*)/);
+        if (defined($m))
+        {
+            $measure_m = $m;
+#-- print STDERR "#${o_l} measure_m='${measure_m}'\n";
+            last;
+        }
+        $subst = 0;
+        for $k (keys(%substitute_number))
+        {
+            $v = $substitute_number{$k};
+            if ($mod_line =~ /$k/)
+            {
+                $mod_line =~ s/$k/$v/;
+                $repl_lines{$v} = $mod_line;
+                $subst = 1;
+                last;
+            }
+        }
+    }
+
+#-- print STDERR "#${m_l} mod_line='${mod_line} subst=${subst}'\n";
+    # Check if all found.
+    for $k (keys(%substitute_number))
+    {
+        $v = $substitute_number{$k};
+        if (!defined($repl_lines{$v}))
+        {
+            print STDERR "Did not find $k -> $v in measure $last_m\n";
+        }
+    }
+
+    # Find measure in original file ... replacing lines when found (error checking).
+    $subst = 0;
+    while ($o_l < $o_last)
+    {
+        $orig_line = $o_lines[$o_l];
+        $o_l++;
+#-- print STDERR "#${o_l} orig_line='${orig_line}'\n";
+        my ($m) = ($orig_line =~ /^measure  *([^ ]*)/);
+        if (defined($m))
+        {
+            $measure_o = $m;
+            print DST "$orig_line\n";
+#-- print STDERR "#${o_l} measure_o='${measure_o}'\n";
+            last;
+        }
+        for $k (keys(%substitute_number))
+        {
+            $v = $substitute_number{$k};
+            if (defined($repl_lines{$v}) and ($orig_line =~ /$v/))
+            {
+                $orig_line = $repl_lines{$v};
+                $subst++;
+            }
+        }
+        print DST "$orig_line\n";
+    }
+
+    if ($subst != $s_num)
+    {
+        print STDERR "#2 err - did not find all ($subst of $s_num) substitutions in measure $last_o\n";
+    }
+    if ($measure_m ne $measure_o)
+    {
+        print STDERR "modified measure ($measure_m) does not match original measure ($measure_o) last_m=$last_m last_o=$last_o\n";
+    }
+}
+
+print STDERR "Last measure ($measure_m)\n";
+# ----------------------------------------------------------------------------
+exit 1;
+# ----------------------------------------------------------------------------

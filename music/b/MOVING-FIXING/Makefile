@@ -1,5 +1,7 @@
-V            = v2-2
-M            = music-2-2
+V            = v2-3
+M            = music-2-3
+#-----------------------------------------------------------------------------
+MCOMP        = ~/src/abc/mcomp/mcomp
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 ABCM2PS      = abcm2ps
@@ -31,13 +33,17 @@ WHICH = "-D WHICH=0"
 #-- WHICH = "-D WHICH=5"
 #-- VOICES = --voices 9,10
 #-- WHICH = "-D WHICH=6"
-#-- VOICES = --voices 11..13
+#-- VOICES = --voices 11,12
 #-- WHICH = "-D WHICH=7"
-#-- VOICES = --voices 14..16
+#-- VOICES = --voices 13
 #-- WHICH = "-D WHICH=8"
-#-- VOICES = --voices 17,18
+#-- VOICES = --voices 14..17
 #-- WHICH = "-D WHICH=9"
-#-- VOICES = --voices 19,20
+#-- VOICES = --voices 18..20
+#-- WHICH = "-D WHICH=10"
+#-- VOICES = --voices 21..23
+#-- WHICH = "-D WHICH=11"
+#-- VOICES = --voices 24..26
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 MC_ARGS = ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
