@@ -2,6 +2,8 @@ V            = v2-3
 M            = music-2-3
 #-----------------------------------------------------------------------------
 MCOMP        = ~/src/abc/mcomp/mcomp
+MCOMPINPUT   = b2m3.mid
+MCOMPOUTPUT  = b2m3.gcs-auto
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 ABCM2PS      = abcm2ps
@@ -85,6 +87,7 @@ help::
 check:
 	@echo "V=${V}"
 	@echo "CPP=${CPP}"
+	@echo "MCOMP=${MCOMP}"
 	@echo "MUSICOMP2ABC=${MUSICOMP2ABC}"
 	@echo "MC_ARGS=${MC_ARGS}"
 	@echo "ABCM2PS=${ABCM2PS}"
@@ -107,6 +110,9 @@ clean:
 s1: ${V}.fs ${V}.pdf
 #-----------------------------------------------------------------------------
 fs: ${V}.fs
+#-----------------------------------------------------------------------------
+${MCOMPOUTPUT}:
+	${MCOMP} ${MCOMPINPUT} vertical > ${MCOMPOUTPUT}
 #-----------------------------------------------------------------------------
 # End of Makefile
 #-----------------------------------------------------------------------------
