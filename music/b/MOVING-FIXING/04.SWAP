@@ -1,0 +1,96 @@
+#!/usr/bin/perl -w
+# vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
+# ----------------------------------------------------------------------------
+use strict;
+use warnings;
+# ----------------------------------------------------------------------------
+# First two arguments are:
+#   1) The original big file before extraction and --vertical run.
+#   2) The file to create after merging modified (and more modifications) into big file.
+# Next ones are in groups of two:
+#   3) Patterns to match and swap.
+#      '=clarinetA:'   '=clarinetB:'
+# ----------------------------------------------------------------------------
+my $original = shift(@ARGV);
+if (!defined($original)) { die "First argument should be the original file name.\n"; }
+my $newfile = shift(@ARGV);
+if (!defined($newfile)) { die "Second argument should be the new file name.\n"; }
+
+my $s_num = 0;
+my %swap_these;
+while (1)
+{
+    my $first = shift(@ARGV);
+    if (!defined($first)) { last; }   # done
+    my $second = shift(@ARGV);
+    if (!defined($second)) { die "first pattern to swap with second pattern - they come in pairs.\n"; }
+    $swap_these{$first} = $second;
+    $swap_these{$second} = $first;
+    $s_num++;
+}
+if (scalar %swap_these <= 0) { die "Expected at least one pattern match pair.\n"; }
+# ----------------------------------------------------------------------------
+my $k;
+my $v;
+# ----------------------------------------------------------------------------
+# Open the original file. Put lines into @o_lines.
+my $o_file = `cat $original`;
+my @o_lines = split(/\n/, $o_file);
+my $o_last = scalar @o_lines;
+# ----------------------------------------------------------------------------
+# Open the newfile.
+open(DST, '>', $newfile) or die "Cannot open $newfile - $!\n";
+# ----------------------------------------------------------------------------
+my $o_l = 0;
+my %repl_lines;
+
+# Start of new measure if here.
+while ($o_l < $o_last)
+{
+    my $orig_line = $o_lines[$o_l];
+#--    print STDERR "line=$orig_line\n";
+    $o_l++;
+
+    my $subst = 0;
+    for $k (keys(%swap_these))
+    {
+        if ($orig_line =~ /$k/)
+        {
+            $v = $swap_these{$k};               # The one to swap with.
+            my $new_line = $orig_line;
+            $new_line =~ s/$k/$v/;
+#--            print STDERR "k=$k  v=$v  new_line=$new_line\n";
+            if (defined($repl_lines{$k}))
+            {
+                print STDERR "Two lines in row with pattern $k, without pattern $v matching - line# $o_l.\n";
+            }
+            $repl_lines{$k} = $new_line;
+            $subst = 1;
+            if (defined($repl_lines{$v}))
+            {
+                print DST "$repl_lines{$k}\n";
+                print DST "$repl_lines{$v}\n";
+                undef($repl_lines{$k});
+                undef($repl_lines{$v});
+                last;
+            }
+        }
+    }
+    if ($subst == 0)
+    {
+        print DST "$orig_line\n";
+    }
+}
+
+for $k (keys(%swap_these))
+{
+    if (defined($repl_lines{$k}))
+    {
+        $v = $swap_these{$k};               # The one to swap with.
+        print STDERR "Did not find second pattern line ($k -> $v).\n";
+    }
+}
+
+# ----------------------------------------------------------------------------
+exit 1;
+# ----------------------------------------------------------------------------
