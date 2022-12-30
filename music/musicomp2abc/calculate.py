@@ -960,19 +960,6 @@ functions = {
     }
 
 #-----------------------------------------------------------------------------
-from itertools import permutations
-
-def the_perms(pre, mystr):
-    d = {}
-    for i in range(1,len(mystr)+1):
-        for comb in permutations(mystr, i):
-            d[pre + ''.join(comb)] = 1
-        # rof
-    # rof
-    return d
-# End of the_perms
-
-#-----------------------------------------------------------------------------
 global variables
 variables = {
     'pi': math.pi,
@@ -996,14 +983,6 @@ variables = {
     'm41': 0,       'm42': 0,       'm43': 0,       'm44': 0,       'm45': 0,
     'm46': 0,       'm47': 0,       'm48': 0,       'm49': 0,       'm50': 0,
     }
-# For suffix on time -- many variations, but do not duplicate z's with l's. 
-# This makes each permuation evaluate to '1'.
-variables.update(the_perms('', 'sbtaz'))
-variables.update(the_perms('d', 'sbtaz'))
-variables.update(the_perms('dd', 'sbtaz'))
-variables.update(the_perms('', 'sbtal'))
-variables.update(the_perms('d', 'sbtal'))
-variables.update(the_perms('dd', 'sbtal'))
 
 #-----------------------------------------------------------------------------
 def cexp_parser():
