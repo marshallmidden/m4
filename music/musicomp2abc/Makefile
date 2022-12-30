@@ -1,12 +1,12 @@
 #-----------------------------------------------------------------------------
 SONGS  =
 SONGS += b-6
-# SONGS += inv15-example			# Measures do not have meter corrections.
-# SONGS += inv15-example.working		# Measures do not have meter corrections.
+SONGS += inv15-example			# Measures do not have meter corrections.
+SONGS += inv15-example.working		# Measures do not have meter corrections.
 SONGS += loudness.mcomp
 SONGS += promenade
 SONGS += promenade-musicomp2abc
-# SONGS += tc
+SONGS += tc
 SONGS += Aflatmajor
 #-----------------------------------------------------------------------------
 TESTS  =
