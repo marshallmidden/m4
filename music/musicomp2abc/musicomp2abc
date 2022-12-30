@@ -434,7 +434,7 @@
 # K: Key                K:G, K:Dm, K:AMix
 # L: Unit Note Length   L:1/4, L:1/8
 # M: Meter              M:3/4, M:4/4        Note present means free - no checking.
-# Q: Tempo              Q:1/4=120
+# Q: Tempo              Q:1/4=120       Q:1/2 1/4=120  - means dotted half note. (GRUMBLE)
 # T: Title              T:Name Of Song, whatever
 # V: Voice              V:4 clef=bass               <----
 # W: words              W: lyrics printed after the end of the tune
@@ -5503,6 +5503,54 @@ def do_bars(t_args, line):
 # End of do_bars
 
 # ----------------------------------------------------------------------------
+# The value for middle_C.
+#       middleC 4c
+#       middleC 3c
+
+def do_middle_C(t_args, line):
+    global middle_C
+    global measure_on
+
+    if t_args is None or len(t_args) <= 0:
+        print_error("middleC does not have a note to process", line)
+        return
+    # fi
+    if t_args[0] == '':
+        compute_middle_c(39)
+        return
+    # fi
+    note_to_decode = t_args[0]
+    temp3 = 0                                   # character pointer
+    if note_to_decode[0] == '(':
+        thenote, type_error = is_float(note_to_decode)
+        if type_error is not None:
+            print_error("middleC does not have a valid number in parenthesis", line)
+            return
+        # fi
+        if thenote is None:
+            print_error("middle_C - m:{} Note is not legal '{}', computation failed".format(measure_on, note_to_decode), line)
+            return
+        # fi
+        note_to_decode = int(round(thenote))
+        note_to_decode = note_to_decode + 12 + 12 - 3     # 3c -> 39 must be 60 for midi.
+        if note_to_decode <= 0 or note_to_decode >= 127:
+            print_error("middle_C - m:{} Note number '{}' not in range".format(measure_on, thenote), line)
+            return
+        # fi
+        compute_middle_c(int(round(thenote)))
+        return
+     # fi
+
+    if note_to_decode not in note_to_midi_value:
+        print_error("middle_C - m:{} note_to_decode '{}' legal note".format(measure_on, note_to_decode), line)
+        return
+    # fi
+    number = note_to_midi_value[note_to_decode] - (60 - middle_C)
+    compute_middle_c(number)
+    return
+# End of do_middle_C
+
+# ----------------------------------------------------------------------------
 # The number of notes of second argument note length in a measure.
 #       meter   1/4             $$ 1 quarter note per measure.
 #       meter   12/8            $$ 12 eighth notes per measure.
@@ -6993,15 +7041,18 @@ commands = {
              'flat'    : do_flat,
              'goto'    : do_goto,
              'if'      : do_if,
+             'intensity' : do_intensity,
+             'instrument' : do_instrument,
              'key'     : do_key,
              'macro'   : do_macro,
              'marker'  : do_marker,
              'measure' : do_measure,
-             'mytitle' : do_title,      # title alternative
-             'unit'    : do_measure,
              'meter'   : do_meter,
+             'middleC' : do_middle_C,
+             'mytitle' : do_title,      # title alternative
              'natural' : do_natural,
              'page'    : do_page,
+             'pan'     : do_pan,
              'percus'  : do_percus,
              'pitch'   : do_pitch,
              'putd'    : do_putd,
@@ -7009,6 +7060,7 @@ commands = {
              'randu'   : do_randu,
              'randp'   : do_randp,
              'repeat'  : do_goto,       # goto alternative
+             'reverb'  : do_reverb,
              'setperm' : do_setperm,
              'sharp'   : do_sharp,
              'slide'   : do_slide,
@@ -7020,13 +7072,10 @@ commands = {
              'temper'  : do_temper,
              'time'    : do_meter,      # meter alternative
              'title'   : do_title,
+             'unit'    : do_measure,    # measure alternative
              'voice'   : do_voice,
              'volume'  : do_volume,
              'volumes' : do_volumes,
-             'reverb'  : do_reverb,
-             'pan'     : do_pan,
-             'intensity' : do_intensity,
-             'instrument' : do_instrument,
              'xpose'   : do_xpose,
              '%%'      : do_percents,
              # '.' -- handled specially.
@@ -7074,19 +7123,19 @@ commands = {
 #     s4(4a,b,a,g) = sLM(ONA,ONA,...)  - play all notes as grace notes, length of staccato, LM=length
 #               last note lasts until LM (quarter note in example) is reached.
 # ----------------------------------------------------------------------------
-#    octave  0      1      2      3      4       5
-#  c/b+     24     36     48     60     72      84
-#  c+/d-    25     37     49     61     73      85
-#  d        26     38     50     62     74      86
-#  d+/e-    27     39     51     63     75      87
-#  e/f-     28     40     52     64     76      88
-#  f/e+     29     41     53     65     77      89
-#  f+/g-    30     42     54     66     78      90
-#  g        31     43     55     67     79      91
-#  g+/a-    32     44     56     68     80      92
-#  a        33     45     57     69     81      93
-#  a+/b-    34     46     58     70     82      94
-#  b/c-     35     47     59     71     83      95
+#    octave  0      1      2      3      4       5       6       7       8
+#  c/b+     24     36     48     60     72      84      96     108     120
+#  c+/d-    25     37     49     61     73      85      97     109     121
+#  d        26     38     50     62     74      86      98     110     122
+#  d+/e-    27     39     51     63     75      87      99     111     123
+#  e/f-     28     40     52     64     76      88     100     112     124
+#  f/e+     29     41     53     65     77      89     101     113     125
+#  f+/g-    30     42     54     66     78      90     102     114     126
+#  g        31     43     55     67     79      91     103     115     127
+#  g+/a-    32     44     56     68     80      92     104     116
+#  a        33     45     57     69     81      93     105     117
+#  a+/b-    34     46     58     70     82      94     106     118
+#  b/c-     35     47     59     71     83      95     107     119
 
 # For octave 3c = 60.
 note_in_octave_value = {
@@ -7106,31 +7155,50 @@ midi_value_to_note_flat = { }
 global midi_value_to_note_sharp
 midi_value_to_note_sharp = { }
 
-for o in range(0, 9):        # 0 thru 8
-    for n in note_in_octave_value:
-        x = str(o) + n
-        v = (note_in_octave_value[n] - (60-24)) + 12*o      # 60-36=24 = '0c'
-        note_to_midi_value[x] = v
-        if len(n) >= 3:     # ignore double flat and double sharp
-            pass
-        elif len(n) == 2:     # accidental
-            if n[1] == '+':
-                if v not in midi_value_to_note_sharp:   # Prefer no sharp/flat.
-                    midi_value_to_note_sharp[v] = x
+global middle_C
+middle_C = 39                   # Default to 60, as per cyber1 (1978 era) musicomp.
+
+def compute_middle_c(f):
+    global note_in_octave_value
+    global note_to_midi_value
+    global midi_value_to_note_sharp
+    global midi_value_to_note_flat
+    global midi_value_to_note_flat
+    global midi_value_to_note_sharp
+    global midi_value_to_note_flat
+    global middle_C
+
+    middle_C = f
+    f = f + 12 + 12 - 3         # 3c -> 39 must be 60 for midi.
+
+    for o in range(0, 9):        # 0 thru 8
+        for n in note_in_octave_value:
+            x = str(o) + n
+            v = (note_in_octave_value[n] - (f - 24)) + (12 * o)  # 60-36=24 = '0c'
+            note_to_midi_value[x] = v
+            if len(n) >= 3:     # ignore double flat and double sharp
+                pass
+            elif len(n) == 2:     # accidental
+                if n[1] == '+':
+                    if v not in midi_value_to_note_sharp:   # Prefer no sharp/flat.
+                        midi_value_to_note_sharp[v] = x
+                    # fi
                 # fi
-            # fi
-            if n[1] == '-':
-                if v not in midi_value_to_note_flat:    # Prefer no sharp/flat.
-                    midi_value_to_note_flat[v] = x
+                if n[1] == '-':
+                    if v not in midi_value_to_note_flat:    # Prefer no sharp/flat.
+                        midi_value_to_note_flat[v] = x
+                    # fi
+                # Ignore 'n'.
                 # fi
-            # Ignore 'n'.
+            else:
+                midi_value_to_note_sharp[v] = x             # Prefer no sharp/flag.
+                midi_value_to_note_flat[v] = x
             # fi
-        else:
-            midi_value_to_note_sharp[v] = x             # Prefer no sharp/flag.
-            midi_value_to_note_flat[v] = x
-        # fi
+        # rof
     # rof
-# rof
+#   End of compute_middle_c
+
+compute_middle_c(middle_C)          # Default to 3c
 
 # ----------------------------------------------------------------------------
 # return:
@@ -8971,6 +9039,9 @@ def process_line(t, line):
             # fi
             if commands[command] == do_meter:
                 do_meter(t_args, line)
+            # fi
+            if commands[command] == do_middle_C:
+                do_middle_C(t_args, line)
             # fi
             if commands[command] == do_tempo:
                 do_tempo(t_args, line)

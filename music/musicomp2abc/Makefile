@@ -26,6 +26,7 @@ TESTS += CRESC2
 TESTS += XPOSE1
 TESTS += XPOSE2
 TESTS += SHARPFLAT
+TESTS += MiddleC
 #-----------------------------------------------------------------------------
 # SONGS_GCS = ${SONGS:=.gcs}
 SONGS_E = ${SONGS:=.E}
