@@ -528,21 +528,28 @@ def Log2(x):
 # ----------------------------------------------------------------------------
 import calculate
 
-calculate.cexp_parser()                                     # initialize parser
+calculate.cexp_parser()                         # initialize parser
 
 # Default ancient musicomp values -- not used within this script/program. (For input files.)
 calculate.variables['pause'] = 4
-calculate.variables['stac'] = 4
 calculate.variables['grace'] = 4
 
-# Default musicomp values for debugging, etc.
+# IMS variables
+calculate.variables['accent'] = 10              # light accent
+calculate.variables['aaccent'] = 20             # heavy accent
+calculate.variables['arp'] = 1/32               # Default arpeggiation length
+calculate.variables['fermata'] = 1              # fermata
+calculate.variables['lferm'] = 1                # No fermata yet.
+calculate.variables['stac'] = 0.25              # Staccato length multiplier - used to be 4, but IMS is 1/4.
+calculate.variables['marc'] = 0.5               # Marcato length multipliers.
+
+# New default musicomp values for debugging, etc.
 calculate.variables['page'] = '-1'
 calculate.variables['measure'] = '-1'
 
 # Default MIDI control values.
 calculate.variables['default_reverb'] = 0       # No reverb.
 calculate.variables['default_pan'] = 64         # Center of left<->right balance.
-#-- calculate.variables['default_intensity'] = 127  # Volume = intensity% * velocity% * vol(ff)%.
 calculate.variables['default_intensity'] = 100  # Volume = intensity% * velocity% * vol(ff)%.
 calculate.variables['default_velocity'] = 120   # Note attack (when played. (Leave 7) Appears to be volume.
 # ----------------------------------------------------------------------------
@@ -1881,6 +1888,9 @@ def print_measure_abc(m, print_V, voice, l_meter, l_tempo, l_dl, l_clef, l_instr
     if vvv in key_voice[m]:
         if l_ky != key_voice[m][vvv]:
             ky = key_voice[m][vvv]
+            if ky == 'atonal':
+                ky = 'C'
+            # fi
             pr = pr + "[K:{}]".format(ky)
             l_ky = ky
         # fi
@@ -2569,10 +2579,16 @@ def print_out_midi1csv_keysignature(m, voiceon, lthworkingmeasure, last_keysig):
     global key_voice
 
     if lthworkingmeasure == 0 and m == '':
+        if key_default is None or key_default == 'atonal':
+            key_default = 0
+        # fi
         last_keysig = key_default
         print_output('{}, {}, Key_signature, {}, "major"'.format(voiceon+1, lthworkingmeasure, last_keysig))
     else:
         if m in key_voice and voiceon in key_voice[m] and last_keysig != key_voice[m][voiceon]:
+            if key_voice[m][voiceon] is None or key_voice[m][voiceon] == 'atonal':
+                key_voice[m][voiceon] = 0
+            # fi
             last_keysig = key_voice[m][voiceon]
             print_output('{}, {}, Key_signature, {}, "major"'.format(voiceon+1, lthworkingmeasure, last_keysig))
         # fi
@@ -2752,6 +2768,9 @@ def print_header():
         # fi
         header = header + "L:{}\n".format(fdnl)
         header = header + "Q:{}={}\n".format(fdnl, tempo_speed_default)
+        if key_default is None or key_default == 'atonal':
+            key_default = 'C'
+        # fi
         header = header + "K:{}".format(key_default)       # no \n, added when printed.
     # fi
     print_output(header)
@@ -2763,7 +2782,6 @@ def print_out_midi1csv_notes():
     global vl                                   # volume levels
     global meas                                 # measures
     global inst
-    global key_default
     global tempo_speed_default
     global default_note_length                  # Default note length.
     global tempo_speed_now                      # Beats per minute for each measure.
@@ -5789,7 +5807,7 @@ def do_key(t_args, line):
         else:                               # No major or minor, so "key 1,2 c-" format.
             vs = vargs[0]
             k = mm
-            if k not in key_sig:
+            if k not in key_sig and k not in ['none', 'atonal']:
                 print_error("key '{}' not recognized.".format(k), line)
                 return
             # fi
@@ -5797,17 +5815,15 @@ def do_key(t_args, line):
     else:
         vs = None
         k = vargs[0].lower()
-        if k not in key_sig:
+        if k not in key_sig and k not in ['none', 'atonal']:
             print_error("key '{}' not recognized.".format(k), line)
             return
         # fi
     # fi
 
     if k in ('none', 'atonal'):
-        k = 'c'
-        args.atonal = True
-    # fi
-    if args.vertical or args.horizontal:
+        k = 'atonal'
+    elif args.vertical or args.horizontal:
         pass                                # printing and used are the same.
     elif args.midi1csv or args.fluidsynth:
         k = key_sig[k]                      # Key number extracted.
@@ -6807,6 +6823,7 @@ def do_xpose(t_args, line):
     global key_sig_int
     global key_default
     global args
+    global key_voice
 
     if args.noxpose:
         print_warning("Ignoring xpose parsing due to --noxpose argument.", line)
@@ -7454,7 +7471,8 @@ def getnote(note_to_decode, voice, line, update_defaults):
         return '', None, normal_note
     # fi
 
-    if update_defaults and args.atonal != True:
+    ky = key_voice[measure_on][voice]
+    if update_defaults and ky != 'atonal':
         if a == '' and voice in acc_m and (str(o) + N) in acc_m[voice] and acc_m[voice][str(o) + N] != '' and line != 'check_staves_notes_order':
             # Check if default from last potential problem.
             print_warning("previous note '{}' voice {} in measure {} was '{}' and this note is default - FIXING".format(n, voice, measure_on, acc_m[voice][str(o) + N]), line)
@@ -7484,33 +7502,41 @@ def getnote(note_to_decode, voice, line, update_defaults):
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     # Have o(ctave), a(ccidental), and n(ote).
     # Convert for key.
-    ky = key_voice[measure_on][voice]
     if args.horizontal or args.vertical or args.midi1csv or args.fluidsynth:
         if args.horizontal or args.vertical:
-            if ky not in key_sig:
+            k_check = ky
+            if k_check in ['none', 'atonal']:
+                k_check = 'c'
+            # fi
+            if k_check not in key_sig:
                 print_error("m:{} v{} key name='{}' not in key_sig.".format(measure_on, voice, ky), line)
                 sys.exit(1)
             # fi
         else:
-            if ky not in key_sig_int:
+            k_check = ky
+            if k_check in ['none', 'atonal']:
+                k_check = 0
+            # fi
+            if k_check not in key_sig_int:
                 print_error("m:{} v{} key number='{}' not in key_sig_int={}".format(measure_on, voice, ky, key_sig_int.keys()), line)
                 sys.exit(1)
+            else:
+                k_check = key_sig_int[k_check]
             # fi
-            ky = key_sig_int[ky]
         # fi
 
         thenote = "{}".format(o) + n + a
         thenote = thenote.lower()
-        if thenote not in key_convert[ky]:
+        if thenote not in key_convert[k_check]:
             print_error("m:{} v{} thenote='{}' not in key_convert[{}] dictionary.".format(measure_on, voice, thenote, ky), line)
             sys.exit(1)
         # fi
-        if key_convert[ky][thenote] is None:
+        if key_convert[k_check][thenote] is None:
             print_error("m:{} v{} note {} is not legal for musicomp2abc".format(measure_on, voice, thenote), line)
             return '', None, normal_note
         # fi
         if (args.midi1csv or args.fluidsynth) or xpose_new_key[voice] != '':      # So can print transpose.
-            thenote = key_convert[ky][thenote]
+            thenote = key_convert[k_check][thenote]
         # fi
         o = thenote[0]
         n = thenote[1].lower()
@@ -7529,6 +7555,9 @@ def getnote(note_to_decode, voice, line, update_defaults):
         #     sys.exit(1)
         # # fi
         # Do not convert it, already in ABC format.
+        if ky == 'atonal':
+            ky = 'C'
+        # fi
         pass
     # fi
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
@@ -9231,8 +9260,6 @@ def parse_args():
                         help = 'Warn if accidental in other octave set/used.')
     parser.add_argument('--spaces', '-spaces', action='store_true',
                         help = 'Use spaces as note separators in addition to commas (input only, not printing vertical/horizontal).')
-    parser.add_argument('--atonal', '-atonal', action='store_true',
-                        help = 'No key, this is atonal music.')
     parser.add_argument('--xpose', '-xpose', 
                         default='', action='store',
                         help = 'Arguments to process as an xpose command before procssing first measure.')
