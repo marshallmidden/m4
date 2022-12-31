@@ -5,6 +5,9 @@
 # TO DO:            2022-12-19_20-19-14
 # Put page into --vertical and --horizontal, and some comments are not printed out.
 # Floating "time" variable for notes played by this voice in current measure. (i.e. 1/2+1/4 = 0.75)
+# Variables to do:
+#       accent, aaccent, arp, fermata, ferma, stac, marc
+# Variable time: -- time for this 'voice' (or staff?) from beginning of measure.
 # ----------------------------------------------------------------------------
 # TO DO:
 # 1) vol(sf,0.25)    -- optional 2nd argument for length of sf.
@@ -533,15 +536,33 @@ calculate.cexp_parser()                         # initialize parser
 # Default ancient musicomp values -- not used within this script/program. (For input files.)
 calculate.variables['pause'] = 4
 calculate.variables['grace'] = 4
+calculate.variables['voice'] = -1               # no voices yet.
 
 # IMS variables
+# NOTDONEYET - accent
 calculate.variables['accent'] = 10              # light accent
+# NOTDONEYET - aaccent
 calculate.variables['aaccent'] = 20             # heavy accent
+# NOTDONEYET - arp
 calculate.variables['arp'] = 1/32               # Default arpeggiation length
+# NOTDONEYET - fermata
 calculate.variables['fermata'] = 1              # fermata
+# NOTDONEYET - ferma
 calculate.variables['lferm'] = 1                # No fermata yet.
+# NOTDONEYET - stac
 calculate.variables['stac'] = 0.25              # Staccato length multiplier - used to be 4, but IMS is 1/4.
+# NOTDONEYET - marc
 calculate.variables['marc'] = 0.5               # Marcato length multipliers.
+# NOTDONEYET - time
+calculate.variables['time'] = 0                 # The "time" in measure for current voice. (staff?)
+
+# IMS "if" variables.  -1 is true
+calculate.variables['print'] = 0                # if compiling for printing - args.abc is true
+calculate.variables['play'] = 0                 # if compiling for playing  - args.fluidsynth or args.midi1csv
+# NOTDONEYET - lime
+calculate.variables['lime'] = 0                 # if compiling for lime (does not apply)
+# NOTDONEYET - include
+calculate.variables['include'] = 0              # if compiling an include file (does not apply)
 
 # New default musicomp values for debugging, etc.
 calculate.variables['page'] = '-1'
@@ -4954,11 +4975,38 @@ def do_marker(t_args, line):
 # End of do_marker
 
 # ----------------------------------------------------------------------------
-# Not likely to ever do.
-#   debug               ignore
+# Print out a line for debugging.
+#   debug                               - Print out a count of debug commands..
+#   debug   page                        - Current value of page variable.
+#   debug   measure                     - Current value of measure variable.
+#   debug   m1*2+7                      - A calculation.
+#   debug   we are here                 - A message (not a calculation).
+
+global debug_count
+debug_count = 0
 
 def do_debug(t_args, line):
-    print_error("debug command makes no sense for python or MIDI.", line)
+    global args
+    global debug_count
+
+    debug_count = debug_count + 1
+
+    if t_args is None or len(t_args) == 0:
+        value = 'count: ' + str(debug_count)
+    else:
+        wargs = arglist(t_args[0], line, False)
+        if not wargs or len(wargs) < 1:
+            value = 'count: ' + str(debug_count)
+        else:
+            value, type_error = is_float(wargs[0])
+            if type_error is not None:
+                value = 'message: ' + t_args[0]
+            else:
+                value = 'value: ' + str(value) + ' -- ' + t_args[0]
+            # fi
+        # fi
+    # fi
+    print('DEBUG ' + value, file=sys.stderr, flush=True)
     return
 # End of do_debug
 
@@ -5359,12 +5407,12 @@ def do_decode(t_args, line):
     args.abc = False
     key_voice[measure_on][1] = k
 
-    if len(wargs) == 2:
+    if len(wargs) == 2:         # decode m1,3c4
         w_note = wargs[1]
-    elif len(wargs) == 3:
+    elif len(wargs) == 3:       # decode m1,m2,3c4
         w_note = wargs[2]
     else:                   # 4
-        w_note = wargs[3]
+        w_note = wargs[3]       # decode m1,m2,m3,3c4
     # fi
     # Ignore leading space.
     therest, thenote, typenote = getnote(w_note, 1, line, False)
@@ -5421,7 +5469,7 @@ def do_decode(t_args, line):
             print_error("cannot have dotted syntax on a default note length.", line)
             return
         # fi
-        timeofnote = time[onvoice]      # Interesting - get last time used. :)
+        timeofnote = time[calculate.variables['voice']]      # Interesting - get last time used. :)
     # fi
     if number_dots != 0:
         p = timeofnote / 2.0
@@ -6396,23 +6444,16 @@ def do_measure(t_args, line):
     # fi
 
     vargs = t_args[0]
-    f1 = None
-    for a in vargs:
-        if a in "abcdefghijklnopqrstuvwxyz_ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-            f1 = vargs
-            break
-        # fi
-    # rof
-    if f1 is None:
-        f1, type_error = is_float(vargs)
-        if type_error is not None or f1 is None:
-            # Error, use it as string instead.
-            f1 = str(vargs)
-        else:
-            tmp = int(round(f1))
-            if (f1 - tmp) == 0:
-                f1 = str(tmp)
-            # fi
+    f1, type_error = is_float(vargs)
+    if type_error is not None or f1 is None:
+        # Error, use it as string instead.
+        f1 = str(vargs)
+        calculate.variables['measure'] = -1     # Variable cannot be a string.
+    else:
+        calculate.variables['measure'] = f1
+        tmp = int(round(f1))
+        if (f1 - tmp) == 0:
+            f1 = str(tmp)
         # fi
     # fi
 
@@ -6426,7 +6467,6 @@ def do_measure(t_args, line):
         # fi
     # fi
 
-    calculate.variables['measure'] = n
 
     # Last note length ... continue to this measure, until it changes.
     last_m = measure_on
@@ -8317,6 +8357,7 @@ def process_notes(line):
     # Decode and stack the notes.
     loopstart = 1 if cis == 0 else cis
     for onvoice in range(loopstart, voices + 1):
+        calculate.variables['voice'] = onvoice
         while True:
             if cis == 0 and len(wargs) < onvoice:
                 print_error("m:{} Not enough arguments on note line - want {}, have {}".format(measure_on, onvoice, wargs), line)
@@ -9340,14 +9381,15 @@ def parse_args():
             print_error_no_line("Only may have one of --vertical, --horizontal, --abc, --midi1 or --fluidsynth")
             sys.exit(1)
         # fi
+        calculate.variables['play'] = -1    # compiling for playing
     elif args.fluidsynth:
         if args.abc == 1:
             print_error_no_line("Only may have one of --vertical, --horizontal, --abc, --midi1 or --fluidsynth")
             sys.exit(1)
         # fi
-#    else args.abc == 1:
-#        print_error_no_line("Only may have one of --vertical, --horizontal, --abc, --midi1 or --fluidsynth")
-#        sys.exit(1)
+        calculate.variables['play'] = -1    # compiling for playing
+    else: # args.abc == 1
+        calculate.variables['print'] = -1   # compiling for printing
     # fi
 
     if args.D:
