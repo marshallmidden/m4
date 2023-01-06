@@ -28,6 +28,7 @@ TESTS += XPOSE2
 TESTS += SHARPFLAT
 TESTS += MiddleC
 TESTS += VARIABLES
+TESTS += CSTOP
 #-----------------------------------------------------------------------------
 # SONGS_GCS = ${SONGS:=.gcs}
 SONGS_E = ${SONGS:=.E}
