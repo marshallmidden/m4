@@ -781,10 +781,10 @@ def f_m(arg):
         return [ "ERROR - argument to array m is not an integer '{}'".format(txt, args), None ]
     # yrt
     if arg < 1 or arg > 50:
-        #-- print("ERROR - argument to array m is out of range 1 to 50 '{}'".format(txt, args))
         return [ "ERROR - argument to array m is out of range 1 to 50 '{}'".format(txt, args), None ]
     # fi
-    return [ 'NUMBER', variables['m' + str(arg)] ]
+#??    return [ 'NUMBER', variables['m' + str(arg)] ]
+    return [ 'ID', 'm' + str(arg) ]
 # End of f_m
 
 #-----------------------------------------------------------------------------
