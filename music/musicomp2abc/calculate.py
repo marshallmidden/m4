@@ -19,6 +19,22 @@ import math
 #++ import inspect
 #++ print(inspect.currentframe().f_code.co_name, '#0')
 #-----------------------------------------------------------------------------
+global zvar
+numarry_name = 0
+numarry_maclevel = 1
+numarry_dimensions = 2
+numarry_indexes = 3
+numarry_values = 4
+zvar = []
+
+#-- warray = [ 'aha0', 8, 3, [ 1, 1, 1], [ 98765.43210 ] ]
+#-- add_array = [ warray, 0 ]
+#-- zvar.append(add_array)
+#-- 
+#-- warray = [ 'aha1', 8, 3, [ 1, 1, 2], [ 12.34, 123.45] ]
+#-- add_array = [ warray, 1 ]
+#-- zvar.append(add_array)
+#-----------------------------------------------------------------------------
 class SymbolDesc:
     def __init__(self, symbol, lprio, rprio, eval):
         self.symbol = symbol
@@ -198,6 +214,8 @@ def identity_eval(args):
 
 #-----------------------------------------------------------------------------
 def get_value(arg):
+    global zvar
+
     a = arg
     if arg[0].startswith('ERROR'):
         #-- print("get_value ERROR MESSAGE")            # NOTDONEYET
@@ -212,12 +230,32 @@ def get_value(arg):
         arg[1] = variables[arg[1]]
         return arg
     # fi
+    if len(arg[1]) > 4 and arg[1][0:4] == 'zvar':
+        zarr = arg[1][4:]
+        if not zarr.isnumeric():
+            return [ "ERROR - zvar following ('{}') is not a number".format(zarr), None ]
+        # fi
+        zarr = int(zarr)
+        if zarr < 0 or zarr >= len(zvar):
+            return [ "ERROR - Argument1 ({}) index number not in 0 < {} < len(zvar)={}.".format(arg[1],zarr,len(zvar)), None ]
+        # fi
+        warray = zvar[zarr][0]
+        windex = zvar[zarr][1]
+        if windex < 0 or windex >= len(warray[numarry_values]):
+            return [ "ERROR - Argument1 ({}) index number {} not in zvar array.".format(arg[1],zarr), None ]
+        # fi
+        newv = warray[numarry_values][windex]
+        return [ 'NUMBER', newv ]
+    # fi
+
     #-- print("ERROR - get_value - unrecognized variable='{}'".format(arg))
     return [ "ERROR - get_value - unrecognized variable='{}'".format(arg), None ]
 # End of get_value
 
 #-----------------------------------------------------------------------------
 def compute_value(op, arg1, arg2):
+    global zvar
+
     a2 = get_value(arg2)
     if a2 is None:
         return [ "ERROR - Argument2 is None a2='{}'".format(a2), None ]
@@ -233,6 +271,23 @@ def compute_value(op, arg1, arg2):
         # NOTDONEYET - arg1 is a list
         if arg1[0] != 'ID':
             return [ "ERROR - Argument1 is not a variable name arg1='{}'".format(arg1), None ]
+        # fi
+        if len(arg1[1]) > 4 and arg1[1][0:4] == 'zvar':
+            zarr = arg1[1][4:]
+            if not zarr.isnumeric():
+                return [ "ERROR - zvar following ('{}') is not a number".format(zarr), arg1[1] ]
+            # fi
+            zarr = int(zarr)
+            if zarr < 0 or zarr >= len(zvar):
+                return [ "ERROR - Argument1 ({}) index number {} not in zvar array.".format(arg1,zarr), None ]
+            # fi
+            warray = zvar[zarr][0]
+            windex = zvar[zarr][1]
+            if windex < 0 or windex >= len(warray[numarry_values]):
+                return [ "ERROR - Argument1 ({}) index number {} not in zvar array.".format(arg1,zarr), None ]
+            # fi
+            warray[numarry_values][windex] = arg2[1]
+            return arg2
         # fi
         if arg1[1] not in variables:
             print("Assignment to unknown variable '{}', creating it = '{}'".format(arg1, a2))
@@ -772,6 +827,28 @@ def close_brace_eval(args):
 # End of close_brace_eval
 
 #-----------------------------------------------------------------------------
+def f_zvar(arg):
+    global zvar
+
+    try:
+        arg = float(arg)
+        arg = int(arg)
+    except:
+        #-- print("ERROR - argument to array m is not an integer '{}'".format(txt, args))
+        return [ "ERROR - argument to array m is not an integer '{}'".format(txt, args), None ]
+    # yrt
+    if arg < 0 or arg >= len(zvar):
+        return [ "ERROR - argument ({}) index number {} not in zvar array.".format(arg1,arg), None ]
+    # fi
+    warray = zvar[arg][0]
+    windex = zvar[arg][1]
+    if windex < 0 or windex >= len(warray[numarry_values]):
+        return [ "ERROR - Argument ({}) index number {} not in zvar array.".format(arg1,arg), None ]
+    # fi
+    return [ 'ID', 'zvar' + str(arg) ]
+# End of f_zvar
+
+#-----------------------------------------------------------------------------
 def f_m(arg):
     try:
         arg = float(arg)
@@ -783,7 +860,6 @@ def f_m(arg):
     if arg < 1 or arg > 50:
         return [ "ERROR - argument to array m is out of range 1 to 50 '{}'".format(txt, args), None ]
     # fi
-#??    return [ 'NUMBER', variables['m' + str(arg)] ]
     return [ 'ID', 'm' + str(arg) ]
 # End of f_m
 
@@ -936,6 +1012,7 @@ global functions
 functions = {
 #...............................................................................
     'm':        f_m,                        # Array of m1, m2, m3, ...
+    'zvar':     f_zvar,                     # Complicated array used by IMS.
 #...............................................................................
     'abs':      f_abs,
     'arctan':   f_arctan,

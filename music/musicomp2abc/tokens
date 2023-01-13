@@ -2,6 +2,8 @@
 # ----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 # ----------------------------------------------------------------------------
+TODO: Need to save and restore token area for when ABC(2,1) ... restore so that n_token=ABC and not 1 after).
+# ----------------------------------------------------------------------------
 # block   from, to, length (words)
 # ------------------------------------------------------------------------------
 # find    object,start,length,return  [, increment, mask]
@@ -112,12 +114,42 @@ calculate.variables.update(the_perms('d', 'sbtal'))
 calculate.variables.update(the_perms('dd', 'sbtal'))
 
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-def handle_n(arg):
-    a = float(arg)
-    return [ 'NUMBER', a ]
-# End of handle_n
+#-- def handle_n(arg):
+#--     # No checking for problems.
+#--     a = float(arg)
+#--     b = int(a)
+#--     which = arg >> 2
+#--     if (arg & 1) == 0:
+#--         return [ 'ID', 'zvar' + str(a) ]
+#--     # fi
+#--     return [ 'ID', 'zvar' + str(a) ]
+#-- # End of handle_n
+#-- 
+#-- calculate.functions['zvar'] = handle_n
 
-calculate.functions['n'] = handle_n
+global the_zvars
+the_zvars = 0
+
+calculate.zvar = []         # warray, value-index.
+
+numarry_name = 0            # The name of the variable.
+numarry_maclevel = 1        # The macro level was in effect when created.
+numarry_dimensions = 2      # Number of dimensions for array. (0=none,1=1,2=2)
+numarry_indexes = 3         # The array indexes.
+numarry_value_type = 4      # 1 for character string, 0 for 'value' (int/float).
+numarry_values = 5          # Array of values ([0] for not an array).
+
+#-- warray = [ 'aha0', 8, 3, [ 1, 1, 1], 0, [98765.43210] ]
+#-- add_array = [ warray, 0 ]
+#-- calculate.zvar.append(add_array)
+#--
+#-- warray = [ 'aha1', 8, 3, [ 1, 1, 2], 0, [12.34, 123.45] ]
+#-- add_array = [ warray, 1 ]
+#-- calculate.zvar.append(add_array)
+#--
+#-- warray = [ 'aha2', 8, 3, [ 1, 1, 2], 1, ["wxyz", "abcd"] ]
+#-- add_array = [ warray, 1 ]
+#-- calculate.zvar.append(add_array)
 # ----------------------------------------------------------------------------
 global args
 global errors_happened
@@ -205,7 +237,7 @@ def print_output_no_eol(strg):
 
 # ----------------------------------------------------------------------------
 # Get a line. Put it in "line" and return it.
-def get_line(if_full_line):
+def get_new_line(if_full_line):
     global linecount
     global args
     global file_name
@@ -278,7 +310,55 @@ def get_line(if_full_line):
     # elihw
     do_pass2()
     sys.exit(errors_happened)
-# End of get_line
+# End of get_new_line
+
+# ----------------------------------------------------------------------------
+def getline(ignore_dollar_dollar):
+    precomment = ''
+    while True:
+        line, commentonline = get_new_line(ignore_dollar_dollar)
+        if line:
+            # Split line on spaces, then process line.
+            while True:
+                line = re.sub(r'   *', r' ', line)                      # multiple spaces to single.
+                t0 = re.sub(r'(^ *[^ ]*).*$', r'\1', line, count=1)     # First non-space thing on line.
+                t1 = re.sub(r'^ *[^ ]*', '', line, count=1)             # Everything after first thing.
+                t_tmp = t0.lstrip()                                     # For command lookup.
+                t = [ t0, t1 ]                                          # Note: a leading space.
+                if t_tmp and t_tmp == '.':                              # Indented lines - plato "."
+                    # If command == '.' toss '.'
+                    if len(t) == 2 and t[1]:
+                        line = t[1]
+                    else:
+                        t = None
+                        line = None
+                        break
+                    # fi
+                    continue                                            # Try again to get line.
+                # fi
+                break
+            # elihw
+
+            if t_tmp and t_tmp[0]:
+                # If command == '*' ignore.
+                if t_tmp[0] != '*' and line[0] != '*' and t_tmp[0] != '#' and line[0] != '#':
+                    return line, commentonline
+                elif line[0] == '#':
+                    # Parse # line to get line number and file.
+                    uxit = re.sub('^ *# ([0-9]+) "([^"]+)".*$', r"\1 \2", line)
+                    if uxit != line:               # If no 3rd argument (flags).
+                        wxit = re.split(r' ', uxit, maxsplit = 1)
+                        linecount = int(wxit[0]) - 1
+                        which_file_in = wxit[1]
+                    # fi
+                else:
+                    precomment = precomment + line + "\n"
+                # fi
+            # fi
+        # fi
+    # elihw
+    return None
+#   End of getline
 
 # ----------------------------------------------------------------------------
 # Calculate values here.
@@ -672,14 +752,9 @@ def v_in(first,second,third):
 # 07677 = ~
 # o64 = x (multiply sign)
 # ----------------------------------------------------------------------------
-maxtok = 250                # max number of chars
-l_token = 1 + maxtok / 10
+#-- l_token = 1 + maxtok / 10
 l_tinfo = 9                 # Length of token information (?)
-l_line = 26                 # max length of a line
-l_cvals = 1200              # max number of character variables
-l_stack = 300               # Max size of stack.
-l_macro = 100               # max number of macros
-l_voice = 60                # max number of voices
+l_voice = 60                # max number of voices              -- NOTDONEYET - can get rid of?
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 t_strng = 0                 # return character string
 t_space = 1                 # string, but keep leading spaces
@@ -691,8 +766,36 @@ t_nexp  = 6                 # numeric var argument (internal)
 t_cexp  = 7                 # character var argument (internal)
 t_cind  = 8                 # get char array indices (internal)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# These are saved/restored in unit token
 global n_ttype              # Type of token
 n_ttype = t_strng
+global n_tstart             # Stat of token/expression
+n_tstart = 0
+global n_targcnt            # Number of varable arguments (if array or not)
+n_targcnt = 0
+global n_tparen             # Parenthesis level
+n_tparen = 0
+global n_targ               # Arguments (1 and 2) for array.
+n_targ = []
+global n_tvarptr            # Start of variable (?)
+n_tvarptr = 0
+
+#- vinfo = nc(s.tinfo+8)
+#-  segmentf, vptr   = vinfo, 1,15  $$ pointer to value
+#-  segmentf, n_vdimen = vinfo,16, 2  $$ array dimension
+#-  segmentf, n_vsize1 = vinfo,18,15  $$ size of dim 1
+#-  segmentf, n_vsize2 = vinfo,33,15  $$ size of dim 2
+#-  segmentf, n_vlen   = vinfo,48,13  $$ length in chars
+#-- global n_vptr               # Pointer to value -- NOTDELETEDYET
+#-- n_vptr = 0
+global n_vdimen             # Array dimension.
+n_vdimen = 0
+global n_vsize1             # size of dimension 1 of array
+n_vsize1 = 0
+global n_vsize2             # size of dimension 2 of array
+n_vsize2 = 0
+global n_vlen               # length in chars -- NOTDELETEDYET
+n_vlen = 0
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global n_char
 n_char = ''                 # Line buffer.
@@ -716,50 +819,32 @@ n_inloop = 0                # loop depth in this macro
 global n_inif
 n_inif = 0                  # if depth in this macro
 
-global n_tstart
-n_tstart = 0
-global n_tparen
-n_tparen = 0
-global n_targ
-n_targ = []
-global n_targcnt
-n_targcnt = 0               # number of var arguments
-
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global n_macname
-n_macname = []              # Name of macro indexed by number.
+n_macname = { }             # Indexed by macro name.
+                            # 1) [macro text]
+                            # Entry is array:
+                            # 2) [{argument name, initial delimiter, final delimiter},
+                            #     {argument name, xxxxxxxxxxxxxxxxx, final delimiter}, ... ]
 global n_mdelim0
 n_mdelim0 = []              # Delimiter for macro indexed by number.
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+numarry_name = 0
+numarry_maclevel = 1
+numarry_dimensions = 2
+numarry_indexes = 3
+numarry_values = 4
+# w_array = [ 'testing', 9, dimensions,            # name, macro_level, number of dimensions,
+#           [#first, #second, #third], w_nums ]    # array of length of dimensions, array of values.
+
+#-- global n_nvdef              # Numeric variables defined # NOTDONEYET nvdef -> cvdef with type(str) check.
+#-- n_nvdef = [ ]               # Array of w_array above.   # NOTDONEYET nvdef -> cvdef with type(str) check.
+global n_cvdef              # Character variables defined.
+n_cvdef = [ ]               # Array of w_array above.
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 
 global n_br
 n_br = 0                    # branch return from nm_numtoken ... starts as zero.
-
-n_vchars = 9                # maximum characters in variable name (character or variable)
-
-global n_nsymb
-n_nsymb = []
-global n_nvdef
-n_nvdef = 0                 # # of numeric vars def'd
-global n_cvdef
-n_cvdef = 0                 # # of char vars defined
-
-global n_vname
-n_vname = []
-#- vinfo = nc(s.tinfo+8)
-#-  segmentf, vptr   = vinfo, 1,15  $$ pointer to value
-#-  segmentf, n_vdimen = vinfo,16, 2  $$ array dimension
-#-  segmentf, n_vsize1 = vinfo,18,15  $$ size of dim 1
-#-  segmentf, n_vsize2 = vinfo,33,15  $$ size of dim 2
-#-  segmentf, n_vlen   = vinfo,48,13  $$ length in chars
-global n_vptr
-n_vptr = 0
-global n_vdimen
-n_vdimen = 0                # Array dimension.
-global n_vsize1
-n_vsize1 = 0
-global n_vsize2
-n_vsize2 = 0
-global n_vlen
-n_vlen = 0
 
 global n_result             # Global result.
 n_result = 0
@@ -772,12 +857,6 @@ n_stfson = 0                # Number of staves. (No staff yet.)
 global p_formok             # Indicates if an error occurs in expression.
 p_formok = -1               # -1 if okay.  >= 0 if problem.
 
-global n_nmacs
-n_nmacs = 0                 # no macros yet
-global n_stkptr
-n_stkptr = 0                # stack pointer
-global n_linesp
-n_linesp = 0
 global n_notes
 n_notes = 0
 global n_lnotes
@@ -796,10 +875,10 @@ global n_minlen
 n_minlen = 0
 global n_incres
 n_incres = 0
-global n_nvwrds
-n_nvwrds = 0                # no numeric vars yet
-global n_cvwrds
-n_cvwrds = 0                # no character vars yet
+#-- global n_nvwrds
+#-- n_nvwrds = 0                # no numeric vars yet
+#-- global n_cvwrds
+#-- n_cvwrds = 0                # no character vars yet
 
 # ----------------------------------------------------------------------------
 n_vmf = 50
@@ -908,22 +987,26 @@ nm_note_to_number = { 'c':0, 'd':1, 'e':2, 'f':3, 'g':4, 'a':5, 'b':6}
 # NOTE: 0 indexing verses 1 indexing in arrays.
 # ----------------------------------------------------------------------------
 # global n_pnt   Starting character in line. If -1, start new line.
-#              Defaults to character after previous token.
+#                Defaults to character after previous token.
 # Entry:
 #   ARGttype -- Type of token desired:
-#              0 = character string (ignore leading spaces)
-#              1 = character string (dont ignore leading spaces or extra trailing spaces)
-#              2 = character string (dont subst character vars)
-#              3 = expression
-#              4 = character variable name
-#   pnt   -- Starting character in line.  If -1,
-#              start new line.  Defaults to character after
-#              previous token.
+#     t_strng  0 = character string (ignore leading spaces).
+#     t_space  1 = character string (dont ignore leading spaces or extra
+#                  trailing spaces).
+#     t_novar  2 = String, don't substitute character variables.
+#     t_cvnam  3 = name of charadcter variable.
+#     t_cvar   4 = Get character variable (internal).
+#     t_exp    5 = Return value of expression.
+#     t_nexp   6 = Numeric variable argument (internal).
+#     t_cexp   7 = Character variable argument (internal).
+#     t_ind    8 = Get Character array indices (internal).
+#   pnt   -- Starting character in line.  If -1, start new line.  Defaults to
+#              character after previous token.
 #   endch -- Ending delimiter. For character string type: Stops at "endch" or
-#              end of line. If not specified, stops at any delimiter except + and -.
-#              Only nondelimiters are a-z and 0-9. For expression type: Stops at end of line,
-#              or "endch", comma, or semicolon if not inside parentheses.
-#
+#              end of line. If not specified, stops at any delimiter - except
+#              plus (+) and minus (-). The only non-delimiters are a-z and 0-9.
+#              For expression type: Stops at end of line, or "endch", comma,
+#              or semicolon if not inside parentheses.
 # Exit:
 #   If token type was expression, its value is returned.
 #   n_token   -- Character string for token.
@@ -945,35 +1028,30 @@ def nm_get_token(ARGttype, ARGpnt, endch):
     global n_targcnt
     global n_targ
     global n_vdimen
-    global n_vinfo
-    global n_stkptr
-    global n_linesp
     global n_ttype
     global n_lchars
 
-    n_ttype = ARGttype              # global ttype variable
-    n_pnt = ARGpnt                  # global pnt variable.
-#--    print_debug("nm_get_token - Entering ({},{},{})".format(n_ttype, n_pnt, endch))
+    n_ttype = ARGttype              # set global n_ttype variable
+    n_pnt = ARGpnt                  # set global n_pnt variable.
+    print_debug("nm_get_token - Entering ({},{},{})".format(n_ttype, n_pnt, endch))
     n_tparen = 0
     n_tlength = 0
     n_token = None
-#--     n_lastend = 0
 
     if n_pnt == -1:
         if n_macnum == 0:
-            n_char, commentdollardollar = get_line(True)  # Ignore $$ comments
+            n_char, commentdollardollar = getline(True)     # Ignore $$ comments
             n_lchars = len(n_char)
         else:
             if nm_nextmacr() is None:
                 print_debug("nm_get_token - #1 return None")
-                n_stkptr = n_linesp
                 return None
             # fi
         # fi
         print_debug("n_char='{}' ({} chars) commentdollardollar={}".format(n_char, n_lchars, commentdollardollar))
         n_pnt = 0                 # zero based index
     # fi
-#--    print_debug("nm_get_token #1 n_pnt={}".format(n_pnt))
+    print_debug("nm_get_token #1 n_pnt={}".format(n_pnt))
     if n_ttype != t_space:
         while n_pnt < len(n_char) and n_char[n_pnt] == ' ':
             n_pnt = n_pnt + 1
@@ -981,68 +1059,56 @@ def nm_get_token(ARGttype, ARGpnt, endch):
     # fi
     n_tstart = n_pnt
 
-    # entry token2
     # Main loop.
     # Find next token. If getting a character variable name, find a sequence of
     # capital letters. Otherwise, find a sequence of lower case letters or digits.
-    #=============================================================================
+
     while True:
         n_tvarptr = n_pnt
-#--        print_debug("nm_get_token #2a n_pnt={}".format(n_pnt))
-        if n_ttype == t_cvar or n_ttype == t_cvnam:
-            print_debug("nm_get_token #2a1 - t_cvar or t_cvnam")
-            while n_pnt < len(n_char) and n_char[n_pnt].isupper():
+        print_debug("nm_get_token #2a n_pnt={}".format(n_pnt))
+        # Must start with a character.
+        if n_pnt < len(n_char) and n_char[n_pnt].isalpha():
+            while n_pnt < len(n_char) and n_char[n_pnt].isalpha():
                 n_pnt = n_pnt + 1
-                print_debug("nm_get_token #A n_pnt={}".format(n_pnt))
-            # elihw
-        else:
-            while n_pnt < len(n_char) and (n_char[n_pnt].islower() or n_char[n_pnt].isnumeric()):
-                n_pnt = n_pnt + 1
-#--                print_debug("nm_get_token #B n_pnt={}".format(n_pnt))
             # elihw
         # fi
-#--        print_debug("nm_get_token #C n_pnt={}".format(n_pnt))
-#--        print_debug("nm_get_token #2b n_pnt={}".format(n_pnt))
+        # Allow name to have numbers after it (and more alpha-numeric).
+        if n_pnt < len(n_char) and (n_char[n_pnt].isalpha() or n_char[n_pnt].isnumeric()):
+            while n_pnt < len(n_char) and (n_char[n_pnt].isalpha() or n_char[n_pnt].isnumeric()):
+                n_pnt = n_pnt + 1
+            # elihw
+        # fi
         dpnt = n_pnt
         # If delimiter is a comma, semicolon, or assignment arrow, skip any spaces before it.
         if n_pnt < len(n_char) and n_char[n_pnt] == " " and n_ttype != t_space:
             while n_pnt < len(n_char) and n_char[n_pnt] == " ":
                 n_pnt = n_pnt + 1
-#--                print_debug("nm_get_token #D n_pnt={}".format(n_pnt))
+                print_debug("nm_get_token #D n_pnt={}".format(n_pnt))
             # elihw
-#--            print_debug("nm_get_token #3 n_pnt={} dpnt={}".format(n_pnt, dpnt))
+            print_debug("nm_get_token #3 n_pnt={} dpnt={}".format(n_pnt, dpnt))
     # NOTDONEYET ASSIGNMENT
             # elihw
-#--            print_debug("nm_get_token #E n_pnt={}".format(n_pnt))
+            print_debug("nm_get_token #E n_pnt={}".format(n_pnt))
             if n_pnt < len(n_char) and n_char[n_pnt] != "," and n_char[n_pnt] != ";" and n_char[n_pnt] != "=":   # ASSIGNMENT
                 n_pnt = n_pnt - 1                   # Move back to one before the space - to have delimitor?
             # fi
-#--            print_debug("nm_get_token #F n_pnt={}".format(n_pnt))
+            print_debug("nm_get_token #F n_pnt={}".format(n_pnt))
         # fi
 
         # Assemble character codes for the ending delimiter.
-#--        print_debug("nm_get_token #4 n_pnt={} len(n_char)={} n_char='{}'".format(n_pnt,len(n_char), n_char))
+        print_debug("nm_get_token #4 n_pnt={} len(n_char)={} n_char='{}'".format(n_pnt,len(n_char), n_char))
         if n_pnt < len(n_char):
             delim = n_char[n_pnt]
             n_pnt = n_pnt + 1
         else:
             delim = 0
         # fi
-#--        print_debug("nm_get_token - #1 delim='{}'".format(delim))
-#--        print_debug("nm_get_token #5 n_pnt={} dpnt={} delim='{}'".format(n_pnt,dpnt,delim))
-    # No micro character in ascii.
-    #--    if delim = o76
-    #--            delim = (delim $cls$ 6) + n_char[n_pnt]
-    #--            n_pnt = n_pnt + 1
-    #--    # fi
-    # No shift in ascii.
-    #--    if (delim $mask$ rmask(6)) = o70
-    #--            delim = (delim $cls$ 6) + n_char[n_pnt]
-    #--            n_pnt = n_pnt + 1
-    #--    # fi
+        print_debug("nm_get_token - #1 delim='{}'".format(delim))
+        print_debug("nm_get_token #5 n_pnt={} dpnt={} delim='{}'".format(n_pnt,dpnt,delim))
 
         # Start of character variable. Save state and get its name.
-#--        print_debug("nm_get_token #6 n_pnt={} dpnt={} delim='{}' n_ttype={}".format(n_pnt, dpnt, delim,n_ttype))
+        print_debug("nm_get_token #6 n_pnt={} dpnt={} delim='{}' n_ttype={}".format(n_pnt, dpnt, delim,n_ttype))
+        print_debug("nm_get_token - type(delim)={} delim='{}' n_ttype={}".format(type(delim), delim,n_ttype))
         if type(delim) is str and delim.isalpha() and n_ttype != t_novar:
             NOTDONEYET("nm_get_token - do      save(s.tinfo, l.tinfo)")
             n_ttype = t_cvar
@@ -1054,7 +1120,7 @@ def nm_get_token(ARGttype, ARGpnt, endch):
             break
         # End of character variable. Look up in symbol table.
         elif n_ttype == t_cvar:
-            print_debug("nm_get_token - n_ttype is t_cvar: n_pnt={} dpnt={} delim='{}' n_ttype={}".format(n_pnt, dpnt, delim, n_ttype))
+            print_debug("nm_get_token#a - calling nm_findcvar, n_ttype is t_cvar: n_pnt={} dpnt={} delim='{}' n_ttype={}".format(n_pnt, dpnt, delim, n_ttype))
             vlth, value = nm_findcvar(n_tvarptr, dpnt - n_tvarptr, -1, -1)
             # Not found in symbol table. Continue after the first capital character (in case 2nd
             # character starts a variable name). Append the character to the n_token buffer.
@@ -1063,17 +1129,14 @@ def nm_get_token(ARGttype, ARGpnt, endch):
                 NOTDONEYET("nm_get_token - do      restore(s.tinfo, l.tinfo)")
                 if nm_addtoken(n_tvarptr, 2) is None:
                     print_debug("nm_get_token - #2 return None")
-                    n_stkptr = n_linesp
                     return None
                 # fi
                 continue
             # Found a character variable array. Save state and get expression for the indices.
             elif n_tvarptr + vlth == dpnt and n_vdimen > 0:
-#--                NOTDONEYET("nm_get_token(", x, er("baddimen", n_vdimen, 0)')
                 if delim != "(":
                     print_error_no_line("bad dimension, delim != ( n_vdimen={}".format(n_vdimen))
                     print_debug("nm_get_token - #3 return None")
-                    n_stkptr = n_linesp
                     return None
                 # fi
                 n_targcnt = 0
@@ -1098,7 +1161,6 @@ def nm_get_token(ARGttype, ARGpnt, endch):
             else:
                 if nm_subcvar(n_tvarptr, vlth, 0, 0, 0) is None:
                     print_debug("nm_get_token - #4 return None")
-                    n_stkptr = n_linesp
                     return None
                 # fi
                 n_pnt = n_tvarptr
@@ -1107,17 +1169,18 @@ def nm_get_token(ARGttype, ARGpnt, endch):
             # fi
         # Check if this token is a numeric variable in an expression.
         elif v_in(t_exp, n_ttype, t_cind):
-#--            print_debug("nm_get_token v_in(t_exp, n_ttype, t_cind)... ({},{},{})".format(t_exp, n_ttype, t_cind))
+            print_debug("nm_get_token v_in(t_exp, n_ttype, t_cind)... ({},{},{})".format(t_exp, n_ttype, t_cind))
             vlth = None
             otype = None
             oparen = None
             value = None
-#--            print_debug("nm_get_token calling nm_numtoken endch={} n_pnt={} dpnt={} vlth={} delim='{}' otype={} oparen={} value={}".format(endch, n_pnt, dpnt, vlth, delim, otype, oparen, value))
+            print_debug("nm_get_token calling nm_numtoken endch={} n_pnt={} dpnt={} vlth={} delim='{}' otype={} oparen={} value={}".format(endch, n_pnt, dpnt, vlth, delim, otype, oparen, value))
+
             n_br, endch, dpnt, vlth, delim, otype, oparen, value = nm_numtoken(endch, dpnt, vlth, delim, otype, oparen, value)
-#--            print_debug("nm_get_token after nm_numtoken n_br={} endch={} n_pnt={} dpnt={} vlth={} delim='{}' otype={} oparen={} value={}".format(n_br, endch, n_pnt, dpnt, vlth, delim, otype, oparen, value))
+
+            print_debug("nm_get_token after nm_numtoken n_br={} endch={} n_pnt={} dpnt={} vlth={} delim='{}' otype={} oparen={} value={}".format(n_br, endch, n_pnt, dpnt, vlth, delim, otype, oparen, value))
             if n_br is None:
-#--                print_debug("nm_get_token - #5 return None")
-                n_stkptr = n_linesp
+                print_debug("nm_get_token - #5 return None")
                 return None
             elif n_br == -1:
                 continue
@@ -1143,45 +1206,37 @@ def nm_get_token(ARGttype, ARGpnt, endch):
     #
     n_tlength = dpnt - n_tstart
     n_lastend = delim
-#--    print_debug("nm_get_token - #10 n_lastend='{}'".format(n_lastend))
-#--    NOTDONEYET("nm_get_token - goto n_tlength > maxtok, er('overflow', 'n_token'), x")
-    if n_tlength > maxtok:
-        print_error_no_line("Overflow, n_token too long - n_tlength({}) > maxtok{}".format(n_tlength, maxtok))
-        n_stkptr = n_linesp
-        return None
-    # fi
-#--    print_debug("nm_get_token #7f n_tstart={} n_tlength='{}' n_char='{}'".format(n_tstart,n_tlength,n_char))
+    print_debug("nm_get_token - #10 n_lastend='{}'".format(n_lastend))
+    print_debug("nm_get_token #7f n_tstart={} n_tlength='{}' n_char='{}'".format(n_tstart,n_tlength,n_char))
     n_token = n_char[n_tstart:n_tstart + n_tlength]
     if n_ttype == t_exp:
-#--        print_debug("nm_get_token - #6 return value={}".format(value))
+        print_debug("nm_get_token - #6 return value={}".format(value))
         return value
     # fi
-#--    print_debug("nm_get_token #8 n_tlength={} n_lastend='{}' n_token='{}' n_char='{}'".format(n_tlength,n_lastend,n_token,n_char))
-#--    print_debug("nm_get_token - #7 return True - n_token='{}'".format(n_token))
+    print_debug("nm_get_token #8 n_tlength={} n_lastend='{}' n_token='{}' n_char='{}'".format(n_tlength,n_lastend,n_token,n_char))
+    print_debug("nm_get_token - #7 return True - n_token='{}'".format(n_token))
     return True
 #   End of nm_get_token
 
 #=============================================================================
+# Check if this token is a numeric variable in an expression. This routine is
+# called as a major subroutine of token. The variables n_ttype, and n_pnt are
+# globals and are already set.
+
 # endch           # ending delimiter (-1 if any)
 # dpnt            # points to 1st character of delimiter
 # vlth            # length of substituted variable
 # delim           # current delimiter
 # otype           # temporary token type
 # oparen          # temporary paren level
-# floating: value # expression value
 #-- NOTE: none of these are globals.
+# Returns:
+#       -1 if branch to 1token in unit token2 is desired
+#        0 if branch to 1done in unit token2 is desired
+#       PLUS the same variables passed in the same order!
+
 def nm_numtoken(endch, dpnt, vlth, delim, otype, oparen, value):
-    # Called as a major subroutine of token. The variables
-    # -n_ttype-, and -n_pnt- are globals and are already set.
-    #
-    # See unit nm_get_token for a better explanation of the variables.
-    # Returns:
-    #       -1 if branch to 1token in unit token2 is desired
-    #        0 if branch to 1done in unit token2 is desired
-    #       PLUS the same variables passed in the same order!
-    #***********************************************************
-    # Check if this token is a numeric variable in an expression.
-    #***********************************************************
+    # floating: value # expression value
 
     global n_tvarptr
     global n_char
@@ -1193,23 +1248,26 @@ def nm_numtoken(endch, dpnt, vlth, delim, otype, oparen, value):
     global n_targcnt
     global n_vdimen
     global n_ttype
-    global n_stkptr
-    global n_linesp
+    global n_token
+    global n_char
 
     print_debug("nm_numtoken Entering: endch={} n_pnt={} dpnt={} vlth={} delim='{}' otype={} oparen={} value={}".format(endch, n_pnt, dpnt, vlth, delim, otype, oparen, value))
-#--    print_debug("n_pnt={} dpnt={} n_tvarptr={}".format(n_pnt, dpnt, n_tvarptr))
-#--    print_debug("n_char[n_tvarptr]={}".format(n_char[n_tvarptr]))
-    n_vinfo = -1                  # NOTDONEYET - n_vinfo
-    if dpnt > n_tvarptr and n_char[n_tvarptr] <= "z":
-        nm_findnvar(n_tvarptr, dpnt - n_tvarptr)
+    print_debug("n_pnt={} dpnt={} n_tvarptr={}".format(n_pnt, dpnt, n_tvarptr))
+    print_debug("n_char[n_tvarptr]={}".format(n_char[n_tvarptr]))
+    n_vinfo = -1                  # findnvar not found token.
+    wary = None
+    if dpnt > n_tvarptr and n_char[n_tvarptr].isalpha():
+        print_debug("nm_numtoken - calling nm_findnvar({},{})".format(n_tvarptr, dpnt - n_tvarptr))
+        wary = nm_findnvar(n_tvarptr, dpnt - n_tvarptr)
+        print_debug("NM_NUMTOKEN nm_findnvar... wary={}".format(wary))
     # fi
-#--    print_debug("n_pnt={} dpnt={} n_tvarptr={} n_vdimen={} n_vinfo={}".format(n_pnt, dpnt, n_tvarptr, n_vdimen, n_vinfo))
+    print_debug("n_pnt={} dpnt={} n_tvarptr={} n_vdimen={}".format(n_pnt, dpnt, n_tvarptr, n_vdimen))
     # Found an array element. Save state and get the expressions for the arguments.
-    if n_vdimen > 0 and n_vinfo != -1:                  # NOTDONEYET - n_vinfo
+    if wary is not None and n_vdimen > 0:                  # findnvar found - and dimensions on it.
 #--        NOTDONEYET('nm_numtoken - goto delim == "(", x, er("baddimen", n_vdimen, 0)')
+        print_debug("NM_NUMTOKEN n_vdimen > 0 wary={}".format(wary))
         if delim != "(":
             print_error_no_line("bad dimension, n_vdimen={}, delim != '('".format(n_vdimen,delim))
-            n_stkptr = n_linesp
             return None, endch, dpnt, vlth, delim, otype, oparen, value
         # fi
         n_targcnt = 0
@@ -1220,48 +1278,61 @@ def nm_numtoken(endch, dpnt, vlth, delim, otype, oparen, value):
         n_tstart = n_pnt
         n_tparen = n_tlength = 0
     # Return to start of token loop.
-#--        print_debug("nm_numtoken #6 return -1 endch={} dpnt={} vlth={} delim='{}' otype={} oparen={} value={}".format(endch, dpnt, vlth, delim, otype, oparen, value))
+        print_debug("nm_numtoken #6 return -1 endch={} dpnt={} vlth={} delim='{}' otype={} oparen={} value={}".format(endch, dpnt, vlth, delim, otype, oparen, value))
         return -1, endch, dpnt, vlth, delim, otype, oparen, value
     # Found a single numerical variable. Add its "zvar(X)" name to the expression being formed in "n_token".
-    elif n_vinfo != -1:                   # NOTDONEYET - n_vinfo
-        if nm_subnvar(0, 0, 0) is None:
-#--            print_debug("nm_numtoken #7 return None endch={} dpnt={} vlth={} delim='{}' otype={} oparen={} value={}".format(endch, dpnt, vlth, delim, otype, oparen, value))
-            n_stkptr = n_linesp
-            return None, endch, dpnt, vlth, delim, otype, oparen, value
+    # findnvar found.
+    elif wary is not None and wary[numarry_values] is not None:
+        print_debug("NM_NUMTOKEN wary is not None, wary={}".format(wary))
+        print_debug("NM_NUMTOKEN wary[numarry_values]={} is not None".format(wary[numarry_values]))
+        if wary[numarry_value_type] == 0:       # This variable is a number.
+            print_debug("NM_NUMTOKEN type(wary[numarry_values][0])={} is not str".format(type(wary[numarry_values][0])))
+            if nm_subnvar(wary, 0, 0, 0) is None:
+                print_debug("nm_numtoken #7 return None endch={} dpnt={} vlth={} delim='{}' otype={} oparen={} value={}".format(endch, dpnt, vlth, delim, otype, oparen, value))
+                return None, endch, dpnt, vlth, delim, otype, oparen, value
+            # fi
+        else:
+            print_debug("NM_NUMTOKEN wary value is str, wary={}".format(wary))
+            print_debug("n_token='{}' n_char='{}'".format(n_token, n_char))
+#--            if nm_addtoken(n_tvarptr, dpnt - n_tvarptr) is None:
+#--                return None, endch, dpnt, vlth, delim, otype, oparen, value
+#--            # fi
+            print_debug("n_token='{}' n_char='{}'".format(n_token, n_char))
         # fi
     # Symbol is not a numeric variable. Add it to the expression unchanged.
     else:
+        print_debug("NM_NUMTOKEN wary is None, wary={}".format(wary))
+        print_debug("n_pnt={} dpnt={} n_tvarptr={} n_vdimen={}".format(n_pnt, dpnt, n_tvarptr, n_vdimen))
+        print_debug("n_token='{}' n_char='{}'".format(n_token, n_char))
         if nm_addtoken(n_tvarptr, dpnt - n_tvarptr) is None:
-#--            print_debug("nm_numtoken #8 return None endch={} dpnt={} vlth={} delim='{}' otype={} oparen={} value={}".format(endch, dpnt, vlth, delim, otype, oparen, value))
-            n_stkptr = n_linesp
+            print_debug("nm_numtoken #8 return None endch={} dpnt={} vlth={} delim='{}' otype={} oparen={} value={}".format(endch, dpnt, vlth, delim, otype, oparen, value))
             return None, endch, dpnt, vlth, delim, otype, oparen, value
         # fi
     # fi
 
-#--    print_debug("nm_numtoken #9 n_token='{}' endch={} n_pnt={} dpnt={} vlth={} delim='{}' otype={} oparen={} value={}".format(n_token, endch, n_pnt, dpnt, vlth, delim, otype, oparen, value))
+    print_debug("nm_numtoken #9 n_token='{}' endch={} n_pnt={} dpnt={} vlth={} delim='{}' otype={} oparen={} value={}".format(n_token, endch, n_pnt, dpnt, vlth, delim, otype, oparen, value))
 
     # Count parenthesis level in expression.
     if delim == "(" or delim == "{":
-#--        print_debug("nm_numtoken #9a left parenthesis or brace")
+        print_debug("nm_numtoken #9a left parenthesis or brace")
         n_tparen = n_tparen + 1
     elif delim == ")" or delim == "}": # or delim == "]"
-#--        print_debug("nm_numtoken #9b left parenthesis or brace")
+        print_debug("nm_numtoken #9b left parenthesis or brace")
         n_tparen = n_tparen - 1
     # fi
     # End of subexpression. Evaluate it.
 
     if delim == 0 or n_tparen < 0 or (n_tparen == 0 and (delim == "," or delim == ";" or delim == endch)):
-#--        print_debug("nm_numtoken #9c delim='{}' n_tparen={}".format(delim,n_tparen))
+        print_debug("nm_numtoken #9c delim='{}' n_tparen={}".format(delim,n_tparen))
         value = nm_eval(n_tstart, dpnt - n_tstart)
         if value is None:
-#--            print_debug("nm_numtoken #10 return None endch={} dpnt={} vlth={} delim='{}' otype={} oparen={} value={}".format(endch, dpnt, vlth, delim, otype, oparen, value))
-            n_stkptr = n_linesp
+            print_debug("nm_numtoken #10 return None endch={} dpnt={} vlth={} delim='{}' otype={} oparen={} value={}".format(endch, dpnt, vlth, delim, otype, oparen, value))
             return None, endch, dpnt, vlth, delim, otype, oparen, value
         # fi
     # End of expression. Return its value.
         if n_ttype == t_exp:
     # Exit token loop.
-#--            print_debug("nm_numtoken #11 return 0 endch={} dpnt={} vlth={} delim='{}' otype={} oparen={} value={}".format(endch, dpnt, vlth, delim, otype, oparen, value))
+            print_debug("nm_numtoken #11 return 0 endch={} dpnt={} vlth={} delim='{}' otype={} oparen={} value={}".format(endch, dpnt, vlth, delim, otype, oparen, value))
             return 0, endch, dpnt, vlth, delim, otype, oparen, value
         # fi
     # Have an argument for a variable. Store it.
@@ -1270,9 +1341,8 @@ def nm_numtoken(endch, dpnt, vlth, delim, otype, oparen, value):
         NOTDONEYET("nm_numtoken - do      restore(s.tinfo, l.tinfo)")
         if n_targcnt == 2:
             print_error_no_line('too many args, n_targcnt==2')
-            n_stkptr = n_linesp
             return None, endch, dpnt, vlth, delim, otype, oparen, value
-        # fi 
+        # fi
         n_targcnt = n_targcnt + 1
         n_targ.append(value)
     # If more arguments, get next one.
@@ -1296,9 +1366,9 @@ def nm_numtoken(endch, dpnt, vlth, delim, otype, oparen, value):
 #--            NOTDONEYET("nm_numtoken - goto n_targ[1] < 1 or n_targ[2] < 1, er('cnofind', n_targ[1], n_targ[2]), x")
             if n_targ[1] < 1 or n_targ[2] < 1:
                 print_error_no_line('cannot be found n_targ[1]={} n_targ[2]={}'.format(n_targ[1], n_targ[2]))
-                n_stkptr = n_linesp
                 return None, endch, dpnt, vlth, delim, otype, oparen, value
             # fi
+            print_debug("nm_get_token#b - calling nm_findcvar")
             vlth, value = nm_findcvar(n_tvarptr, dpnt - n_tvarptr, n_targ[1], n_targ[2])
     # If there is no arguments (not indices) to this character var
     # array element, then substitute the value.
@@ -1307,7 +1377,6 @@ def nm_numtoken(endch, dpnt, vlth, delim, otype, oparen, value):
             if n_char[dpnt + 1] != o76 or n_char[dpnt + 2] != o61:
                 if nm_subcvar(n_tvarptr, n_pnt - n_tvarptr, 0, 0, 0) is None:
                     print_debug("nm_numtoken #13 return None")
-                    n_stkptr = n_linesp
                     return None, endch, dpnt, vlth, delim, otype, oparen, value
                 # fi
                 NOTDONEYET("nm_numtoken - do      restore(s.tinfo, l.tinfo)")
@@ -1329,9 +1398,8 @@ def nm_numtoken(endch, dpnt, vlth, delim, otype, oparen, value):
             NOTDONEYET("nm_numtoken - do      restore(s.tinfo, l.tinfo)")
             n_pnt = n_tvarptr
         else:
-            if nm_subnvar(n_targcnt, n_targ[1], n_targ[2]) is None:
+            if nm_subnvar(None, n_targcnt, n_targ[1], n_targ[2]) is None:   # wary for variable.
                 print_debug("nm_numtoken #14 return None")
-                n_stkptr = n_linesp
                 return None, endch, dpnt, vlth, delim, otype, oparen, value
             # fi
         # fi
@@ -1340,10 +1408,9 @@ def nm_numtoken(endch, dpnt, vlth, delim, otype, oparen, value):
         return -1, endch, dpnt, vlth, delim, otype, oparen, value
     # Not end of expression. Add delimiter to the expression being formed in n_token.
     else:
-#--        print_debug("nm_numtoken #9d dpnt={} n_pnt={}".format(dpnt,n_pnt))
+        print_debug("nm_numtoken #9d dpnt={} n_pnt={}".format(dpnt,n_pnt))
         if nm_addtoken(dpnt, n_pnt - dpnt) is None:
             print_debug("nm_numtoken #16 return None")
-            n_stkptr = n_linesp
             return None, endch, dpnt, vlth, delim, otype, oparen, value
         # fi
     # fi
@@ -1353,29 +1420,19 @@ def nm_numtoken(endch, dpnt, vlth, delim, otype, oparen, value):
 #   End of nm_numtoken
 
 #=============================================================================
+# Subroutine to nm_get_token. Add the string to the end of the n_token buffer.
+# String is in the line buffer with pointer and length as passed.
 # strptr          # pointer to string
 # strlen          # length of string
-#
-# Return None if error occurred, and should return where called.
+# Returns: None if error occurred.
 
 def nm_addtoken(strptr, strlen):
-# Subroutine to nm_get_token.
-# Add the string to the end of the n_token buffer.
-# String is in the line buffer with pointer and length as passed.
 
     global n_tlength
     global n_token
     global n_char
-    global n_stkptr
-    global n_linesp
 
 #--    print_debug("nm_addtoken - Entering: strptr={} strlen={}".format(strptr,strlen))
-#--    NOTDONEYET("nm_addtoken - goto n_tlength + strlen > maxtok, er('overflow', 'token'), x")
-    if n_tlength + strlen > maxtok:
-        print_error_no_line("n_token overflow n_token='{}'".format(n_token))
-        n_stkptr = n_linesp
-        return None
-    # fi
 #--    print_debug("nm_addtoken - n_token='{}' strptr={} + strlen={}".format(n_token, strptr, strlen))
     if n_tlength == 0:
         n_token = None
@@ -1392,69 +1449,67 @@ def nm_addtoken(strptr, strlen):
 #   End of nm_addtoken
 
 #=============================================================================
+# Check if the symbol starting at "start" for "lth" chars is the name of a
+# numeric variable. If so, return its name in "vchar" and its information in
+# "n_vinfo".
 # start           # pointer to symbol
 # lth             # symbol length in chars
-def nm_findnvar(start, lth):
-# Check if the symbol starting at "start" for "lth" chars
-# is the name of a numeric variable. If so, return its
-# name in "vchar" and its information in "n_vinfo". If
-# not found, set "n_vinfo" to -1.
-#--        ptr             # symbol table entry number
-#--        i               # loop index
-# Exit if too many chars.
+# Returns:
+#   None if no name. And n_vinfo = -1.
+#   w_array if found.
 
+def nm_findnvar(start, lth):
     global n_maclev
-    global n_vchars
-    global n_vname
     global n_char
+    global n_cvdef
 
     print_debug("nm_findnvar - Entering start={} lth={}".format(start,lth))
-#--    print_debug("start={} lth={} n_vchars={}".format(start,lth,n_vchars))
-    n_vinfo = -1                  # NOTDONEYET - n_vinfo
-    n_vname = ''
-    if lth > n_vchars:
-        print_debug("nm_findnvar #7 exiting")
-        return
-    # fi
-    # Get the symbol.
-#--    print_debug("nm_findnvar type(n_char)={} n_char='{}' start={} lth={} n_char[..]='{}'".format(type(n_char),n_char,start,lth, n_char[start:start+lth]))
-    n_vname = n_char[start:start+lth]
-    # Find the symbol with the same name and closest macro
-    # level in the symbol table.
+    n_vinfo = -1                  # flag symbol not found.
+    # Get the symbol name.
+    print_debug("nm_findnvar n_char='{}' start={} lth={} n_char[..]='{}'".format(n_char,start,lth, n_char[start:start+lth]))
+    vname = n_char[start:start+lth]
+    # Find the symbol with the same name and closest macro to current macro level.
     i = n_maclev
-    while i > 0:
-        print_debug("nm_findnvar - n_vname={} i={} n_nsymb={} n_nvdef={}".format(n_vname,i,n_nsymb,n_nvdef))
-        NOTDONEYET("nm_findnvar - findsa  n_vname + i, s, n_nsymb(1); n_nvdef, 2, 1, 10, ptr")
-        ptr = -1    # NOTDONEYET - due to above and below
-        if ptr >= 0:
-            NOTDONEYET("nm_findnvar - transfr s, n_nsymb(ptr) + 1; n_vinfo; 1")
-            # Symbol found, return its information.
-            print_debug("nm_findnvar #8 exiting")
-            return
-        # fi
+    while i >= 0:
+        print_debug("nm_findnvar - vname={} i={} n_cvdef={}".format(vname,i,n_cvdef))
+        for v in n_cvdef:
+            print_debug("nm_findnvar - v={}".format(v))
+            if v[0] == vname and v[numarry_maclevel] == i and v[numarry_dimensions] == 0:
+                # matches!
+                print_debug("nm_findnvar - matches v[numarry_values]={}".format(v[numarry_values]))
+                print_debug("nm_findnvar - v[numarry_values][0]={}".format(v[numarry_values][0]))
+                print_debug("nm_findnvar - type(v[numarry_values][0])={}".format(type(v[numarry_values][0])))
+#--                if type(v[numarry_values][0]) is not str:
+#--                    n_vinfo = 0
+#--                    return v                            # Return its information.
+#--                # fi
+                n_vinfo = 0
+                return v                            # Return its information.
+            # fi
+        # rof
         i = i - 1
     # elihw
-#--    print_debug("nm_findnvar #9 exiting")
-    return
+    return None
 #   End of nm_findnvar
 
 #=============================================================================
+# Check if the symbol starting at "start" for "lth" char codes is the name of
+# a character variable. Put name in "vchar". Return its length in chars, and
+# symbol table entry. If not found, set "n_vinfo" to -1, and return None.
+#
+# If arg1 == arg2 == -1, then find the first character variable with given name.
+#
+# Otherwise, arg1 and arg2 give indices for the char var array entry desired.
+# Scalar entries are (1, 1), 1d entries are (x, 1) and 2d entries are (x, y).
+#
 # start           # pointer to symbol
 # lth             # symbol length in character codes
 # arg1, arg2      # character array variable desired
+# Returns:
+#   -1 if not found, else number of characters in name.
+#   None if no name, and n_vinfo = -1.  w_array if found.
+
 def nm_findcvar(start, lth, arg1, arg2):
-    # Check if the symbol starting at "start" for "lth" char
-    # codes is the name of a character variable. If so, put
-    # its name (in lower case) in "vchar" and its information
-    # in "n_vinfo", and return its length in chars, and symbol
-    # table entry number. If not found, set "n_vinfo" to -1.
-    #
-    # If arg1 == arg2 == -1, then find the first character
-    # variable with the given name.
-    #
-    # Otherwise, arg1 and arg2 give the indices for the char
-    # var array entry desired. Scalar entries are (1, 1),
-    # 1d entries are (x, 1) and 2d entries are (x, y).
 #--            vlth            # variable name length in chars
 #--            ptr             # symbol table entry number
 #--            i               # loop index
@@ -1465,44 +1520,57 @@ def nm_findcvar(start, lth, arg1, arg2):
     global n_maclev
     global n_vsize1
     global n_vsize2
-    global n_stkptr
-    global n_linesp
-    global n_vname
-    global n_vchars
     global n_cvdef
+    global n_vinfo
 
     print_debug("nm_findcvar - Entering: start={} lth={} arg1={} arg2={}".format(start, lth, arg1, arg2))
-    n_vname = ''
-    n_vinfo = -1                  # NOTDONEYET - n_vinfo
-    lth = min(lth, 2 * n_vchars)
-    # Get the symbol (without shift codes).
-    i = 2
-    while i <= lth:
-        n_vname[i / 2] = n_char[start + i - 1]
-        i = i + 2
-    # elihw
+    print_debug("nm_findcvar - n_token='{}' n_tlength={} n_lastend={} n_pnt={} n_tparen={} n_br={} n_tvarptr={}".format( n_token, n_tlength, n_lastend, n_pnt, n_tparen, n_br, n_tvarptr))
+    print_debug("nm_findcvar - n_char='{}' n_macnum={} n_tstart={} n_targcnt={} n_targ={} n_vdimen={}".format( n_char, n_macnum, n_tstart, n_targcnt, n_targ, n_vdimen))
+    print_debug("nm_findcvar#1 - n_cvdef={}".format(n_cvdef))
+# NOTDONEYET
+    n_vinfo = -1                    # NOTDONEYET - n_vinfo
+    vname = n_token
+    print_debug("nm_findcvar#1b - vname={}".format(vname))
     # Look for a symbol with the longest name that matches the first chars of this symbol.
-    vlth = lth /2
-    found = False
-    while vlth >= 1:
-        NOTDONEYET("nm_findcvar - findsa  n_vname, s, csymb(1); n_cvdef, 2, 1, 10, ptr, lmask(6 * n_vchars)")
-        ptr = -1    # NOTDONEYET - due to above and below
-        if ptr >= 0:
-            found = True
+    while len(vname) >= 1:
+        wary = None
+        for v in n_cvdef:           # foreach vname in w_array
+            if v[numarry_name] == vname:
+                if arg1 == -1 and arg2 == -1:   # Any item, assume any dimensions (?)
+                    print_debug("nm_findcvar #2 return {}, {}".format(len(vname), v))
+                    n_vinfo = 0
+                    return len(vname), v
+                # fi
+                elif arg2 == 0 and v[numarry_dimensions] == 1 and arg1 == v[numarry_indexes][0]:
+                    print_debug("nm_findcvar #3 return {}, {}".format(len(vname), v))
+                    n_vinfo = 0
+                    return len(vname), v
+                elif (v[numarry_dimensions] == 2 and arg1 == v[numarry_indexes][0] and
+                      arg2 == v[numarry_indexes][1]):
+                    print_debug("nm_findcvar #4 return {}, {}".format(len(vname), v))
+                    n_vinfo = 0
+                    return len(vname), v
+                else:           # Not matching ?!
+                    print_debug("nm_findcvar #5 Not matching dimensions (??) {}, {}".format(len(vname), v))
+                # fi
+            # fi
+        # rof
+        if wary is not None:
             break
         # fi
-        n_vname[vlth] = 0
-        vlth = vlth - 1
+        vname = vname[:-1]
     # elihw
-    if not found:
-        print_debug("nm_findcvar #5 return -1, -1")
-        return -1, -1           # none found.
+#-----------------------------------------------------------------------------
+    if len(vname) <= 0:
+        print_debug("nm_findcvar #5 return -1, None")
+        return -1, None             # Not found.
     # fi
+
     # Find the symbol with the same name and closest macro level in the symbol table.
     i = n_maclev
     found = False
     while i >= 0:
-        NOTDONEYET("nm_findcvar - findsa  n_vname + i, s, csymb(1); n_cvdef, 2, 1, 10, ptr")
+        NOTDONEYET("nm_findcvar - findsa  vname + i, s, csymb(1); n_cvdef, 2, 1, 10, ptr")
         ptr = -1    # NOTDONEYET - due to above and below
         if ptr >= 0:
             found = True
@@ -1511,18 +1579,20 @@ def nm_findcvar(start, lth, arg1, arg2):
         i = i - 1
     # elihw
     if not found:
-        print_debug("nm_findcvar #6 return -1, -1")
-        return -1, -1  # none found
+        print_debug("nm_findcvar #6 return -1, None")
+        return -1, None             # Not found.
     # fi
     # Symbol found, get its information and return its length
     # if searching for first [(-1, -1) case] or have found the desired entry already.
     NOTDONEYET("nm_findcvar - transfr s, csymb(ptr) + 1; n_vinfo; 1")
     if arg1 == -1 and arg2 == -1:
-        print_debug("nm_findcvar #7 return {}, {}".format(2*vlth, ptr))
-        return 2 * vlth, ptr
+        print_debug("nm_findcvar #7 return {}, {}".format(vlth, ptr))
+        n_vinfo = 0
+        return vlth, ptr
     elif arg1 == n_vsize1 and arg2 == n_vsize2:
-        print_debug("nm_findcvar #8 return {}, {}".format(2*vlth, ptr))
-        return 2 * vlth, ptr
+        print_debug("nm_findcvar #8 return {}, {}".format(vlth, ptr))
+        n_vinfo = 0
+        return vlth, ptr
     # fi
     # Search forward and backwards from the first found entry for the correct character var array entry.
     ptrd = ptru = ptr
@@ -1531,7 +1601,7 @@ def nm_findcvar(start, lth, arg1, arg2):
         ptru = ptru + 1
         if ptrd > 0:
             NOTDONEYET("nm_findcvar - transfr s, csymb(ptrd); newname; 1")
-            if newname == n_vname + i:
+            if newname == vname + i:
                 NOTDONEYET("nm_findcvar - transfr s, csymb(ptrd) + 1; n_vinfo; 1")
                 ptr = ptrd
                 if n_vsize1 == arg1 and n_vsize2 == arg2:
@@ -1541,7 +1611,7 @@ def nm_findcvar(start, lth, arg1, arg2):
         # fi
         if ptru <= n_cvdef:
             NOTDONEYET("nm_findcvar - transfr s, csymb(ptru); newname; 1")
-            if newname == n_vname + i:
+            if newname == vname + i:
                 NOTDONEYET("nm_findcvar - transfr s, csymb(ptru) + 1; n_vinfo; 1")
                 ptr = ptru
                 if n_vsize1 == arg1 and n_vsize2 == arg2:
@@ -1553,98 +1623,93 @@ def nm_findcvar(start, lth, arg1, arg2):
 #--    NOTDONEYET("nm_findcvar - goto ptrd <= 0 and ptru > n_cvdef, er('cnofind', arg1, arg2), x")
     if ptrd <= 0 and ptru > n_cvdef:
         print_error_no_line('character variable - ptrd={} arg1={} arg2={}'.format(arg1, arg2))
-        n_stkptr = n_linesp
-        return -1, -1  # none found
+        return -1, None                 # Not found
     # fi
-    print_debug("nm_findcvar #9 return {}, {}".format(2*vlth, ptr))
-    return 2 * vlth, ptr
+    print_debug("nm_findcvar #9 return {}, {}".format(vlth, ptr))
+    n_vinfo = 0
+    return vlth, ptr
 #   End of nm_findcvar
 
 #=============================================================================
+# Add the zvarXXX name for numeric variable or array element with information
+# in n_vinfo to the expression being formed on in n_token. "argcnt" is number
+# of array arguments, "arg1" and "arg2" are argument values.
+#
+# wary            # which w_array to change.
 # argcnt          # number of array arguments
 # arg1, arg2      # argument values
-def nm_subnvar(argcnt, arg1, arg2):
-# Add the zvar(X) name for the numeric variable or array
-# element with information in "n_vinfo" to the expression
-# being formed on in "n_token". "argcnt" is the number of
-# array arguments, "arg1" and "arg2" are argument values.
-#--        varnam          # new string
-#--        vlth            # length of new string
 
+def nm_subnvar(wary, argcnt, arg1, arg2):
     global n_tlength
     global n_token
-    global n_vptr
     global n_vdimen
     global n_vsize1
     global n_vsize2
-    global n_stkptr
-    global n_linesp
+    global the_zvars
 
     print_debug("nm_subnvar - Entering: argcnt={} arg1={} arg2={}".format(argcnt, arg1, arg2))
     # Check if proper number of arguments, and that arguments have proper values.
-#--    NOTDONEYET("nm_subnvar - goto argcnt == n_vdimen, x, er('baddimen', n_vdimen, argcnt)")
-    if argcnt != n_vdimen:
-        print_error_no_line('bad dimen, argcnt={} n_vdimen={}'.format(argcnt,n_vdimen))
-        n_stkptr = n_linesp
+    if argcnt != wary[numarry_dimensions]:
+        print_error_no_line('bad dimen, argcnt={} wary[numarry_dimensions]={}'.format(argcnt,wary[numarry_dimensions]))
         return None
     # fi
     if argcnt > 0:
-#--        NOTDONEYET("nm_subnvar - goto v_in(1, arg1, n_vsize1), x, er('bounds', arg1, n_vsize1)")
-        if v_in(1, arg1, n_vsize1) == 0:
-            print_error_no_line('bounds error, argcnt={}, arg1={} n_vsize1={}'.format(argcnt, arg1, n_vsize1))
-            n_stkptr = n_linesp
+        if v_in(1, arg1, wary[numarry_dimensions][0]):
+            print_error_no_line('bounds error, argcnt={}, arg1={} wary[numarry_indexes][0]={}'.format(argcnt, arg1, wary[numarry_indexes][0]))
             return None
         # fi
-    #
     # fi
     if argcnt > 1:
-#--        NOTDONEYET("nm_subnvar - goto v_in(1, arg2, n_vsize2), x, er('bounds', arg2, n_vsize2)")
-        if v_in(1, arg2, n_vsize2) == 0:
-            print_error_no_line('bounds error, arg2={} n_vsize2={}'.format(arg2, n_vsize2))
-            n_stkptr = n_linesp
+        if v_in(1, arg2, wary[numarry_dimensions][1]):
+            print_error_no_line('bounds error, argcnt={}, arg2={} wary[numarry_indexes][1]={}'.format(argcnt, arg1, wary[numarry_indexes][1]))
             return None
         # fi
     # fi
-    # Set up the new string.
-    NOTDONEYET("nm_subnvar - packc   n_vdimen - 1, varnam, vlth")
-    NOTDONEYET("nm_subnvar - packc   zvar(@0s, n_vptr + 1@1)")
-    NOTDONEYET("nm_subnvar - packc   zvar(@0s, n_vptr + arg1@1)")
-    NOTDONEYET("nm_subnvar - packc   zvar(@0s, n_vptr + n_vsize2 * (arg1 - 1) + arg2@1)")
-    # Add the new string to the expression in "n_token".
-#--    NOTDONEYET("nm_subnvar - goto n_tlength + vlth > maxtok, er('overflow', 'n_token'), x")
-    if n_tlength + vlth > maxtok:
-        print_error_no_line("overflow, too many tokens, n_token='{}' n_tlength={},vlth={},maxtok={}".format(n_token,n_tlength,vlth,maxtok))
-        n_stkptr = n_linesp
-        return None
+    # This can go to many dimensional array.
+    if argcnt == 0:
+        varnum = 0
+    elif argcnt == 1:
+        varnum = arg1 - 1
+    else:
+        varnum = (arg1 - 1) + wary[numarry_indexes][0] * (arg2 -1)
     # fi
-    n_token = n_token + varnam[0:vlth]
-    n_tlength = n_tlength + vlth
-    print_debug("nm_subnvar exiting")
+    # New zvar entry in calculate.py.
+    new_array = [wary, varnum]
+    calculate.zvar.append(new_array)
+    newzvar = 'zvar' + str(the_zvars)
+    # Create string.
+    if n_token is None or n_token == '':
+        n_token = newzvar
+    else:
+        n_token = n_token + newzvar
+    # fi
+    n_tlength = n_tlength + len(newzvar)
+    the_zvars = the_zvars + 1           # Ready for next one.
+    print_debug("nm_subnvar created {} with zvar {} with wary={}".format(wary[numarry_name],newzvar,wary))
     return True
 #   End of nm_subnvar
 
 #=============================================================================
+# Substitute the value for the character variable name with information in
+# "n_vinfo". Replace the string starting at "start" for "lth" chars.
+# "argcnt" is the number of arguments, "arg1" and "arg2" are argument values.
+#
+# No arguments implies entire string.
+# 1  argument  implies {x, 100000}
+# 2  arguments implies y objects starting at object x.
+#
 # start           # start of old string
 # lth             # length of old string
 # argcnt          # number of array arguments
 # arg1, arg2      # argument values
+
 def nm_subcvar(start, lth, argcnt, arg1, arg2):
-    # Substitute the value for the character variable name
-    # with information in "n_vinfo". Replace the string starting
-    # at "start" for "lth" chars. "argcnt" is the number of
-    # arguments, "arg1" and "arg2" are the argument values.
-    #
-    # No arguments implies entire string.
-    # 1  argument  implies {x, 100000}
-    # 2  arguments implies y objects starting at object x.
 #--            cstart          # start of new string
 #--            clth            # length of new string
 
     global n_lchars
-    global n_vptr
+#--     global n_vptr
     global n_vlen
-    global n_stkptr
-    global n_linesp
     global n_char
 
     print_debug("nm_subcvar - Entering: start={} lth={} argcnt={} arg1={} arg2={}".format(start, lth, argcnt, arg1, arg2))
@@ -1652,13 +1717,11 @@ def nm_subcvar(start, lth, argcnt, arg1, arg2):
 #--    NOTDONEYET("nm_subcvar - goto argcnt > 0 and arg1 <= 0, er('negcval', arg1), x")
     if argcnt > 0 and arg1 <= 0:
         print_error_no_line('negcval argcnt={} arg1={}'.format(argcnt,arg1))
-        n_stkptr = n_linesp
         return None
     # fi
 #--    NOTDONEYET("nm_subcvar - goto argcnt > 1 and arg2 <= 0, er('negcval', arg2), x")
     if argcnt > 1 and arg2 <= 0:
         print_error_no_line("negcval argcnt={} arg2={}".format(argcnt,arg2))
-        n_stkptr = n_linesp
         return None
     # fi
     if argcnt == 0:              # entire value
@@ -1672,11 +1735,6 @@ def nm_subcvar(start, lth, argcnt, arg1, arg2):
     # fi
     # Substitute the new string.
 #--    NOTDONEYET("nm_subcvar - goto n_lchars - lth + clth >= 10 * l.line, er('linelong'), x")
-    if n_lchars - lth + clth >= 10 * l_line:
-        print_error_no_line('line too long')
-        n_stkptr = n_linesp
-        return None
-    # fi
 #--    tmp_move = n_char[start+lth:start+n_lchars - start - lth + 2]
     tmp_move = n_char[start+lth:n_lchars - start - lth + 2]
     tmp_start = n_char[0:start+clth]
@@ -1691,24 +1749,23 @@ def nm_subcvar(start, lth, argcnt, arg1, arg2):
 #   End of nm_subcvar
 
 #=============================================================================
+# Evaluate expression in "n_token" and return its value. All defined numeric
+# variables have already been substituted. Update value of compile-time variable
+# "time" to length of the selected staff.
+#
+# If there is an error in the expression, set n_token to the string staring at
+# "start" for "lth" characters from the current line. This makes the error
+# message more readable.
+#
 # integer:  start         # start of expression
 # integer:  lth           # length of expression
+
 def nm_eval(start, lth):
-    # Evaluate the expression in "n_token" and return its value.
-    # All defined numeric variables have already been
-    # substituted. Update the value of compile-time variable
-    # "time" to length of the selected staff.
-    #
-    # If there is an error in the expression, set n_token to the
-    # string staring at "start" for "lth" characters from the
-    # current line. This makes the error message more readable.
     #--        floating: value         # value of expression
 
     global n_tlength
     global n_token
     global n_stfson
-    global n_stkptr
-    global n_linesp
     global n_staffon
     global n_char
 
@@ -1731,7 +1788,6 @@ def nm_eval(start, lth):
 #--        print_error_no_line("eval gives error: {}".format(msg))
         p_formok = 0                  # Error of some sort.
         value = None
-        n_stkptr = n_linesp
     else:
         p_formok = -1                     # NOTDONEYET - set from above compute.
         value = x                       # NOTDONEYET - set from above compute.
@@ -1742,7 +1798,6 @@ def nm_eval(start, lth):
         n_tlength = lth
 #--        NOTDONEYET("nm_eval - goto er('badexpr', p_formok)")
 #--        print_error_no_line('bad expressionl - {}'.format(msg))
-        n_stkptr = n_linesp
         return None
     # fi
 #--    print_debug("nm_eval returning {}".format(value))
@@ -1750,9 +1805,10 @@ def nm_eval(start, lth):
 #   End of nm_eval
 
 #=============================================================================
+# Assign the value passed to the variable in "n_token".
 # floating: value         # value to assign
+
 def nm_assign(value):
-    # Assign the value passed to the variable in "n_token".
     #--        integer:  opnt          # place to save "n_pnt"
     #--                  olchars       # place to save "n_lchars"
     #--                  odelim        # place to save "n_lastend"
@@ -1762,8 +1818,6 @@ def nm_assign(value):
     global n_token
     global n_lastend
     global n_pnt
-    global n_stkptr
-    global n_linesp
 
     print_debug("nm_assign - Entering: value={}".format(value))
     # Save current line on stack.
@@ -1777,13 +1831,11 @@ def nm_assign(value):
     # Evaluate the expression.
     value = nm_get_token(t_exp, 1, -1)
     if value is None:
-        n_stkptr = n_linesp
         return None
     # fi
 #--    NOTDONEYET("nm_assign - goto n_lastend == 0, x, er('badchar', n_lastend)")
     if n_lastend != 0:
         print_error_no_line('bad character, n_lastend={}'.format(n_lastend))
-        n_stkptr = n_linesp
         return None
     # fi
     # Restore old line.
@@ -1797,10 +1849,11 @@ def nm_assign(value):
 #   End of nm_assign
 
 #=============================================================================
+# Replace the current value of the character variable with symbol table entry
+# "symbptr" with the string in "n_token".
 # symbptr         # pointer to symbol table entry
+
 def nm_setcvar(symbptr):
-    # Replace the current value of the character variable with
-    # symbol table entry "symbptr" with the string in "n_token".
     #--        owords          # old length in words
     #--        nwords          # new length in words
     #--        valptr          # local copy of "n_vptr"
@@ -1809,135 +1862,74 @@ def nm_setcvar(symbptr):
 
     global n_tlength
     global n_token
-    global n_vptr
+#--     global n_vptr
     global n_vlen
-    global n_stkptr
-    global n_linesp
-    global n_cvwrds
+#--     global n_cvwrds
     global n_cvdef
 
     print_debug("nm_setcvar - Entering: symbptr={}".format(symbptr))
-    # Get the symbol table entry, and find lengths in words.
-    # Note that a length of 0 chars requires 1 word. This
-    # prevents two value pointers being equal.
-    NOTDONEYET("nm_setcvar - transfr s, csymb(symbptr) + 1; n_vinfo; 1")
-    owords = int((n_vlen - 1) / 10) + 1
-    nwords = int((n_tlength - 1) / 10) + 1
-    valptr = n_vptr
-    symbols = n_cvdef
-    # Store the new value.
-#--    NOTDONEYET("nm_setcvar - goto n_cvwrds - owords + nwords > l.cvals, er('overflow', 'char var'), x")
-    if n_cvwrds - owords + nwords > l_cvals:
-        print_error_no_line('overflow, character variables')
-        n_stkptr = n_linesp
-        return None
-    # fi
-    NOTDONEYET("nm_setcvar - transfr s, s.cvals + valptr + owords; s, s.cvals + valptr + nwords; n_cvwrds - valptr - owords")
-    NOTDONEYET("nm_setcvar - transfr n_token; s, s.cvals + valptr; nwords")
-    n_cvwrds = n_cvwrds - owords + nwords
-    # Update the length in the symbol table.
-    n_vlen = n_tlength
-    NOTDONEYET("nm_setcvar - transfr n_vinfo; s, csymb(symbptr) + 1; 1")
-    # If number of words has changed, update the value pointers
-    # of other variables.
-    if owords != nwords and valptr + nwords < n_cvwrds:
-        NOTDONEYET("nm_setcvar - stoload nc1, s.csymb, l.csymb")
-        i = 1
-        while i <= symbols:
-            if vvseg2[2 * i] > valptr:
-                vvseg2[2 * i] = vvseg2[2 * i] - owords + nwords
-            # fi
-            i = i + 1
-        # elihw
-#--        NOTDONEYET("nm_setcvar - stoload nc1, 1, 1500")
-    # fi
-    print_debug("nm_setcvar exiting")
+    print_debug("nm_setcvar - n_tlength={} n_token={}".format(n_tlength,n_token))
+
+    symbptr[numarry_values] = [ n_token ]
+    print_debug("nm_setcvar exiting symbptr={}".format(symbptr))
     return True
 #   End of nm_setcvar
 
 #=============================================================================
+# Create a new character variable with name in "varnam". The array dimensions
+# are passed in dimen1, dimen2.
+#   If dimen1 == dimen2 == 0 then scalar character var
+#   If dimen1 != 0 and dimen2 == 0 then 1-d character var.
+#   If dimen1 != 0 and dimen2 != 0 then 2-d character var.
+# Arrays are stored in the character variable symbol table with the same name
+# but different values of n_vsize1 and n_vsize2.
+#
 # varnam          # name of new variable
 # dimen1, dimen2  # dimensions of character var to define
-def nm_makecvar(varnam, dimen1, dimen2):
-    # Create a new character variable with name in "varnam".
-    # The array dimensions are passed in dimen1, dimen2.
-    #       If dimen1 == dimen2 == 0 then scalar character var
-    #       If dimen1 != 0 and dimen2 == 0 then 1-d character var.
-    #       If dimen1 != 0 and dimen2 != 0 then 2-d character var.
-    # Arrays are stored in the character variable symbol table
-    # with the same name but different values of n_vsize1 and
-    # n_vsize2.
-    # Return its symbol table entry number.
-#--            ptr             # symbol table pointer
-#--            vsymb(2)        # symbol table entry
+# Return symbol table entry.
 
+def nm_makecvar(varnam, dimen1, dimen2):
     global n_maclev
-    global n_vptr
-    global n_vdimen
-    global n_vsize1
-    global n_vsize2
-    global n_vlen
-    global n_stkptr
-    global n_linesp
-    global n_cvwrds
     global n_cvdef
 
     print_debug("nm_makecvar - Entering: varnam={} dimen1={} dimen2={}".format(varnam, dimen1, dimen2))
     # Set up symbol table entry and find its place in table.
     n_vdimen = 0
+    dims = []
+    maxvs = 1
     # Set the character var dimension.
     if dimen1 != 0:
         if dimen2 == 0:
             n_vdimen = 1
+            dims = [ dimen1 ]
+            maxvs = int(dimen1)
         else:
             n_vdimen = 2
+            dims = [ dimen1, dimen2 ]
+            maxvs = int(dimen1 * dimen2)
         # fi
     # fi
-    # Loop through creating an entry for each element of the character string variable (array).
-    n_vsize1 = 1
-    while n_vsize1 <= max(1, dimen1):
-        n_vsize2 = 1
-        while n_vsize2 <= max(1, dimen2):
-            n_vptr = n_cvwrds
-            n_vlen = 0
-            vsymb[1] = varnam + n_maclev
-            vsymb[2] = n_vinfo                    # NOTDONEYET - n_vinfo
-            NOTDONEYET("nm_makecvar - findsa  vsymb[1], s, csymb(1); n_cvdef, 2, 1, 10, ptr")
-            ptr = -1    # NOTDONEYET - due to above and below
-            ptr = abs(ptr)
-            # Put the new entry into table.
-#--            NOTDONEYET("nm_makecvar - goto n_cvdef == maxcvar, er('manycvar'), x")
-            if n_cvwrds == l_cvals:
-                print_error_no_line('overflow, character variables')
-                n_stkptr = n_linesp
-                return None
-            # fi
-            NOTDONEYET("nm_makecvar - inserts vsymb[1], s, csymb(1); n_cvdef, 2, ptr")
-            ptr = -1    # NOTDONEYET - due to above and below (?)
-            n_cvdef = n_cvdef + 1
-            n_cvwrds = n_cvwrds + 1
-            n_vsize2 = n_vsize2 + 1
-        n_vsize1 = n_vsize1 + 1
-    # elihw
-    print_debug("nm_makecvar returning ptr={}".format(ptr))
-    return ptr
+    w_nums = [None for l in range(0,maxvs)]
+    w_ary = [varnam, n_maclev, n_vdimen, dims, 1, w_nums]   # Assume Character value(s). numarry_value_type
+    n_cvdef.append(w_ary)
+    print_debug("nm_makecvar returning w_ary={}  n_cvdef={}".format(w_ary,n_cvdef))
+    return w_ary
 #   End of nm_makecvar
 
 #=============================================================================
+# Get a range of objects starting with object number "stobj" for a length of
+# "nobj" objects from the value of character variable with info in "n_vinfo".
+# Returns a pointer to the starting character code, and length.
+# If starting object number is too large, this subroutine returns length of 0.
+#
+# Objects are strings separated by spaces, commas, brackets, or glissando
+# arrows that are not inside parentheses. A bracket itself is an object.
+# Separating spaces / commas are not included in object, but glissando arrow is.
+#
 # stobj           # starting object number
 # nobj            # number of objects
+
 def nm_getobj(stobj, nobj):
-    # Get a range of objects starting with object number "stobj"
-    # for a length of "nobj" objects from the value of the
-    # character variable with info in "n_vinfo". Returns a
-    # pointer to the starting character code, and the length in
-    # character codes. If the starting object number is too
-    # large, this subroutine returns a length of 0.
-    #
-    # Objects are strings separated by spaces, commas, brackets,
-    # or glissando arrows that are not inside parentheses.
-    # A bracket itself is an object. Separating spaces or
-    # commas are not included in an object, but the glissando arrow is.
 #--            obj             # current object number
 #--            paren           # parenthesis level
 #--            ptr             # character pointer
@@ -1947,7 +1939,7 @@ def nm_getobj(stobj, nobj):
 #--            chr             # char being examined
 #--            segment, vchar = nc1, 6  # chars of value
 
-    global n_vptr
+#--     global n_vptr
     global n_vlen
 
     print_debug("nm_getobj - Entering: stobj={} nobj={}".format(stobj, nobj))
@@ -2033,23 +2025,15 @@ def nm_getobj(stobj, nobj):
 #   End of nm_getobj
 
 #=============================================================================
-# info
+# Save "lth" words starting at storage location "start" if "start" is positive,
+# else save student vars starting at "-start".
+#
 # segmentf, start = info, 1, 30, s  # start location
 # segmentf, lth   = info, 31, 30    # number of words
+
 def nm_save(start, lth):
-    # Save "lth" words starting at storage location "start"
-    # if "start" is positive, else save student vars starting at "-start".
-
-    global n_stkptr
-    global n_linesp
-
     print_debug("nm_save - Entering")
 #--    NOTDONEYET("nm_save - goto n_stkptr + lth + 1 > l.stack, er('overflow', 'stack'), x")
-    if n_stkptr + lth + 1 > l_stack:
-        print_error_no_line('overflow stack')
-        n_stkptr = n_linesp
-        return None
-    # fi
     if start > 0:  # save storage
         NOTDONEYET("nm_save - transfr s, start; s, s.stack + n_stkptr; lth")
     else:    # save student vars
@@ -2062,26 +2046,19 @@ def nm_save(start, lth):
 #   End of nm_save
 
 #=============================================================================
+# Restore "nlth" words from stack and place starting at storage location
+# "nstart" or student var "-start". This checks that the start location and
+# length that was pushed on the stack match what is being asked for.
+#
 # nstart          # expected starting location
 # nlth            # expected length in words
+
 def nm_restore(nstart, nlth):
-    # Restore "nlth" words from stack and place starting at
-    # storage location "nstart" or student var "-start".
-    # This checks that the start location and length that was
-    # pushed on the stack match what is being asked for.
-#--            info
-#--             segmentf, start = info, 1, 30, s  # start location
-#--             segmentf, lth   = info, 31, 30    # number of words
-
-    global n_stkptr
-    global n_linesp
-
     print_debug("nm_restore - Entering: nstart={} nlth={}".format(nstart, nlth))
 
 #--    NOTDONEYET("nm_restore - goto n_stkptr == 0, er('badstack'), x")
     if n_stkptr == 0:
         print_error_no_line('badstack')
-        n_stkptr = n_linesp
         return None
     # fi
     NOTDONEYET("nm_restore - transfr s, s.stack + n_stkptr - 1; info; 1  # restore info")
@@ -2089,7 +2066,6 @@ def nm_restore(nstart, nlth):
     if start != nstart or lth != nlth:   # check if valid
 #--        NOTDONEYET("nm_restore - goto er('badstack')")
         print_error_no_line('bad stack')
-        n_stkptr = n_linesp
         return None
     # fi
     if start > 0:  # restore storage
@@ -2102,24 +2078,18 @@ def nm_restore(nstart, nlth):
 #   End of nm_restore
 
 #=============================================================================
+# Discard "nlth" words from stack that came from storage location "nstart".
+# This does the same checks as unit "restore" does.
+#
 # nstart          # expected starting location
 # nlth            # expected length in words
+
 def nm_discard(nstart, nlth):
-    # Discard "nlth" words from stack that came from storage
-    # location "nstart". This does the same checks as unit "restore" does.
-#--            info
-#--             segmentf, start = info, 1, 30, s  # start location
-#--             segmentf, lth   = info, 31, 30    # number of words
-
-    global n_stkptr
-    global n_linesp
-
     print_debug("nm_discard - Entering: nstart={} nlth={}".format(nstart, nlth))
 
 #--    NOTDONEYET("nm_discard - goto n_stkptr == 0, er('badstack'), x")
     if n_stkptr == 0:
         print_error_no_line('bad stack')
-        n_stkptr = n_linesp
         return None
     # fi
     NOTDONEYET("nm_discard - transfr s, s.stack + n_stkptr - 1; info; 1  # restore info")
@@ -2127,7 +2097,6 @@ def nm_discard(nstart, nlth):
     if start != nstart or lth != nlth:   # check if valid
 #--        NOTDONEYET("nm_discard - goto er('badstack')")
         print_error_no_line('bad stack')
-        n_stkptr = n_linesp
         return None
     # fi
     print_debug("nm_discard exiting")
@@ -2135,26 +2104,23 @@ def nm_discard(nstart, nlth):
 #   End of nm_discard
 
 #=============================================================================
+# Start processing a macro call to macro number "macn". Get macro arguments,
+# save current state, then jump to ml to process macro text.
+#
+# If this is a process, the first n_token has already been fetched. Get the
+# rest of the object and use it as the argument.
+#
+# For macros, "n_lastend" has the initial delimiter. Get arguments and check
+# that delimiters match.
+#
 # macn            # number of macro being called
-def nm_fndmacro(macn):
-    # Start processing a macro call to macro number "macn". Get macro arguments,
-    # save current state, then jump to ml to process macro text.
-    #
-    # If this is a process, the first n_token has already been
-    # fetched. Get the rest of the object and use it as the argument.
-    #
-    # For macros, "n_lastend" has the initial delimiter. Get
-    # arguments and check that delimiters match.
-#--            loc             # start of macro info in "minfo"
-#--            lwords          # number of words in current line
 
+def nm_fndmacro(macn):
     global n_lchars
     global n_macnum
     global n_inloop
     global n_inif
     global n_maclev
-    global n_stkptr
-    global n_linesp
     global n_nextwrd
 
     print_debug("nm_fndmacro - Entering: macn={}".format(macn))
@@ -2165,12 +2131,10 @@ def nm_fndmacro(macn):
     # Get the macro arguments.
     if margs[loc] < 0:
         if nm_readnote(loc) is None:
-            n_stkptr = n_linesp
             return None
         # fi
     elif margs[loc] > 0:
         if nm_gen_targs(loc) is None:
-            n_stkptr = n_linesp
             return None
         # fi
     # fi
@@ -2193,20 +2157,16 @@ def nm_fndmacro(macn):
 #   End of nm_fndmacro
 
 #=============================================================================
+# Get arguments for macro with info at "loc". For each argument, create a
+# character variable and initialize it to the argument read from the line.
+# Check that delimiters match those of the macro definition.
+#
 # loc             # start of macro info in "minfo"
-def nm_gen_targs(loc):
-    # Get arguments for macro with info at "loc". For each
-    # argument, create a character variable and initialize it
-    # to the argument read from the line. Check that delimiters
-    # match those of the macro definition.
-#--            arg             # argument counter
-#--            ptr             # character variable pointer
 
+def nm_gen_targs(loc):
     global n_lastend
     global n_pnt
     global n_mdelim0
-    global n_stkptr
-    global n_linesp
 
     print_debug("nm_gen_targs - Entering: loc={}".format(loc))
 
@@ -2214,29 +2174,24 @@ def nm_gen_targs(loc):
     if n_lastend != n_mdelim0[loc]:
 #--        NOTDONEYET("nm_gen_targs - goto er('badelim', n_mdelim0[loc], 0)")
         print_error_no_line("bad delimiter - , n_lastend={} n_mdelim0[loc]={}".format(n_lastend, n_mdelim0[loc]))
-        n_stkptr = n_linesp
         return None
     # fi
     # Now get each argument, checking that delimiters match.
     arg = 1
     while arg < marcs(loc):
         if nm_get_token(t_strng, n_pnt, n_mdelim(loc, arg)) is None:
-            n_stkptr = n_linesp
             return None
         # fi
         if n_lastend != n_mdelim(loc, arg):
 #--            NOTDONEYET("nm_gen_targs - goto er('badelim', n_mdelim[loc, arg], arg)")
             print_error_no_line("bad deliminator, n_lastend={} n_mdelim[loc, arg]={} arg={}".format(n_lastend,n_mdelim(loc, arg), arg))
-            n_stkptr = n_linesp
             return None
         # fi
         ptr = nm_makecvar(marg(loc, arg), 0, 0)
         if ptr is None:
-            n_stkptr = n_linesp
             return None
         # fi
         if nm_setcvar(ptr) is None:
-            n_stkptr = n_linesp
             return None
         # fi
         arg = arg + 1
@@ -2246,22 +2201,16 @@ def nm_gen_targs(loc):
 #   End of nm_gen_targs
 
 #=============================================================================
+# Remove any variables that were defined in this macro. Symbol table entries
+# need to be deleted, but value pointers don't have to be changed because
+# values are allocated sequentially.
+#
 # charvar         # -1 = kill character vars, 0 = numeric
-def nm_killvars(charvar):
-    # Remove any variables that were defined in this macro.
-    # Symbol table entries need to be deleted, but value
-    # pointers don't have to be changed because values are
-    # allocated sequentially.
-#--            level           # current macro level
-#--            nvars           # symbol table length
-#--            minptr          # smallest value pointer
-#--            i               # loop index
 
+def nm_killvars(charvar):
     global n_maclev
     global n_cvdef
-    global n_nvdef
-    global n_cvwrds
-    global n_nvwrds
+    global n_nvdef                                      # NOTDONEYET nvdef -> cvdef with type(str) check.
 
     print_debug("nm_killvars - Entering: charvar={}".format(charvar))
 
@@ -2272,7 +2221,7 @@ def nm_killvars(charvar):
         nvars = n_cvdef
         NOTDONEYET("nm_killvars - stoload nc1, s.csymb, l.csymb")
     else:
-        nvars = n_nvdef
+        nvars = n_nvdef                                 # NOTDONEYET nvdef -> cvdef with type(str) check.
         NOTDONEYET("nm_killvars - stoload nc1, s.n_nsymb, l.n_nsymb")
     # fi
     # Loop through table entries. Delete entries at current
@@ -2292,25 +2241,22 @@ def nm_killvars(charvar):
     if charvar and nvars != n_cvdef:
         n_cvdef = nvars
         n_cvwrds = minptr
-    elif not(charvar) and nvars != n_nvdef:
-        n_nvdef = nvars
+    elif not(charvar) and nvars != n_nvdef:             # NOTDONEYET nvdef -> cvdef with type(str) check.
+        n_nvdef = nvars                                 # NOTDONEYET nvdef -> cvdef with type(str) check.
         n_nvwrds = minptr
     # fi
     print_debug("nm_killvars exiting")
 #   End of nm_killvars
 
 #=============================================================================
-def nm_nextmacr():
-    # Get next line of macro text. If macro has ended, exit
-    # it and return to previous level.
-#--            loc             # start of macro info in "minfo"
+# Get next line of macro text. If macro has ended, exit it and return to
+# previous level.
 
+def nm_nextmacr():
     global n_lchars
     global n_lastend
     global n_macnum
     global n_nextwrd
-    global n_stkptr
-    global n_linesp
     global n_inmacro
     global n_inproc
 
@@ -2323,7 +2269,6 @@ def nm_nextmacr():
     # processing that notes line.
     if n_nextwrd >= mtext(loc) + mwords(loc):
         if nm_popmacro() is None:            # return to calling macro line
-            n_stkptr = n_linesp
             return None
         # fi
         if n_lastend == 0: # no more text on calling line
@@ -2332,7 +2277,6 @@ def nm_nextmacr():
             else:    # calling line was macro
 #--                NOTDONEYET("nm_nextmacr - goto nm_nextmacr  # get macro line")
                 if nm_nextmacr() is None:
-                    n_stkptr = n_linesp
                     return None         # get macro line
                 # fi
                 return True
@@ -2340,7 +2284,6 @@ def nm_nextmacr():
         else:    # there is more on calling line
 #--            NOTDONEYET("nm_nextmacr - goto notes(0)")
             if nm_notes(0) is None:
-                n_stkptr = n_linesp
                 return None
             # fi
             return True
@@ -2355,7 +2298,6 @@ def nm_nextmacr():
 #--        NOTDONEYET("nm_nextmacr - goto n_lchars, er('oops'), x  # end of line found?")
         if n_lchars < 0:
             print_error_no_line('oops')
-            n_stkptr = n_linesp
             return None
         # fi
         thiswrd = n_nextwrd
@@ -2366,19 +2308,15 @@ def nm_nextmacr():
 #   End of nm_nextmacr
 
 #=============================================================================
-def nm_popmacro():
-    # End of current macro has been reached. Pop this all
-    # info about this macro from the stack and return to
-    # the previous level.
-#--            lwords          # number of words in line
+# End of current macro has been reached. Pop this all info about this macro
+# from the stack and return to the previous level.
 
+def nm_popmacro():
     global n_lchars
     global n_macnum
     global n_inloop
     global n_inif
     global n_maclev
-    global n_stkptr
-    global n_linesp
 
     print_debug("nm_popmacro - Entering")
 
@@ -2387,27 +2325,23 @@ def nm_popmacro():
     if n_inif != 0:
 #--        NOTDONEYET("nm_popmacro - goto er('noend', '# fi')")
         print_error_no_line('no end for fi')
-        n_stkptr = n_linesp
         return None
     # fi
     if n_inloop != 0:
         while n_inloop > 0:  # clean up loop stack
             if nm_discard(s.mvars, l.mvars) is None:
-                n_stkptr = n_linesp
                 return None
             # fi
             n_inloop = n_inloop - 1
         # elihw
 #--        NOTDONEYET("nm_popmacro - goto er('noend', 'endloop')")
         print_error_no_line('no end for endloop')
-        n_stkptr = n_linesp
         return None
     # fi
     if n_inmacro != 0:
         n_inmacro = 0
 #--        NOTDONEYET("nm_popmacro - goto er('noendmac')")
         print_error_no_line('no end for macro')
-        n_stkptr = n_linesp
         return None
     # fi
     # Clear "n_inproc" if exiting a process.
@@ -2428,27 +2362,21 @@ def nm_popmacro():
 #   End of nm_popmacro
 
 #=============================================================================
+# Get the next note or other notes line object from the current line and use
+# it as an argument for the process with information at "loc". The first token
+# has already been fetched.
+#
+# Objects are strings separated by glissando arrows, spaces, commas, or brackets
+# that are not inside parentheses. A bracket itself is an object. Separating
+# spaces or commas are not included in an object, but the glissando arrow is.
+#
 # loc             # pointer to process information
-def nm_readnote(loc):
-    # Get the next note or other notes line object from the
-    # current line and use it as an argument for the process
-    # with information at "loc". The first token has already been fetched.
-    #
-    # Objects are strings separated by glissando arrows, spaces,
-    # commas, or brackets that are not inside parentheses.
-    # A bracket itself is an object. Separating spaces or
-    # commas are not included in an object, but the glissando
-    # arrow is.
-    #--        string(l.line)  # string being formed
-    #--        paren           # parenthesis level
-    #--        ptr             # character variable pointer
 
+def nm_readnote(loc):
     global n_tlength
     global n_token
     global n_lastend
     global n_pnt
-    global n_stkptr
-    global n_linesp
 
     print_debug("nm_readnote - Entering: loc={}".format(loc))
 
@@ -2473,7 +2401,6 @@ def nm_readnote(loc):
     # and delimiter to string, and get the next one.
         NOTDONEYET("nm_readnote - pack string(1), , @0a, string(1), 10 * l.line@1@0a, n_token, n_tlength@1@0a, n_lastend@1")
         if nm_get_token(t_space, n_pnt, -1) is None:
-            n_stkptr = n_linesp
             return None
         # fi
     # elihw
@@ -2489,11 +2416,9 @@ def nm_readnote(loc):
     # fi
     # Create the character variable and initialize it to the object just gotten.
     if nm_makecvar(marg(loc, 1), 0, 0) is None:
-        n_stkptr = n_linesp
         return None
     # fi
     if nm_setcvar(ptr) is None:
-        n_stkptr = n_linesp
         return None
     # fi
     print_debug("nm_readnote exiting")
@@ -2501,20 +2426,15 @@ def nm_readnote(loc):
 #   End of nm_readnote
 
 #=============================================================================
+# This processes notes lines. This may be called at the start or the middle of
+# a line. A notes line may or may not start with a staff select. If it is the
+# start of a notes line, and there is no staff select, then write out the
+# staves selected for the last notes line IF the previous line was not a notes
+# line. Check for staff select if new line.
+#
 # newln           # -1 if start of new line
+
 def nm_notes(newln):
-    #--        stf
-    #--        find # return for -find- and -search-
-    #--        dquote          # location of double quote mark
-    #--        squote          # location of single quote mark
-    #--        stfsent         # -1 if staff selects sent
-    # This processes notes lines.
-    # This may be called at the start or the middle of a line.
-    # A notes line may or may not start with a staff select.
-    # If it is the start of a notes line, and there is no staff
-    # select, then write out the staves selected for the last
-    # notes line IF the previous line was not a notes line.
-    # Check for staff select if new line.
 
     global n_lchars
     global n_tlength
@@ -2523,8 +2443,6 @@ def nm_notes(newln):
     global n_pnt
     global n_macname
     global n_stfson
-    global n_stkptr
-    global n_linesp
     global n_staffon
     global n_notes
 
@@ -2532,7 +2450,7 @@ def nm_notes(newln):
 
     while True:
         if newln >= 0:
-            break   
+            break
         # fi
         n_notes = -1                                                  # this is a notes line
         stfsent = 0                                                 # staff selects not sent yet
@@ -2558,7 +2476,6 @@ def nm_notes(newln):
             if find < 0:                                                # not a staff name
 #--                NOTDONEYET("nm_notes - goto er('badname', n_token)")
                 print_error_no_line("bad name, n_token='{}'".format(n_token))
-                n_stkptr = n_linesp
                 return None
             # fi
             n_stfson = n_stfson + 1
@@ -2567,19 +2484,16 @@ def nm_notes(newln):
                 break
             # fi
             if nm_get_token(t_strng, n_pnt, -1) is None:
-                n_stkptr = n_linesp
                 return None
             # fi
         # elihw
 #--        NOTDONEYET("nm_notes:", x, er("badchar", n_lastend)')
         if n_lastend != ":":
             print_error_no_line("bad character, n_lastend={} is not ':'".format(n_lastend))
-            n_stkptr = n_linesp
             return None
         # fi
         # Get next token.
         if nm_get_token(t_space, n_pnt, -1) is None:
-            n_stkptr = n_linesp
             return None
         # fi
         # Select staves in binary.
@@ -2598,7 +2512,6 @@ def nm_notes(newln):
     # elihw
     if newln >= 0:
         if nm_get_token(t_space, -1, -1) is None:
-            n_stkptr = n_linesp
             return None
         # fi
     # fi
@@ -2624,17 +2537,14 @@ def nm_notes(newln):
 #--            NOTDONEYET("nm_notes - goto n_stfson == 0, er('nostaff'), x")
             if n_stfson == 0:
                 print_error_no_line('no staff')
-                n_stkptr = n_linesp
                 return None
             # fi
 #--            NOTDONEYET("nm_notes - goto n_lastend == 0, er('procname'), x")
             if n_lastend == 0:
                 print_error_no_line('proc name not found')
-                n_stkptr = n_linesp
                 return None
             # fi
             if nm_get_token(t_strng, n_pnt, -1) is None:
-                n_stkptr = n_linesp
                 return
             # fi
             NOTDONEYET("nm_notes - find n_token, n_macname[1], n_nmacs, find")
@@ -2642,7 +2552,6 @@ def nm_notes(newln):
 #--            NOTDONEYET("nm_notes - goto find == -1 or n_tlength > 10, er('notaproc'), x")
             if find == -1 or n_tlength > 10:
                 print_error_no_line('not a process')
-                n_stkptr = n_linesp
                 return None
             # fi
 #--            NOTDONEYET("nm_notes - goto margs(macloc(find + 1)) != -1, er('notaproc'), x")
@@ -2660,7 +2569,6 @@ def nm_notes(newln):
 #--            NOTDONEYET("nm_notes - goto n_stfson == 0, er('nostaff'), x")
             if n_stfson == 0:
                 print_error_no_line('no staff')
-                n_stkptr = n_linesp
                 return None
             # fi
             stf = 1
@@ -2670,16 +2578,14 @@ def nm_notes(newln):
             # elihw
         # If this is a macro name, get its arguments and call it.
         # Give an error if it is a process macro.
-        elif v_in(1, n_tlength, 10) and find > -1:
+        elif v_in(1, n_tlength, 10) and n_token in n_macname:       # token exists as macro/proc name.
 #--            NOTDONEYET("nm_notes - goto margs(macloc(find + 1)) == -1, er('noproc'), x")
             if margs[macloc[find + 1]] == -1:
                 print_error_no_line('no proc')
-                n_stkptr = n_linesp
                 return None
             # fi
 #--            NOTDONEYET("nm_notes - goto nm_fndmacro(find + 1)")
             if nm_fndmacro(find + 1) is None:
-                n_stkptr = n_linesp
                 return None
             # fi
             return True
@@ -2703,7 +2609,6 @@ def nm_notes(newln):
 #--            NOTDONEYET("nm_notes - goto n_stfson == 0, er('nostaff'), x")
             if n_stfson == 0:
                 print_error_no_line('no staff')
-                n_stkptr = n_linesp
                 return None
             # fi
         # Check if a clef change.
@@ -2719,7 +2624,6 @@ def nm_notes(newln):
             elif n_token == 'scribe': # obsolete
 #--                NOTDONEYET("nm_notes - goto er('scribe')")
                 print_error_no_line('scribe is obsolete')
-                n_stkptr = n_linesp
                 return None
             elif n_token == 'transcribe':
                 tscribe()
@@ -2744,14 +2648,12 @@ def nm_notes(newln):
                 n_inproc = 1
 #--                NOTDONEYET("nm_notes - goto fndmacro(n_process[n_staffon[1]])")
                 if nm_fndmacro(n_process[n_staffon[1]]) is None:
-                    n_stkptr = n_linesp
                     return None
                 # fi
                 return True
         # Otherwise, compile and output the notes line object.
             else:
                 if nm_noteget0(-1) is None:
-                    n_stkptr = n_linesp
                     return None
                 # fi
                 noteout()
@@ -2762,7 +2664,6 @@ def nm_notes(newln):
             NOTDONEYET("nm_notes - jump    ml")
         else:
             if nm_get_token(t_space, n_pnt, -1) is None:
-                n_stkptr = n_linesp
                 return
             # fi
             continue
@@ -2774,28 +2675,23 @@ def nm_notes(newln):
 #   End of nm_notes
 
 #=============================================================================
+# Get the next note and set the various internal variables. If "default" is -1,
+# substitute defualts for unspecified octave or length. If 0, leave unspecified.
+#
 # default         # -1 to substitute defaults
-def nm_noteget(default):
-    # Get the next note and set the various internal variables.
-    # If "default" is -1, substitute defualts for unspecified
-    # octave or length. If 0, leave unspecified.
-#--            stf             # temp staff number
 
+def nm_noteget(default):
     global n_lastend
     global n_pnt
-    global n_stkptr
-    global n_linesp
 
     print_debug("nm_noteget - Entering: default={}".format(default))
 
     if n_lastend != "(":
         if nm_get_token(t_space, n_pnt, -1) is None:
-            n_stkptr = n_linesp
             return None
         # fi
     # fi
     if nm_noteget0(default) is None:
-        n_stkptr = n_linesp
         return None
     # fi
     print_debug("nm_noteget exiting")
@@ -2803,31 +2699,30 @@ def nm_noteget(default):
 #   End of nm_noteget
 
 #=============================================================================
-def nm_noteget0(default):          # dont-get-token entry point
-    # forms for notes:
-    # 4c4  4c4d  4c3(4)  4c++4  c  5c 4c16s  r2
-    # (48,.25)  (r,.5)
-    #
-    # defaults:
-    # if only one element is given it is assumed to be note name.
-    #
-    # n_ch will be char number
-    # n_part will be where in note we are:
-    #    -1 = nothing yet
-    #     0 = getting octave
-    #     1 = getting note name
-    #     2 = getting accidentals;  waiting for lth
-    #     3 = getting note lth
-    #     4 = getting ties, dots, etc.
-    # ptype is the type of pitch specification:
-    #     0 = 4c            tnote   octave/notetname
-    #     1 = (48,.25)      tnote1 or tnote2  note number
-    #     4 = r             trest   rest
-    # ltype is the type of length specification:
-    #     0 = (48,.25)      fractional whole notes
-    #     1 = 4             standard note lengths
-    #     3 = 3(4)          triplets, etc
+# Form of notes:
+#     4c4  4c4d  4c3(4)  4c++4  c  5c 4c16s  r2
+#     (48,.25)  (r,.5)
+#
+# Defaults: if only one element is given it is assumed to be note name.
+#
+# n_ch will be char number
+# n_part will be where in note we are:
+#    -1 = nothing yet
+#     0 = getting octave
+#     1 = getting note name
+#     2 = getting accidentals;  waiting for lth
+#     3 = getting note lth
+#     4 = getting ties, dots, etc.
+# ptype is the type of pitch specification:
+#     0 = 4c            tnote   octave/notetname
+#     1 = (48,.25)      tnote1 or tnote2  note number
+#     4 = r             trest   rest
+# ltype is the type of length specification:
+#     0 = (48,.25)      fractional whole notes
+#     1 = 4             standard note lengths
+#     3 = 3(4)          triplets, etc
 
+def nm_noteget0(default):          # dont-get-token entry point
     global n_tlength
     global n_token
     global n_lastend
@@ -2852,8 +2747,6 @@ def nm_noteget0(default):          # dont-get-token entry point
     global n_simile
     global n_ch
     global n_bracket
-    global n_stkptr
-    global n_linesp
     global n_ltype
     global n_grace
     global n_mleg
@@ -2897,10 +2790,6 @@ def nm_noteget0(default):          # dont-get-token entry point
             # fi
         else:
             n_temp = n_token[n_ch]            # next char
-    #--        if n_temp == o70:        # shift code
-    #--            n_ch = n_ch + 1
-    #--            n_temp = o7000 + n_token[n_ch]
-    #--        # fi
         # fi
     # the above code is similar in nm_noteget1.
         if n_part < 0:                        # nothing yet
@@ -2965,11 +2854,9 @@ def nm_noteget0(default):          # dont-get-token entry point
 #--                NOTDONEYET("nm_noteget0 - goto n_ch == 1, x, er('badvol')")
                 if n_ch != 1:
                     print_error_no_line('badvol')
-                    n_stkptr = n_linesp
                     return None
                 # fi
                 if nm_volume() is None:
-                    n_stkptr = n_linesp
                     return None
                 # fi
                 break
@@ -2977,7 +2864,6 @@ def nm_noteget0(default):          # dont-get-token entry point
 #--                NOTDONEYET("nm_noteget0 - goto n_ch == 1, x, er('badvol')")
                 if n_ch != 1:
                     print_error_no_line('bad vol')
-                    n_stkptr = n_linesp
                     return None
                 # fi
                 position()
@@ -2986,29 +2872,24 @@ def nm_noteget0(default):          # dont-get-token entry point
 #--                NOTDONEYET("nm_noteget0 - goto n_tlength == 0, x, er('badvol')")
                 if n_tlength != 0:
                     print_error_no_line('badvol')
-                    n_stkptr = n_linesp
                     return None
                 # fi
                 if nm_get_token(t_space, n_pnt, -1) is None:             # get vol/pos
-                    n_stkptr = n_linesp
                     return None
                 # fi
 #--                NOTDONEYET("nm_noteget0 - goto n_tlength == 0, er('badvol'), x")
                 if n_tlength != 0:
                     print_error_no_line('badvol')
-                    n_stkptr = n_linesp
                     return None
                 # fi
 #--                NOTDONEYET("nm_noteget0v" or n_token[1] == "p", x, er("badvol")')
                 if n_token[1] != "v" and n_token[1] != "p":
                     print_error_no_line("badvol")
-                    n_stkptr = n_linesp
                     return None
                 # fi
                 n_ch = 0
             elif n_temp == "(":
                 if nm_numeric() is None:
-                    n_stkptr = n_linesp
                     return None
                 # fi
             elif n_token == 'legato' or n_token == 'leg':
@@ -3029,7 +2910,6 @@ def nm_noteget0(default):          # dont-get-token entry point
             else:
 #--                NOTDONEYET("nm_noteget0 - goto er('badchar', n_temp)")
                 print_error_no_line('bad character n_temp={}'.format(n_temp))
-                n_stkptr = n_linesp
                 return None
             # fi
         elif n_part == 0: # getting octave
@@ -3054,7 +2934,6 @@ def nm_noteget0(default):          # dont-get-token entry point
             else:
 #--                NOTDONEYET("nm_noteget0 - goto er('badchar', n_temp)")
                 print_error_no_line('bad character n_temp={}'.format(n_temp))
-                n_stkptr = n_linesp
                 return None
             # fi
         else:            # no more room in unit!
@@ -3066,7 +2945,6 @@ def nm_noteget0(default):          # dont-get-token entry point
         continue                # which is default behavior, merely documenting it here.
     # elihw
     if nm_notechk(default) is None:
-        n_stkptr = n_linesp
         return None
     # fi
     print_debug("nm_noteget0 #9 exiting")
@@ -3079,8 +2957,6 @@ def nm_noteget1():
     global n_token
     global n_lastend
     global n_pnt
-    global n_stkptr
-    global n_linesp
     global n_ch
     global n_ltype
     global n_mtied
@@ -3118,7 +2994,6 @@ def nm_noteget1():
 #--            NOTDONEYET("nm_noteget1 - goto n_stemdir == 0, x, er('badstem')")
             if n_stemdir != 0:
                 print_error_no_line('badstem')
-                n_stkptr = n_linesp
                 return None
             # fi
             if tmpy == "@W":
@@ -3127,7 +3002,6 @@ def nm_noteget1():
                 n_stemdir = -1
             # fi
             if nm_get_token(t_space, n_pnt, -1) is None:
-                n_stkptr = n_linesp
                 return None
             # fi
             n_ch = 0
@@ -3136,7 +3010,6 @@ def nm_noteget1():
         else:
 #--            NOTDONEYET("nm_noteget1 - goto er('badchar', tmpy)")
             print_error_no_line('bad character type(tmpy)={} tmpy={}'.format(type(tmpy), tmpy))
-            n_stkptr = n_linesp
             return None
         # fi
         return True
@@ -3224,25 +3097,21 @@ def nm_noteget1():
                 print_debug("#y2")
                 if n_notelen == 0:
                     print_error_no_line('bad length')
-                    n_stkptr = n_linesp
                     return None
                 # fi
                 n_result = nm_get_token(t_exp, n_pnt, -1)
                 if n_result is None:
-                    n_stkptr = n_linesp
                     return None
                 # fi
 #--                NOTDONEYET("nm_noteget1)", x, er("badchar", n_lastend)')
                 if n_lastend != ")":
                     print_error_no_line("bad character n_lastend={}".format(n_lastend))
-                    n_stkptr = n_linesp
                     return None
                 # fi
                 n_ltype = n_notelen
                 n_notelen = n_result
                 n_part = 4
                 if nm_get_token(t_space, n_pnt, -1) is None:
-                    n_stkptr = n_linesp
                     return None
                 # fi
                 n_ch = 0
@@ -3262,7 +3131,6 @@ def nm_noteget1():
         else:
 #--            NOTDONEYET("nm_noteget1 - goto er('internal', 'nm_noteget')")
             print_error_no_line('internal nm_noteget error')
-            n_stkptr = n_linesp
             return None
         # fi
     # elihw
@@ -3273,7 +3141,6 @@ def nm_noteget1():
         return True
     else:
         if nm_notechk(default) is None:
-            n_stkptr = n_linesp
             return None
         # fi
     # fi
@@ -3282,22 +3149,15 @@ def nm_noteget1():
 #   End of nm_noteget1
 
 #=============================================================================
+# Check if this is a valid note. If "default" is -1, substitute default values
+# for octave or note length if they are not specified. If "default" is 0, leave
+# them unspecified (value == -1); and do not perform any transcribe" functions.
+#
 # default         # -1 to substitute defaults
-def nm_notechk(default):
-    # Check if this is a valid note. If "default" is -1,
-    # substitute default values for octave or note length if
-    # they are not specified. If "default" is 0, leave them
-    # unspecified (value == -1); and also do not perform any
-    # "transcribe" functions.
-#--            oct             # temp octave
-#--            stf             # temp staff number
-#--            stfon           # current staff number
-#--            acc             # accidental for note
 
+def nm_notechk(default):
     global n_stfson
     global n_staffon
-    global n_stkptr
-    global n_linesp
     global n_ptype
     global n_grace
     global n_ltype
@@ -3339,7 +3199,6 @@ def nm_notechk(default):
 #--        NOTDONEYET("nm_notechk - goto n_notenam == -1, er('octnont'), x")
         if n_notenam == -1:
             print_error_no_line('octnont')
-            n_stkptr = n_linesp
             return None
         # fi
         if default:
@@ -3358,7 +3217,6 @@ def nm_notechk(default):
             pass
         else:
             print_error_no_line('octoor oct={}'.format(oct))
-            n_stkptr = n_linesp
             return None
         # fi
         if default < 0:
@@ -3371,19 +3229,15 @@ def nm_notechk(default):
 #--        NOTDONEYET("nm_notechk - goto sign(n_sharp) + sign(n_flat) + n_nat > 1, er('onetype'), x")
         if n_sharp > 2:
             print_error_no_line("too many sharps={}".format(n_sharp))
-            n_stkptr = n_linesp
             return None
         if n_flat > 2:
             print_error_no_line("too many flats={}".format(n_flat))
-            n_stkptr = n_linesp
             return None
         if n_nat > 1:
             print_error_no_line("too many natural={}".format(n_nat))
-            n_stkptr = n_linesp
             return None
         if sign(n_sharp) + sign(n_flat) + n_nat > 1:
             print_error_no_line('onetype of sharp/flat/natural')
-            n_stkptr = n_linesp
             return None
         # fi
     # Set accidental table for this note.
@@ -3404,7 +3258,6 @@ def nm_notechk(default):
 #--            NOTDONEYET("nm_notechk - goto abs(acc) > 2, er('badtrans'), x")
             if abs(acc) > 2:
                 print_error_no_line('badtrans')
-                n_stkptr = n_linesp
                 return None
             # fi
             if n_sharp + n_flat + n_nat != 0:
@@ -3434,7 +3287,6 @@ def nm_notechk(default):
             pass
         else:
             print_error_no_line('ntoor n_notenum={}'.format(n_notenum))
-            n_stkptr = n_linesp
         # fi
     elif n_ptype == 1:  # numerical note
 #--        NOTDONEYET("nm_notechk - goto v_in(0, n_notenum, maxnote), x, er('ntoor', n_notenum)")
@@ -3442,7 +3294,6 @@ def nm_notechk(default):
             pass
         else:
             print_error_no_line('ntoor n_notenum={}'.format(n_notenum))
-            n_stkptr = n_linesp
             return None
         # fi
     # fi
@@ -3452,20 +3303,17 @@ def nm_notechk(default):
 #--        NOTDONEYET("nm_notechk - goto n_notelen != -1 or (n_dotted + n_mstac + n_mmarc + n_mleg + n_mtied + n_mslur + n_acct + n_grace != 0), er('badgliss'), x")
         if n_notelen != -1 or (n_dotted + n_mstac + n_mmarc + n_mleg + n_mtied + n_mslur + n_acct + n_grace != 0):
             print_error_no_line('bad gliss')
-            n_stkptr = n_linesp
             return None
         # fi
     elif n_ltype == 1 and n_notelen == -1:  # no length given
 #--        NOTDONEYET("nm_notechk - goto n_dotted == 0, x, er('baddot')")
         if n_dotted != 0:
             print_error_no_line('baddot')
-            n_stkptr = n_linesp
             return None
         # fi
 #--        NOTDONEYET("nm_notechk - goto n_ptype == 1, er('badnumer'), x")
         if n_ptype == 1:
             print_error_no_line('badnumer')
-            n_stkptr = n_linesp
             return None
         # fi
         if n_ptype == 0 or n_ptype == 4:
@@ -3481,12 +3329,10 @@ def nm_notechk(default):
 #--        NOTDONEYET("nm_notechk - goto n_ntime > 1000, er('toolarge', 0, n_ntime), x")
         if n_ntime <= 0:
             print_error_no_line('zerotime')
-            n_stkptr = n_linesp
             return None
         # fi
         if n_ntime > 1000:
             print_error_no_line("too large n_ntime={}".format(n_ntime))
-            n_stkptr = n_linesp
             return None
         # fi
     else:    # standard length
@@ -3495,17 +3341,14 @@ def nm_notechk(default):
 #--        NOTDONEYET("nm_notechkmuch", "dots", 2), x')
         if n_ltype < 1 or frac(n_ltype) != 0:
             print_error_no_line('badlen')
-            n_stkptr = n_linesp
             return None
         # fi
         if n_notelen < 1 or frac(n_notelen) != 0:
             print_error_no_line('badlen')
-            n_stkptr = n_linesp
             return None
         # fi
         if n_dotted > 2:
-            print_error_no_line("too many dots={}".format(n_dotted)) 
-            n_stkptr = n_linesp
+            print_error_no_line("too many dots={}".format(n_dotted))
             return None
         # fi
         n_lltype[stfon] = n_ltype                   # set defaults
@@ -3529,90 +3372,75 @@ def nm_notechk(default):
     print_debug("nm_notechk exiting")
     if n_mtied + n_mstac + n_mmarc + n_mleg > 1:
         print_error_no_line('cannot have two different modifiers')
-        n_stkptr = n_linesp
         return None
     # fi
     if n_mtied + n_mleg + n_mslur > 1:
         print_error_no_line('cannot have two different')
-        n_stkptr = n_linesp
         return None
     # fi
     if n_acct > 2:
         print_error_no_line('too many modifiers n_acct={}'.format(n_acct))
-        n_stkptr = n_linesp
         return None
     # fi
     if n_grace > 2:
         print_error_no_line('too many n_grace notes')
-        n_stkptr = n_linesp
         return None
     # fi
     if v_in(.01, stac, 1):
         pass
     else:
         print_error_no_line("mult oor Staccato")
-        n_stkptr = n_linesp
         return None
     # fi
     if v_in(.01, marc, 1):
         pass
     else:
         print_error_no_line("mult oor Marcato")
-        n_stkptr = n_linesp
         return None
     # fi
     if v_in(0, accent, 50):
         pass
     else:
         print_error_no_line('accent out of range')
-        n_stkptr = n_linesp
         return None
     # fi
     if v_in(0, aaccent, 50):
         pass
     else:
         print_error_no_line('aaccent our of range')
-        n_stkptr = n_linesp
         return None
     # fi
     if n_volume > 100 or n_volname > 8:
         print_error_no_line('volume out of range')
-        n_stkptr = n_linesp
         return None
     # fi
     if n_pos > 100:
         print_error_no_line('pos out of range')
-        n_stkptr = n_linesp
         return None
     # fi
     if v_in(.01, arp, 20):
         pass
     else:
         print_error_no_line('arp out of range')
-        n_stkptr = n_linesp
         return None
     # fi
     if v_in(.01, fermata, 20):
         pass
     else:
         print_error_no_line("multiplier out of range - Fermata")
-        n_stkptr = n_linesp
         return None
     # fi
     return True
 #   End of nm_notechk
 
 #=============================================================================
-def nm_numeric():
-    # Process numerical note format:  (48,. 25)
-#--            ptr     # line character pointer
+# Process numerical note format:  (48,. 25)
 
+def nm_numeric():
     global n_tlength
     global n_token
     global n_lastend
     global n_pnt
-    global n_stkptr
-    global n_linesp
     global n_lastend
     global n_ptype
     global n_ntime
@@ -3623,7 +3451,6 @@ def nm_numeric():
 
     ptr = n_pnt
     if nm_get_token(t_strng, n_pnt, -1) is None:                     # see if it is a rest
-        n_stkptr = n_linesp
         return None
     # fi
     if n_token == 'r' and n_lastend == ",":         # (r,.25) format
@@ -3631,7 +3458,6 @@ def nm_numeric():
     else:    # get note number
         n_notenum = nm_get_token(t_exp, ptr, -1)         # reprocess n_token")
         if n_notenum is None:
-            n_stkptr = n_linesp
             return None
         # fi
         if n_notenum == -1:
@@ -3643,17 +3469,14 @@ def nm_numeric():
     if n_lastend == ",": # (48,.25) or (r,.25) format
         n_ntime = nm_get_token(t_exp, n_pnt, -1)           # get note length
         if n_ntime is None:
-            n_stkptr = n_linesp
             return None
         # fi
 #--        NOTDONEYET("nm_numeric)", x, er("badchar", n_lastend)')
         if n_lastend != ")":
             print_error_no_line("bad character n_lastend={}".format(n_lastend))
-            n_stkptr = n_linesp
             return None
         # fi
         if nm_get_token(t_space, n_pnt, -1)  is None:       # continue with next token
-            n_stkptr = n_linesp
             return
         # fi
         n_ch = 0
@@ -3661,7 +3484,6 @@ def nm_numeric():
         n_part = 4                                # get note modifiers
     elif n_lastend == ")":                        # (48)@D(49,.25) format
         if nm_get_token(t_space, n_pnt, -1) is None:                 # check for "@D"
-            n_stkptr = n_linesp
             return
         # fi
 #--        NOTDONEYET("nm_numeric@D", x, er("badnumer")')
@@ -3669,13 +3491,11 @@ def nm_numeric():
             pass
         else:
             print_error_no_line("badnumer")
-            n_stkptr = n_linesp
             return None
         # fi
     else:
 #--        NOTDONEYET("nm_numeric - goto er('badchar', n_lastend)")
         print_error_no_line('bad character n_lastend={}'.format(n_lastend))
-        n_stkptr = n_linesp
         return None
     # fi
     print_debug("nm_numeric exiting")
@@ -3683,27 +3503,24 @@ def nm_numeric():
 #   End of nm_numeric
 
 #=============================================================================
+# Set "n_volume" to the numeric volume. Set "n_volname" to volume name:
+#   0 if numeric, 1 if vppp, 2 if vpp, ... , 8 if vfff
+# Set "n_vinc" to -1 or 1 if start of crescendo/decrescendo.
+#
+# The numerical volume values go from 0-100.
+# In pass 2 the range is changed from 0-63, since that is what is sent to terminal.
+#
+# The numerical values of vppp, vpp, vp, vmp, vmf, vf, vff, vfff can be set in
+# music by assigning a value to the variable of the same name.
+# (compiler has default values)
+#
+# Crescendos/decrescendos end at the next volume given in the source.
+#
 def nm_volume():
-    # Set "n_volume" to the numeric volume.
-    # Set "n_volname" to volume name:
-    #   0 if numeric, 1 if vppp, 2 if vpp, ... , 8 if vfff
-    # Set "n_vinc" to -1 or 1 if start of crescendo/decrescendo.
-    #
-    # the numerical volume values go from 0-100. in pass 2
-    # the range is changed from 0-63, since that is what is actually sent to the terminal.
-    #
-    # the numerical values of vppp, vpp, vp, vmp, vmf, vf, vff,
-    # vfff can be set in music by assigning a value to the
-    # variable of the same name. (compiler has default values)
-    #
-    # Crescendos/decrescendos end at the next volume given in the source.
-
     global n_tlength
     global n_token
     global n_lastend
     global n_pnt
-    global n_stkptr
-    global n_linesp
     global n_staffon
     global n_volname
     global n_incres
@@ -3716,24 +3533,20 @@ def nm_volume():
     if n_tlength == 1 and n_lastend == "(":
         n_volume = nm_get_token(t_exp, n_pnt, -1)
         if n_volume is None:
-            n_stkptr = n_linesp
             return None
         # fi
 #--        NOTDONEYET("nm_volume)", x, er("badchar", n_lastend)')
         if n_lastend != ")":
             print_error_no_line("badchar n_lastend={}".format(n_lastend))
-            n_stkptr = n_linesp
             return None
         # fi
         n_volname = 0
         if nm_get_token(t_space, n_pnt, -1) is None:        # check for < or >
-            n_stkptr = n_linesp
             return None
         # fi
 #--        NOTDONEYET("nm_volume - goto n_tlength == 0, x, er('badchar', n_token[1])")
         if n_tlength != 0:
             print_error_no_line("bad character n_token='{}'".format(n_token[1]))
-            n_stkptr = n_linesp
             return None
         # fi
     # If no volume given and not in a crescendo, use previous value.
@@ -3741,7 +3554,6 @@ def nm_volume():
 #--        NOTDONEYET("nm_volume - goto n_increspn_staffon[1]] == 1, er('badvol2'), x")
         if n_incres[n_staffon[1]] == 1:
             print_error_no_line('badvol2')
-            n_stkptr = n_linesp
             return None
         # fi
         n_volume = vol[n_staffon[1]]
@@ -3781,7 +3593,6 @@ def nm_volume():
 #--        NOTDONEYET("nm_volume - goto p_formok, x, er('badvol')")
         if p_formok >= 0:
             print_error_no_line('badvol')
-            n_stkptr = n_linesp
             return None
         # fi
         n_volname = 0
@@ -3797,7 +3608,6 @@ def nm_volume():
 #--    NOTDONEYET("nm_volume - goto v_in(0, n_volume, 100) and v_in(0, n_volname, 8), x, er('voloor')")
     if v_in(0, n_volume, 100) and v_in(0, n_volname, 8):
         print_error_no_line('voloor')
-        n_stkptr = n_linesp
         return None
     # fi
     print_debug("nm_volume exiting")
@@ -3805,21 +3615,18 @@ def nm_volume():
 #   End of nm_volume
 
 #=============================================================================
+# Compile the note starting at "start". Get default values for unspecified
+# parameters if "default" is -1. Restores "n_pnt" and "n_lastend" to their
+# orginal values.
+#
 # start           # pointer to start of note
 # default         # set default values if -1
-def nm_compnote(start, default):
-    # Compile the note starting at "start". Get default
-    # values for unspecified parameters if "default" is -1.
-    # Restores "n_pnt" and "n_lastend" to their orginal values.
-#--             pntsave         # place to save "pnt"
-#--             lastsav         # place to save "n_lastend"
 
+def nm_compnote(start, default):
     global n_tlength
     global n_token
     global n_lastend
     global n_pnt
-    global n_stkptr
-    global n_linesp
 
     print_debug("nm_compnote - Entering")
 
@@ -3829,30 +3636,25 @@ def nm_compnote(start, default):
     # Compile the note.
     n_pnt = start
     if nm_get_token(t_strng, n_pnt, -1) is None:        # ignore leading spaces")
-        n_stkptr = n_linesp
         return None
     # fi
     if nm_noteget0(default) is None:
-        n_stkptr = n_linesp
         return None
     # fi
     # Get the delimiter after the note, if don't already have it.
     if n_lastend != "," and n_lastend != ";":
         if nm_get_token(t_strng, n_pnt, -1) is None:
-            n_stkptr = n_linesp
             return None
         # fi
 #--        NOTDONEYET("nm_compnote - goto n_tlength == 0, x, er('badchar', n_token[1])")
         if n_tlength != 0:
             print_error_no_line('bad char n_token[1]={}'.format(n_token[1]))
-            n_stkptr = n_linesp
             return None
         # fi
     # fi
 #--    NOTDONEYET("nm_compnote;", x, er("badchar", n_lastend)')
     if n_lastend != ";":
         print_error_no_line("bad char n_lastend={}".format(n_lastend))
-        n_stkptr = n_linesp
         return None
     # fi
     # Restore "n_pnt" and "n_lastend".
@@ -3864,11 +3666,10 @@ def nm_compnote(start, default):
 #   End of nm_compnote
 
 #=============================================================================
-def nm_valget():
-    # Get note value off of the line.
-    # This subroutine wont write anything to the binary; the
-    # value is returned in the same variables as nm_noteget uses.
+# Get note value off of the line. This subroutine will not write anything to
+# binary; the value is returned in the same variables as nm_noteget uses.
 
+def nm_valget():
     global n_token
     global n_lastend
     global n_pnt
@@ -3927,57 +3728,44 @@ def nm_valget():
 #   End of nm_valget
 
 #=============================================================================
-# nm_get_token -- 2nd argument is pnt assignment.  Yuck.
-# ----------------------------------------------------------------------------
-
 # tempo command.
 #   tempo   120,4        $$ 120 quarter notes per minute
 #   tempo   120,4,accel  $$ accelerate to next tempo command
 #   tempo   120,4,rit    $$ decelerate
-#   tempo   accel        $$ accelerate from current tempo 
+#   tempo   accel        $$ accelerate from current tempo
 #  If accelerated or decelerated up to this tempo command,
 #  this tempo command must specify a tempo.
 
 def nm_tempo():
-    #--        merge,previous
-    #--        floating: beatspm         $$ beats per minute
-    #--        integer:  ptr             $$ line character pointer
     global n_pnt
     global n_tempoc                   # Flag for making sure notes since last tempo command.
-    global n_stkptr
-    global n_linesp
     global n_ntime
 
     print_debug("nm_tempo entering")
     if n_tempoc < 0:
         print_error_no_line('There have been no notes since last tempo')
-        n_stkptr = n_linesp
         return None
     #-- do      stafflen(0)                        # Require all staffs to be the same length.
 
     # Check for "accel", or "rit" as only tag.
     if n_lastend == 0:
         print_error_no_line('too few arguments for tempo, need at least one')
-        n_stkptr = n_linesp
         return None
     # fi
     ptr = n_pnt                                  # save position on line
     result = nm_get_token(t_strng, n_pnt, -1)
-#--    print_debug("nm_tempo result={}  from nm_get_token - n_tlength={} n_lastend={} n_token={}".format(result,n_tlength,n_lastend,n_token))
+#--    print_debug("nm_tempo result={}  from nm_get_token - n_tlength={} n_lastend={} n_token='{}'".format(result,n_tlength,n_lastend,n_token))
     if result is None or (n_tlength == 0 and n_lastend == 0):
         print_error_no_line("too few arguments for tempo, need one.")
-        n_stkptr = n_linesp
         return None
     # fi
     if n_token == 'accel' or n_token == 'rit':
         if n_lastend != 0:
             print_error_no_line('bad tempo single argument tempo')
-            n_stkptr = n_linesp
             return None
         # fi
         if n_acclnow < 0:
             print_error_no_line('bad tempo, previous crescendo/ritard needs beats per minute on this one.')
-            n_stkptr = n_linesp
             return None
         # fi
 #--        wbin(ttinc)                                 # changing tempo
@@ -3988,13 +3776,11 @@ def nm_tempo():
         # Process numerical forms.
         beatspm = nm_get_token(t_exp, ptr, -1)                                   # get beats per minute
         if beatspm is None:
-            n_stkptr = n_linesp
             return None
         # fi
-#--        print_debug("nm_tempo beatspm={}  from nm_get_token - n_tlength={} n_lastend={} n_token={}".format(beatspm,n_tlength,n_lastend,n_token))
+#--        print_debug("nm_tempo beatspm={}  from nm_get_token - n_tlength={} n_lastend={} n_token='{}'".format(beatspm,n_tlength,n_lastend,n_token))
         if n_lastend != "," or beatspm is None:
             print_error_no_line('bad char "{}"'.format(n_lastend))
-            n_stkptr = n_linesp
             return None
         # fi
         if nm_valget() is None:                                                 # get beat value
@@ -4003,13 +3789,11 @@ def nm_tempo():
         # fi
         if n_notelen == 0:
             print_error_no_line('time error')
-            n_stkptr = n_linesp
             return None
         # fi
         vresult = 60.0 / (beatspm * n_ntime)
         if vresult < 0.01 or vresult > 60:
             print_error_no_line('bad tempo value 0.01 < {} < 60'.format(vresult))
-            n_stkptr = n_linesp
             return None
         # fi
 #--        wbin(ttempo)
@@ -4020,16 +3804,13 @@ def nm_tempo():
         else:
             result = nm_get_token(t_strng, n_pnt, -1)
             if result is None:
-                n_stkptr = n_linesp
                 return None
             # fi
             if n_token != 'accel' and n_token != 'rit':
                 print_error_no_line('third argument is not accel nor rit')
-                n_stkptr = n_linesp
                 return None
             elif n_lastend != 0:
                 print_error_no_line('too many arguments for tempo command, only 3 maximum allowed')
-                n_stkptr = n_linesp
                 return None
             # fi
 #--            wbin(ttinc)                                 # changing tempo
@@ -4056,29 +3837,21 @@ def nm_process():
 #   End of nm_process
 
 #=============================================================================
+# Start of macro definition. "proc" = -1 if this is a process macro definition
+# (only one arg allowed). First get each argument and delimiter and put in
+# macro info buffer. Then get each line of macro text and put in macro text buffer.
+#
 # proc            # -1 if a process macro
-def nm_defmacro(proc):
-    # Start of macro definition. "proc" = -1 if this is a
-    # process macro definition (only one arg allowed).
-    # First get each argument and delimiter and put in
-    # macro info buffer. Then get each line of macro text
-    # and put in macro text buffer.
-#--            loc             # start of macro info in "minfo"
-#--            arg             # argument counter
-#--            start           # 'macro' or 'process'
-#--            end             # 'endmacro' or 'endprocess'
-#--            pntsave         # pointer into line buffer
-#--            ret             # return var
-#--            i               # loop index
 
+def nm_defmacro(proc):
     global n_tlength
     global n_token
     global n_lastend
     global n_pnt
     global n_macname
     global n_mdelim0
-    global n_macs
     global n_vinfo
+    global n_inmacro
 
     print_debug("nm_defmacro - Entering")
     if proc:
@@ -4092,10 +3865,6 @@ def nm_defmacro(proc):
         print_error_no_line("too few, start={}".format(start))
         return None
     # fi
-    if n_nmacs >= l_macro:
-        print_error_no_line('overflow, too many macros')
-        return None
-    # ri
     # Get macro name.
     if nm_get_token(t_strng, n_pnt, -1) is None:
         return None
@@ -4108,7 +3877,7 @@ def nm_defmacro(proc):
         print_error_no_line('too long a name')
         return None
     # fi
-    # Check for illegal or duplicate staff name.
+    # Check for illegal or duplicating a {staff,command,macro,process} name.
     if n_token in n_sname:
         print_error_no_line('name already used as a staff name')
         return None
@@ -4122,13 +3891,15 @@ def nm_defmacro(proc):
         return None
     # fi
     # Store the macro name and initial delimiter.
-    loc = minfop + 1  # pointer to info for new macro
-    n_macname[n_nmacs + 1] = n_token
-    n_mdelim0[loc] = n_lastend
+    #-- loc = minfop + 1  # pointer to info for new macro
+    #-- n_macname[n_nmacs + 1] = n_token
+    mname = n_token
+    #-- n_mdelim0[loc] = n_lastend
     # Store each argument and following delimiter.
     # Character string variable substitution is done for
     # all character strings defined previous to the macro definition.
     arg = 0
+    args = []
     while True:
         pntsave = n_pnt
         if nm_get_token(t_cvnam, n_pnt, -1) is None:
@@ -4145,42 +3916,35 @@ def nm_defmacro(proc):
             print_error_no_line('macro argument too long')
             return None
         # fi
-# Make sure the macro dummy arguments are not defined
-# character string variables at macro definition time.
-        ret, ret = nm_findcvar(pntsave, n_tlength, -1, -1)
+        # Make sure the macro dummy arguments are not defined
+        # character string variables at macro definition time.
+        print_debug("nm_defmacro#a - calling nm_findcvar")
+        ret, ptr = nm_findcvar(pntsave, n_tlength, -1, -1)
         if n_vinfo != -1:
             print_error_no_line('illegal dummy argument name')
             return None
         # fi
-# Remove shift codes from argument name.
-        i = 1
-        while i < n_tlength / 2:
-            n_token[i] = n_token[2 * i]
-            i = i + 1
-        # elihw
-        NOTDONEYET("nm_defmacro - n_token = n_token $mask$ cmask(n_tlength / 2)")
         arg = arg + 1
         NOTDONEYET("nm_defmacro - marg(loc, arg) = n_token")
         NOTDONEYET("nm_defmacro - mchars(loc, arg) = n_tlength")
         NOTDONEYET("nm_defmacro - mdelim(loc, arg) = n_lastend")
-        if loc + 2 * arg + 5 > l.minfo:
-            print_error_no_line("overflow macro info")
-            return None
-        # fi
+        args.append([n_token, n_lastend])
     # elihw
     # Must have exactly one argument for a process macro.
     if proc < 0 and arg != 1:
         print_error_no_line('must have one argument for process macro')
         return None
     # fi
+    n_macname.append({n_token: args})
     # Store number of args in macro, and start location of
     # macro text. Number of args is -1 for a process macro.
-    if proc < 0:
-        margs[loc] = -1
-    else:
-        margs[loc] = arg
-    # fi
-    mtext[loc] = msrcp + 1
+#--    if proc < 0:
+#--        margs[loc] = -1
+#--    else:
+#--        margs[loc] = arg
+#--    # fi
+#--    mtext[loc] = msrcp + 1
+    mtext = []
     # now read up macro text and put it into msource buffer.
     # (note that this macro may be defined within another!)
     # store n_tokens & the delimiters. if this is a macro,
@@ -4188,7 +3952,7 @@ def nm_defmacro(proc):
     # count process and endprocess commands. if not in a
     # nested macro definition, store goto labels (and dont
     # put them into macro text buffer).
-    inmacro = 1  # in a macro definition
+    n_inmacro = 1  # in a macro definition
     while True:
     # Get command from next line.
     # Stop at "=" to check for "goto" labels; if an "=" is found
@@ -4202,55 +3966,53 @@ def nm_defmacro(proc):
             # fi
         # fi
     # count nested macro definition levels
-        NOTDONEYET("nm_defmacro - if (n_token $mask$ lmask(6 * chars(start))) == start:")
-        NOTDONEYET("nm_defmacro -     inmacro = inmacro + 1")
-        NOTDONEYET("nm_defmacro - elif (n_token $mask$ lmask(6 * chars(end))) == end:")
-        NOTDONEYET("nm_defmacro -     inmacro = inmacro - 1")
-        NOTDONEYET("nm_defmacro - # fi")
-    # exit if end of macro being defined
-        if inmacro == 0:
+        if n_token == start:
+            n_inmacro = n_inmacro + 1
+        elif n_token == end:
+            n_inmacro = n_inmacro - 1
+        # fi
+    # exit if end of macro/process being defined
+        if n_inmacro == 0:
             break
         # fi
-    # Process -goto- labels. Ignore those that are in macros
-    # that are defined inside of this one.
-        if n_tlength == 0 and n_lastend == "=" and inmacro == 1:
-            nm_label()
-            continue
-        # fi
+#--    # Process -goto- labels. Ignore those that are in macros
+#--    # that are defined inside of this one.
+#--        if n_tlength == 0 and n_lastend == "=" and n_inmacro == 1:
+#--            nm_label()
+#--            continue
+#--        # fi
     # Store this line in the macro source buffer. Note that
     # a single zero char follows the last char on the line,
     # and this is used to indicate end-of-line. "lchars" is
     # the number of chars on the line, excluding the last 0.
-        if msrcp >= l.msrc:
-            print_error_no_line('overflow macro text')
-            return None
-        # fi
+#--        if msrcp >= l.msrc:
+#--            print_error_no_line('overflow macro text')
+#--            return None
+#--        # fi
         if n_lastend != 0:
             NOTDONEYET("nm_defmacro - pack n_token, n_tlength, @0a, n_token, n_tlength@1@0a, n_lastend@1")
         # fi
-        NOTDONEYET("nm_defmacro - transfr n_token; s, msource(msrcp + 1); int(n_tlength / 10) + 1")
-        msrcp = msrcp + int(n_tlength / 10) + 1
+#--        NOTDONEYET("nm_defmacro - transfr n_token; s, msource(msrcp + 1); int(n_tlength / 10) + 1")
+        mtext.append(n_token)
+#--        msrcp = msrcp + int(n_tlength / 10) + 1
     # elihw
     # Store number of words of macro text.
     NOTDONEYET("nm_defmacro - mwords(loc) = msrcp - mtext(loc) + 1  # # words of text")
     # Set macro info pointer and update pointer to next free word in info buffer.
-    n_nmacs = n_nmacs + 1
-    NOTDONEYET("nm_defmacro - macloc(n_nmacs) = loc")
     minfop = minfop + 2 * abs(margs[loc]) + 1
     if n_lastend == 0:
         return True
-    # fi 
+    # fi
     print_error_no_line('too many arguments on line')
     return None
 #   End of nm_defmacro
 
 #=============================================================================
-def nm_calcc():
-    # command similar to tutor calcc:
-    # calcc   m1 == f4, m2 = @p^u2, ,
-    # evaluate expression and get proper tag.
-#--            ptr     # pointer to tag to evaluate
+# command similar to tutor calcc:
+#       calcc   m1 == f4, m2 = @p^u2, ,
+# Evaluate expression and get proper tag.
 
+def nm_calcc():
     global n_tlength
     global n_lastend
     global n_pnt
@@ -4293,14 +4055,10 @@ def nm_calcc():
 #   End of nm_calcc
 
 #=============================================================================
-def nm_calcs():
-    # command similar to tutor calcs:
-    # calcs   m1 - f4, m2 = @p^u2, 3, 4, 1, 5, 8, , 3, 1, ,
-#--            varl == 5 # max length in words of variable to assgn
-#--            var(varl) # var to assign to
-#--            varlth  # length in chars
-#--            ptr     # pointer to tag to evaluate
+# Command similar to tutor calcs:
+#       calcs   m1 - f4, m2 = @p^u2, 3, 4, 1, 5, 8, , 3, 1, ,
 
+def nm_calcs():
     global n_tlength
     global n_token
     global n_lastend
@@ -4379,38 +4137,23 @@ def nm_calc():
 #   End of nm_calc
 
 #=============================================================================
-def nm_encode():
-    # -encode- command. Used to manipulate character variables.
-    #
-    # encode  A = hi there; after,hi; upto,re
-    #
-    # The above command assigns the value " the" to A.
-    # The keywords are optional.
-    #
-    # encode  A = 4c4; octave,3; notelength,2
-    #
-    # The above command assigns the value "3c2" to A.
-    # If the string after the = is a note, compile that note
-    # and use keywords to change parameters of the note. If
-    # no string after the  = , start a note from scratch.
-    #
-    # The -debug- command calls this unit to process a
-    # character expression. "debug" will be -1.
-#--            start         # start of string
-#--            lth           # length of string
-#--            varptr        # pointer to var assigned
-#--            keywdn        # keyword number
-#--            tagtype       # 0=none, 1=string, 2=note
-#--            lastsav       # var to save "n_lastend"
-#--            pntsave       # var to save "pnt"
-#--            ret           # return var
-#--            arg1, arg2    # arguments for char var array
-#--            savedim       # saved dimension of char car array
-#--            savtlth       # Saved n_tlength of char var array
-#--            appends       # -1 means "append staff name to end"
-#--            append        # -1 means "append a number to end"
-#--            floating: appendn # number to append to string end
+# -encode- command. Used to manipulate character variables.
+#
+# encode  A = hi there; after,hi; upto,re
+#
+# The above command assigns the value " the" to A.
+# The keywords are optional.
+#
+# encode  A = 4c4; octave,3; notelength,2
+#
+# The above command assigns the value "3c2" to A. If the string after the = is
+# a note, compile that note and use keywords to change parameters of the note.
+# If no string after the  = , start a note from scratch.
+#
+# The -debug- command calls this unit to process a character expression.
+# "debug" will be -1.
 
+def nm_encode():
     global n_tlength
     global n_token
     global n_lastend
@@ -4433,13 +4176,17 @@ def nm_encode():
         return None
     # fi
     savtlth = n_tlength
-    # See if this character variable name is in symbol table.
+    # See if this character variable name is in symbol table (anywhere).
+    print_debug("nm_encode#a - calling nm_findcvar")
     ret, varptr = nm_findcvar(pntsave, savtlth, -1, -1)
-    if n_vinfo != -1 and ret != savtlth:
-        print_error_no_line('badcvar')
+    print("nm_encode - ret={} varptr={}".format(ret,varptr), file=sys.stderr,flush=True)
+    if n_vinfo != -1 and ret != savtlth:    # If not found, or shorter name than that passed in.
+        print_error_no_line('badcvar encode #1')
         return None
     # fi
     # If char var array element, pick up the indices.
+    n_vdimen = varptr[numarry_dimensions]
+    print("nm_encode - n_vinfo={} n_vdimen={} varptr={}".format(n_vinfo,n_vdimen,varptr), file=sys.stderr,flush=True)
     if n_vinfo != -1 and n_vdimen != 0:                 # NOTDONEYET - n_vinfo
         arg1 = arg2 = 1
         savedim = n_vdimen
@@ -4465,21 +4212,18 @@ def nm_encode():
             print_error_no_line("manyargs")
             return None
         # fi
+        print_debug("nm_encode#b - calling nm_findcvar")
         ret, varptr = nm_findcvar(pntsave, savtlth, arg1, arg2)
         if nm_get_token(t_strng, n_pnt, "=") is None:
             return None
         # fi
     # fi
     if savtlth == 0 or n_lastend != "=":
-        if debug >= 0:
-            print_error_no_line('nocvar')
-            return None
-        # fi
-        varptr = -1
-        n_pnt = pntsave
+        print_error_no_line('nocvar')
+        return None
     else:
         if n_vinfo == -1:
-            print_error_no_line('badcvar')
+            print_error_no_line('badcvar encode #2')
             return None
         # fi
     # fi
@@ -4651,7 +4395,7 @@ def nm_encode():
         # fi
         makenote()
     else:    # assign the string itself
-        n_token = char[start:start+lth]
+        n_token = n_char[start:start+lth]
         n_tlength = lth
         if append:  # if there is a number to append
             NOTDONEYET("nm_encode - pack n_token, n_tlength, @0a, n_token, n_tlength@1@0s, appendn, 10@1")
@@ -4666,29 +4410,18 @@ def nm_encode():
             return None
         # fi
     # fi
-    if debug < 0:
-        return None
-    # fi
     return True
 #   End of nm_encode
 
 #=============================================================================
-def nm_decode():
-    # Decode command. First tag is a note or other notes line
-    # object. Each following tags is a pair of the form
-    # keyword,variable. (Tags are separated by ";".)  The first
-    # tag is compiled and values are assigned to each variable
-    # according to the keyword.
-    #
-    # decode  4c+4; octave,oct; notenumber,num; duration,wholes
-    #
-    # Above command sets "oct" to 4, "num" to 49, and "wholes" to 0.25.
-#--            integer:  lastsav       # var to save "n_lastend"
-#--            integer:  notetyp       # type of note
-#--            integer:  ret           # return var
-#--            floating: value         # value to assign
-#--            onezero(@a) == 1 + not(@a)   # -1,0 @D 1,0
+# Decode command. First tag is a note or other notes line object. Each following
+# tags is a pair of the form 'keyword,variable'. (Tags are separated by ";".)
+# The first tag is compiled and values are assigned to each variable according
+# to the keyword.
+#       decode  4c+4; octave,oct; notenumber,num; duration,wholes
+# Above command sets "oct" to 4, "num" to 49, and "wholes" to 0.25.
 
+def nm_decode():
     global n_tlength
     global n_token
     global n_lastend
@@ -4814,23 +4547,21 @@ def nm_clef():
 #   End of nm_clef
 
 #=============================================================================
-def nm_loop():
-    # loop    condition
-    #
-    # Enter loop if tag is true (positive) or blank, skip to
-    # matching -endloop- if tag is false (negative).
-    #
-    # loop    index = start, end, increment
-    #
-    # Iterative loop with index variable "index". "increment"
-    # defaults to 1 if omitted.
-#--            ptr1, ptr2      # line pointers
+# loop    condition
+#
+# Enter loop if tag is true (positive) or blank, skip to matching -endloop-
+# if tag is false (negative).
+#
+# loop    index = start, end, increment
+#
+# Iterative loop with index variable "index". "increment" defaults to 1 if omitted.
 
+def nm_loop():
     global n_tlength
     global n_lastend
     global n_pnt
     global n_inloop
-    global n_vptr
+#--     global n_vptr
     global n_result
 
     print_debug("nm_loop - Entering")
@@ -4869,6 +4600,7 @@ def nm_loop():
         print_error_no_line("badloop")
         return None
     # fi
+    print_debug("nm_loop - calling nm_findnvar({},{})".format(ptr1, n_tlength))
     nm_findnvar(ptr1, n_tlength)
     if n_vinfo == -1:
         print_error_no_line('badnvar')
@@ -4902,11 +4634,10 @@ def nm_loop():
 #   End of nm_loop
 
 #=============================================================================
-def nm_skiploop():
-    # -loop- tag was false, or iterative loop index was past
-    # ending value. Skip to matching -endloop-.
-#--            looplev  # additional loop level
+# -loop- tag was false, or iterative loop index was past ending value.
+# Skip to matching -endloop-.
 
+def nm_skiploop():
     global n_token
     global n_inloop
 
@@ -4931,19 +4662,17 @@ def nm_skiploop():
 #   End of nm_skiploop
 
 #=============================================================================
-def nm_endloop():
-    # -endloop- command. Marks the end of a loop.
-    #
-    # If tag is true (negative):  Exit the loop.
-    #
-    # If conditional loop:  Start compiling at the -loop-
-    # command so its condition is tested again.
-    #
-    # If iterative loop:  Add increment to index. Start
-    # compiling at line after -loop- command if index has not
-    # passed ending value. Otherwise, exit the loop.
-#--            floating: lpsave(3)  # looping iteration info
+# -endloop- command. Marks the end of a loop.
+#
+# If tag is true (negative): Exit the loop.
+#
+# If conditional loop: Start compiling at the -loop- command so its condition
+# is tested again.
+#
+# If iterative loop: Add increment to index. Start compiling at line after
+# -loop- command if index has not passed ending value. Otherwise, exit the loop.
 
+def nm_endloop():
     global n_linecount
     global n_lastend
     global n_macnum
@@ -4999,14 +4728,11 @@ def nm_endloop():
 #   End of nm_endloop
 
 #=============================================================================
-def nm_exitloop():
-    # do stack manipulations necessary for exiting a loop:
-    # restore the iterative looping information to what it was
-    # before this loop, but do not change the other information
-    # in the "s.mvars" buffer.
-#--            savem(l.mvars)     # temporary "s.mvars" buffer
-#--            floating:lpsave(3) # temporary iterative loop info
+# Do stack manipulations necessary for exiting a loop: restore the iterative
+# looping information to what it was before this loop, but do not change the
+# other information in the "s.mvars" buffer.
 
+def nm_exitloop():
     print_debug("nm_exitloop - Entering")
 
     # get iterative looping info as it was before this loop
@@ -5024,11 +4750,10 @@ def nm_exitloop():
 #   End of nm_exitloop
 
 #=============================================================================
-def nm_express():
-    # Evaluate rest of line as an expression and return its
-    # result in "result" and "vresult".
-    # Used for calc, endloop, if, etc.
+# Evaluate rest of line as an expression and return its result in "result"
+# and "vresult". Used for calc, endloop, if, etc.
 
+def nm_express():
     global n_lastend
     global n_pnt
     global n_result
@@ -5048,15 +4773,15 @@ def nm_express():
 #   End of nm_express
 
 #=============================================================================
-def nm_staff():
-    #  staff   staffnam: 1, 2, 3
-    #  staff   s2: 4, 5, 6
-    #
-    # it is possible to reassign voices to staves by using
-    # staff commands with the same name as previous staff cmnds
-    #
-    # get staff name
+# Get staff name:
+#
+#  staff   staffnam: 1, 2, 3
+#  staff   s2: 4, 5, 6
+#
+# It is possible to reassign voices to staves by using staff commands with the
+# same name as previous staff cmnds.
 
+def nm_staff():
     global n_tlength
     global n_token
     global n_lastend
@@ -5099,10 +4824,6 @@ def nm_staff():
     # fi
     NOTDONEYET("nm_staff - find n_token, sname(1), staves, n_temp")
     if n_temp == -1: # not previously defined
-        if staves >= l_voice:
-            print_error('maxstf')
-            return None
-        # fi
         n_staffon[1] = staves = staves + 1
         stfson = 1
         sname[n_staffon[1]] = n_token
@@ -5156,9 +4877,10 @@ def nm_staff():
 #   End of nm_staff
 
 #=============================================================================
+# Process music keyword number "keywdn".
 # integer:  keywdn        # keyword number
+
 def nm_muskeywd(keywdn):
-    # Process music keyword number "keywdn".
 #--                      ntype         # != 0 if type change
 #--                      ngrace        # != 0 if grace change
 #--                      nacct         # != 0 if accent change
@@ -5368,15 +5090,14 @@ def nm_muskeywd(keywdn):
 #   End of nm_muskeywd
 
 #=============================================================================
+# Compile the note starting at "start". Get default values for unspecified
+# parameters if "default" is -1. Restores "pnt" and "n_lastend" to their
+# original values.
+#
 # start           # pointer to start of note
 # default         # set default values if -1
-def nm_compnote(start, default):
-    # Compile the note starting at "start". Get default
-    # values for unspecified parameters if "default" is -1.
-    # Restores "pnt" and "n_lastend" to their orginal values.
-#--             pntsave         # place to save "pnt"
-#--             lastsav         # place to save "n_lastend"
 
+def nm_compnote(start, default):
     global n_tlength
     global n_token
     global n_lastend
@@ -5417,10 +5138,9 @@ def nm_compnote(start, default):
 #   End of nm_compnote
 
 #=============================================================================
+# Put character string into "n_token" for current note or other notes line object.
+
 def nm_makenote():
-    # Assemble a character string into "n_token" for the current
-    # note or other notes line object.
-    #--        pack(10)        # buffer for -pack-
     # Simile.
 
     global n_tlength
@@ -5545,19 +5265,19 @@ def nm_makenote():
 #   End of nm_makenote
 
 #=============================================================================
+# nm_vars    cows, EAT, grass(2,10), ME(2,2)
+#
+# Define numeric or character variables.
+#
+# Above, "cows" is a single numeric variable. "grass" is a 2 by 10 array of
+# numeric variables. One and two dimensional arrays are allowed.
+#
+# "EAT" is a character variable. ME is a two dimensional character variable.
+#
+# Variables defined within a macro are local to that macro and any macros it
+# calls. Newly defined variables are initialized to zero.
+
 def nm_vars():
-    # nm_vars    cows, EAT, grass(2,10), ME(2,2)
-    #
-    # Define numeric or character variables.
-    #
-    # Above, "cows" is a single numeric variable. "grass" is
-    # a 2 by 10 array of numeric variables. One and two
-    # dimensional arrays are allowed.
-    #
-    # "EAT" is a character variable. ME is a two dimensional character variable.
-    #
-    # Variables defined within a macro are local to that macro
-    # and any macros it calls. Newly defined variables are initialized to zero.
     #--        varnam          # name of new variable
     #--         segment, vchar == varnam, 6  # chars of varnam
     #--        dimen           # dimension of numeric var
@@ -5573,7 +5293,7 @@ def nm_vars():
     global n_lastend
     global n_pnt
     global n_maclev
-    global n_vptr
+#--     global n_vptr
     global n_vdimen
     global n_vn_size1
     global n_vn_size2
@@ -5601,13 +5321,8 @@ def nm_vars():
                 print_error_no_line('bad char n_lastend={}'.format(n_lastend))
                 return None
             # fi
-            if n_tlength > vchars:
-                print_error_no_line('badvname')
-                return None
-            # fi
             varnam = n_token
             charvar = 0
-        # Remove shift codes from character variable name.
         else:
             if n_lastend == "," or n_lastend == "(" or n_lastend == 0:
                 pass
@@ -5615,43 +5330,45 @@ def nm_vars():
                 print_error_no_line("bad character n_lastend={}".format(n_lastend))
                 return None
             # fi
-            if n_tlength > 2 * vchars:
-                print_error_no_line('badvname')
-                return None
-            # fi
-            i = 1
-            while i <= 10:
-                vchar[i] = n_token[2 * i]
-            # elihw
+            varnam = n_token
             charvar = -1
         # fi
         # Check for funky variable names.
-        if v_in("0", vchar[1], "9"):
+        if varnam[0].isdigit():
             print_error_no_line("badvname")
             return None
         # fi
-        NOTDONEYET("nm_vars - search  '+', 1, varnam, 10, 1, ret")
-        if ret >= 0:
-            print_error_no_line('badvname')
+        if '+' in varnam:
+            print_error_no_line('badvname, cannot have a plus sign')
             return None
-        # fi
-        NOTDONEYET("nm_vars - search  '-', 1, varnam, 10, 1, ret")
-        if ret >= 0:
-            print_error_no_line('badvname')
+        elif '-' in varnam:
+            print_error_no_line('badvname, cannot have a minus sign')
             return None
         # fi
         # Check if new var was previously defined at this macro
         # level. If not, find place to insert it in symbol table.
-        if charvar:
-            NOTDONEYET("nm_vars - findsa  varnam + maclev, s, csymb(1); cvdef, 2, 1, 10, ptr")
+        if charvar < 0:
+            for i in n_cvdef:
+                if i[0] != varnam or i[1] != n_maclev:
+                    continue
+                # fi
+                print_error_no_line('redefine cvdef')
+                return None
+            # rof
         else:
-            NOTDONEYET("nm_vars - findsa  varnam + maclev, s, nsymb(1); n_nvdef, 2, 1, 10, ptr")
+            for i in n_nvdef:                                 # NOTDONEYET nvdef -> cvdef with type(str) check.
+                if i[0] != varnam or i[1] != n_maclev:
+                    continue
+                # fi
+                print_error_no_line('redefine nvdef')
+                return None
+            # rof
         # fi
-        if ptr >= 0:
-            print_error_no_line('redefine')
-            return None
-        # fi
-        ptr = -ptr
+#--        if ptr >= 0:
+#--            print_error_no_line('redefine')
+#--            return None
+#--        # fi
+#--        ptr = -ptr
         # Check if new var has the same name as a compile time var.
         if not(charvar):
             NOTDONEYET("nm_vars - compute ret, varnam, 10")
@@ -5685,7 +5402,7 @@ def nm_vars():
             else:
                 dimen = n_size2 = 1
             # fi
-            if fn_lastend != ")":
+            if n_lastend != ")":
                 print_error_no_line("bad character n_lastend={}".format(n_lastend))
                 return None
             # fi
@@ -5706,7 +5423,8 @@ def nm_vars():
             print_error_no_line("bad character n_lastend={}".format(n_lastend))
             return None
         # fi
-        vptr = n_nvwrds
+        print_debug("n_token='{}'".format(n_token))
+#--        vptr = n_nvwrds  Number of nv variables
         n_vdimen = dimen
         vn_size1 = n_size1
         vn_size2 = n_size2
@@ -5726,18 +5444,10 @@ def nm_vars():
                 # fi
             # fi
         else:
-            if n_nvdef == n_maxnvar:
-                print_error_no_line('manynvar')
-                return None
-            # fi
-            if n_size1 * n_size2 + n_nvwrds > l_nvals:
-                print_error_no_line('manynvar')
-                return None
-            # fi
             vsymb[1] = varnam + maclev
-            vsymb[2] = n_vinfo                    # NOTDONEYET - n_vinfo
+            vsymb[2] = n_vinfo                  # NOTDONEYET - n_vinfo
             NOTDONEYET("nm_vars - inserts vsymb[1], s, nsymb(1); n_nvdef, 2, ptr")
-            n_nvdef = n_nvdef + 1
+            n_nvdef = n_nvdef + 1               # NOTDONEYET nvdef -> cvdef with type(str) check.
             NOTDONEYET("nm_vars - deletes s, s.nvals + n_nvwrds; n_size1 * n_size2, 1, 1, n_size1 * n_size2")
             n_nvwrds = n_nvwrds + n_size1 * n_size2
         # fi
@@ -5749,90 +5459,111 @@ def nm_vars():
     return True
 #   End of nm_vars
 
-#=============================================================================
-def nm_repeat():
-    print_error_no_line("NOTDONEYET")
-#   End of 
-
-def nm_measure():
-    print_error_no_line("NOTDONEYET")
-#   End of 
-
-def nm_title():
-    print_error_no_line("NOTDONEYET")
-#   End of 
-
-def nm_endmacro():
-    print_error_no_line("NOTDONEYET")
-#   End of 
-
-def nm_if():
-    print_error_no_line("NOTDONEYET")
-#   End of 
-
-def nm_else():
-    print_error_no_line("NOTDONEYET")
-#   End of 
-
-def nm_elseif():
-    print_error_no_line("NOTDONEYET")
-#   End of 
-
-def nm_endif():
-    print_error_no_line("NOTDONEYET")
-#   End of 
-
-def nm_randu():
-    print_error_no_line("NOTDONEYET")
-#   End of 
-
-def nm_randp():
-    print_error_no_line("NOTDONEYET")
-#   End of 
-
-def nm_setperm():
-    print_error_no_line("NOTDONEYET")
-#   End of 
-
-def nm_instr():
-    print_error_no_line("NOTDONEYET")
-#   End of 
-
-def nm_tuning():
-    print_error_no_line("NOTDONEYET")
-#   End of 
+# ============================================================================
+global debug_count
+debug_count = 0
 
 def nm_debug():
-    print_error_no_line("NOTDONEYET")
-#   End of 
+    global debug_count
 
-def nm_goto():
-    print_error_no_line("NOTDONEYET")
-#   End of 
+    debug_count = debug_count + 1
+    # If no argument.
+    if n_lastend == 0:
+        value = 'count: ' + str(debug_count)
+    else:
+        ptr = n_pnt                                 # save position on line
+        # Process numerical forms.
+        value = nm_get_token(t_exp, ptr, -1)
+        if value is None:                           # If error
+            value = 'message: ' + n_char[ptr:]
+        else:
+            value = 'value: ' + str(value) + ' -- ' + n_char[ptr:]
+        # fi
+    # fi
+    print('DEBUG ' + value, file=sys.stderr, flush=True)
+    return True
+#   End of nm_debug
 
-def nm_print():
+#=============================================================================
+def nm_repeat():                        # NOTDONEYET
     print_error_no_line("NOTDONEYET")
-#   End of 
+#   End of nm_repeat
 
-def nm_time():
+def nm_measure():                       # NOTDONEYET
     print_error_no_line("NOTDONEYET")
-#   End of 
+#   End of nm_measure
 
-def nm_format():
+def nm_title():                         # NOTDONEYET
     print_error_no_line("NOTDONEYET")
-#   End of 
+#   End of nm_title
 
-def nm_stop():
+def nm_endmacro():                      # NOTDONEYET
     print_error_no_line("NOTDONEYET")
-#   End of 
+#   End of nm_endmacro
 
-def nm_endproc():
+def nm_if():                            # NOTDONEYET
     print_error_no_line("NOTDONEYET")
-#   End of 
+#   End of nm_if
 
-def nm_include():
+def nm_else():                          # NOTDONEYET
     print_error_no_line("NOTDONEYET")
-#   End of 
+#   End of nm_else
+
+def nm_elseif():                        # NOTDONEYET
+    print_error_no_line("NOTDONEYET")
+#   End of nm_elseif
+
+def nm_endif():                         # NOTDONEYET
+    print_error_no_line("NOTDONEYET")
+#   End of nm_endif
+
+def nm_randu():                         # NOTDONEYET
+    print_error_no_line("NOTDONEYET")
+#   End of nm_randu
+
+def nm_randp():                         # NOTDONEYET
+    print_error_no_line("NOTDONEYET")
+#   End of nm_randp
+
+def nm_setperm():                       # NOTDONEYET
+    print_error_no_line("NOTDONEYET")
+#   End of nm_setperm
+
+def nm_instr():                         # NOTDONEYET
+    print_error_no_line("NOTDONEYET")
+#   End of nm_instr
+
+def nm_tuning():                        # NOTDONEYET
+    print_error_no_line("NOTDONEYET")
+#   End of nm_tuning
+
+def nm_goto():                          # NOTDONEYET
+    print_error_no_line("NOTDONEYET")
+#   End of nm_goto
+
+def nm_print():                         # NOTDONEYET
+    print_error_no_line("NOTDONEYET")
+#   End of nm_print
+
+def nm_time():                          # NOTDONEYET
+    print_error_no_line("NOTDONEYET")
+#   End of nm_time
+
+def nm_format():                        # NOTDONEYET
+    print_error_no_line("NOTDONEYET")
+#   End of nm_format
+
+def nm_stop():                          # NOTDONEYET
+    print_error_no_line("NOTDONEYET")
+#   End of nm_stop
+
+def nm_endproc():                       # NOTDONEYET
+    print_error_no_line("NOTDONEYET")
+#   End of nm_endproc
+
+def nm_include():                       # NOTDONEYET
+    print_error_no_line("NOTDONEYET")
+#   End of nm_include
 
 #=============================================================================
 global n_sname                  # staff names.
@@ -5893,8 +5624,6 @@ def main():
     global n_token
     global n_char
     global n_pnt
-    global n_stkptr
-    global n_linesp
     global n_targcnt
     global n_lnotes
     global n_tlength
@@ -5948,22 +5677,23 @@ def main():
 
     # unit ml - main compiler loop.
     while True:
-        n_linesp = n_stkptr
         n_targcnt = 0                       # number of var arguments
         if nm_get_token(t_strng, -1, -1) is None:
-            n_stkptr = n_linesp
             continue
         # fi
         n_lnotes = n_notes                  # Previous notes line flag.
         n_notes = 0                         # Assume not a notes line.
         if n_tlength == 0:
+
+            print_debug("n_token='{}' n_tlength={} n_lastend={} n_pnt={} n_tparen={} n_br={} n_tvarptr={}".format( n_token, n_tlength, n_lastend, n_pnt, n_tparen, n_br, n_tvarptr))
+            print_debug("n_char='{}' n_macnum={} n_tstart={} n_targcnt={} n_targ={} n_vdimen={}".format( n_char, n_macnum, n_tstart, n_targcnt, n_targ, n_vdimen))
+
             if n_lastend == '=':
                 # Ignore label
                 print_debug("ml: label - n_token='{}' n_lnotes={} n_tlength={}".format(n_token, n_lnotes, n_tlength))
             else:
                 # Ignore notes for now.
                 print_debug("ml: unexpected delimiter for first n_token='{}' n_lnotes={} n_tlength={}".format(n_token, n_lnotes, n_tlength))
-                n_stkptr = n_linesp         # effectively an error happened, ignore it
             # fi
             continue
         elif n_lastend == ':':                  # staffname: type of thing.
@@ -5975,8 +5705,8 @@ def main():
             nm_notes(-1)
             continue
         elif n_token in n_commands:
-            if n_commands[n_token]() is None:     # if error occurred, kill anything put on stack.
-                n_stkptr = n_linesp
+            if n_commands[n_token]() is None:     # if error occurred, ...
+                pass
             # fi
             continue
         else:
@@ -5984,36 +5714,6 @@ def main():
             print_debug("main: n_token='{}' n_char='{}'".format(n_token, n_char))
             continue
         # fi
-
-        while n_lastend != 0:
-#- works -            nm_get_token(t_strng, n_pnt, -1)
-#- yuck -            nm_get_token(t_cvnam, n_pnt,  -1)
-            result = nm_get_token(t_exp, n_pnt, -1)
-# result = nm_get_token(t_exp, n_pnt, " ")
-# result = nm_get_token(t_exp, n_pnt, ":")
-# result = nm_get_token(t_exp, n_pnt, -1)
-# result = nm_get_token(t_exp, n_pnt, -1)
-# nm_get_token(t_cvnam, n_pnt, -1)
-# nm_get_token(t_novar, n_pnt, -1)
-# nm_get_token(t_space, -1, -1)
-# nm_get_token(t_space, n_pnt, "=")
-# nm_get_token(t_space, n_pnt, 0)
-# nm_get_token(t_space, n_pnt, 0)
-# nm_get_token(t_space, n_pnt, ";")
-# nm_get_token(t_space, n_pnt, -1)
-# nm_get_token(t_space, n_pnt, 0)
-# nm_get_token(t_space, n_pnt, o7056)
-# nm_get_token(t_strng, n_pnt, -1)
-# nm_get_token(t_strng, n_pnt, ",")
-# nm_get_token(t_strng, n_pnt, ";")
-# nm_get_token(t_strng, n_pnt, "^=")
-# nm_get_token(t_strng, n_pnt, -1)
-# nm_get_token(t_strng, n_pnt, 0)
-# nm_get_token(t_strng, n_pnt, mdelim(loc,arg))
-# nm_get_token(t_strng, n_pnt, o7042)
-# nm_get_token(t_strng, n_pnt, -1)
-#--            print_debug("main: after nm_get_token -- result='{}' n_token='{}' n_tlength={} n_lastend='{}' n_pnt={} n_char='{}'".format(result, n_token, n_tlength, n_lastend, n_pnt, n_char))
-        # elihw
     # elihw
     do_pass2()
     sys.exit(errors_happened)
@@ -6028,3 +5728,4 @@ exit(errors_happened)
 # ----------------------------------------------------------------------------
 # End of file tokens
 # ----------------------------------------------------------------------------
+#??    print_debug("nm_makecvar#3a - type(n_cvdef)={} n_cvdef={}".format(type(n_cvdef),n_cvdef))
