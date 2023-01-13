@@ -20,18 +20,23 @@ import math
 #++ print(inspect.currentframe().f_code.co_name, '#0')
 #-----------------------------------------------------------------------------
 global zvar
-numarry_name = 0
-numarry_maclevel = 1
-numarry_dimensions = 2
-numarry_indexes = 3
-numarry_values = 4
+numarry_name = 0            # The name of the variable.
+numarry_maclevel = 1        # The macro level was in effect when created.
+numarry_dimensions = 2      # Number of dimensions for array. (0=none,1=1,2=2)
+numarry_indexes = 3         # The array indexes.
+numarry_value_type = 4      # 1 for character string, 0 for 'value' (int/float).
+numarry_values = 5          # Array of values ([0] for not an array).
 zvar = []
 
-#-- warray = [ 'aha0', 8, 3, [ 1, 1, 1], [ 98765.43210 ] ]
+#-- warray = [ 'aha0', 8, 3, [ 1, 1, 1], 0, [98765.43210] ]
 #-- add_array = [ warray, 0 ]
 #-- zvar.append(add_array)
-#-- 
-#-- warray = [ 'aha1', 8, 3, [ 1, 1, 2], [ 12.34, 123.45] ]
+#--
+#-- warray = [ 'aha1', 8, 3, [ 1, 1, 2], 0, [12.34, 123.45] ]
+#-- add_array = [ warray, 1 ]
+#-- zvar.append(add_array)
+#--
+#-- warray = [ 'aha2', 8, 3, [ 1, 1, 2], 1, ["wxyz", "abcd"] ]
 #-- add_array = [ warray, 1 ]
 #-- zvar.append(add_array)
 #-----------------------------------------------------------------------------
@@ -244,8 +249,12 @@ def get_value(arg):
         if windex < 0 or windex >= len(warray[numarry_values]):
             return [ "ERROR - Argument1 ({}) index number {} not in zvar array.".format(arg[1],zarr), None ]
         # fi
+        if warray[numarry_value_type] == 0:
+            newv = warray[numarry_values][windex]
+            return [ 'NUMBER', newv ]
+        # fi
         newv = warray[numarry_values][windex]
-        return [ 'NUMBER', newv ]
+        return [ 'ID', newv ]
     # fi
 
     #-- print("ERROR - get_value - unrecognized variable='{}'".format(arg))
@@ -286,7 +295,16 @@ def compute_value(op, arg1, arg2):
             if windex < 0 or windex >= len(warray[numarry_values]):
                 return [ "ERROR - Argument1 ({}) index number {} not in zvar array.".format(arg1,zarr), None ]
             # fi
-            warray[numarry_values][windex] = arg2[1]
+            if warray[numarry_value_type] == 0:
+                warray[numarry_values][windex] = arg2[1]
+            else:
+                if warray[numarry_dimensions] == 0:
+                    warray[numarry_value_type] = 0
+                    warray[numarry_values][windex] = arg2[1]
+                else:
+                    return [ "ERROR - Trying to put value({}) into character array({}) - Argument1 ({}).".format(arg2[1], warray[numarry_name], arg1), None ]
+                # fi
+            # fi
             return arg2
         # fi
         if arg1[1] not in variables:
