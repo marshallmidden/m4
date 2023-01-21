@@ -36,54 +36,54 @@ numarry_indexes = 2         # The array indexes. []=value, [3]=1-dimen, [2,4]=2-
 numarry_values = 3          # Array of values ([0] for not an array).
 numarry_value_type = 4      # Array of types None=not-set, 0=int/float, 1= character string
 
-warray = [ 'abc', 8,
-           [ ],             # Zero dimension
-           [ 123.000 ],
-           [ 0 ] ]       # Character string, number, No dimensions.
-arrays.append(warray)
-
-warray = [ 'abc1', 8,
-           [ 2 ],           # 1 dimension
-           [ "abc1", 123.001 ],
-           [ 1, 0 ] ]       # Character string, number, 1 dimension.
-arrays.append(warray)
-
-warray = [ 'abc2', 8,
-           [ 1, 2 ],        # 2 dimensions
-           [ "abc2", 123.002 ],
-           [ 1, 0 ] ]    # Not-set-yet, int/float
-arrays.append(warray)
-
-warray = [ 'abc3', 8,
-           [ 1, 1, 2 ],        # 2 dimensions
-           [ "abc3", 123.003 ],
-           [ 1, 0 ] ]    # Not-set-yet, int/float
-arrays.append(warray)
-
-warray = [ 'def', 8,
-           [ 2, 2 ],        # 2 dimensions
-           [ 1, 2, 3, 4 ],
-           [ 0, 0, 0, 0 ] ]    # Not-set-yet, int/float
-arrays.append(warray)
-
-warray = [ 'ghi', 8,
-           [ 3, 2, 2 ],        # 2 dimensions
-           [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 ],
-           [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ] ]    # Not-set-yet, int/float
-arrays.append(warray)
-
-warray = [ 'xyz', 8,
-           [ ], 
-           [ "m1" ],
-           [ 1 ] ]    # Not-set-yet, int/float
-local_arrays.append(warray)
-
-warray = [ 'tuv', 8,
-           [ ], 
-           [ "1.234" ],
-           [ 1 ] ]    # Not-set-yet, int/float
-local_arrays.append(warray)
-
+#-- warray = [ 'abc', 8,
+#--            [ ],             # Zero dimension
+#--            [ 123.000 ],
+#--            [ 0 ] ]       # Character string, number, No dimensions.
+#-- arrays.append(warray)
+#-- 
+#-- warray = [ 'abc1', 8,
+#--            [ 2 ],           # 1 dimension
+#--            [ "abc1", 123.001 ],
+#--            [ 1, 0 ] ]       # Character string, number, 1 dimension.
+#-- arrays.append(warray)
+#-- 
+#-- warray = [ 'abc2', 8,
+#--            [ 1, 2 ],        # 2 dimensions
+#--            [ "abc2", 123.002 ],
+#--            [ 1, 0 ] ]    # Not-set-yet, int/float
+#-- arrays.append(warray)
+#-- 
+#-- warray = [ 'abc3', 8,
+#--            [ 1, 1, 2 ],        # 2 dimensions
+#--            [ "abc3", 123.003 ],
+#--            [ 1, 0 ] ]    # Not-set-yet, int/float
+#-- arrays.append(warray)
+#-- 
+#-- warray = [ 'def', 8,
+#--            [ 2, 2 ],        # 2 dimensions
+#--            [ 1, 2, 3, 4 ],
+#--            [ 0, 0, 0, 0 ] ]    # Not-set-yet, int/float
+#-- arrays.append(warray)
+#-- 
+#-- warray = [ 'ghi', 8,
+#--            [ 3, 2, 2 ],        # 2 dimensions
+#--            [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 ],
+#--            [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ] ]    # Not-set-yet, int/float
+#-- arrays.append(warray)
+#-- 
+#-- warray = [ 'xyz', 8,
+#--            [ ], 
+#--            [ "m1" ],
+#--            [ 1 ] ]    # Not-set-yet, int/float
+#-- local_arrays.append(warray)
+#-- 
+#-- warray = [ 'tuv', 8,
+#--            [ ], 
+#--            [ "1.234" ],
+#--            [ 1 ] ]    # Not-set-yet, int/float
+#-- local_arrays.append(warray)
+#-- 
 #-----------------------------------------------------------------------------
 class SymbolDesc:
     def __init__(self, symbol, lprio, rprio, eval):
@@ -105,7 +105,7 @@ class SymbolDesc:
 #   kind    - 'NUMBER' if a number
 
 def next_token(string):
-#--    print("next_token - Entering")
+#--    print("next_token - Entering string={}".format(string))
     # Make sure string exists. next_token useable by other than tokenize.
     if len(string) <= 0:
         return None, None, None
@@ -127,7 +127,8 @@ def next_token(string):
                 elif string[0:6] == '$diff$':
                     return string[6:], '$diff$', 'OPER'
                 # fi
-            elif len(string) >= 5:
+            # fi
+            if len(string) >= 5:
                 if string[0:5] == '$and$':
                     return string[5:], '$and$', 'OPER'
                 elif string[0:5] == '$cls$':
@@ -135,7 +136,8 @@ def next_token(string):
                 elif string[0:5] == '$ars$':
                     return string[5:], '$ars$', 'OPER'
                 # fi
-            elif len(string) >= 4:
+            # fi
+            if len(string) >= 4:
                 if string[0:4] == '$or$':
                     return string[4:], '$or$', 'OPER'
                 # fi
