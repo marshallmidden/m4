@@ -119,15 +119,14 @@ def getvar(arg):
 # End of getval
 
 # ----------------------------------------------------------------------------
-#-- def getvarmaclevel(arg, maclev):
-#--     for wary in calculate.arrays + calculate.local_arrays:
-#--         if arg == wary[calculate.numarry_name] and maclev == wary[calculate.numarry_maclevel]:
-#--             return wary[calculate.numarry_values][0]
-#--         # fi
-#--     # rof
-#--     print_error_no_line("getvarmaclevel unable to find arg={}".format(arg))
-#--     sys.exit(1)
-#-- # End of getvarmaclevel
+def getvarmaclevel(arg, maclev):
+    for wary in calculate.arrays + calculate.local_arrays:
+        if arg == wary[calculate.numarry_name] and maclev == wary[calculate.numarry_maclevel]:
+            return wary
+        # fi
+    # rof
+    return None
+# End of getvarmaclevel
 
 # ----------------------------------------------------------------------------
 def createlocalvar(arg, val, maclev, typ):
@@ -5545,30 +5544,30 @@ def nm_vars():
     # variable. If that doesn't work, assume its numeric.
     while True:
         ptr = n_pnt  # save position on line
-        if nm_get_token(t_cvnam, n_pnt, -1) is None:
+#--        if nm_get_token(t_cvnam, n_pnt, -1) is None:
+#--            return None
+#--        # fi
+#--        # Get numeric variable name.
+#--        if n_tlength == 0:
+        if nm_get_token(t_strng, n_pnt, -1) is None:
             return None
         # fi
-        # Get numeric variable name.
         if n_tlength == 0:
-            if nm_get_token(t_strng, ptr, -1) is None:
-                return None
-            # fi
-            if n_tlength == 0:
-                print_error_no_line('bad char n_lastend={}'.format(n_lastend))
-                return None
-            # fi
-            varnam = n_token
-            charvar = 0
-        else:
-            if n_lastend == "," or n_lastend == "(" or n_lastend == 0:
-                pass
-            else:
-                print_error_no_line("bad character n_lastend={}".format(n_lastend))
-                return None
-            # fi
-            varnam = n_token
-            charvar = -1
+            print_error_no_line('bad char n_lastend={}'.format(n_lastend))
+            return None
         # fi
+        varnam = n_token
+#--            charvar = 0
+#--        else:
+        if n_lastend == "," or n_lastend == "(" or n_lastend == 0:
+            pass
+        else:
+            print_error_no_line("bad character n_lastend={}".format(n_lastend))
+            return None
+        # fi
+#--            varnam = n_token
+#--            charvar = -1
+#--        # fi
         # Check for funky variable names.
         if varnam[0].isdigit():
             print_error_no_line("badvname")
@@ -5583,54 +5582,23 @@ def nm_vars():
         # fi
         # Check if new var was previously defined at this macro
         # level. If not, find place to insert it in symbol table.
-        if charvar < 0:
-            for i in n_cvdef:
-                if i[0] != varnam or i[1] != n_maclev:
-                    continue
-                # fi
-                print_error_no_line('redefine cvdef')
-                return None
-            # rof
-        else:
-            for i in n_nvdef:                                 # NOTDONEYET nvdef -> cvdef with type(str) check.
-                if i[0] != varnam or i[1] != n_maclev:
-                    continue
-                # fi
-                print_error_no_line('redefine nvdef')
-                return None
-            # rof
-        # fi
-#--        if ptr >= 0:
-#--            print_error_no_line('redefine')
-#--            return None
-#--        # fi
-#--        ptr = -ptr
-        # Check if new var has the same name as a compile time var.
-        if not(charvar):
-            NOTDONEYET("nm_vars - compute ret, varnam, 10")
-            formok = -1                     # NOTDONEYET - set from above compute.
-            ret = 4                       # NOTDONEYET - set from above compute.
-            if formok < 0:
-                print_error_no_line('compvar')
-                return None
-            # fi
+        if getvarmaclevel(varnam, n_maclev) is not None:
+            print_error_no_line('redefine variable {} at macro level {}'.format(varnam, n_maclev))
+            return None
         # fi
         # Get the dimension and sizes of the variable.
         if n_lastend == "(":
             n_size1 = nm_get_token(t_exp, n_pnt, -1)
             if n_size1 is None:
                 return None
-            # fi
-            if n_size1 < 1:
+            elif n_size1 < 1:
                 print_error_no_line('badarray')
                 return None
-            # fi
-            if n_lastend == ",":
+            elif n_lastend == ",":
                 n_size2 = nm_get_token(t_exp, n_pnt, -1)
                 if n_size2 is None:
                     return None
-                # fi
-                if n_size2 < 1:
+                elif n_size2 < 1:
                     print_error_no_line('badarray')
                     return None
                 # fi
@@ -5644,8 +5612,7 @@ def nm_vars():
             # fi
             if nm_get_token(t_strng, n_pnt, -1) is None:
                 return None
-            # fi
-            if n_tlength != 0:
+            elif n_tlength != 0:
                 print_error_no_line('bad character n_token[1]={}'.format(n_token[1]))
                 return None
             # fi
@@ -5663,29 +5630,34 @@ def nm_vars():
         n_vdimen = dimen
         vn_size1 = n_size1
         vn_size2 = n_size2
-        # Add the new variable to symbol table and initialize it.
-        if charvar:
-            if n_vdimen == 0:
-                if nm_makecvar(varnam, 0, 0) is None:
-                    return None
-                # fi
-            elif n_vdimen == 1:
-                if nm_makecvar(varnam, n_size1, 0) is None:
-                    return None
-                # fi
-            else:
-                if nm_makecvar(varnam, n_size1, n_size2) is None:
-                    return None
-                # fi
+        if n_vdimen == 0:
+            dimsiz = []
+            val = [ None ]
+            valtyp = [ None ]
+        elif n_vdimen == 1:
+            dimsiz = [ n_size1 ]
+            val = [ ]
+            valtyp = [ ]
+            for i in range(0, n_size1):
+                val.append(None)
+                valtyp.append(None)
+            # fi
+        elif n_vdimen == 2:
+            dimsiz = [ n_size1, n_size2 ]
+            val = [ ]
+            valtyp = [ ]
+            for i in range(0, n_size1):
+                for j in range(0, n_size2):
+                    val.append(None)
+                    valtyp.append(None)
+                # rof
             # fi
         else:
-            vsymb[1] = varnam + maclev
-            vsymb[2] = n_wary
-            NOTDONEYET("nm_vars - inserts vsymb[1], s, nsymb(1); n_nvdef, 2, ptr")
-            n_nvdef = n_nvdef + 1               # NOTDONEYET nvdef -> cvdef with type(str) check.
-            NOTDONEYET("nm_vars - deletes s, s.nvals + n_nvwrds; n_size1 * n_size2, 1, 1, n_size1 * n_size2")
-            n_nvwrds = n_nvwrds + n_size1 * n_size2
+            print_error_no_line("only two dimensions allowed")
+            return None
         # fi
+        warray = [ varnam, n_maclev, dimsiz, val, valtyp ]
+        calculate.local_arrays.append(warray)
         # Process the next tag.
         if n_lastend == 0:
             break
