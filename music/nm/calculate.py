@@ -1,6 +1,12 @@
 #!/usr/bin/python3 -B
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 #-----------------------------------------------------------------------------
+# Need to do a bunch of things.
+# a) m1 = abc1(1)       # CHAR
+# b) character string assignment.
+#     Operations on character strings (+)
+# c) single and double quotes for strings and operations.
+#-----------------------------------------------------------------------------
 # TO DO:
 #   1) Can change functions into:
 #      ftof()   floating input to floating output
@@ -21,56 +27,62 @@ import math
 #-----------------------------------------------------------------------------
 global arrays
 arrays = [ ]
+global local_arrays
+local_arrays = [ ]
 #-----------------------------------------------------------------------------
-#-- global zvar
 numarry_name = 0            # The name of the variable.
 numarry_maclevel = 1        # The macro level was in effect when created.
 numarry_indexes = 2         # The array indexes. []=value, [3]=1-dimen, [2,4]=2-dimen.
 numarry_values = 3          # Array of values ([0] for not an array).
 numarry_value_type = 4      # Array of types None=not-set, 0=int/float, 1= character string
-#-- zvar = []
+
+warray = [ 'abc', 8,
+           [ ],             # Zero dimension
+           [ 123.000 ],
+           [ 0 ] ]       # Character string, number, No dimensions.
+arrays.append(warray)
 
 warray = [ 'abc1', 8,
-           [ 1, 2 ],
-           [ None, 123.45 ],
-           [ None, 0 ] ]    # Not-set-yet, int/float
+           [ 2 ],           # 1 dimension
+           [ "abc1", 123.001 ],
+           [ 1, 0 ] ]       # Character string, number, 1 dimension.
 arrays.append(warray)
 
 warray = [ 'abc2', 8,
-            [ 1, 2],
-            [ "wxyz", 8589934591 ],
-            [ 1, 0 ] ]      # Character string, int/float
-arrays.append(warray)
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-warray = [ 'def1', 8,
-           [ 2 ],
-           [ None, 123.45 ],
-           [ None, 0 ] ]    # Not-set-yet, int/float
+           [ 1, 2 ],        # 2 dimensions
+           [ "abc2", 123.002 ],
+           [ 1, 0 ] ]    # Not-set-yet, int/float
 arrays.append(warray)
 
-warray = [ 'def2', 8,
-            [ 2],
-            [ "wxyz", 8589934591 ],
-            [ 1, 0 ] ]      # Character string, int/float
-arrays.append(warray)
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-warray = [ 'aha0', 8,
-            [],
-            [ 98765.43210 ],
-            [ 0 ] ]         # int/float
+warray = [ 'abc3', 8,
+           [ 1, 1, 2 ],        # 2 dimensions
+           [ "abc3", 123.003 ],
+           [ 1, 0 ] ]    # Not-set-yet, int/float
 arrays.append(warray)
 
-warray = [ 'aha1', 8,
-           [ 1, 1, 2 ],
-           [ None, 123.45 ],
-           [ None, 0 ] ]    # Not-set-yet, int/float
+warray = [ 'def', 8,
+           [ 2, 2 ],        # 2 dimensions
+           [ 1, 2, 3, 4 ],
+           [ 0, 0, 0, 0 ] ]    # Not-set-yet, int/float
 arrays.append(warray)
 
-warray = [ 'aha2', 8,
-            [ 1, 1, 2],
-            [ "wxyz", 8589934591 ],
-            [ 1, 0 ] ]      # Character string, int/float
+warray = [ 'ghi', 8,
+           [ 3, 2, 2 ],        # 2 dimensions
+           [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 ],
+           [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ] ]    # Not-set-yet, int/float
 arrays.append(warray)
+
+warray = [ 'xyz', 8,
+           [ ], 
+           [ "m1" ],
+           [ 1 ] ]    # Not-set-yet, int/float
+local_arrays.append(warray)
+
+warray = [ 'tuv', 8,
+           [ ], 
+           [ "1.234" ],
+           [ 1 ] ]    # Not-set-yet, int/float
+local_arrays.append(warray)
 
 #-----------------------------------------------------------------------------
 class SymbolDesc:
@@ -93,6 +105,7 @@ class SymbolDesc:
 #   kind    - 'NUMBER' if a number
 
 def next_token(string):
+#--    print("next_token - Entering")
     # Make sure string exists. next_token useable by other than tokenize.
     if len(string) <= 0:
         return None, None, None
@@ -105,76 +118,63 @@ def next_token(string):
                 return string[2:], '**', 'OPER'
             # fi
             return string[1:], '*', 'OPER'
-        # fi
-        if c == '$':
+        elif c == '$':
             if len(string) >= 7 and string[0:7] == '$union$':
                 return string[7:], '$union$', 'OPER'
-            # fi
-            if len(string) >= 6:
+            elif len(string) >= 6:
                 if string[0:6] == '$mask$':
                     return string[6:], '$mask$', 'OPER'
-                # fi
-                if string[0:6] == '$diff$':
+                elif string[0:6] == '$diff$':
                     return string[6:], '$diff$', 'OPER'
                 # fi
-            # fi
-            if len(string) >= 5:
+            elif len(string) >= 5:
                 if string[0:5] == '$and$':
                     return string[5:], '$and$', 'OPER'
-                # fi
-                if string[0:5] == '$cls$':
+                elif string[0:5] == '$cls$':
                     return string[5:], '$cls$', 'OPER'
-                # fi
-                if string[0:5] == '$ars$':
+                elif string[0:5] == '$ars$':
                     return string[5:], '$ars$', 'OPER'
                 # fi
-            # fi
-            if len(string) >= 4:
+            elif len(string) >= 4:
                 if string[0:4] == '$or$':
                     return string[4:], '$or$', 'OPER'
+                # fi
             # fi
             if len(string) > 1:
                 return string[1:], c, 'MISMATCH #a len(string)={}'.format(len(string))
             # fi
             return None, c, 'MISMATCH #b len(string)={}'.format(len(string))
-        # fi
-        if c == '=' and len(string) >= 2:   # Possible ==, =>, =<
+        elif c == '=' and len(string) >= 2:   # Possible ==, =>, =<
             if string[1] == '=':
                 return string[2:], '==', 'OPER'
-            # fi
-            if string[1] == '>':
+            elif string[1] == '>':
                 return string[2:], '>=', 'OPER'
-            # fi
-            if string[1] == '<':
+            elif string[1] == '<':
                 return string[2:], '<=', 'OPER'
             # fi
             return string[1:], '=', 'OPER'
-        # fi
-        if c == '!' and len(string) >= 2:   # Possible !=
+        elif c == '!' and len(string) >= 2:   # Possible !=
             if string[1] == '=':
                 return string[2:], '!=', 'OPER'
             # fi
             return None, c, 'MISMATCH #c len(string)={}'.format(len(string))
-        # fi
-        if c == '<' and len(string) >= 2:   # Possible <=
+        elif c == '<' and len(string) >= 2:   # Possible <=
             if string[1] == '=':
                 return string[2:], '<=', 'OPER'
             # fi
             return string[1:], '<', 'OPER'
-        # fi
-        if c == '>' and len(string) >= 2:   # Possible <=
+        elif c == '>' and len(string) >= 2:   # Possible <=
             if string[1] == '=':
                 return string[2:], '>=', 'OPER'
             # fi
             return string[1:], '>', 'OPER'
-        # fi
         # The +-(/= reach below.
-        if len(string) > 1:
+        elif len(string) > 1:
             return string[1:], c, 'OPER'
         # fi
         return None, c, 'OPER'
-    # fi
-    if c.isalpha():                         # First character is [a-zA-Z].
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    elif c.isalpha():                         # First character is [a-zA-Z].
         m = re.match(r'[_a-zA-Z0-9]+', string)
         ret = strg = m.group(0)             # We know there is at least one character.
         if strg == 'lpause':                 # convert a few names to the other name.
@@ -188,27 +188,22 @@ def next_token(string):
             return string[len(strg):], ret, 'ID'
         # fi
         return None, ret, 'ID'
-    # fi
-    if c.isdigit() or c == '.':             # First is a digit.
+    elif c.isdigit() or c == '.':             # First is a digit.
         m = re.match(r'[0-9.]+', string)
         strg = m.group(0)                   # We know there is at least one character.
         if strg.count('.') > 1:             # Only one decimal place in a number.
             return None, strg, 'MISMATCH #d strg={}'.format(strg)
-        # fi
-        if len(string) > len(strg):         # Something after this alphabetic string.
+        elif len(string) > len(strg):         # Something after this alphabetic string.
             return string[len(strg):], strg, 'NUMBER'
         # fi
         return None, strg, 'NUMBER'
-    # fi
-    if re.match(r'[\[\](){}]', c):          # Known parenthesis/brackets/braces.
+    elif re.match(r'[\[\](){}]', c):          # Known parenthesis/brackets/braces.
         if len(string) > 1:                 # Something after this alphabetic string.
             return string[1:], c, 'SYNTAX'
         # fi
         return None, c, 'SYNTAX'
-    # fi
-
     # comma reached below.
-    if len(string) > 1:
+    elif len(string) > 1:
         return string[1:], c, 'OPER'
     # fi
 
@@ -218,6 +213,7 @@ def next_token(string):
 
 #-----------------------------------------------------------------------------
 def tokenize(code):
+#--    print("tokenize - Entering")
     code = ''.join(code.split())
     # Get next token.
     last_kind = ''
@@ -238,10 +234,11 @@ def tokenize(code):
         last_token = token
         code = therest
     # elihw
-# End of __repr__
+# End of tokenize
 
 #-----------------------------------------------------------------------------
 def identity_eval(args):
+#--    print("identity_eval - Entering args={}".format(args))
     if len(args) == 1:
         if type(args[0]) == SymbolDesc:
             return [ args[0].symbol ]
@@ -252,129 +249,107 @@ def identity_eval(args):
             return [ a ]
         # fi
     # fi
-    #-- print("ERROR - ID type(args[0])={} args[0]='{}'".format(type(args[0]), args[0]))
     return [ "ERROR - ID type(args[0])={} args[0]='{}'".format(type(args[0]), args[0]), None ]
 # End of identity_eval
 
 #-----------------------------------------------------------------------------
 def get_value(arg):
     global arrays
+    global local_arrays
 
-    a = arg
+#--    print("get_value - Entering arg={}".format(arg))
     if arg[0].startswith('ERROR'):
         return arg
-    # fi
-    if arg[0] == 'NUMBER':
+    elif arg[0] == 'NUMBER':
         arg[1] = float(arg[1])
         return arg
-    # fi
-    if arg[0] == 'COMMA':
+    elif arg[0] == 'COMMA':
         return arg
-    # fi
-    if arg[0] == 'CHAR':
+    elif arg[0] == 'CHAR':
         return arg
-    # fi
-    if arg[1] in variables:
-        arg[0] = 'NUMBER'
-        arg[1] = variables[arg[1]]
-        return arg
-    # fi
-    if arg[0] == 'ID':
-        if arg[1] in local_variables:               # NOTDONEYET - delete after wary is done?
-            arg[0] = 'NUMBER'                       # NOTDONEYET - delete after wary is done?
-            arg[1] = local_variables[arg[1]]        # NOTDONEYET - delete after wary is done?
-            return arg                              # NOTDONEYET - delete after wary is done?
-        # fi                                        # NOTDONEYET - delete after wary is done?
-        maxmaclev = 0
-        maxwary = None
-        for wary in arrays:
-            if arg[1] == wary[numarry_name]:
-                if wary[numarry_maclevel] >  maxmaclev:
-                    maxmaclev = wary[numarry_maclevel]
-                    maxwary = wary
-                # fi
-            # fi
-        # rof
-        if maxwary is not None:
-            if maxwary[numarry_indexes] == []:
-                if maxwary[numarry_value_type][0] is None:
-                    return [ "ERROR - get_value - variable is not set yet - '{}'".format(arg), None ]
-                # fi
-                if maxwary[numarry_value_type][0] == 0:
-                    arg[0] = 'NUMBER'
-                else:
-                    arg[0] = 'CHAR'                       # NOTDONEYET - probably should be 'CHAR'
-                # fi
-                arg[1] = maxwary[numarry_values][0]
-                return arg
-            # fi
-            return [ "ERROR - get_value - variable is array '{}' ({})".format(arg,maxwary[numarry_indexes]), None ]
+    elif arg[0] == 'ADDRESS':
+        a = arg[1]
+        idx = a[0]
+        warray = a[1]
+        where_value = warray[numarry_values][idx]
+        where_type = warray[numarry_value_type][idx]
+        if where_type is None:
+            arg[0] = 'CHAR'
+            arg[1] = 'None'
+        elif where_type == 0:
+            arg[0] = 'NUMBER'
+            arg[1] = where_value
+        else:
+            arg[0] = 'CHAR'
+            arg[1] = where_value
         # fi
+        return arg
+    elif arg[0] != 'ID':
+        return [ "ERROR - get_value - unrecognized variable type='{}'".format(arg), None ]
     # fi
 
-    #-- print("ERROR - get_value - unrecognized variable='{}'".format(arg))
-    return [ "ERROR - get_value - unrecognized variable='{}'".format(arg), None ]
+    maxmaclev = -1
+    maxwary = None
+    for wary in arrays + local_arrays:
+        if arg[1] == wary[numarry_name]:
+            if wary[numarry_maclevel] >  maxmaclev:
+                maxmaclev = wary[numarry_maclevel]
+                maxwary = wary
+            # fi
+        # fi
+    # rof
+    if maxwary is None:
+        return [ "ERROR - get_value - unrecognized variable='{}'".format(arg), None ]
+    elif len(maxwary[numarry_indexes]) != 0:
+        return [ "ERROR - get_value - array needs '{}' arguments".format(len(maxwary[numarry_indexes])), None ]
+    elif maxwary[numarry_value_type][0] is None:
+        return [ "ERROR - get_value - variable is not set yet - '{}'".format(arg), None ]
+    elif maxwary[numarry_value_type][0] == 0:
+        arg[0] = 'NUMBER'
+        arg[1] = float(maxwary[numarry_values][0])
+    else:
+        arg[0] = 'CHAR'
+        arg[1] = str(maxwary[numarry_values][0])
+    # fi
+    return arg
 # End of get_value
 
 #-----------------------------------------------------------------------------
 def compute_value(op, arg1, arg2):
     global arrays
+    global local_arrays
 
     a2 = get_value(arg2)
     if a2 is None:
         return [ "ERROR - Argument2 is None a2='{}'".format(a2), None ]
-    # fi
-    if a2[0].startswith('ERROR'):
+    elif a2[0].startswith('ERROR'):
         return a2
-    # fi
-    if a2[0] != 'NUMBER':
+    elif a2[0] not in [ 'NUMBER', 'CHAR' ]:
         return [ "ERROR - Argument2 is not a Number a2='{}'".format(a2), None ]
-    # fi
-
-    if op == '=':
-        # NOTDONEYET - arg1 is a list
-        if arg1[0] != 'ID':
-            return [ "ERROR - Argument1 is not a variable name arg1='{}'".format(arg1), None ]
-        # fi
-        if len(arg1[1]) > 4 and arg1[1][0:4] == 'zvar':
-            zarr = arg1[1][4:]
-            if not zarr.isnumeric():
-                return [ "ERROR - zvar following ('{}') is not a number".format(zarr), arg1[1] ]
-            # fi
-            zarr = int(zarr)
-            if zarr < 0 or zarr >= len(zvar):
-                return [ "ERROR - Argument1 ({}) index number {} not in zvar array.".format(arg1,zarr), None ]
-            # fi
-            warray = zvar[zarr][0]
-            windex = zvar[zarr][1]
-            if windex < 0 or windex >= len(warray[numarry_values]):
-                return [ "ERROR - Argument1 ({}) index number {} not in zvar array.".format(arg1,zarr), None ]
-            # fi
-            if warray[numarry_value_type] == 0:
-                warray[numarry_values][windex] = arg2[1]
+    elif op == '=':
+        if arg1[0] == 'ADDRESS':
+            a = arg1[1]
+            idx = a[0]
+            warray = a[1]
+            warray[numarry_values][idx] = arg2[1]
+            if arg2[0] == 'NUMBER':
+                warray[numarry_value_type][idx] = 0
+            elif arg2[0] == 'CHAR':
+                warray[numarry_value_type][idx] = 1
             else:
-                if warray[numarry_dimensions] == 0:
-                    warray[numarry_value_type] = 0
-                    warray[numarry_values][windex] = arg2[1]
-                else:
-                    return [ "ERROR - Trying to put value({}) into character array({}) - Argument1 ({}).".format(arg2[1], warray[numarry_name], arg1), None ]
-                # fi
+                return [ "ERROR - ADDRESS and arg2 unrecognized '{}'".format(arg2), None]
             # fi
             return arg2
         # fi
-        if arg1[1] in variables:
-            variables[arg1[1]] = arg2[1]
-            return arg2
-        # fi
-        if arg1[1] in local_variables:
-            local_variables[arg1[1]] = arg2[1]
-            return arg2
+
+        if arg1[0] not in [ 'ID', 'ADDRESS' ]:
+            return [ "ERROR - Argument1 is not a variable name arg1='{}'".format(arg1), None ]
         # fi
 
         # arrays here.
-        maxmaclev = 0
+        maxmaclev = -1
         maxwary = None
-        for wary in arrays:
+        for wary in arrays + local_arrays:
             if arg1[1] == wary[numarry_name]:
                 if wary[numarry_maclevel] >  maxmaclev:
                     maxmaclev = wary[numarry_maclevel]
@@ -382,30 +357,31 @@ def compute_value(op, arg1, arg2):
                 # fi
             # fi
         # rof
-        if maxwary is not None:
-            if maxwary[numarry_indexes] != []:
-                return [ "ERROR - compute_value - variable is array '{}'".format(arg), None ]
+        if maxwary is None:
+            print("Assignment to unknown variable '{}', creating it = '{}'".format(arg1, a2))
+            if arg2[0] == 'NUMBER':
+                local_arrays.append( [ arg1[1],  0, [ ], [ arg2[1] ],  [ 0 ] ] )
+            else:                               # Assume CHAR
+                local_arrays.append( [ arg1[1],  0, [ ], [ arg2[1] ],  [ 1 ] ] )
             # fi
-#--            if maxwary[numarry_value_type][0] is None:
-#--                return [ "ERROR - compute_value - variable is not set yet - '{}'".format(arg), None ]
-#--            # fi
-            maxwary[numarry_value_type][0] = 0
-            maxwary[numarry_values][0] = arg2[1]
             return arg2
+        elif maxwary[numarry_indexes] != []:
+            return [ "ERROR - compute_value - variable is array '{}'".format(arg), None ]
+        elif arg2[0] == 'NUMBER':
+            maxwary[numarry_value_type][0] = 0
+        else:                                   # Assume CHAR
+            maxwary[numarry_value_type][0] = 1
         # fi
-        print("Assignment to unknown variable '{}', creating it = '{}'".format(arg1, a2))
-        variables[arg1[1]] = arg2[1]
+        maxwary[numarry_values][0] = arg2[1]
         return arg2
     # fi
 
     a1 = get_value(arg1)
     if a1 is None:
         return [ "ERROR - Argument1 is None a1='{}'".format(a1), None ]
-    # fi
-    if a1[0].startswith('ERROR'):
+    elif a1[0].startswith('ERROR'):
         return a1
-    # fi
-    if a1[0] != 'NUMBER':
+    elif a1[0] != 'NUMBER':
         return [ "ERROR - Argument1 is not a Number a1='{}'".format(a1), None ]
     # fi
     a1 = a1[1]
@@ -414,66 +390,47 @@ def compute_value(op, arg1, arg2):
     # Math: +, -, *, /, **
     if op == '+':
         return [ 'NUMBER', a1 + a2 ]
-    # fi
-    if op == '-':
+    elif op == '-':
         return [ 'NUMBER',  a1 - a2 ]
-    # fi
-    if op == '*':
+    elif op == '*':
         return [ 'NUMBER',  a1 * a2 ]
-    # fi
-    if op == '/':
+    elif op == '/':
         return [ 'NUMBER',  a1 / a2 ]
-    # fi
-    if op == '**':
+    elif op == '**':
         return [ 'NUMBER',  a1 ** a2 ]
-    # fi
-
     # Logical: >, >=, <=, <, ==, !=
-    if op == '<=':
+    elif op == '<=':
         return [ 'NUMBER', -1 if a1 <= a2 else 0 ]
-    # fi
-    if op == '>=':
+    elif op == '>=':
         return [ 'NUMBER',  -1 if a1 >= a2 else 0 ]
-    # fi
-    if op == '>':
+    elif op == '>':
         return [ 'NUMBER',  -1 if a1 > a2 else 0 ]
-    # fi
-    if op == '<':
+    elif op == '<':
         return [ 'NUMBER',  -1 if a1 < a2 else 0 ]
-    # fi
-    if op == '==':
+    elif op == '==':
         return [ 'NUMBER',  -1 if a1 == a2 else 0 ]
-    # fi
-    if op == '!=':
+    elif op == '!=':
         return [ 'NUMBER',  -1 if a1 != a2 else 0 ]
-    # fi
 
     # Bitwise: $cls$, $ars$, $mask$, $union$, $diff$
-    if op == '$mask$':
+    elif op == '$mask$':
         return [ 'NUMBER',  int(a1) & int(a2) ]
-    # fi
-    if op == '$union$':
+    elif op == '$union$':
         return [ 'NUMBER',  int(a1) | int(a2) ]
-    # fi
-    if op == '$cls$':
+    elif op == '$cls$':
         return [ 'NUMBER',  int(a1) << int(a2) ]
-    # fi
-    if op == '$ars$':
+    elif op == '$ars$':
         return [ 'NUMBER',  int(a1) >> int(a2) ]
-    # fi
-    if op == '$diff$':
+    elif op == '$diff$':
         return [ 'NUMBER',  int(a1) ^ int(a2) ]             # xor
-    # fi
 
     # combination: $and$, $or$
-    if op == '$and$':
+    elif op == '$and$':
         return [ 'NUMBER',  -1 if int(a1) == -1 and int(a2) == -1 else 0 ]
-    # fi
-    if op == '$or$':
+    elif op == '$or$':
         return [ 'NUMBER',  -1 if int(a1) == -1 or int(a2) == -1 else 0 ]
     # fi
 
-    #-- print("ERROR - unknown operator '{}' '{}' '{}'".format(arg1, op, arg2))
     return [ "ERROR - unknown operator '{}' '{}' '{}'".format(arg1, op, arg2) , None ]
 # End of compute_value
 
@@ -487,10 +444,9 @@ def comma_eval(args):
     a2 = args[2]
     if type(a0) == SymbolDesc or type(a1) != SymbolDesc or type(a2) == SymbolDesc:
         return [ "ERROR - comma_eval args={}".format(args), None ]
-    # fi
-    if a0[0] != 'NUMBER':
+    elif a0[0] != 'NUMBER':
         return [ "ERROR - comma_eval first argument is not a NUMBER, args={}".format(args), None ]
-    if a2[0] == 'NUMBER':
+    elif a2[0] == 'NUMBER':
         value = [ 'COMMA', [ int(a0[1]), int(a2[1]) ] ]
     elif a2[0] == 'COMMA':
         value = [ 'COMMA', [ int(a0[1]) ] + a2[1] ]
@@ -500,6 +456,7 @@ def comma_eval(args):
 
 #-----------------------------------------------------------------------------
 def binary_eval(args):
+#--    print("binary_eval - Entering")
     if args is None or len(args) != 3:
         return [ "ERROR - binary_eval wrong number of arguments, args={}".format(args), None ]
     # fi
@@ -507,7 +464,6 @@ def binary_eval(args):
     a1 = args[1]
     a2 = args[2]
     if type(a0) == SymbolDesc or type(a1) != SymbolDesc or type(a2) == SymbolDesc:
-        #-- print("ERROR - binary_eval args={}".format(args))
         return [ "ERROR - binary_eval args={}".format(args), None ]
     # fi
     value = compute_value(a1.symbol, a0, a2)
@@ -516,32 +472,25 @@ def binary_eval(args):
 
 #-----------------------------------------------------------------------------
 def unary_eval(args):
+#--    print("unary_eval - Entering")
     if len(args) != 2:
-        #-- print("ERROR - unary_eval args={}".format(args))
         return [ "ERROR - unary_eval args={}".format(args), None ]
-    # fi
-    if type(args[0]) == SymbolDesc and type(args[1]) != SymbolDesc:
+    elif type(args[0]) == SymbolDesc and type(args[1]) != SymbolDesc:
         op = args[0].symbol
         arg1 = get_value(args[1])
         if arg1 is None:
             return [ "ERROR - Argument2 is None arg1='{}'".format(arg1), None ]
-        # fi
-        if arg1[0].startswith('ERROR'):
+        elif arg1[0].startswith('ERROR'):
             return arg1
-        # fi
-        if arg1[0] != 'NUMBER':
+        elif arg1[0] != 'NUMBER':
             return [ "ERROR - Argument2 is not a Number arg1='{}'".format(arg1), None ]
-        # fi
-        if op == '-':
+        elif op == '-':
             arg1[1] = 0 - arg1[1]
         # fi
         return [ arg1 ]
-    # fi
-    if type(args[0]) != SymbolDesc and type(args[1]) == SymbolDesc:
-        #-- print("ERROR - unary_eval post args={}".format(args))
+    elif type(args[0]) != SymbolDesc and type(args[1]) == SymbolDesc:
         return [ "ERROR - unary_eval post args={}".format(args), None ]
     # fi
-    #-- print("ERROR - unary_eval args={}".format(args))
     return [ "ERROR - unary_eval args={}".format(args), None ]
 # End of unary_eval
 
@@ -584,11 +533,13 @@ def register_postsymbol(oper, lprio, rprio, eval=None):
 
 #-----------------------------------------------------------------------------
 def id_symbol(id):
+#--    print("id_symbol - Entering")
     return SymbolDesc(id, 99999, 100000, identity_eval)
 # End of id_symbol
 
 #-----------------------------------------------------------------------------
 def evaluate_handle(args):
+#--    print("evaluate_handle - Entering args={}".format(args))
     for i in args:
         if type(i) == SymbolDesc:
             a = i.eval(args)
@@ -607,6 +558,7 @@ def advance():
     global lexer
     global cur_token
 
+#--    print("advance - Entering")
     try:
         cur_token = lexer.__next__()                    # [ kind, item ]
     except StopIteration:
@@ -618,6 +570,7 @@ def advance():
 def reset(s):
     global lexer
 
+#--    print("reset - Entering")
     lexer = tokenize(s)
     advance()
 # End of reset
@@ -628,28 +581,26 @@ def cur_sym(allow_presymbol):
     global presymbols
     global cur_token
     
+#--    print("cur_sym - Entering cur_token='{}'".format(cur_token))
     if cur_token is None:
         return None
-    # fi
-    if cur_token[0] == 'ID':                            # kind
-        var = id_symbol(cur_token)
-        return var
-    # fi
-    if cur_token[0] == 'NUMBER':                        # kind
+    elif cur_token[0] == 'ID':                              # kind
         return id_symbol(cur_token)
-    # fi
-    if allow_presymbol and cur_token[1] in presymbols:  # item
+    elif cur_token[0] == 'NUMBER':                          # kind
+        return id_symbol(cur_token)
+    elif cur_token[0] == 'ADDRESS':                         # kind
+        return id_symbol(cur_token)
+    elif allow_presymbol and cur_token[1] in presymbols:    # item
         return presymbols[cur_token[1]]
+    elif cur_token[1] in postsymbols:                       # item
+        return postsymbols[cur_token[1]]                    # item
     # fi
-    if cur_token[1] in postsymbols:                     # item
-        return postsymbols[cur_token[1]]                # item
-    # fi
-    #-- print("ERROR - Undefined token{}".format(cur_token))
     return [ "ERROR - Undefined token '{}'".format(cur_token), None ]
 # End of cur_sym
 
 #-----------------------------------------------------------------------------
 def parse_to(prio):
+#--    print("parse_to - Entering")
     args = []
     while True:
         assert len(args) == 0 or (len(args) == 1 and type(args[0]) != SymbolDesc)
@@ -681,24 +632,19 @@ def parse_to(prio):
         a = get_value(args[0])
         if a is None:
             return [ "ERROR - value is None a='{}'".format(a), None ]
-        # fi
-        if a[0].startswith('ERROR'):
+        elif a[0].startswith('ERROR'):
             return a
-        # fi
-        if a[0] == 'COMMA':
+        elif a[0] == 'COMMA':
             return a
-        # fi
-        if a[0] == 'CHAR':
+        elif a[0] == 'CHAR':
             return a
-        # fi
-        if a[0] != 'NUMBER':
+        elif a[0] != 'NUMBER':
             return [ "ERROR - value is not a Number a='{}'".format(a), None ]
         # fi
         return a
     elif len(args) == 0:
         return None
     # fi
-    #-- print("ERROR - parse_to runs off the end of routine '{}'".format(args))
     return "ERROR - parse_to runs off the end of routine '{}'".format(args)
 # End of parse_to
 
@@ -706,15 +652,14 @@ def parse_to(prio):
 def parse(s):
     global cur_token
 
+#--    print("parse - Entering")
     reset(s)
     try:                                # NOTDONEYET - move to only around specific OOR plaes.
         res = parse_to(0)
     except:
-        #-- print("parse - exception")
         return [ None, "error parsing" ]
     # yrt
     if cur_token is not None:
-        #-- print("ERROR - remaining input res='{}' cur_token='{}'".format(res, cur_token))
         return [ "ERROR - remaining input res='{}' cur_token='{}'".format(res, cur_token), None ]
     # fi
     return res
@@ -724,193 +669,137 @@ def parse(s):
 def result_functions(arg1, arg2):
     global functions
     global arrays
+    global local_arrays
 
-    print("result_functions - #1 arg1={} arg2={}".format(arg1,arg2))
+#--    print("result_functions - #1 arg1={} arg2={}".format(arg1,arg2))
     if arg1[0] != 'ID':
         # 'NUMBER' -- implied multiply
         # Do implied multiply
         a1 = get_value(arg1)
         if a1 is None:
             return [ "ERROR - value is None a1='{}'".format(a1), None ]
-        # fi
-        if a1[0].startswith('ERROR'):
+        elif a1[0].startswith('ERROR'):
             return a1
-        # fi
-        if a1[0] != 'NUMBER':
+        elif a1[0] != 'NUMBER':
             return [ "ERROR - value is not a Number a1='{}'".format(a1), None ]
         # fi
         a2 = get_value(arg2)
         if a2 is None:
             return [ "ERROR - value is None a2='{}'".format(a2), None ]
-        # fi
-        if a2[0].startswith('ERROR'):
+        elif a2[0].startswith('ERROR'):
             return a2
-        # fi
-        if a2[0] != 'NUMBER':
+        elif a2[0] != 'NUMBER':
             return [ "ERROR - value is not a Number a2='{}'".format(a2), None ]
         # fi
-        a = [[ 'NUMBER',  a1[1] * a2[1] ]]
+        a = [ 'NUMBER',  a1[1] * a2[1] ]
         return a
     # fi
-    # -- ID --
-    if arg2[0] not in ['NUMBER', 'COMMA']:
-        print("ERROR - Argument to function/array/implied-multiply is not a number '{}'".format(arg2))
-        return [ "ERROR - Argument to function is not a number '{}'".format(arg2), None ]
-    # fi
 
+    # -- ID --
     if arg1[1] in functions:
+        fu = functions[arg1[1]]
+        wh = fu[0]
+        ar = fu[1]
+        if arg2[0] not in ar:
+            return [ "ERROR - function '{}' called with wrong argument type {} vs {}".format(arg1[1], arg2[0], ar), None ]
+        # fi
         try:
-            a = [ functions[arg1[1]](arg2[1]) ]
+            a = wh(arg2)
             return a
         except:
-            #-- print("ERROR - performing function '{}' with argument '{}'".format(arg1, arg2))
             return [ "ERROR - performing function '{}' with argument '{}'".format(arg1, arg2), None ]
         # yrt
     # fi
 
-    maxmaclev = 0
-    maxwary = None
-    for wary in arrays:
-        if arg1[1] == wary[numarry_name]:
-            if wary[numarry_maclevel] > maxmaclev:
-                maxmaclev = wary[numarry_maclevel]
-                maxwary = wary
-            # fi
-        # fi
-    # rof
-    if maxwary is not None:
-        print("result_functions - #5b arg1={} arg2={}".format(arg1,arg2))
-        print("                       maxwary={}".format(maxwary))
-        print("                       maxwary[numarry_name]={}".format(maxwary[numarry_name]))
-        print("                       maxwary[numarry_maclevel]={}".format(maxwary[numarry_maclevel]))
-        print("                       maxwary[numarry_indexes]={}".format(maxwary[numarry_indexes]))
-        print("                       maxwary[numarry_values]={}".format(maxwary[numarry_values]))
-        print("                       maxwary[numarry_value_type]={}".format(maxwary[numarry_value_type]))
-        a = [ None, None]
-        if maxwary[numarry_indexes] == []:
-            # NOTDONEYET - implied multiply of variable with following argument.
-            print("result_functions - #5c arg1={} arg2={}".format(arg1,arg2))
-            if maxwary[numarry_value_type][0] is None:
-                return [ "ERROR - get_value - variable is not set yet - '{}'".format(arg1[0]), None ]
-            # fi
-            print("result_functions - #5d arg1={} arg2={}".format(arg1,arg2))
-            print("result_functions - #5e arg1={} arg2={}".format(arg1,arg2))
-            if maxwary[numarry_value_type][0] == 0:
-                a[0] = 'NUMBER'
-            else:
-                a[0] = 'CHAR'                       # NOTDONEYET - probably should be 'CHAR'
-            # fi
-            print("result_functions - #5f arg1={} arg2={}".format(arg1,arg2))
-            a[1] = maxwary[numarry_values][0]
-            print("result_functions - #5g arg1={} arg2={} a={}".format(arg1,arg2,a))
-            return a
-        elif len(maxwary[numarry_indexes]) == 1:
-            print("result_functions - #5h arg1={} arg2={}".format(arg1,arg2))
-            if arg2[0] != 'COMMA' or len(arg2[1]) != 1:
-                return [ "ERROR - get_value - variable needs 1 arguments to array '{}' ({})".format(arg,maxwary[numarry_indexes]), None ]
-            # fi
-            idx = int(arg2[1][0])
-            if maxwary[numarry_value_type][idx] is None:
-                return [ "ERROR - get_value - array ({}) is not set yet".format(arg2[0]), None ]
-            # fi
-            if maxwary[numarry_value_type][idx] == 0:
-                a[0] = 'NUMBER'
-            else:
-                a[0] = 'CHAR'                       # NOTDONEYET - probably should be 'CHAR'
-            # fi
-            a[1] = maxwary[numarry_values][idx]
-            return a
-        elif len(maxwary[numarry_indexes]) == 2:
-            print("result_functions - #5i arg1={} arg2={}".format(arg1,arg2))
-            if arg2[0] != 'COMMA' or len(arg2[1]) != 2:
-                return [ "ERROR - get_value - variable needs 2 arguments to array '{}' ({})".format(arg,maxwary[numarry_indexes]), None ]
-            # fi
-            idx = int(arg2[1][0]) + int(arg2[1][1]) * maxwary[numarry_indexes][0]
-            if maxwary[numarry_value_type][idx] is None:
-                return [ "ERROR - get_value - array ({},{}) is not set yet".format(arg2[0],arg2[1]), None ]
-            # fi
-            if maxwary[numarry_value_type][idx] == 0:
-                a[0] = 'NUMBER'
-            else:
-                a[0] = 'CHAR'                       # NOTDONEYET - probably should be 'CHAR'
-            # fi
-            a[1] = maxwary[numarry_values][idx]
-            return a
-        elif len(maxwary[numarry_indexes]) == 3:
-            print("result_functions - #5j arg1={} arg2={}".format(arg1,arg2))
-            print("                       arg2[0]={}".format(arg2[0]))
-            print("                       arg2[1]={}".format(arg2[1]))
-            if arg2[0] != 'COMMA' or type(arg2[1]) is not list or len(arg2[1]) != 3:
-                print("arg2[0] not COMMA or len(arg2[1]) != 3")
-                if type(arg2[1]) is not list:
-                    ix = 1
-                else:
-                    ix = len(arg2[1])
+    if arg2[0] in ['NUMBER', 'COMMA', 'CHAR']:
+        maxmaclev = -1
+        maxwary = None
+        for wary in arrays + local_arrays:
+            if arg1[1] == wary[numarry_name]:
+                if wary[numarry_maclevel] > maxmaclev:
+                    maxmaclev = wary[numarry_maclevel]
+                    maxwary = wary
                 # fi
-                return [ "ERROR - get_value - variable needs 3 arguments to array '{}' ({}) not {}".format(arg1,maxwary[numarry_indexes],ix), None ]
             # fi
-            i1 = int(arg2[1][0]) - 1
-            i2 = int(arg2[1][1]) - 1
-            i3 = int(arg2[1][2]) - 1
-            if i1 < 0 or i1 > (maxwary[numarry_indexes][0] -1):
-                return [ "ERROR - get_value - first dimension ({}) out of range ({})".format(i1+1,maxwary[numarry_indexes][0]), None ]
-            elif i2 < 0 or i2 > (maxwary[numarry_indexes][1] -1):
-                return [ "ERROR - get_value - second dimension ({}) out of range ({})".format(i2+1,maxwary[numarry_indexes][1]), None ]
-            elif i3 < 0 or i3 > (maxwary[numarry_indexes][2] -1):
-                return [ "ERROR - get_value - second dimension ({}) out of range ({})".format(i3+1,maxwary[numarry_indexes][2]), None ]
-            # fi
-            mult = maxwary[numarry_indexes][0] * maxwary[numarry_indexes][1]
-            idx = i1 + i2 * maxwary[numarry_indexes][0] + i3 * mult
-            if maxwary[numarry_value_type][idx] is None:
-                return [ "ERROR - get_value - array ({},{},{}) is not set yet".format(i1+1,i2+1,i3+1), None ]
-            # fi
-            if maxwary[numarry_value_type][idx] == 0:
-                a[0] = 'NUMBER'
+        # rof
+        if maxwary is not None:
+            arg = [ None, None]
+            l = len(maxwary[numarry_indexes])
+            if l == 0:                      # Do an implied multiply.
+                pass
+            elif l == 1:
+                d = int(arg2[1])
+                if arg2[0] != 'NUMBER':
+                    return [ "ERROR - result_functions - variable needs 1 dimension to array '{}' not {}".format(arg1, l) ]
+                elif d < 1 or d > maxwary[numarry_indexes][0]:
+                    return [ "ERROR - result_functions - variable {} 1st dimension {} not in range 1 thru {}".format(arg1, d, maxwary[numarry_indexes][0]) ]
+                elif maxwary[numarry_value_type][d-1] is None:
+                    return [ "ERROR - result_functions - variable {}({}) is not set".format(arg1, d) ]
+                # fi
+                arg = [ 'ADDRESS', [ d - 1, maxwary] ]
+                return arg
             else:
-                a[0] = 'CHAR'                       # NOTDONEYET - probably should be 'CHAR'
+                if arg2[0] != 'COMMA':
+                    return [ "ERROR - result_functions - variable {} needs {} dimensions for array".format(arg1, l) ]
+                # fi
+                d = len(arg2[1])
+                if l != d:
+                    return [ "ERROR - result_functions - variable {} needs {} dimensions to array '{}' not {}".format(arg1, l, d) ]
+                # fi
+
+                d = arg2[1][0]
+                x = maxwary[numarry_indexes][0]     # Max dimension of this..
+                if d < 1 or d > x:
+                    return [ "ERROR - result_functions - variable {} dimension#1 {} not in range 1 thru {}".format(arg1, d, x) ]
+                # fi
+                h = d - 1                           # array index into numarry_values & numarry_value_type
+                mult = x
+                for a in range(1, l):
+                    d = arg2[1][a]
+                    x = maxwary[numarry_indexes][a]
+                    if d < 1 or d > x:
+                        return [ "ERROR - result_functions - variable {} dimension#{} {} not in range 1 thru {}".format(arg1, a+1, d, x) ]
+                    # fi
+                    h = h + (d-1) * mult
+                    mult = mult * x
+                # rof
+
+                if maxwary[numarry_value_type][h] is None:
+                    return [ "ERROR - result_functions - array {} ({}) is not set yet".format(arg1,arg2[1]), None ]
+                # fi
+                arg = [ 'ADDRESS', [ h, maxwary] ]
+                return arg
             # fi
-            a[1] = maxwary[numarry_values][idx]
-            return a
-        else:
-            return [ "ERROR - get_value - array has too many dimensions '{}'".format(maxwary[numarry_indexes]), None ]
         # fi
-        return [ "ERROR - get_value - variable is array '{}' ({})".format(arg,maxwary[numarry_indexes]), None ]
     # fi
 
     # See if can get_value(arg1[0]) -- if can, then do implied multiply.
     a1 = get_value(arg1)
     if a1 is None:
         return [ "ERROR - value is None a1='{}'".format(a1), None ]
-    # fi
-    if a1[0].startswith('ERROR'):
+    elif a1[0].startswith('ERROR'):
         return a1
-    # fi
-    if a1[0] != 'NUMBER':
+    elif a1[0] != 'NUMBER':
         return [ "ERROR - value is not a Number a1='{}'".format(a1), None ]
     # fi
     a2 = get_value(arg2)
     if a2 is None:
         return [ "ERROR - value is None a2='{}'".format(a2), None ]
-    # fi
-    if a2[0].startswith('ERROR'):
+    elif a2[0].startswith('ERROR'):
         return a2
-    # fi
-    if a2[0] != 'NUMBER':
+    elif a2[0] != 'NUMBER':
         return [ "ERROR - value is not a Number a2='{}'".format(a2), None ]
-    # fi
-    if a1 and a2:
-        a = [[ 'NUMBER', a1[1] * a2[1] ]]
+    elif a1 and a2:
+        a = [ 'NUMBER', a1[1] * a2[1] ]
         return a
     # fi
-    #-- print("ERROR - Fetching from unknown function '{}' '{}'".format(arg1, arg2))
     return [[ "ERROR - Fetching from unknown function '{}' '{}'".format(arg1, arg2) , None ]]
 # End of result_functions
 
 #-----------------------------------------------------------------------------
 def common_grouping_eval(args, txt, open_char, close_char):
-    print("common_grouping_eval - len(args)={} args='{}'".format(len(args),args))
+#--    print("common_grouping_eval - len(args)={} args='{}'".format(len(args),args))
     if len(args) == 3:
-        print("common_grouping_eval - #3")
         r = args[0]
         s = args[1]
         t = args[2]
@@ -921,7 +810,6 @@ def common_grouping_eval(args, txt, open_char, close_char):
         # fi
     # fi
     if len(args) == 4:
-        print("common_grouping_eval - #4")
         r = args[0]
         s = args[1]
         t = args[2]
@@ -941,29 +829,23 @@ def common_grouping_eval(args, txt, open_char, close_char):
             a1 = get_value(s)
             if a1 is None:
                 return [ "ERROR - value is None a1='{}'".format(a1), None ]
-            # fi
-            if a1[0].startswith('ERROR'):
+            elif a1[0].startswith('ERROR'):
                 return a1
-            # fi
-            if a1[0] != 'NUMBER':
+            elif a1[0] != 'NUMBER':
                 return [ "ERROR - value is not a Number a1='{}'".format(a1), None ]
             # fi
             a2 = get_value(u)
             if a2 is None:
                 return [ "ERROR - value is None a2='{}'".format(a2), None ]
-            # fi
-            if a2[0].startswith('ERROR'):
+            elif a2[0].startswith('ERROR'):
                 return a2
-            # fi
-            if a2[0] != 'NUMBER':
+            elif a2[0] != 'NUMBER':
                 return [ "ERROR - value is not a Number a2='{}'".format(a2), None ]
             # fi
             return [[ 'NUMBER',  a1[1] * a2[1] ]]
         #fi
-        print("common_grouping_eval - #4c")
     # fi
     if len(args) == 6:
-        print("common_grouping_eval - #6")
         r = args[0]
         s = args[1]
         t = args[2]
@@ -980,28 +862,23 @@ def common_grouping_eval(args, txt, open_char, close_char):
             a1 = get_value(s)
             if a1 is None:
                 return [ "ERROR - value is None a1='{}'".format(a1), None ]
-            # fi
-            if a1[0].startswith('ERROR'):
+            elif a1[0].startswith('ERROR'):
                 return a1
-            # fi
-            if a1[0] != 'NUMBER':
+            elif a1[0] != 'NUMBER':
                 return [ "ERROR - value is not a Number a1='{}'".format(a1), None ]
             # fi
             a2 = get_value(v)
             if a2 is None:
                 return [ "ERROR - value is None a2='{}'".format(a2), None ]
-            # fi
-            if a2[0].startswith('ERROR'):
+            elif a2[0].startswith('ERROR'):
                 return a2
-            # fi
-            if a2[0] != 'NUMBER':
+            elif a2[0] != 'NUMBER':
                 return [ "ERROR - value is not a Number a2='{}'".format(a2), None ]
             # fi
             return [[ 'NUMBER',  a1[1] * a2[1] ]]
         #fi
     # fi
     if len(args) == 7:
-        print("common_grouping_eval - #7")
         r = args[0]
         s = args[1]
         t = args[2]
@@ -1016,36 +893,28 @@ def common_grouping_eval(args, txt, open_char, close_char):
             and type(v) == SymbolDesc and (v.symbol in ['(','[','{'])
             and type(w) != SymbolDesc                       # NUMBER def
             and type(x) == SymbolDesc and (x.symbol in [')',']','}'])):
-            print("common_grouping_eval - before result_functions #2 a1={}".format(a1))
             a1 = result_functions(r, t)
-            print("common_grouping_eval - after result_functions #2 a1={}".format(a1))
             if type(a1) == list and len(a1) > 0:
                 a1 = a1[0]
-            # fi
-            if a1 is None:
+            elif a1 is None:
                 return [ "ERROR - value is None a1='{}'".format(a1), None ]
-            # fi
-            if a1[0].startswith('ERROR'):
+            elif a1[0].startswith('ERROR'):
                 return a1
-            # fi
-            if a1[0] != 'NUMBER':
+            elif a1[0] != 'NUMBER':
                 return [ "ERROR - value is not a Number a1='{}'".format(a1), None ]
             # fi
             a2 = get_value(w)
             if a2 is None:
                 return [ "ERROR - value is None a2='{}'".format(a2), None ]
-            # fi
-            if a2[0].startswith('ERROR'):
+            elif a2[0].startswith('ERROR'):
                 return a2
-            # fi
-            if a2[0] != 'NUMBER':
+            elif a2[0] != 'NUMBER':
                 return [ "ERROR - value is not a Number a2='{}'".format(a2), None ]
             # fi
             a = [[ 'NUMBER',  a1[1] * a2[1] ]]
             return a
         #fi
     # fi
-    #-- print("ERROR - open_{}_eval args='{}'".format(txt, args))
     return [ "ERROR - open_{}_eval args='{}'".format(txt, args), None ]
 # End of common_grouping_eval
 
@@ -1056,7 +925,6 @@ def open_paren_eval(args):
 
 #-----------------------------------------------------------------------------
 def close_paren_eval(args):
-    #-- print("ERROR - close_paren_eval args='{}'".format(args))
     return [ "ERROR - close_paren_eval args='{}'".format(args), None ]
 # End of close_paren_eval
 
@@ -1067,7 +935,6 @@ def open_bracket_eval(args):
 
 #-----------------------------------------------------------------------------
 def close_bracket_eval(args):
-    #-- print("ERROR - close_bracket_eval args='{}'".format(args))
     return [ "ERROR - close_bracket_eval args='{}'".format(args), None ]
 # End of close_bracket_eval
 
@@ -1078,120 +945,102 @@ def open_brace_eval(args):
 
 #-----------------------------------------------------------------------------
 def close_brace_eval(args):
-    #-- print("ERROR - close_brace_eval args='{}'".format(args))
     return [ "ERROR - close_brace_eval args='{}'".format(args), None ]
 # End of close_brace_eval
 
 #-----------------------------------------------------------------------------
-def f_zvar(arg):
-    global zvar
-
-    try:
-        arg = float(arg)
-        arg = int(arg)
-    except:
-        #-- print("ERROR - argument to array m is not an integer '{}'".format(txt, args))
-        return [ "ERROR - argument to array m is not an integer '{}'".format(txt, args), None ]
-    # yrt
-    if arg < 0 or arg >= len(zvar):
-        return [ "ERROR - argument ({}) index number {} not in zvar array.".format(arg1,arg), None ]
-    # fi
-    warray = zvar[arg][0]
-    windex = zvar[arg][1]
-    if windex < 0 or windex >= len(warray[numarry_values]):
-        return [ "ERROR - Argument ({}) index number {} not in zvar array.".format(arg1,arg), None ]
-    # fi
-    return [ 'ID', 'zvar' + str(arg) ]
-# End of f_zvar
-
-#-----------------------------------------------------------------------------
 def f_m(arg):
     try:
-        arg = float(arg)
-        arg = int(arg)
+        a = float(arg[1])
+        a = int(a)
     except:
-        #-- print("ERROR - argument to array m is not an integer '{}'".format(txt, args))
-        return [ "ERROR - argument to array m is not an integer '{}'".format(txt, args), None ]
+        return [ "ERROR - argument to array m is not an integer '{}'".format(txt, arg), None ]
     # yrt
-    if arg < 1 or arg > 50:
-        return [ "ERROR - argument to array m is out of range 1 to 50 '{}'".format(txt, args), None ]
+    if a < 1 or a > 50:
+        return [ "ERROR - argument to array m is out of range 1 to 50 '{}'".format(txt, a), None ]
     # fi
-    return [ 'ID', 'm' + str(arg) ]
+    return [ 'ID', 'm' + str(a) ]
 # End of f_m
 
 #-----------------------------------------------------------------------------
 def f_ceil(arg):
-    a = float(arg)
+    a = float(arg[1])
     a = math.ceil(a)
     return [ 'NUMBER', a ]
 # End of f_ceil
 
 #-----------------------------------------------------------------------------
 def f_floor(arg):
-    a = float(arg)
+    a = float(arg[1])
     a = math.floor(a)
     return [ 'NUMBER', a ]
 # End of f_floor
 
 #-----------------------------------------------------------------------------
 def f_freq(arg):
-    a = float(arg)
+    a = float(arg[1])
     a = 968000.0 / a
     return [ 'NUMBER', a ]
 # End of f_freq
 
 #-----------------------------------------------------------------------------
 def f_nearest(arg):
-    a = float(arg)
+    a = float(arg[1])
     a = int(round(math.log(a / 27.5) * (12.0 / 0.693147)))
     return [ 'NUMBER', a ]
 # End of f_nearest
 
 #-----------------------------------------------------------------------------
 def f_abs(arg):
-    a = float(arg)
-    a = abs(a)
+    a = float(arg[1])
+    a = math.fabs(a)
     return [ 'NUMBER', a ]
 # End of f_abs
 
 #-----------------------------------------------------------------------------
 def f_arctan(arg):
-    a = float(arg)
+    a = float(arg[1])
     a = math.atan(a)
     return [ 'NUMBER', a ]
 # End of f_arctan
 
 #-----------------------------------------------------------------------------
 def f_cos(arg):
-    a = float(arg)
+    a = float(arg[1])
     a = math.cos(a)
     return [ 'NUMBER', a ]
 # End of f_cos
 
 #-----------------------------------------------------------------------------
 def f_exp(arg):
-    a = float(arg)
+    a = float(arg[1])
     a = math.exp(a)
     return [ 'NUMBER', a ]
 # End of f_exp
 
 #-----------------------------------------------------------------------------
 def f_frac(arg):
-    a = float(arg)
+    a = float(arg[1])
     a = int(round(a)) - a
     return [ 'NUMBER', a ]
 # End of f_frac
 
 #-----------------------------------------------------------------------------
+def f_float(arg):
+    a = float(arg[1])
+    return [ 'NUMBER', a ]
+# End of f_int
+
+#-----------------------------------------------------------------------------
 def f_int(arg):
-    a = float(arg)
+    a = float(arg[1])
     a = int(a)
     return [ 'NUMBER', a ]
 # End of f_int
 
 #-----------------------------------------------------------------------------
 def f_log(arg):
-    a = float(arg)
+    a = float(arg[1])
     try:
         a = math.log(a, 10)
     except:
@@ -1202,21 +1051,21 @@ def f_log(arg):
 
 #-----------------------------------------------------------------------------
 def f_ln(arg):
-    a = float(arg)
+    a = float(arg[1])
     a = math.log(a)
     return [ 'NUMBER', a ]
 # End of f_ln
 
 #-----------------------------------------------------------------------------
 def f_round(arg):
-    a = float(arg)
+    a = float(arg[1])
     a = int(round(a))
     return [ 'NUMBER', a ]
 # End of f_round
 
 #-----------------------------------------------------------------------------
 def f_sign(arg):
-    a = float(arg)
+    a = float(arg[1])
     if a < 0:
         return [ 'NUMBER', -1 ]
     elif a > 0:
@@ -1227,14 +1076,14 @@ def f_sign(arg):
 
 #-----------------------------------------------------------------------------
 def f_sin(arg):
-    a = float(arg)
+    a = float(arg[1])
     a = math.sin(a)
     return [ 'NUMBER', a ]
 # End of f_sin
 
 #-----------------------------------------------------------------------------
 def f_sqrt(arg):
-    a = float(arg)
+    a = float(arg[1])
     a = math.sqrt(a)
     return [ 'NUMBER', a ]
 # End of f_sqrt
@@ -1242,7 +1091,7 @@ def f_sqrt(arg):
 #-----------------------------------------------------------------------------
 # Invert logical expression (-1 = true, 0 = false). Make anything non-zero be true.
 def f_not(arg):
-    a = float(arg)
+    a = float(arg[1])
     if a < 0 or a > 0:
         a = -1
     else:
@@ -1253,67 +1102,123 @@ def f_not(arg):
 
 #-----------------------------------------------------------------------------
 def f_print(arg):
-    arg = float(arg)
-    print(arg)
-    return [ 'NUMBER', arg ]
+    which = arg[0]
+    val = arg[1]
+    if which in [ 'NUMBER', 'CHAR']:
+        print(val)
+        return arg
+    elif which == 'COMMA':
+        a = ''
+        for i in val:
+            if a != '':
+                a = a + ','
+            # fi
+            a = a + str(i)
+        # rof
+        print(a)
+        return arg
+    else:
+        print("PRINT: UNKNOWN TYPE={}".format(arg))
+        return arg
+    # fi
 # End of f_print
 
-#-- #-----------------------------------------------------------------------------
-#-- def f_pal(arg):
-#--     return [ 'NUMBER', 12345.67890 ]
-#-- # End of f_pal
-#--
 #-----------------------------------------------------------------------------
 global functions
 functions = {
+#    NAME       Function        array of argument-types
+    'm':        [ f_m,          ['NUMBER' ]],           # Array of m1, m2, m3, ...
 #...............................................................................
-    'm':        f_m,                        # Array of m1, m2, m3, ...
-    'zvar':     f_zvar,                     # Complicated array used by IMS.
+# Math functions.
+    'abs':      [ f_abs,        ['NUMBER']],
+    'arctan':   [ f_arctan,     ['NUMBER']],
+    'ceil':     [ f_ceil,       ['NUMBER']],
+    'cos':      [ f_cos,        ['NUMBER']],
+    'exp':      [ f_exp,        ['NUMBER']],
+    'float':    [ f_float,      ['NUMBER', 'CHAR']],
+    'floor':    [ f_floor,      ['NUMBER']],
+    'frac':     [ f_frac,       ['NUMBER']],
+    'int':      [ f_int,        ['NUMBER', 'CHAR']],
+    'log':      [ f_log,        ['NUMBER']],
+    'ln':       [ f_ln,         ['NUMBER']],
+    'not':      [ f_not,        ['NUMBER']],
+    'round':    [ f_round,      ['NUMBER']],
+    'sign':     [ f_sign,       ['NUMBER']],
+    'sin':      [ f_sin,        ['NUMBER']],
+    'sqrt':     [ f_sqrt,       ['NUMBER']],
 #...............................................................................
-    'abs':      f_abs,
-    'arctan':   f_arctan,
-    'ceil':     f_ceil,
-    'cos':      f_cos,
-    'exp':      f_exp,
-    'floor':    f_floor,
-    'frac':     f_frac,
-    'freq':     f_freq,
-    'int':      f_int,
-    'log':      f_log,
-    'ln':       f_ln,
-    'nearest':  f_nearest,
-    'not':      f_not,
-    'print':    f_print,
-    'round':    f_round,
-    'sign':     f_sign,
-    'sin':      f_sin,
-    'sqrt':     f_sqrt,
+# Old musicomp functions.
+    'freq':     [ f_freq,       ['NUMBER']],
+    'nearest':  [ f_nearest,    ['NUMBER']],
 #...............................................................................
-#--     'pal':  f_pal,                      # For testing purposes only.
+    'print':    [ f_print,      ['NUMBER','CHAR','COMMA']],
     }
 
 #-----------------------------------------------------------------------------
-global local_variables
-local_variables = {}
+#               Name of variable
+#                       Macro-level
+#                          Zero dimension
+#                               Value
+#                                             Number (not character string)
+arrays.append( [ 'pi',  0, [ ], [ math.pi ],  [ 0 ] ] )
+arrays.append( [ 'e',   0, [ ], [ math.e ],   [ 0 ] ] )
+arrays.append( [ 'tau', 0, [ ], [ math.tau ], [ 0 ] ] )
 
-global variables
-variables = {
-    'pi': math.pi,
-    'e': math.e,
-    'tau': math.tau,
-#   1   .   .   .   2   .   .   .   3   .   .   .   4   .   .   .   5   .   .   .
-    'm1': 0,        'm2': 0,        'm3': 0,        'm4': 0,        'm5': 0,
-    'm6': 0,        'm7': 0,        'm8': 0,        'm9': 0,        'm10': 0,
-    'm11': 0,       'm12': 0,       'm13': 0,       'm14': 0,       'm15': 0,
-    'm16': 0,       'm17': 0,       'm18': 0,       'm19': 0,       'm20': 0,
-    'm21': 0,       'm22': 0,       'm23': 0,       'm24': 0,       'm25': 0,
-    'm26': 0,       'm27': 0,       'm28': 0,       'm29': 0,       'm30': 0,
-    'm31': 0,       'm32': 0,       'm33': 0,       'm34': 0,       'm35': 0,
-    'm36': 0,       'm37': 0,       'm38': 0,       'm39': 0,       'm40': 0,
-    'm41': 0,       'm42': 0,       'm43': 0,       'm44': 0,       'm45': 0,
-    'm46': 0,       'm47': 0,       'm48': 0,       'm49': 0,       'm50': 0,
-    }
+arrays.append( [ 'm1',  0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm2',  0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm3',  0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm4',  0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm5',  0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm6',  0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm7',  0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm8',  0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm9',  0, [ ], [ 0 ],        [ 0 ] ] )
 
+arrays.append( [ 'm10', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm11', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm12', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm13', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm14', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm15', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm16', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm17', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm18', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm19', 0, [ ], [ 0 ],        [ 0 ] ] )
+
+arrays.append( [ 'm20', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm21', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm22', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm23', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm24', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm25', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm26', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm27', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm28', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm29', 0, [ ], [ 0 ],        [ 0 ] ] )
+
+arrays.append( [ 'm30', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm31', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm32', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm33', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm34', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm35', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm36', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm37', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm38', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm39', 0, [ ], [ 0 ],        [ 0 ] ] )
+
+arrays.append( [ 'm40', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm41', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm42', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm43', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm44', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm45', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm46', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm47', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm48', 0, [ ], [ 0 ],        [ 0 ] ] )
+arrays.append( [ 'm49', 0, [ ], [ 0 ],        [ 0 ] ] )
+
+arrays.append( [ 'm50', 0, [ ], [ 0 ],        [ 0 ] ] )
 #-----------------------------------------------------------------------------
 def cexp_parser():
     #                    oper,                         lprio, rprio, eval
@@ -1370,7 +1275,6 @@ def get_line():
                 line = re.sub('[$][$].*$', '', line)
                 # ignore leading and trailing spaces.
                 line = line.strip()
-                #-- print("line='{}'".format(line), file=sys.stderr)
                 return line
             # fi
         except EOFError:
