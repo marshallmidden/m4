@@ -29,6 +29,8 @@ global arrays
 arrays = [ ]
 global local_arrays
 local_arrays = [ ]
+global note_arrays
+note_arrays = [ ]
 #-----------------------------------------------------------------------------
 numarry_name = 0            # The name of the variable.
 numarry_maclevel = 1        # The macro level was in effect when created.
@@ -258,6 +260,7 @@ def identity_eval(args):
 def get_value(arg):
     global arrays
     global local_arrays
+    global note_arrays
 
 #--    print("get_value - Entering arg={}".format(arg))
     if arg[0].startswith('ERROR'):
@@ -292,7 +295,7 @@ def get_value(arg):
 
     maxmaclev = -1
     maxwary = None
-    for wary in arrays + local_arrays:
+    for wary in arrays + local_arrays + note_arrays:
         if arg[1] == wary[numarry_name]:
             if wary[numarry_maclevel] >  maxmaclev:
                 maxmaclev = wary[numarry_maclevel]
@@ -320,6 +323,7 @@ def get_value(arg):
 def compute_value(op, arg1, arg2):
     global arrays
     global local_arrays
+    global note_arrays
 
     a2 = get_value(arg2)
     if a2 is None:
@@ -351,7 +355,7 @@ def compute_value(op, arg1, arg2):
         # arrays here.
         maxmaclev = -1
         maxwary = None
-        for wary in arrays + local_arrays:
+        for wary in arrays + local_arrays + note_arrays:
             if arg1[1] == wary[numarry_name]:
                 if wary[numarry_maclevel] >  maxmaclev:
                     maxmaclev = wary[numarry_maclevel]
@@ -672,6 +676,7 @@ def result_functions(arg1, arg2):
     global functions
     global arrays
     global local_arrays
+    global note_arrays
 
 #--    print("result_functions - #1 arg1={} arg2={}".format(arg1,arg2))
     if arg1[0] != 'ID':
@@ -716,7 +721,7 @@ def result_functions(arg1, arg2):
     if arg2[0] in ['NUMBER', 'COMMA', 'CHAR']:
         maxmaclev = -1
         maxwary = None
-        for wary in arrays + local_arrays:
+        for wary in arrays + local_arrays + note_arrays:
             if arg1[1] == wary[numarry_name]:
                 if wary[numarry_maclevel] > maxmaclev:
                     maxmaclev = wary[numarry_maclevel]
