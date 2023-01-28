@@ -41,25 +41,25 @@ numarry_value_type = 4      # Array of types None=not-set, 0=int/float, 1= chara
 #-- warray = [ 'abc', 8,
 #--            [ ],             # Zero dimension
 #--            [ 123.000 ],
-#--            [ 0 ] ]       # Character string, number, No dimensions.
+#--            [ 0 ] ]       #  int/float
 #-- arrays.append(warray)
 #-- 
 #-- warray = [ 'abc1', 8,
 #--            [ 2 ],           # 1 dimension
 #--            [ 'abc1', 123.001 ],
-#--            [ 1, 0 ] ]       # Character string, number, 1 dimension.
+#--            [ 1, 0 ] ]       # Character string, int/float
 #-- arrays.append(warray)
 #-- 
 #-- warray = [ 'abc2', 8,
 #--            [ 1, 2 ],        # 2 dimensions
 #--            [ 'abc2', 123.002 ],
-#--            [ 1, 0 ] ]    # Not-set-yet, int/float
+#--            [ 1, 0 ] ]    # character string, int/float
 #-- arrays.append(warray)
 #-- 
 #-- warray = [ 'abc3', 8,
-#--            [ 1, 1, 2 ],        # 2 dimensions
+#--            [ 1, 1, 2 ],        # 3 dimensions
 #--            [ 'abc3', 123.003 ],
-#--            [ 1, 0 ] ]    # Not-set-yet, int/float
+#--            [ 1, 0 ] ]    # character string, int/float
 #-- arrays.append(warray)
 #-- 
 #-- warray = [ 'def', 8,
@@ -69,7 +69,7 @@ numarry_value_type = 4      # Array of types None=not-set, 0=int/float, 1= chara
 #-- arrays.append(warray)
 #-- 
 #-- warray = [ 'ghi', 8,
-#--            [ 3, 2, 2 ],        # 2 dimensions
+#--            [ 3, 2, 2 ],        # 3 dimensions
 #--            [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 ],
 #--            [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ] ]    # Not-set-yet, int/float
 #-- arrays.append(warray)
@@ -77,13 +77,13 @@ numarry_value_type = 4      # Array of types None=not-set, 0=int/float, 1= chara
 #-- warray = [ 'xyz', 8,
 #--            [ ], 
 #--            [ 'm1' ],
-#--            [ 1 ] ]    # Not-set-yet, int/float
+#--            [ 1 ] ]    # character string
 #-- local_arrays.append(warray)
 #-- 
 #-- warray = [ 'tuv', 8,
 #--            [ ], 
 #--            [ '1.234' ],
-#--            [ 1 ] ]    # Not-set-yet, int/float
+#--            [ 1 ] ]    # character string
 #-- local_arrays.append(warray)
 #-- 
 #-----------------------------------------------------------------------------
