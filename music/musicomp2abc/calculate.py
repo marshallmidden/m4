@@ -29,6 +29,8 @@ global arrays
 arrays = [ ]
 global local_arrays
 local_arrays = [ ]
+global note_arrays
+note_arrays = [ ]
 #-----------------------------------------------------------------------------
 numarry_name = 0            # The name of the variable.
 numarry_maclevel = 1        # The macro level was in effect when created.
@@ -39,25 +41,25 @@ numarry_value_type = 4      # Array of types None=not-set, 0=int/float, 1= chara
 #-- warray = [ 'abc', 8,
 #--            [ ],             # Zero dimension
 #--            [ 123.000 ],
-#--            [ 0 ] ]       # Character string, number, No dimensions.
+#--            [ 0 ] ]       #  int/float
 #-- arrays.append(warray)
 #-- 
 #-- warray = [ 'abc1', 8,
 #--            [ 2 ],           # 1 dimension
-#--            [ "abc1", 123.001 ],
-#--            [ 1, 0 ] ]       # Character string, number, 1 dimension.
+#--            [ 'abc1', 123.001 ],
+#--            [ 1, 0 ] ]       # Character string, int/float
 #-- arrays.append(warray)
 #-- 
 #-- warray = [ 'abc2', 8,
 #--            [ 1, 2 ],        # 2 dimensions
-#--            [ "abc2", 123.002 ],
-#--            [ 1, 0 ] ]    # Not-set-yet, int/float
+#--            [ 'abc2', 123.002 ],
+#--            [ 1, 0 ] ]    # character string, int/float
 #-- arrays.append(warray)
 #-- 
 #-- warray = [ 'abc3', 8,
-#--            [ 1, 1, 2 ],        # 2 dimensions
-#--            [ "abc3", 123.003 ],
-#--            [ 1, 0 ] ]    # Not-set-yet, int/float
+#--            [ 1, 1, 2 ],        # 3 dimensions
+#--            [ 'abc3', 123.003 ],
+#--            [ 1, 0 ] ]    # character string, int/float
 #-- arrays.append(warray)
 #-- 
 #-- warray = [ 'def', 8,
@@ -67,21 +69,21 @@ numarry_value_type = 4      # Array of types None=not-set, 0=int/float, 1= chara
 #-- arrays.append(warray)
 #-- 
 #-- warray = [ 'ghi', 8,
-#--            [ 3, 2, 2 ],        # 2 dimensions
+#--            [ 3, 2, 2 ],        # 3 dimensions
 #--            [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 ],
 #--            [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ] ]    # Not-set-yet, int/float
 #-- arrays.append(warray)
 #-- 
 #-- warray = [ 'xyz', 8,
 #--            [ ], 
-#--            [ "m1" ],
-#--            [ 1 ] ]    # Not-set-yet, int/float
+#--            [ 'm1' ],
+#--            [ 1 ] ]    # character string
 #-- local_arrays.append(warray)
 #-- 
 #-- warray = [ 'tuv', 8,
 #--            [ ], 
-#--            [ "1.234" ],
-#--            [ 1 ] ]    # Not-set-yet, int/float
+#--            [ '1.234' ],
+#--            [ 1 ] ]    # character string
 #-- local_arrays.append(warray)
 #-- 
 #-----------------------------------------------------------------------------
@@ -105,13 +107,24 @@ class SymbolDesc:
 #   kind    - 'NUMBER' if a number
 
 def next_token(string):
-#--    print("next_token - Entering string={}".format(string))
+#--    print("next_token - Entering string='{}'".format(string))
     # Make sure string exists. next_token useable by other than tokenize.
+    string = string.strip()
     if len(string) <= 0:
         return None, None, None
     # fi
     # First character processing is special.
     c = string[0]                           # Character in string
+    if c in [ '"', "'" ]:
+        if len(string) >= 1:
+            x = string[1:].find(c)           # Find the terminating single/double quote.
+            if x >= 0:
+                therest = string[x+1:]
+                strng = string[1:x+1]
+                return None, strng , 'CHAR'
+            # fi
+        # fi
+    # fi
     if re.match(r'[-+*/=$<>!]', c):         # Possible operation
         if c == '*' and len(string) >= 2:   # Possible '**'
             if string[1] == '*':
@@ -215,15 +228,13 @@ def next_token(string):
 
 #-----------------------------------------------------------------------------
 def tokenize(code):
-#--    print("tokenize - Entering")
-    code = ''.join(code.split())
+#--    print("tokenize - Entering code='{}'".format(code))
     # Get next token.
     last_kind = ''
     last_token = ''
     while code is not None and code != '':
         therest, token, kind = next_token(code)
-        if (((last_kind == 'NUMBER' or last_kind == 'ID') and
-             (kind == 'NUMBER' or kind == 'ID')) or
+        if (((last_kind in ['NUMBER', 'ID']) and (kind in ['NUMBER', 'ID'])) or
             ((last_kind == 'SYNTAX' and kind == 'SYNTAX') and
              (last_token in [')', ']', '}'] and token in ['(', '[', '{'])) or
             (last_kind == 'SYNTAX' and last_token in [')',']','}'] and
@@ -240,7 +251,7 @@ def tokenize(code):
 
 #-----------------------------------------------------------------------------
 def identity_eval(args):
-#--    print("identity_eval - Entering args={}".format(args))
+#--    print("identity_eval - Entering args='{}'".format(args))
     if len(args) == 1:
         if type(args[0]) == SymbolDesc:
             return [ args[0].symbol ]
@@ -258,8 +269,9 @@ def identity_eval(args):
 def get_value(arg):
     global arrays
     global local_arrays
+    global note_arrays
 
-#--    print("get_value - Entering arg={}".format(arg))
+#--    print("get_value - Entering arg='{}'".format(arg))
     if arg[0].startswith('ERROR'):
         return arg
     elif arg[0] == 'NUMBER':
@@ -292,7 +304,11 @@ def get_value(arg):
 
     maxmaclev = -1
     maxwary = None
-    for wary in arrays + local_arrays:
+#--    print('arrays={}'.format(arrays))
+#--    print('local_arrays={}'.format(local_arrays))
+#--    print('note_arrays={}'.format(note_arrays))
+    for wary in arrays + local_arrays + note_arrays:
+#--        print('arg[1]={} wary[numarry_name]={}'.format(arg[1],wary[numarry_name]), file=sys.stderr, flush=True)
         if arg[1] == wary[numarry_name]:
             if wary[numarry_maclevel] >  maxmaclev:
                 maxmaclev = wary[numarry_maclevel]
@@ -320,6 +336,7 @@ def get_value(arg):
 def compute_value(op, arg1, arg2):
     global arrays
     global local_arrays
+    global note_arrays
 
     a2 = get_value(arg2)
     if a2 is None:
@@ -351,7 +368,7 @@ def compute_value(op, arg1, arg2):
         # arrays here.
         maxmaclev = -1
         maxwary = None
-        for wary in arrays + local_arrays:
+        for wary in arrays + local_arrays + note_arrays:
             if arg1[1] == wary[numarry_name]:
                 if wary[numarry_maclevel] >  maxmaclev:
                     maxmaclev = wary[numarry_maclevel]
@@ -439,15 +456,15 @@ def compute_value(op, arg1, arg2):
 #-----------------------------------------------------------------------------
 def comma_eval(args):
     if args is None or len(args) != 3:
-        return [ "ERROR - comma_eval wrong number of arguments, args={}".format(args), None ]
+        return [ 'ERROR - comma_eval wrong number of arguments, args={}'.format(args), None ]
     # fi
     a0 = args[0]
     a1 = args[1]
     a2 = args[2]
     if type(a0) == SymbolDesc or type(a1) != SymbolDesc or type(a2) == SymbolDesc:
-        return [ "ERROR - comma_eval args={}".format(args), None ]
+        return [ 'ERROR - comma_eval args={}'.format(args), None ]
     elif a0[0] != 'NUMBER':
-        return [ "ERROR - comma_eval first argument is not a NUMBER, args={}".format(args), None ]
+        return [ 'ERROR - comma_eval first argument is not a NUMBER, args={}'.format(args), None ]
     elif a2[0] == 'NUMBER':
         value = [ 'COMMA', [ int(a0[1]), int(a2[1]) ] ]
     elif a2[0] == 'COMMA':
@@ -457,16 +474,37 @@ def comma_eval(args):
 # End of comma_eval
 
 #-----------------------------------------------------------------------------
-def binary_eval(args):
-#--    print("binary_eval - Entering")
+def quotes_eval(args):
+#--     print("quotes_eval - Entering args='{}'".format(args), file=sys.stderr, flush=True)
     if args is None or len(args) != 3:
-        return [ "ERROR - binary_eval wrong number of arguments, args={}".format(args), None ]
+        return [ 'ERROR - quotes_eval wrong number of arguments, args={}'.format(args), None ]
     # fi
     a0 = args[0]
     a1 = args[1]
     a2 = args[2]
     if type(a0) == SymbolDesc or type(a1) != SymbolDesc or type(a2) == SymbolDesc:
-        return [ "ERROR - binary_eval args={}".format(args), None ]
+        return [ 'ERROR - quotes_eval args={}'.format(args), None ]
+    elif a0[0] != 'NUMBER':
+        return [ 'ERROR - quotes_eval first argument is not a NUMBER, args={}'.format(args), None ]
+    elif a2[0] == 'NUMBER':
+        value = [ 'COMMA', [ int(a0[1]), int(a2[1]) ] ]
+    elif a2[0] == 'COMMA':
+        value = [ 'COMMA', [ int(a0[1]) ] + a2[1] ]
+    # fi
+    return [ value ]
+# End of quotes_eval
+
+#-----------------------------------------------------------------------------
+def binary_eval(args):
+#--    print('binary_eval - Entering')
+    if args is None or len(args) != 3:
+        return [ 'ERROR - binary_eval wrong number of arguments, args={}'.format(args), None ]
+    # fi
+    a0 = args[0]
+    a1 = args[1]
+    a2 = args[2]
+    if type(a0) == SymbolDesc or type(a1) != SymbolDesc or type(a2) == SymbolDesc:
+        return [ 'ERROR - binary_eval args={}'.format(args), None ]
     # fi
     value = compute_value(a1.symbol, a0, a2)
     return [ value ]
@@ -474,9 +512,9 @@ def binary_eval(args):
 
 #-----------------------------------------------------------------------------
 def unary_eval(args):
-#--    print("unary_eval - Entering")
+#--    print('unary_eval - Entering')
     if len(args) != 2:
-        return [ "ERROR - unary_eval args={}".format(args), None ]
+        return [ 'ERROR - unary_eval args={}'.format(args), None ]
     elif type(args[0]) == SymbolDesc and type(args[1]) != SymbolDesc:
         op = args[0].symbol
         arg1 = get_value(args[1])
@@ -491,9 +529,9 @@ def unary_eval(args):
         # fi
         return [ arg1 ]
     elif type(args[0]) != SymbolDesc and type(args[1]) == SymbolDesc:
-        return [ "ERROR - unary_eval post args={}".format(args), None ]
+        return [ 'ERROR - unary_eval post args={}'.format(args), None ]
     # fi
-    return [ "ERROR - unary_eval args={}".format(args), None ]
+    return [ 'ERROR - unary_eval args={}'.format(args), None ]
 # End of unary_eval
 
 #-----------------------------------------------------------------------------
@@ -535,13 +573,13 @@ def register_postsymbol(oper, lprio, rprio, eval=None):
 
 #-----------------------------------------------------------------------------
 def id_symbol(id):
-#--    print("id_symbol - Entering")
+#--    print('id_symbol - Entering')
     return SymbolDesc(id, 99999, 100000, identity_eval)
 # End of id_symbol
 
 #-----------------------------------------------------------------------------
 def evaluate_handle(args):
-#--    print("evaluate_handle - Entering args={}".format(args))
+#--    print('evaluate_handle - Entering args={}'.format(args))
     for i in args:
         if type(i) == SymbolDesc:
             a = i.eval(args)
@@ -560,7 +598,7 @@ def advance():
     global lexer
     global cur_token
 
-#--    print("advance - Entering")
+#--    print('advance - Entering')
     try:
         cur_token = lexer.__next__()                    # [ kind, item ]
     except StopIteration:
@@ -572,7 +610,7 @@ def advance():
 def reset(s):
     global lexer
 
-#--    print("reset - Entering")
+#--    print("reset - Entering s='{}'".format(s))
     lexer = tokenize(s)
     advance()
 # End of reset
@@ -590,6 +628,8 @@ def cur_sym(allow_presymbol):
         return id_symbol(cur_token)
     elif cur_token[0] == 'NUMBER':                          # kind
         return id_symbol(cur_token)
+    elif cur_token[0] == 'CHAR':                            # kind
+        return id_symbol(cur_token)
     elif cur_token[0] == 'ADDRESS':                         # kind
         return id_symbol(cur_token)
     elif allow_presymbol and cur_token[1] in presymbols:    # item
@@ -602,7 +642,7 @@ def cur_sym(allow_presymbol):
 
 #-----------------------------------------------------------------------------
 def parse_to(prio):
-#--    print("parse_to - Entering")
+#--    print('parse_to - Entering')
     args = []
     while True:
         assert len(args) == 0 or (len(args) == 1 and type(args[0]) != SymbolDesc)
@@ -654,12 +694,12 @@ def parse_to(prio):
 def parse(s):
     global cur_token
 
-#--    print("parse - Entering")
+#--     print("reset - Entering s='{}'".format(s))
     reset(s)
     try:                                # NOTDONEYET - move to only around specific OOR plaes.
         res = parse_to(0)
     except:
-        return [ None, "error parsing" ]
+        return [ None, 'error parsing' ]
     # yrt
     if cur_token is not None:
         return [ "ERROR - remaining input res='{}' cur_token='{}'".format(res, cur_token), None ]
@@ -672,8 +712,9 @@ def result_functions(arg1, arg2):
     global functions
     global arrays
     global local_arrays
+    global note_arrays
 
-#--    print("result_functions - #1 arg1={} arg2={}".format(arg1,arg2))
+#--    print('result_functions - #1 arg1={} arg2={}'.format(arg1,arg2))
     if arg1[0] != 'ID':
         # 'NUMBER' -- implied multiply
         # Do implied multiply
@@ -716,7 +757,7 @@ def result_functions(arg1, arg2):
     if arg2[0] in ['NUMBER', 'COMMA', 'CHAR']:
         maxmaclev = -1
         maxwary = None
-        for wary in arrays + local_arrays:
+        for wary in arrays + local_arrays + note_arrays:
             if arg1[1] == wary[numarry_name]:
                 if wary[numarry_maclevel] > maxmaclev:
                     maxmaclev = wary[numarry_maclevel]
@@ -734,15 +775,15 @@ def result_functions(arg1, arg2):
                 if arg2[0] != 'NUMBER':
                     return [ "ERROR - result_functions - variable needs 1 dimension to array '{}' not {}".format(arg1, l) ]
                 elif d < 1 or d > maxwary[numarry_indexes][0]:
-                    return [ "ERROR - result_functions - variable {} 1st dimension {} not in range 1 thru {}".format(arg1, d, maxwary[numarry_indexes][0]) ]
+                    return [ 'ERROR - result_functions - variable {} 1st dimension {} not in range 1 thru {}'.format(arg1, d, maxwary[numarry_indexes][0]) ]
                 elif maxwary[numarry_value_type][d-1] is None:
-                    return [ "ERROR - result_functions - variable {}({}) is not set".format(arg1, d) ]
+                    return [ 'ERROR - result_functions - variable {}({}) is not set'.format(arg1, d) ]
                 # fi
                 arg = [ 'ADDRESS', [ d - 1, maxwary] ]
                 return arg
             else:
                 if arg2[0] != 'COMMA':
-                    return [ "ERROR - result_functions - variable {} needs {} dimensions for array".format(arg1, l) ]
+                    return [ 'ERROR - result_functions - variable {} needs {} dimensions for array'.format(arg1, l) ]
                 # fi
                 d = len(arg2[1])
                 if l != d:
@@ -752,7 +793,7 @@ def result_functions(arg1, arg2):
                 d = arg2[1][0]
                 x = maxwary[numarry_indexes][0]     # Max dimension of this..
                 if d < 1 or d > x:
-                    return [ "ERROR - result_functions - variable {} dimension#1 {} not in range 1 thru {}".format(arg1, d, x) ]
+                    return [ 'ERROR - result_functions - variable {} dimension#1 {} not in range 1 thru {}'.format(arg1, d, x) ]
                 # fi
                 h = d - 1                           # array index into numarry_values & numarry_value_type
                 mult = x
@@ -760,14 +801,14 @@ def result_functions(arg1, arg2):
                     d = arg2[1][a]
                     x = maxwary[numarry_indexes][a]
                     if d < 1 or d > x:
-                        return [ "ERROR - result_functions - variable {} dimension#{} {} not in range 1 thru {}".format(arg1, a+1, d, x) ]
+                        return [ 'ERROR - result_functions - variable {} dimension#{} {} not in range 1 thru {}'.format(arg1, a+1, d, x) ]
                     # fi
                     h = h + (d-1) * mult
                     mult = mult * x
                 # rof
 
                 if maxwary[numarry_value_type][h] is None:
-                    return [ "ERROR - result_functions - array {} ({}) is not set yet".format(arg1,arg2[1]), None ]
+                    return [ 'ERROR - result_functions - array {} ({}) is not set yet'.format(arg1,arg2[1]), None ]
                 # fi
                 arg = [ 'ADDRESS', [ h, maxwary] ]
                 return arg
@@ -1120,7 +1161,7 @@ def f_print(arg):
         print(a)
         return arg
     else:
-        print("PRINT: UNKNOWN TYPE={}".format(arg))
+        print('PRINT: UNKNOWN TYPE={}'.format(arg))
         return arg
     # fi
 # End of f_print
@@ -1226,6 +1267,7 @@ def cexp_parser():
     #                    oper,                         lprio, rprio, eval
     # Assignment.
     register_postsymbol('=',                               5,   4)                      # r to l
+    register_presymbol('"' + "'",                          6,   7, quotes_eval)         # quotes to eoln
     register_postsymbol(',',                               9,   8, comma_eval)          # r to l
     # Cominbation.
     register_postsymbol(['$or$', '$and$'],                10,  11)                      # l to r
@@ -1252,7 +1294,7 @@ def cexp_parser():
 # End of cexp_parser
 
 #-----------------------------------------------------------------------------
-# Get a line. Put it in "line" and return it.
+# Get a line. Put it in 'line' and return it.
 def get_line():
     global linecount
 
@@ -1280,14 +1322,14 @@ def get_line():
                 return line
             # fi
         except EOFError:
-            print("Read gave EOF", file=sys.stderr)
+            print('Read gave EOF', file=sys.stderr)
         except SystemExit:
-            print("Read gave system exit", file=sys.stderr)
+            print('Read gave system exit', file=sys.stderr)
         except KeyboardInterrupt:
-            print("Read got keyboard interrupt", file=sys.stderr)
+            print('Read got keyboard interrupt', file=sys.stderr)
         except:
-            print("Read got a processing error", file=sys.stderr)
-            print("   ", sys.exc_info()[0], sys.exc_info, file=sys.stderr)
+            print('Read got a processing error', file=sys.stderr)
+            print('   ', sys.exc_info()[0], sys.exc_info, file=sys.stderr)
         # yrt
         break
     # elihw
@@ -1297,7 +1339,8 @@ def get_line():
 #-----------------------------------------------------------------------------
 # Parse and process line.
 def process_line(t, line):
-    wline = ''.join(line.split())
+#--     print("process_line - Entering line='{}'".format(line))
+    wline = line.strip()                 # Ignore leading and trailing whitespace.
     if wline == 'quit' or wline == 'exit':
         sys.exit(0)
     # fi
@@ -1331,7 +1374,7 @@ def main():
 global linecount
 linecount = 0
 #-----------------------------------------------------------------------------
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
     exit(0)
 # fi
