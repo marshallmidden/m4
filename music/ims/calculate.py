@@ -107,13 +107,24 @@ class SymbolDesc:
 #   kind    - 'NUMBER' if a number
 
 def next_token(string):
-#--    print('next_token - Entering string={}'.format(string))
+#--    print("next_token - Entering string='{}'".format(string))
     # Make sure string exists. next_token useable by other than tokenize.
+    string = string.strip()
     if len(string) <= 0:
         return None, None, None
     # fi
     # First character processing is special.
     c = string[0]                           # Character in string
+    if c in [ '"', "'" ]:
+        if len(string) >= 1:
+            x = string[1:].find(c)           # Find the terminating single/double quote.
+            if x >= 0:
+                therest = string[x+1:]
+                strng = string[1:x+1]
+                return None, strng , 'CHAR'
+            # fi
+        # fi
+    # fi
     if re.match(r'[-+*/=$<>!]', c):         # Possible operation
         if c == '*' and len(string) >= 2:   # Possible '**'
             if string[1] == '*':
@@ -217,15 +228,13 @@ def next_token(string):
 
 #-----------------------------------------------------------------------------
 def tokenize(code):
-#--    print('tokenize - Entering')
-    code = ''.join(code.split())
+#--    print("tokenize - Entering code='{}'".format(code))
     # Get next token.
     last_kind = ''
     last_token = ''
     while code is not None and code != '':
         therest, token, kind = next_token(code)
-        if (((last_kind == 'NUMBER' or last_kind == 'ID') and
-             (kind == 'NUMBER' or kind == 'ID')) or
+        if (((last_kind in ['NUMBER', 'ID']) and (kind in ['NUMBER', 'ID'])) or
             ((last_kind == 'SYNTAX' and kind == 'SYNTAX') and
              (last_token in [')', ']', '}'] and token in ['(', '[', '{'])) or
             (last_kind == 'SYNTAX' and last_token in [')',']','}'] and
@@ -242,7 +251,7 @@ def tokenize(code):
 
 #-----------------------------------------------------------------------------
 def identity_eval(args):
-#--    print('identity_eval - Entering args={}'.format(args))
+#--    print("identity_eval - Entering args='{}'".format(args))
     if len(args) == 1:
         if type(args[0]) == SymbolDesc:
             return [ args[0].symbol ]
@@ -262,7 +271,7 @@ def get_value(arg):
     global local_arrays
     global note_arrays
 
-#--    print('get_value - Entering arg={}'.format(arg))
+#--    print("get_value - Entering arg='{}'".format(arg))
     if arg[0].startswith('ERROR'):
         return arg
     elif arg[0] == 'NUMBER':
@@ -465,6 +474,27 @@ def comma_eval(args):
 # End of comma_eval
 
 #-----------------------------------------------------------------------------
+def quotes_eval(args):
+#--     print("quotes_eval - Entering args='{}'".format(args), file=sys.stderr, flush=True)
+    if args is None or len(args) != 3:
+        return [ 'ERROR - quotes_eval wrong number of arguments, args={}'.format(args), None ]
+    # fi
+    a0 = args[0]
+    a1 = args[1]
+    a2 = args[2]
+    if type(a0) == SymbolDesc or type(a1) != SymbolDesc or type(a2) == SymbolDesc:
+        return [ 'ERROR - quotes_eval args={}'.format(args), None ]
+    elif a0[0] != 'NUMBER':
+        return [ 'ERROR - quotes_eval first argument is not a NUMBER, args={}'.format(args), None ]
+    elif a2[0] == 'NUMBER':
+        value = [ 'COMMA', [ int(a0[1]), int(a2[1]) ] ]
+    elif a2[0] == 'COMMA':
+        value = [ 'COMMA', [ int(a0[1]) ] + a2[1] ]
+    # fi
+    return [ value ]
+# End of quotes_eval
+
+#-----------------------------------------------------------------------------
 def binary_eval(args):
 #--    print('binary_eval - Entering')
     if args is None or len(args) != 3:
@@ -580,7 +610,7 @@ def advance():
 def reset(s):
     global lexer
 
-#--    print('reset - Entering')
+#--    print("reset - Entering s='{}'".format(s))
     lexer = tokenize(s)
     advance()
 # End of reset
@@ -597,6 +627,8 @@ def cur_sym(allow_presymbol):
     elif cur_token[0] == 'ID':                              # kind
         return id_symbol(cur_token)
     elif cur_token[0] == 'NUMBER':                          # kind
+        return id_symbol(cur_token)
+    elif cur_token[0] == 'CHAR':                            # kind
         return id_symbol(cur_token)
     elif cur_token[0] == 'ADDRESS':                         # kind
         return id_symbol(cur_token)
@@ -662,7 +694,7 @@ def parse_to(prio):
 def parse(s):
     global cur_token
 
-#--    print('parse - Entering')
+#--     print("reset - Entering s='{}'".format(s))
     reset(s)
     try:                                # NOTDONEYET - move to only around specific OOR plaes.
         res = parse_to(0)
@@ -1235,6 +1267,7 @@ def cexp_parser():
     #                    oper,                         lprio, rprio, eval
     # Assignment.
     register_postsymbol('=',                               5,   4)                      # r to l
+    register_presymbol('"' + "'",                          6,   7, quotes_eval)         # quotes to eoln
     register_postsymbol(',',                               9,   8, comma_eval)          # r to l
     # Cominbation.
     register_postsymbol(['$or$', '$and$'],                10,  11)                      # l to r
@@ -1306,7 +1339,8 @@ def get_line():
 #-----------------------------------------------------------------------------
 # Parse and process line.
 def process_line(t, line):
-    wline = ''.join(line.split())
+#--     print("process_line - Entering line='{}'".format(line))
+    wline = line.strip()                 # Ignore leading and trailing whitespace.
     if wline == 'quit' or wline == 'exit':
         sys.exit(0)
     # fi
