@@ -807,9 +807,9 @@ def result_functions(arg1, arg2):
                     mult = mult * x
                 # rof
 
-                if maxwary[numarry_value_type][h] is None:
-                    return [ 'ERROR - result_functions - array {} ({}) is not set yet'.format(arg1,arg2[1]), None ]
-                # fi
+#--                if maxwary[numarry_value_type][h] is None:
+#--                    return [ 'ERROR - result_functions - array {} ({}) is not set yet'.format(arg1,arg2[1]), None ]
+#--                # fi
                 arg = [ 'ADDRESS', [ h, maxwary] ]
                 return arg
             # fi
