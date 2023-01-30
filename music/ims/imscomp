@@ -542,8 +542,8 @@ def print_i_line(line):
         k = j
     # rof
     line = line.rstrip()
-    if line != k:
-        print("                  - line:  '{}'".format(line), file=sys.stderr, flush=True)
+    if k is None or line != k[7:]:
+        print("                  - 'line:  {}'".format(line), file=sys.stderr, flush=True)
     # fi
     return
 # End of print_i_line
@@ -718,32 +718,7 @@ def createnotevar(arg, val, maclev, typ):
 # End of createlocalvar
 
 # ----------------------------------------------------------------------------
-def setvar(arg, val, typ):
-    maxmaclev = -1
-    maxwary = None
-    for wary in calculate.arrays + calculate.local_arrays:
-        if arg == wary[numarry_name]:
-            if len(wary[numarry_indexes]) != 0:     # Arrays are complicated!
-                return False                    # Already exists but a dimensional array.
-            elif wary[numarry_maclevel] > maxmaclev:
-                maxmaclev = wary[numarry_maclevel]
-                maxwary = wary
-            # fi
-        # fi
-    # rof
-    if maxwary is None:
-        return False                            # Does not exist.
-    # fi
-    maxwary[numarry_values][0] = val
-    maxwary[numarry_value_type][0] = typ
-    if typ == 1:
-        recompute_whichlocalchars()
-    # fi
-    return True
-# End of setvar
-
-# ----------------------------------------------------------------------------
-def getvar(arg):
+def chkvar(arg):
     maxmaclev = -1
     maxwary = None
     for wary in calculate.arrays + calculate.local_arrays:
@@ -754,7 +729,31 @@ def getvar(arg):
             # fi
         # fi
     # rof
-    return maxwary[numarry_values][0]
+    return maxwary
+# End of setvar
+
+# ----------------------------------------------------------------------------
+def setvar(arg, val, typ):
+    wary = chkvar(arg)
+    if wary is None or (len(wary[numarry_indexes]) > 1 and wary[numarry_indexes][0] > 1):
+        return False                            # Does not exist.
+    # fi
+    wary[numarry_values][0] = val
+    wary[numarry_value_type][0] = typ
+    if typ == 1:
+        recompute_whichlocalchars()
+    # fi
+    return True
+# End of setvar
+
+# ----------------------------------------------------------------------------
+def getvar(arg):
+    wary = chkvar(arg)
+    if wary is None or (len(wary[numarry_indexes]) > 1 and wary[numarry_indexes][0] > 1):
+        print_error_no_line("getvar - multidimensional array ... without dimensions", 'getvar')
+        return None
+    # fi
+    return wary[numarry_values][0]
 # End of getval
 
 # ----------------------------------------------------------------------------
@@ -4958,6 +4957,7 @@ def replace_macro(command, t_args, line):
     global i_line
     global macro_i_line
 
+    print_debug("replace_macro command={} t_args={}".format(command,t_args))
     if t_args is None or t_args == '':
         if macro_arguments[command] != []:
             print_error("macro command does not have any arguments, but needs {}.".format(macro_arguments[command]), line)
@@ -4998,6 +4998,7 @@ def do_macro(t_args, line):
     global macro_buffer                 # Name of macro, array of lines for macro.
     global macro_arguments              # Name of macro, array of arguments for macro.
 
+    print_debug("do_macro t_args={}".format(t_args))
     if t_args is None or t_args == '':
         print_error("macro command does not have any arguments.", line)
         return
@@ -5999,9 +6000,6 @@ def do_meter(t_args, line):
 #           (,[,{, },],)                            $$ Parenthesis
 
 def do_calc(t_args, line):
-
-    # NOTDONEYET character variable substitution on arguments.
-
     if t_args is None or t_args == '':
         print_error("calc does not have an expression to process", line)
         return
@@ -7341,13 +7339,45 @@ def do_xpose(t_args, line):
 
 # ----------------------------------------------------------------------------
 def do_encode(t_args, line):
-    print_error("do_encode - Entering t_args='{}' line='{}'".format(t_args,line), line)
-#--    print_debug("calculate.arrays={}".format(calculate.arrays))
-#--    print_debug("calculate.local_arrays={}".format(calculate.local_arrays))
+    if t_args is None or t_args == '':
+        print_error("encode does not have a variable, nor string to assign to it.", line)
+        return
+    # fi
+    assign = t_args.find('=')
+    if assign <= 0:
+        print_error("encode does not have a name followed by an assignment character.", line)
+        return
+    # fi
+    strng = t_args[assign+1:].strip()            # Toss spaces before and after.
+    token = t_args[0:assign].strip()             # Toss spaces before and after.
+
+    # Are there any Parenthesis?
+    a = token.find('(')
+    if a >= 0:
+        wary, h = do_vars_parens(token, a, line, False)
+    else:
+        a = token.find('[')
+        if a >= 0:
+            wary, h = do_vars_parens(token, a, line, False)
+        else:
+            chk = setvar(token, strng, 1)
+            if not chk:
+                print_error("variable name {} does not exist.".format(token), line)
+            # fi
+            return
+        # fi
+    # fi
+    wary[numarry_values][h] = strng
+    wary[numarry_value_type][h] = 1         # Character string
 # End of do_encore
 
 # ----------------------------------------------------------------------------
-def do_vars_parens(arg, a, line):
+# arg       - string with variable name with parens in it.
+# a         - where the first parenthesis is located.
+# line      - for error messages, original line.
+# create_it - True if should create variable. False means it must exist correctly.
+
+def do_vars_parens(arg, a, line, create_it):
     global macro_executing_depth
 
     if a == 0:
@@ -7361,14 +7391,22 @@ def do_vars_parens(arg, a, line):
     # fi
     for t in token[1:]:
         if not t.isalnum() and t != '_':
-            print_error("variable name {} does not start with a alphabetic character.".format(arg))
+            print_error("variable name {} does not have all alphanumeric characters or '_'.".format(arg))
             return
         # fi
     # rof
-    wary = getvarmaclevel(token, len(macro_executing_depth))
-    if wary is not None:
-        print_error("variable name {} redefined at current macro depth level {}".format(token, macro_executing_depth), line)
-        return
+    if create_it:                       # Creating, must not exist at this level.
+        wary = getvarmaclevel(token, len(macro_executing_depth))
+        if wary is not None:
+            print_error("variable name {} redefined at current macro depth level {}".format(token, macro_executing_depth), line)
+            return
+        # fi
+    else:                               # Fetching variable, it must exist.
+        wary = chkvar(token)
+        if wary is None:
+            print_error("variable name {} does not exist.".format(token), line)
+            return
+        # fi
     # fi
     aftertoken = arg[a:]
     w = 0
@@ -7438,14 +7476,14 @@ def do_vars_parens(arg, a, line):
                 return
             # fi
             if type(f) is not float:
-                print_error("dimension '{}' is not an integer. {}".format(f1,type_error), line)
+                print_error("dimension value '{}' is not an integer. {}".format(f1,type_error), line)
                 return
             # fi
             if f.is_integer():
                 f = int(f)
             # fi
             if f is None:
-                print_error("dimension does not have first argument as an integer.", line)
+                print_error("dimension does not have {} argument as an integer.".format(len(dimensions)+1), line)
                 return
             # fi
             dimensions.append(f)
@@ -7455,6 +7493,26 @@ def do_vars_parens(arg, a, line):
     if w < len(aftertoken):
         print_error("variable {}, characters after closing dimensional delimiter '{}' -- {}.".format(token, enddelim, arg), line)
         return
+    # fi
+    if wary is not None:                                # It exists already. :)
+        if len(wary[numarry_indexes]) != len(dimensions):
+            print_error("variable {} with {} dimensions does not match dimensions {}.".format(token, len(wary[numarry_indexes]), len(dimensions)), line)
+            return None
+        # fi
+        l = len(dimensions)
+        x = mult = wary[numarry_indexes][0]             # Max dimension of first.
+        h = dimensions[0] - 1                           # array index into numarry_values & numarry_value_type
+        for a in range(1, l):
+            d = dimensions[a]
+            x = wary[numarry_indexes][a]
+            if d < 1 or d > x:
+                print_error("variable {} dimension#{} {} not in range 1 thru {}".format(token, a+1, d, x), line)
+                return None, None
+            # fi
+            h = h + (d-1) * mult
+            mult = mult * x
+        # rof
+        return wary, h                                  # variable array, and index into values.
     # fi
     num = 1
     for w in dimensions:
@@ -7502,12 +7560,12 @@ def do_vars(t_args, line):
         # Are there any Parenthesis?
         a = token.find('(')
         if a >= 0:
-            do_vars_parens(token, a, line)
+            do_vars_parens(token, a, line, True)
             continue
         # fi
         a = token.find('[')
         if a >= 0:
-            do_vars_parens(token, a, line)
+            do_vars_parens(token, a, line, True)
             continue
         # fi
         if not token[0].isalnum():
