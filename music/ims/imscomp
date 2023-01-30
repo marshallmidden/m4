@@ -4166,22 +4166,32 @@ def get_list_sep_rem(string):
 
 def is_float(strg, type_float):
     tree = calculate.parse(strg)            # parse the string
+#PRINT    print_debug("is_float - tree={} strg={} type_float={}".format(tree,strg,type_float))
     if tree is None or len(tree) != 2:
+#PRINT        print_debug("is_float #1- None, None")
         return None, None
     elif tree[0] is not None and tree[0].startswith('ERROR'):
         sexpr = tree[0]
+#PRINT        print_debug("is_float #2- {}, {}".format(strg, sexpr))
         return strg, sexpr
+    elif tree[1] is None:
+#PRINT        print_debug("is_float #3- {}, {}".format(strg, "bad input to calculator#1"))
+        return strg, "variable '{}' is not set".format(strg)
+    # fi
     elif tree[1] == '.':
-        return strg, "bad input to calculator#1"
+#PRINT        print_debug("is_float #4- {}, {}".format(strg, "bad input to calculator#2"))
+        return strg, "bad input to calculator#2"
     # fi
     if type_float:
         try:
             sexpr = float(tree[1])
             return sexpr, None
         except:
-            return strg, "bad input to calculator#2"
+#PRINT            print_debug("is_float #5- {}, {}".format(strg, "bad input to calculator#3"))
+            return strg, "bad input to calculator#3"
         # yrt
     # fi
+    recompute_whichlocalchars()
     return tree[1], None
 # End of is_float
 
@@ -5091,6 +5101,46 @@ def do_endif(t_args, line):
 # End of do_endif
 
 # ----------------------------------------------------------------------------
+#       elseif          $$ elseif clause of an "if elseif else endif" sequence.
+
+def do_else_if(t_args, line):
+    global ifdepth
+    global iftest
+
+    if t_args is None or t_args == '':
+        print_error("elseif command does not have exactly one argument.", line)
+        return
+    # fi
+    if ifdepth == 0 or iftest[ifdepth] == 1 or iftest[ifdepth] == 2:
+        print_error("elseif command while not in an if command", line)
+        return
+    # fi
+    if iftest[ifdepth] == -1:           # already processing, handle as normal if.
+        iftest[ifdepth] = 3             # Switch to skipping elseif and else.
+        return
+    # fi
+    if iftest[ifdepth] != 0:            # skipping if, want to do else or elseif.
+        # if iftest[ifdepth] == 3:            # skip both if and else, want endif
+        # NOTE: do not test for if/else/endif ... second else.
+        return;
+    # fi
+    wargs = arglist(t_args, line, False)
+    if not wargs or len(wargs) < 1:
+        print_error("no elseif argument.", line)
+        return
+    # fi
+    value, type_error = is_float(wargs[0], True)
+    if type_error is not None or value is None:
+        print_error("elseif unable to determine value ({}).".format(wargs[0]), line)
+        return
+    # fi
+    value =  -1 if value < 0 or value > 0 else 0   # 0 is false, otherwise everything is true.
+    if value < 0:
+        iftest[ifdepth] = -1            # Switch to as if processing.
+    # fi
+# End of do_else
+
+# ----------------------------------------------------------------------------
 #       else            $$ else clause of an "if else endif" sequence.
 
 def do_else(t_args, line):
@@ -5103,10 +5153,10 @@ def do_else(t_args, line):
     # fi
 
     if iftest[ifdepth] == -1:           # already processing, handle as normal if.
-        iftest[ifdepth] = 2             # Switch to skipping else.
+        iftest[ifdepth] = 2             # Switch to skipping elseif and else.
         return
     # fi
-    if iftest[ifdepth] == 0:            # skipping if, want to do else.
+    if iftest[ifdepth] == 0:            # skipping if, want to do else or elseif.
         iftest[ifdepth] = 1             # Switch to processing else.
         return
     # fi
@@ -5119,6 +5169,7 @@ def do_else(t_args, line):
 #       if      -1      $$ Start of an "if else endif" sequence.
 #       if      0       $$ False
 #       if      1       $$ Non-zero is true.
+#       elseif          $$ if if was false, is this true? Else do the else clause. (optional)
 #       else            $$ if if was false, do the else clause. (optional)
 #       endif           $$ end of the if else.
 
@@ -5215,6 +5266,7 @@ def do_debug(t_args, line):
     global args
     global debug_count
 
+#PRINT    print_debug("do_debug - t_args={}".format(t_args))
     debug_count = debug_count + 1
 
     if t_args is None or t_args == '':
@@ -5225,6 +5277,14 @@ def do_debug(t_args, line):
             value = 'count: ' + str(debug_count)
         else:
             value, type_error = is_float(wargs[0], False)
+            if type_error is not None or value == 'error parsing':
+                if re.match(r'variable .* is not set', type_error):
+                    print_warning("wargs[0]={} has type_error={}".format(wargs[0],type_error), line)
+                # fi
+                value = 'message: ' + ' '.join(wargs) + ' -- ' + t_args
+            elif value is None:
+                print_warning("wargs[0]={} is not set".format(wargs[0]), line)
+                value = 'message: ' + ' '.join(wargs) + ' -- ' + t_args
             if type_error is not None or value is None or value == 'error parsing':
                 value = 'message: ' + ' '.join(wargs) + ' -- ' + t_args
             else:
@@ -7369,6 +7429,7 @@ def do_encode(t_args, line):
     # fi
     wary[numarry_values][h] = strng
     wary[numarry_value_type][h] = 1         # Character string
+    recompute_whichlocalchars()
 # End of do_encore
 
 # ----------------------------------------------------------------------------
@@ -7544,6 +7605,7 @@ def do_vars_parens(arg, a, line, create_it):
 def do_vars(t_args, line):
     global macro_executing_depth
 
+#PRINT    print_debug("do_vars - t_args={}".format(t_args))
     if t_args is None or t_args == '':
         print_error("vars needs at least one argument", line)
         return
@@ -7592,6 +7654,7 @@ def do_vars(t_args, line):
         createlocalvar(token, None, len(macro_executing_depth), None)       # Not set, nor any type yet.
         wary = getvarmaclevel(token, len(macro_executing_depth))
     # elihw
+#PRINT    print_debug("do_vars - calculate.local_arrays={}".format(calculate.local_arrays))
     return
 #   End of do_vars
 
@@ -7666,8 +7729,10 @@ commands = {
              'debug'   : (do_debug,     False),
              'decode'  : (do_decode,    False),
              'delay'   : (do_delay,     False),
+             'elif'    : (do_else_if,   False),
              'else'    : (do_else,      False),
-             'encode'  : (do_encode,     False),
+             'elseif'  : (do_else_if,   False),
+             'encode'  : (do_encode,    False),
              'end'     : (do_cstopnow,  True),          # cstop* alternative
              'endif'   : (do_endif,     False),
              'endm'    : (do_endm,      False),
@@ -9743,14 +9808,15 @@ def replace_array_char(wary, thetoken, aftertoken, original_line):
     f1, type_error = is_float(f, False)     # Want a string.
     if type_error is not None or f1 is None:
         print_warning("m:{}".format(measure_on) + type_error, original_line)
-#--         print_debug("replace_array_char #5- thetoken={} aftertoken={}".format(thetoken, aftertoken))
-#--         print_debug("replace_array_char #e- returning '{}'".format(thetoken + aftertoken))
+#PRINT        print_debug("replace_array_char #5- thetoken={} aftertoken={}".format(thetoken, aftertoken))
+#PRINT        print_debug("replace_array_char #e- returning '{}'".format(thetoken + aftertoken))
         return thetoken, aftertoken
     elif type(f1) is not str:
+#PRINT        print_debug("replace_array_char #f1- returning type(f1)={} f1='{}' s='{}'".format(type(f1), f1, s))
         f1 = str(f1)
     # fi
     # Need to retokenize.
-#--     print_debug("replace_array_char #f- returning '{}'".format(f1 + s))
+#PRINT    print_debug("replace_array_char #f2- returning type(f1)={} f1='{}' s='{}'".format(type(f1), f1, s))
     return f1, s
 # End of replace_array_char
 
@@ -9790,9 +9856,11 @@ def replace_char_var(line, linestarts, lineends, original_line):
             aftertoken = '' + aftertokenline
         # fi
         if len(whichlocalcharswary[w][numarry_indexes]) == 0:
-            if whichlocalcharswary[w][numarry_value_type][0] == 0:
+            if whichlocalcharswary[w][numarry_value_type][0] is None:   # if not set
+                continue
+            elif whichlocalcharswary[w][numarry_value_type][0] == 0:    # if number
                 b = str(whichlocalcharswary[w][numarry_values][0])
-            else:
+            else:                                                       # if character string
                 b = whichlocalcharswary[w][numarry_values][0]
             # fi
             ntoken = beforetokenline + beforetoken + b + aftertoken
@@ -9845,21 +9913,23 @@ def first_token(strg):
 
 # ============================================================================
 def char_var_subst_whole_string(strg, line):
+    global whichlocalchars
+
     if whichlocalchars == []:
         return strg
     # fi
-#--     print_debug("char_var_subst_whole_string - Entering {}".format(strg))
+#PRINT    print_debug("char_var_subst_whole_string - Entering {}".format(strg))
     o_strg = strg
     w = 0
     while w < len(strg):
         linestarts,lineends = next_token(w, strg)
         if linestarts is None:
-#--             print_debug("char_var_subst_whole_string - returning '{}'".format(strg))
+#PRINT            print_debug("char_var_subst_whole_string - returning '{}'".format(strg))
             return strg
          # fi
-#--         print_debug("char_var_subst_whole_string #a- '{}'".format(strg[linestarts:lineends]))
+#PRINT        print_debug("char_var_subst_whole_string #a- '{}'".format(strg[linestarts:lineends]))
         strg = replace_char_var(strg, linestarts, lineends, line)
-#--         print_debug("char_var_subst_whole_string #b- strg={}".format(strg))
+#PRINT        print_debug("char_var_subst_whole_string #b- strg={}".format(strg))
         if strg != o_strg:
             o_strg = strg
             w = 0
@@ -9868,7 +9938,7 @@ def char_var_subst_whole_string(strg, line):
             w = lineends
         # fi
     # elihw
-#--     print_debug("char_var_subst_whole_string - returning '{}'".format(strg))
+#PRINT    print_debug("char_var_subst_whole_string - returning '{}'".format(strg))
     return strg
 # End of char_var_subst_whole_string
 
@@ -9943,8 +10013,11 @@ def process_line(line):
             commands[command][0](t_args, line)      # Process command vars, encode, or calc.
             return
         # fi
+        numcharvar = 0
         while True:
+#PRINT            print_debug("process_line #1 - t_args={}".format(t_args))
             nline = char_var_subst_whole_string(t_args, line).strip()
+#PRINT            print_debug("process_line #2 - nline={}".format(nline))
             if nline == t_args:
                 break
             # fi
@@ -9962,6 +10035,7 @@ def process_line(line):
         elif command[0] == '%':             # Change single percent to double percent signs.
             command = '%%'
         # fi
+#PRINT        print_debug("process_line - command={}".format(command))
         if command in commands:
             try:
                 r = commands[command][0]    # Had an error once ... thus try/expect.
@@ -9982,9 +10056,9 @@ def process_line(line):
         return
     # fi
     # Do not do macros in false part of if/elif/else section.
-    if t[0] in commands:
-        if commands[t[0]][0] in (do_cstopnow, do_if, do_else, do_endif):
-            commands[t[0]][0](t_args, line)
+    if command in commands:
+        if commands[command][0] in (do_cstopnow, do_if, do_else, do_else_if, do_endif):
+            commands[command][0](t_args, line)
         # fi
     # fi
     return
@@ -9992,7 +10066,7 @@ def process_line(line):
 
 # ----------------------------------------------------------------------------
 def dothefile():
-    global last_command
+    global last_voice_staff
     global commentonline
     global precomment
     global linecount
@@ -10022,7 +10096,7 @@ def dothefile():
                     # fi
                 elif line[0] == "\t" or re.match(r'^        ', line):
                     # This is a continuation line.
-                    line = last_command + ' ' + line.strip()
+                    line = last_voice_staff + ' ' + line.strip()
                     break
                 elif len(line) >= 1 and line[0] == '.' and (len(line) == 1 or (line[1] == "\t" or line[1] == ' ')):
                     line = line[1:].lstrip()
