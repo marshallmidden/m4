@@ -237,7 +237,9 @@ def tokenize(code):
         therest, token, kind = next_token(code)
         if (((last_kind in ['NUMBER', 'ID']) and (kind in ['NUMBER', 'ID'])) or
             ((last_kind == 'SYNTAX' and kind == 'SYNTAX') and
+# NOTDONEYET = {}
              (last_token in [')', ']', '}'] and token in ['(', '[', '{'])) or
+# NOTDONEYET = {}
             (last_kind == 'SYNTAX' and last_token in [')',']','}'] and
              (kind == 'ID' or kind == 'NUMBER')) ):
             # Implied multiplication between numbers and id's.
@@ -762,6 +764,65 @@ def parse(s):
 # End of parse
 
 #-----------------------------------------------------------------------------
+# Returns character string of tokens requested.
+# strng = The string to get tokens from.
+# start = token number to start at (1 = first).
+# lth   = number of tokens to get. Note: delimiters except for space/comma count as a token.
+#       = None means to go "start" to end of string.
+
+def get_tokens_from_char(strng, start, lth):
+    start = int(round(start)) - 1
+#--    print("get_tokens_from_char - Entering strng={} start={} lth={}".format(strng,start,lth), file=sys.stderr, flush=True)
+    if strng is None or strng == '' or start < 0:
+        return ''
+    # fi
+#--    print("get_tokens_from_char - #1", file=sys.stderr, flush=True)
+#--     a = [i for i in re.split(r'(\d+|\W+)', strng) if i]
+    a = [i for i in re.split(r'(\w+|[ \t]*\W+[ \t]*)', strng) if i]
+#--    print("a={}".format(a), file=sys.stderr, flush=True)
+    # Get rid of only spaces.
+    new = []
+    for i in a:
+        if i in ' ':
+            continue
+        # fi
+        x = i.replace(' ', '')
+        x = x.replace("\t", '')
+        new.append(x)
+    # rof
+#--    print("new={}".format(new), file=sys.stderr, flush=True)
+    if len(new) < start:
+#--        print("len(new)={}".format(len(new)), file=sys.stderr, flush=True)
+        return ''
+    # fi
+    if lth is None:
+        lth = len(new)
+    else:
+        lth = int(round(start + lth))
+    # fi
+#--    print("lth={}".format(lth), file=sys.stderr, flush=True)
+#--    print("new={} start={} lth={}".format(new,start,lth), file=sys.stderr, flush=True)
+    x = new[start : lth]
+#--    print("x={}".format(x), file=sys.stderr, flush=True)
+    w = ''
+    prev = ''
+    for y in x:
+#--        print("y={}".format(y), file=sys.stderr, flush=True)
+        if y == '':
+            w = w + ' '
+        elif re.match(r'\w+', prev) and re.match(r'\w+', y):
+            w = w + ' ' + y
+        else:
+            w = w + y
+        # fi
+        prev = y
+#--        print("w={}".format(w), file=sys.stderr, flush=True)
+    # rof
+#--    print("get_tokens_from_char - w={}".format(w), file=sys.stderr, flush=True)
+    return w
+# End of get_tokens_from_char
+
+#-----------------------------------------------------------------------------
 def result_functions(arg1, arg2):
     global functions
     global arrays
@@ -778,7 +839,7 @@ def result_functions(arg1, arg2):
         elif a1[0].startswith('ERROR'):
             return a1
         elif a1[0] != 'NUMBER':
-            return [ "ERROR - value is not a Number a1='{}'".format(a1), None ]
+            return [ "ERROR - value is not a Number a1='{}' arg2={} -- implied multiply #1 result_functions".format(a1,arg2), None ]
         # fi
         a2 = get_value(arg2)
         if a2 is None:
@@ -879,8 +940,29 @@ def result_functions(arg1, arg2):
         return [ "ERROR - value is None a1='{}'".format(a1), None ]
     elif a1[0].startswith('ERROR'):
         return a1
+    elif a1[0] == 'CHAR':
+        a2 = get_value(arg2)
+        if a2[0] == 'NUMBER':               # Go from token number a2[1] to end of string.
+            if type(a2[1]) is not int and type(a2[1]) is not float: 
+                return [ "ERROR - character token fetching needs first argument as integer, but this has {}".format(type(a2[1][0])), None ]
+            # fi
+            x = get_tokens_from_char(a1[1],a2[1],None)
+        elif a2[0] == 'COMMA':              # Go from token number a2[1][0] for length a2[1][1]
+            if len(a2[1]) != 2:
+                return [ "ERROR - character token fetching needs 1 or 2 arguments, but this has {}".format(len(a2[1])), None ]
+            # fi
+            if type(a2[1][0]) is not int and type(a2[1][0]) is not float: 
+                return [ "ERROR - character token fetching needs first argument as integer, but this has {}".format(type(a2[1][0])), None ]
+            elif type(a2[1][1]) is not int and type(a2[1][1]) is not float: 
+                return [ "ERROR - character token fetching needs second argument as integer, but this has {}".format(type(a2[1][0])), None ]
+            # fi
+            x = get_tokens_from_char(a1[1], a2[1][0], a2[1][1])
+        else:
+            return [ "ERROR - character token fetching has bad type ({}) for token indexes".format(a2[0]), None ]
+        # fi
+        return [ 'CHAR', x ]
     elif a1[0] != 'NUMBER':
-        return [ "ERROR - value is not a Number a1='{}'".format(a1), None ]
+        return [ "ERROR - value is not a Number a1='{}' arg2={} -- implied multiply #2 result_functions".format(a1,arg2), None ]
     # fi
     a2 = get_value(arg2)
     if a2 is None:
@@ -932,7 +1014,7 @@ def common_grouping_eval(args, txt, open_char, close_char):
             elif a1[0].startswith('ERROR'):
                 return a1
             elif a1[0] != 'NUMBER':
-                return [ "ERROR - value is not a Number a1='{}'".format(a1), None ]
+                return [ "ERROR - value is not a Number a1='{}' u={} implied multiply #3 -- common_grouping_eval".format(a1,u), None ]
             # fi
             a2 = get_value(u)
             if a2 is None:
@@ -952,11 +1034,15 @@ def common_grouping_eval(args, txt, open_char, close_char):
         u = args[3]
         v = args[4]
         w = args[5]
+# NOTDONEYET = {}
         if (type(r) == SymbolDesc and (r.symbol in ['(','[','{'])
             and type(s) != SymbolDesc
+# NOTDONEYET = {}
             and type(t) == SymbolDesc and (t.symbol in [')',']','}'])
+# NOTDONEYET = {}
             and type(u) == SymbolDesc and (u.symbol in ['(','[','{'])
             and type(v) != SymbolDesc
+# NOTDONEYET = {}
             and type(w) == SymbolDesc and (w.symbol in [')',']','}'])):
             # Do implied multiply
             a1 = get_value(s)
@@ -965,7 +1051,7 @@ def common_grouping_eval(args, txt, open_char, close_char):
             elif a1[0].startswith('ERROR'):
                 return a1
             elif a1[0] != 'NUMBER':
-                return [ "ERROR - value is not a Number a1='{}'".format(a1), None ]
+                return [ "ERROR - value is not a Number a1='{}' v={} implied multiply #4 -- common_grouping_eval".format(a1,v), None ]
             # fi
             a2 = get_value(v)
             if a2 is None:
@@ -987,11 +1073,15 @@ def common_grouping_eval(args, txt, open_char, close_char):
         w = args[5]
         x = args[6]
         if (type(r) != SymbolDesc                           # ID m
+# NOTDONEYET = {}
             and type(s) == SymbolDesc and (s.symbol in ['(','[','{'])
             and type(t) != SymbolDesc                       # NUMBER abc
+# NOTDONEYET = {}
             and type(u) == SymbolDesc and (u.symbol in [')',']','}'])
+# NOTDONEYET = {}
             and type(v) == SymbolDesc and (v.symbol in ['(','[','{'])
             and type(w) != SymbolDesc                       # NUMBER def
+# NOTDONEYET = {}
             and type(x) == SymbolDesc and (x.symbol in [')',']','}'])):
             a1 = result_functions(r, t)
             if type(a1) == list and len(a1) > 0:
@@ -1001,7 +1091,7 @@ def common_grouping_eval(args, txt, open_char, close_char):
             elif a1[0].startswith('ERROR'):
                 return a1
             elif a1[0] != 'NUMBER':
-                return [ "ERROR - value is not a Number a1='{}'".format(a1), None ]
+                return [ "ERROR - value is not a Number a1='{}' w={} implied multiply #5 -- common_grouping_eval".format(a1,w), None ]
             # fi
             a2 = get_value(w)
             if a2 is None:
@@ -1045,6 +1135,7 @@ def close_bracket_eval(args):
 #-----------------------------------------------------------------------------
 def open_brace_eval(args):
 #PRINT    print("open_brace_eval - args='{}'".format(args), file=sys.stderr, flush=True)  # PRINT
+# NOTDONEYET = {}
     return common_grouping_eval(args, 'brace', '{', '}')
 # End of open_brace_eval
 
@@ -1449,7 +1540,9 @@ def cexp_parser():
     register_postsymbol(')',                               1, 1000, close_paren_eval)   # r to l
     register_postsymbol('[',                            1000,   1, open_bracket_eval)   # l to r
     register_postsymbol(']',                               1, 1000, close_bracket_eval) # r to l
+# NOTDONEYET = {}
     register_postsymbol('{',                            1000,   1, open_brace_eval)
+# NOTDONEYET = {}
     register_postsymbol('}',                               1, 1000, close_brace_eval)   # r to l
     return
 # End of cexp_parser
