@@ -107,7 +107,7 @@ class SymbolDesc:
 #   kind    - 'NUMBER' if a number
 
 def next_token(string):
-#PRINT    print("next_token - Entering string='{}'".format(string), file=sys.stderr,flush=True)
+#PRINT    print("next_token - Entering string='{}'".format(string), file=sys.stderr,flush=True)   # PRINT
     # Make sure string exists. next_token useable by other than tokenize.
     string = string.strip()
     if len(string) <= 0:
@@ -119,9 +119,9 @@ def next_token(string):
         if len(string) >= 1:
             x = string[1:].find(c)           # Find the terminating single/double quote.
             if x >= 0:
-                therest = string[x+1:]
+                therest = string[x+2:]
                 strng = string[1:x+1]
-                return None, strng , 'CHAR'
+                return therest, strng , 'CHAR'
             # fi
         # fi
     # fi
@@ -229,7 +229,7 @@ def next_token(string):
 
 #-----------------------------------------------------------------------------
 def tokenize(code):
-#PRINT    print("tokenize - Entering code='{}'".format(code), file=sys.stderr,flush=True)
+#PRINT    print("tokenize - Entering code='{}'".format(code), file=sys.stderr,flush=True) # PRINT
     # Get next token.
     last_kind = ''
     last_token = ''
@@ -252,7 +252,7 @@ def tokenize(code):
 
 #-----------------------------------------------------------------------------
 def identity_eval(args):
-#PRINT    print("identity_eval - Entering args='{}'".format(args), file=sys.stderr,flush=True)
+#PRINT    print("identity_eval - Entering args='{}'".format(args), file=sys.stderr,flush=True)    # PRINT
     if len(args) == 1:
         if type(args[0]) == SymbolDesc:
             return [ args[0].symbol ]
@@ -273,7 +273,7 @@ def get_value(arg):
     global local_arrays
     global note_arrays
 
-#PRINT    print("get_value - Entering arg='{}'".format(arg), file=sys.stderr,flush=True)
+#PRINT    print("get_value - Entering arg='{}'".format(arg), file=sys.stderr,flush=True)  # PRINT
     if arg[0].startswith('ERROR'):
         return arg
     elif arg[0] == 'NUMBER':
@@ -340,17 +340,19 @@ def compute_value(op, arg1, arg2):
     global local_arrays
     global note_arrays
 
-#PRINT    print("compute_value - Entering op='{}' arg1={} arg2={}".format(op,arg1,arg2), file=sys.stderr,flush=True)
+#PRINT    print("compute_value - Entering op='{}' arg1={} arg2={}".format(op,arg1,arg2), file=sys.stderr,flush=True)  # PRINT
     a2 = get_value(arg2)
+    t2 = a2[0]
     if a2 is None:
         return [ "ERROR - Argument2 is None a2='{}'".format(a2), None ]
-    elif a2[0].startswith('ERROR'):
+    elif t2.startswith('ERROR'):
         return a2
-    elif a2[0] not in [ 'NUMBER', 'CHAR' ]:
-        return [ "ERROR - Argument2 is not a Number a2='{}'".format(a2), None ]
+    elif t2 not in [ 'NUMBER', 'CHAR', 'COMMA' ]:
+        return [ "ERROR - Argument2 is not a Number, character string, or comma list - a2='{}'".format(a2), None ]
     elif op == '=':
-        if arg1[0] == 'ADDRESS':
-            a = arg1[1]
+        t1 = arg1[0]
+        a = arg1[1]
+        if t1 == 'ADDRESS':
             idx = a[0]
             warray = a[1]
             warray[numarry_values][idx] = arg2[1]
@@ -362,9 +364,7 @@ def compute_value(op, arg1, arg2):
                 return [ "ERROR - ADDRESS and arg2 unrecognized '{}'".format(arg2), None]
             # fi
             return arg2
-        # fi
-
-        if arg1[0] not in [ 'ID', 'ADDRESS' ]:
+        elif t1 != 'ID':
             return [ "ERROR - Argument1 is not a variable name arg1='{}'".format(arg1), None ]
         # fi
 
@@ -372,7 +372,7 @@ def compute_value(op, arg1, arg2):
         maxmaclev = -1
         maxwary = None
         for wary in arrays + local_arrays + note_arrays:
-            if arg1[1] == wary[numarry_name]:
+            if a == wary[numarry_name]:
                 if wary[numarry_maclevel] >  maxmaclev:
                     maxmaclev = wary[numarry_maclevel]
                     maxwary = wary
@@ -380,11 +380,11 @@ def compute_value(op, arg1, arg2):
             # fi
         # rof
         if maxwary is None:
-            print("Assignment to unknown variable '{}', creating it = '{}'".format(arg1, a2), file=sys.stderr,flush=True)
+            print("Assignment to unknown variable '{}', creating it='{}'".format(arg1, a2), file=sys.stderr,flush=True)
             if arg2[0] == 'NUMBER':
-                local_arrays.append( [ arg1[1],  0, [ ], [ arg2[1] ],  [ 0 ] ] )
+                local_arrays.append( [ a,  0, [ ], [ arg2[1] ],  [ 0 ] ] )
             else:                               # Assume CHAR
-                local_arrays.append( [ arg1[1],  0, [ ], [ arg2[1] ],  [ 1 ] ] )
+                local_arrays.append( [ a,  0, [ ], [ arg2[1] ],  [ 1 ] ] )
             # fi
             return arg2
         elif maxwary[numarry_indexes] != []:
@@ -400,27 +400,72 @@ def compute_value(op, arg1, arg2):
     # fi
 
     a1 = get_value(arg1)
+    t1 = a1[0]
     if a1 is None:
         return [ "ERROR - Argument1 is None a1='{}'".format(a1), None ]
-    elif a1[0].startswith('ERROR'):
+    elif t1.startswith('ERROR'):
         return a1
-    elif a1[0] != 'NUMBER':
-        return [ "ERROR - Argument1 is not a Number a1='{}'".format(a1), None ]
     # fi
-    a1 = float(a1[1])
-    a2 = float(a2[1])
+    if t1 == 'NUMBER':
+        a1 = float(a1[1])
+    # fi
+    if t2 == 'NUMBER':
+        a2 = float(a2[1])
+    # fi
+    if t1 == 'CHAR':
+        a1 = a1[1]
+    # fi
+    if t2 == 'CHAR':
+        a2 = a2[1]
+    # fi
+    if t1 == 'COMMA':
+        a1 = a1[1]
+    # fi
+    if t2 == 'COMMA':
+        a2 = a2[1]
+    # fi
+    # Might be other types here.
+    if t1 not in [ 'NUMBER', 'CHAR', 'COMMA'] or t2 not in [ 'NUMBER', 'CHAR', 'COMMA']:
+        return [ 'ERROR - compute_value unexpected types, arg1={} arg2={}'.format(arg1,arg2), None ]
+    # fi
+
+    if op == ',':
+        if t2 == 'COMMA':
+            value = [ 'COMMA', [ a1 ] + a2 ]
+        else:
+            value = [ 'COMMA', [ a1, a2 ] ]
+#--        else:
+#--            return [ 'ERROR - compute_value first argument is not a NUMBER nor COMMA, arg1={} arg2={}'.format(arg1,arg2), None ]
+        # fi
+        return value
+#--    elif t2 != 'NUMBER':
+#--        return [ "ERROR - Argument2 is not a Number a2='{}'".format(a2), None ]
+    # fi
 
     # Math: +, -, *, /, **
     if op == '+':
-        return [ 'NUMBER', a1 + a2 ]
-    elif op == '-':
-        return [ 'NUMBER',  a1 - a2 ]
+        return [ t1, a1 + a2 ]
+    # fi
+    if op == '-':
+        if t2 != 'NUMBER':
+            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+        # fi
+        return [ t1,  a1 - a2 ]
     elif op == '*':
-        return [ 'NUMBER',  a1 * a2 ]
+        if t2 != 'NUMBER':
+            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+        # fi
+        return [ t1,  a1 * a2 ]
     elif op == '/':
-        return [ 'NUMBER',  a1 / a2 ]
+        if t2 != 'NUMBER':
+            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+        # fi
+        return [ t1,  a1 / a2 ]
     elif op == '**':
-        return [ 'NUMBER',  a1 ** a2 ]
+        if t2 != 'NUMBER':
+            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+        # fi
+        return [ t1,  a1 ** a2 ]
     # Logical: >, >=, <=, <, ==, !=
     elif op == '<=':
         return [ 'NUMBER', -1 if a1 <= a2 else 0 ]
@@ -437,20 +482,41 @@ def compute_value(op, arg1, arg2):
 
     # Bitwise: $cls$, $ars$, $mask$, $union$, $diff$
     elif op == '$mask$':
+        if t2 != 'NUMBER':
+            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+        # fi
         return [ 'NUMBER',  int(a1) & int(a2) ]
     elif op == '$union$':
+        if t2 != 'NUMBER':
+            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+        # fi
         return [ 'NUMBER',  int(a1) | int(a2) ]
     elif op == '$cls$':
+        if t2 != 'NUMBER':
+            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+        # fi
         return [ 'NUMBER',  int(a1) << int(a2) ]
     elif op == '$ars$':
+        if t2 != 'NUMBER':
+            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+        # fi
         return [ 'NUMBER',  int(a1) >> int(a2) ]
     elif op == '$diff$':
+        if t2 != 'NUMBER':
+            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+        # fi
         return [ 'NUMBER',  int(a1) ^ int(a2) ]             # xor
 
     # combination: $and$, $or$
     elif op == '$and$':
+        if t2 != 'NUMBER':
+            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+        # fi
         return [ 'NUMBER',  -1 if int(a1) == -1 and int(a2) == -1 else 0 ]
     elif op == '$or$':
+        if t2 != 'NUMBER':
+            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+        # fi
         return [ 'NUMBER',  -1 if int(a1) == -1 or int(a2) == -1 else 0 ]
     # fi
 
@@ -458,34 +524,8 @@ def compute_value(op, arg1, arg2):
 # End of compute_value
 
 #-----------------------------------------------------------------------------
-def comma_eval(args):
-#PRINT    print("comma_eval - args={}".format(args), file=sys.stderr, flush=True)
-    if args is None or len(args) != 3:
-        return [ 'ERROR - comma_eval wrong number of arguments, args={}'.format(args), None ]
-    # fi
-    a0 = args[0]
-    a1 = args[1]
-    a2 = args[2]
-    if type(a0) == SymbolDesc or type(a1) != SymbolDesc or type(a2) == SymbolDesc:
-        return [ 'ERROR - comma_eval args={}'.format(args), None ]
-    elif a0[0] != 'NUMBER':
-        return [ 'ERROR - comma_eval first argument is not a NUMBER, args={}'.format(args), None ]
-    elif a2[0] == 'NUMBER':
-        v0 = float(a0[1])
-        v2 = float(a2[1])
-        value = [ 'COMMA', [ v0, v2 ] ]
-    elif a2[0] == 'COMMA':
-        v0 = float(a0[1])
-        value = [ 'COMMA', [ v0 ] + a2[1] ]
-    else:
-        return [ 'ERROR - comma_eval first argument is not a NUMBER nor comma, args={}'.format(args), None ]
-    # fi
-    return [ value ]
-# End of comma_eval
-
-#-----------------------------------------------------------------------------
 def quotes_eval(args):
-#PRINT    print("quotes_eval - Entering args='{}'".format(args), file=sys.stderr, flush=True)
+#PRINT    print("quotes_eval - Entering args='{}'".format(args), file=sys.stderr, flush=True) # PRINT
     if args is None or len(args) != 3:
         return [ 'ERROR - quotes_eval wrong number of arguments, args={}'.format(args), None ]
     # fi
@@ -508,7 +548,7 @@ def quotes_eval(args):
 
 #-----------------------------------------------------------------------------
 def binary_eval(args):
-#PRINT    print('binary_eval - Entering args={}'.format(args))
+#PRINT    print('binary_eval - Entering args={}'.format(args))    # PRINT
     if args is None or len(args) != 3:
         return [ 'ERROR - binary_eval wrong number of arguments, args={}'.format(args), None ]
     # fi
@@ -524,7 +564,7 @@ def binary_eval(args):
 
 #-----------------------------------------------------------------------------
 def unary_eval(args):
-#PRINT    print('unary_eval - Entering args={}')
+#PRINT    print('unary_eval - Entering args={}')    # PRINT
     if len(args) != 2:
         return [ 'ERROR - unary_eval args={}'.format(args), None ]
     elif type(args[0]) == SymbolDesc and type(args[1]) != SymbolDesc:
@@ -585,13 +625,13 @@ def register_postsymbol(oper, lprio, rprio, eval=None):
 
 #-----------------------------------------------------------------------------
 def id_symbol(id):
-#--    print('id_symbol - Entering')
+#PRINT    print('id_symbol - Entering id={}'.format(id))  # PRINT
     return SymbolDesc(id, 99999, 100000, identity_eval)
 # End of id_symbol
 
 #-----------------------------------------------------------------------------
 def evaluate_handle(args):
-#PRINT    print('evaluate_handle - Entering args={}'.format(args))
+#PRINT    print('evaluate_handle - Entering args={}'.format(args))  # PRINT
     for i in args:
         if type(i) == SymbolDesc:
             a = i.eval(args)
@@ -610,10 +650,10 @@ def advance():
     global lexer
     global cur_token
 
-#PRINT    print('advance - Entering')
+#PRINT    print('advance - Entering')   # PRINT
     try:
         cur_token = lexer.__next__()                    # [ kind, item ]
-#PRINT        print('advance - cur_token={}'.format(cur_token))
+#PRINT        print('advance - cur_token={}'.format(cur_token)) # PRINT
     except StopIteration:
         cur_token = None
     # yrt
@@ -623,7 +663,7 @@ def advance():
 def reset(s):
     global lexer
 
-#PRINT    print("reset - Entering s='{}'".format(s), file=sys.stderr, flush=True)
+#PRINT    print("reset - Entering s='{}'".format(s), file=sys.stderr, flush=True) # PRINT
     lexer = tokenize(s)
     advance()
 # End of reset
@@ -634,7 +674,7 @@ def cur_sym(allow_presymbol):
     global presymbols
     global cur_token
     
-#PRINT    print("cur_sym - Entering cur_token='{}'".format(cur_token), file=sys.stderr, flush=True)
+#PRINT    print("cur_sym - Entering cur_token='{}'".format(cur_token), file=sys.stderr, flush=True)   # PRINT
     if cur_token is None:
         return None
     elif cur_token[0] == 'ID':                              # kind
@@ -655,7 +695,7 @@ def cur_sym(allow_presymbol):
 
 #-----------------------------------------------------------------------------
 def parse_to(prio):
-#PRINT    print('parse_to - Entering')
+#PRINT    print('parse_to - Entering')  # PRINT
     args = []
     while True:
         assert len(args) == 0 or (len(args) == 1 and type(args[0]) != SymbolDesc)
@@ -708,7 +748,7 @@ def parse_to(prio):
 def parse(s):
     global cur_token
 
-#PRINT    print("reset - Entering s='{}'".format(s), file=sys.stderr, flush=True)
+#PRINT    print("reset - Entering s='{}'".format(s), file=sys.stderr, flush=True) # PRINT
     reset(s)
     try:                                # NOTDONEYET - move to only around specific OOR plaes.
         res = parse_to(0)
@@ -728,7 +768,7 @@ def result_functions(arg1, arg2):
     global local_arrays
     global note_arrays
 
-#PRINT    print('result_functions - #1 arg1={} arg2={}'.format(arg1,arg2))
+#PRINT    print('result_functions - #1 arg1={} arg2={}'.format(arg1,arg2))  # PRINT
     if arg1[0] != 'ID':
         # 'NUMBER' -- implied multiply
         # Do implied multiply
@@ -757,11 +797,14 @@ def result_functions(arg1, arg2):
         fu = functions[arg1[1]]
         wh = fu[0]
         ar = fu[1]
+#PRINT        print('result_functions - #2 fu={}'.format(fu))  # PRINT
         if arg2[0] not in ar:
             return [ "ERROR - function '{}' called with wrong argument type {} vs {}".format(arg1[1], arg2[0], ar), None ]
         # fi
         try:
+#PRINT            print('result_functions - #11')  # PRINT
             a = wh(arg2)
+#PRINT            print('result_functions - #12')  # PRINT
             return a
         except:
             return [ "ERROR - performing function '{}' with argument '{}'".format(arg1, arg2), None ]
@@ -855,7 +898,7 @@ def result_functions(arg1, arg2):
 
 #-----------------------------------------------------------------------------
 def common_grouping_eval(args, txt, open_char, close_char):
-#PRINT    print("common_grouping_eval - len(args)={} args='{}'".format(len(args),args), file=sys.stderr, flush=True)
+#PRINT    print("common_grouping_eval - len(args)={} args='{}'".format(len(args),args), file=sys.stderr, flush=True)  # PRINT
     if len(args) == 3:
         r = args[0]
         s = args[1]
@@ -863,7 +906,6 @@ def common_grouping_eval(args, txt, open_char, close_char):
         if (type(r) == SymbolDesc and args[0].symbol == open_char
             and type(s) != SymbolDesc
             and type(t) == SymbolDesc and t.symbol == close_char):
-#PRINT            print("common_grouping_eval - #1 returning [ {} ]".format(s), file=sys.stderr, flush=True)
             return [ s ]
         # fi
     # fi
@@ -877,7 +919,6 @@ def common_grouping_eval(args, txt, open_char, close_char):
             and type(t) != SymbolDesc
             and type(u) == SymbolDesc and u.symbol == close_char):
             a = result_functions(r, t)
-#PRINT            print("common_grouping_eval - #2 returning [ {} ]".format(a), file=sys.stderr, flush=True)
             return [ a ]
         #fi
         if (type(r) == SymbolDesc and r.symbol == open_char
@@ -889,7 +930,6 @@ def common_grouping_eval(args, txt, open_char, close_char):
             if a1 is None:
                 return [ "ERROR - value is None a1='{}'".format(a1), None ]
             elif a1[0].startswith('ERROR'):
-#PRINT                print("common_grouping_eval - #3 returning [ {} ]".format(a1), file=sys.stderr, flush=True)
                 return a1
             elif a1[0] != 'NUMBER':
                 return [ "ERROR - value is not a Number a1='{}'".format(a1), None ]
@@ -898,12 +938,10 @@ def common_grouping_eval(args, txt, open_char, close_char):
             if a2 is None:
                 return [ "ERROR - value is None a2='{}'".format(a2), None ]
             elif a2[0].startswith('ERROR'):
-#PRINT                print("common_grouping_eval - #4 returning [ {} ]".format(a2), file=sys.stderr, flush=True)
                 return a2
             elif a2[0] != 'NUMBER':
                 return [ "ERROR - value is not a Number a2='{}'".format(a2), None ]
             # fi
-#PRINT            print("common_grouping_eval - #5 returning implied multiply", file=sys.stderr, flush=True)
             return [[ 'NUMBER',  a1[1] * a2[1] ]]
         #fi
     # fi
@@ -925,7 +963,6 @@ def common_grouping_eval(args, txt, open_char, close_char):
             if a1 is None:
                 return [ "ERROR - value is None a1='{}'".format(a1), None ]
             elif a1[0].startswith('ERROR'):
-#PRINT                print("common_grouping_eval - #10 returning [ {} ]".format(a1), file=sys.stderr, flush=True)
                 return a1
             elif a1[0] != 'NUMBER':
                 return [ "ERROR - value is not a Number a1='{}'".format(a1), None ]
@@ -938,7 +975,6 @@ def common_grouping_eval(args, txt, open_char, close_char):
             elif a2[0] != 'NUMBER':
                 return [ "ERROR - value is not a Number a2='{}'".format(a2), None ]
             # fi
-#PRINT            print("common_grouping_eval - #11 returning implied multiply", file=sys.stderr, flush=True)
             return [[ 'NUMBER',  a1[1] * a2[1] ]]
         #fi
     # fi
@@ -963,7 +999,6 @@ def common_grouping_eval(args, txt, open_char, close_char):
             elif a1 is None:
                 return [ "ERROR - value is None a1='{}'".format(a1), None ]
             elif a1[0].startswith('ERROR'):
-#PRINT                print("common_grouping_eval - #21 returning {}".format(a1), file=sys.stderr, flush=True)
                 return a1
             elif a1[0] != 'NUMBER':
                 return [ "ERROR - value is not a Number a1='{}'".format(a1), None ]
@@ -972,12 +1007,10 @@ def common_grouping_eval(args, txt, open_char, close_char):
             if a2 is None:
                 return [ "ERROR - value is None a2='{}'".format(a2), None ]
             elif a2[0].startswith('ERROR'):
-#PRINT                print("common_grouping_eval - #22 returning {}".format(a2), file=sys.stderr, flush=True)
                 return a2
             elif a2[0] != 'NUMBER':
                 return [ "ERROR - value is not a Number a2='{}'".format(a2), None ]
             # fi
-#PRINT            print("common_grouping_eval - #23 returning implied multiply", file=sys.stderr, flush=True)
             a = [[ 'NUMBER',  a1[1] * a2[1] ]]
             return a
         #fi
@@ -987,43 +1020,43 @@ def common_grouping_eval(args, txt, open_char, close_char):
 
 #-----------------------------------------------------------------------------
 def open_paren_eval(args):
-#PRINT    print("open_paren_eval - args='{}'".format(args), file=sys.stderr, flush=True)
+#PRINT    print("open_paren_eval - args='{}'".format(args), file=sys.stderr, flush=True)  # PRINT
     return common_grouping_eval(args, 'paren', '(', ')')
 # End of open_paren_eval
 
 #-----------------------------------------------------------------------------
 def close_paren_eval(args):
-#PRINT    print("close_paren_eval - args='{}'".format(args), file=sys.stderr, flush=True)
+#PRINT    print("close_paren_eval - args='{}'".format(args), file=sys.stderr, flush=True) # PRINT
     return [ "ERROR - close_paren_eval args='{}'".format(args), None ]
 # End of close_paren_eval
 
 #-----------------------------------------------------------------------------
 def open_bracket_eval(args):
-#PRINT    print("open_bracket_eval - args='{}'".format(args), file=sys.stderr, flush=True)
+#PRINT    print("open_bracket_eval - args='{}'".format(args), file=sys.stderr, flush=True)    # PRINT
     return common_grouping_eval(args, 'bracket', '[', ']')
 # End of open_bracket_eval
 
 #-----------------------------------------------------------------------------
 def close_bracket_eval(args):
-#PRINT    print("close_bracket_eval - args='{}'".format(args), file=sys.stderr, flush=True)
+#PRINT    print("close_bracket_eval - args='{}'".format(args), file=sys.stderr, flush=True)   # PRINT
     return [ "ERROR - close_bracket_eval args='{}'".format(args), None ]
 # End of close_bracket_eval
 
 #-----------------------------------------------------------------------------
 def open_brace_eval(args):
-#PRINT    print("open_brace_eval - args='{}'".format(args), file=sys.stderr, flush=True)
+#PRINT    print("open_brace_eval - args='{}'".format(args), file=sys.stderr, flush=True)  # PRINT
     return common_grouping_eval(args, 'brace', '{', '}')
 # End of open_brace_eval
 
 #-----------------------------------------------------------------------------
 def close_brace_eval(args):
-#PRINT    print("close_brace_eval - args='{}'".format(args), file=sys.stderr, flush=True)
+#PRINT    print("close_brace_eval - args='{}'".format(args), file=sys.stderr, flush=True) # PRINT
     return [ "ERROR - close_brace_eval args='{}'".format(args), None ]
 # End of close_brace_eval
 
 #-----------------------------------------------------------------------------
 def f_m(arg):
-#PRINT    print("f_m - arg='{}'".format(arg), file=sys.stderr, flush=True)
+#PRINT    print("f_m - arg='{}'".format(arg), file=sys.stderr, flush=True)    # PRINT
     try:
         a = float(arg[1])
         a = int(a)
@@ -1103,7 +1136,7 @@ def f_frac(arg):
 def f_float(arg):
     a = float(arg[1])
     return [ 'NUMBER', a ]
-# End of f_int
+# End of f_float
 
 #-----------------------------------------------------------------------------
 def f_int(arg):
@@ -1111,6 +1144,34 @@ def f_int(arg):
     a = int(a)
     return [ 'NUMBER', a ]
 # End of f_int
+
+#-----------------------------------------------------------------------------
+def f_in(arg):
+#PRINT    print("f_in - arg='{}'".format(arg), file=sys.stderr, flush=True)   # PRINT
+    val = arg[1]
+    if len(val) != 3:
+        return [ "ERROR - in() needs two arguments, not: {}'".format(val), None ]
+    # fi
+    # check if types of 3 arguments are float/int. 
+    n = 1
+    for x in val:
+        if type(x) is not float and type(x) is not int:
+            return [ "ERROR - in() needs arguments to be integer or float. #{} {} is type {}".format(n, x, type(x)), None ]
+        # fi
+        n = n + 1
+    # rof
+    val1 = val[0]
+    val2 = val[1]
+    val3 = val[2]
+    if val3 < val1:
+        return [ "ERROR - in() needs third argument ({}) greater than or equal first ({})'".format(val3,val1), None ]
+    elif val1 <= val2 and val2 <= val3:
+        value = -1
+    else:
+        value = 0
+    # fi
+    return [ 'NUMBER', value ]
+# End of f_in
 
 #-----------------------------------------------------------------------------
 def f_log(arg):
@@ -1203,6 +1264,13 @@ def f_max(arg):
     if len(val) != 2:
         return [ "ERROR - max needs two arguments, not: {}'".format(val), None ]
     # fi
+    n = 1
+    for x in val:
+        if type(x) is not float and type(x) is not int:
+            return [ "ERROR - max() needs arguments to be integer or float. #{} {} is type {}".format(n, x, type(x)), None ]
+        # fi
+        n = n + 1
+    # rof
     val1 = arg[1][0]
     val2 = arg[1][1]
     value = val1 if val1 > val2 else val2
@@ -1215,6 +1283,13 @@ def f_min(arg):
     if len(val) != 2:
         return [ "ERROR - min needs two arguments, not: {}'".format(val), None ]
     # fi
+    n = 1
+    for x in val:
+        if type(x) is not float and type(x) is not int:
+            return [ "ERROR - min() needs arguments to be integer or float. #{} {} is type {}".format(n, x, type(x)), None ]
+        # fi
+        n = n + 1
+    # rof
     val1 = arg[1][0]
     val2 = arg[1][1]
     value = val1 if val1 <= val2 else val2
@@ -1223,11 +1298,18 @@ def f_min(arg):
 
 #-----------------------------------------------------------------------------
 def f_mod(arg):
-#PRINT    print("f_mod - arg='{}'".format(arg), file=sys.stderr, flush=True)
+#PRINT    print("f_mod - arg='{}'".format(arg), file=sys.stderr, flush=True)  # PRINT
     val = arg[1]
     if len(val) != 2:
         return [ "ERROR - mod needs two arguments, not: {}'".format(val), None ]
     # fi
+    n = 1
+    for x in val:
+        if type(x) is not float and type(x) is not int:
+            return [ "ERROR - mod() needs arguments to be integer or float. #{} {} is type {}".format(n, x, type(x)), None ]
+        # fi
+        n = n + 1
+    # rof
     val1 = arg[1][0]
     val2 = arg[1][1]
     if val2 == 0:
@@ -1239,7 +1321,6 @@ def f_mod(arg):
         value = math.fmod(float(val1), float(val2))
     # fi
     return [ 'NUMBER', value ]
-    pass
 # End of f_mod
 
 #-----------------------------------------------------------------------------
@@ -1258,6 +1339,7 @@ functions = {
     'floor':    [ f_floor,      ['NUMBER']],
     'frac':     [ f_frac,       ['NUMBER']],
     'int':      [ f_int,        ['NUMBER', 'CHAR']],
+    'in':       [ f_in,         ['COMMA']],
     'log':      [ f_log,        ['NUMBER']],
     'ln':       [ f_ln,         ['NUMBER']],
     'max':      [ f_max,        ['COMMA']],
@@ -1347,7 +1429,7 @@ def cexp_parser():
     # Assignment.
     register_postsymbol('=',                               5,   4)                      # r to l
     register_presymbol('"' + "'",                          6,   7, quotes_eval)         # quotes to eoln
-    register_postsymbol(',',                               9,   8, comma_eval)          # r to l
+    register_postsymbol(',',                               9,   8)                      # l to r
     # Cominbation.
     register_postsymbol(['$or$', '$and$'],                10,  11)                      # l to r
     # Logical.
@@ -1418,7 +1500,7 @@ def get_line():
 #-----------------------------------------------------------------------------
 # Parse and process line.
 def process_line(t, line):
-#--     print("process_line - Entering line='{}'".format(line), file=sys.stderr, flush=True)
+#--     print("process_line - Entering line='{}'".format(line), file=sys.stderr, flush=True)    # PRINT
     wline = line.strip()                 # Ignore leading and trailing whitespace.
     if wline == 'quit' or wline == 'exit':
         sys.exit(0)
