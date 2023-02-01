@@ -1674,8 +1674,12 @@ global macro_defining               # If defining macro.
 macro_defining = None
 global macro_buffer                 # Name of macro, array of lines for macro.
 macro_buffer = { '':''}
+global macro_delim                  # Name of macro, array of first delimiter after name.
+macro_delim = { '':''}
 global macro_arguments              # Name of macro, array of arguments for macro.
 macro_arguments = { '':''}
+global macro_arg_delim              # Name of macro, array of delimiters between arguments for macro.
+macro_arg_delim = { '':''}
 global macro_executing_depth        # If processing macro ... reading from macro buffer.
 macro_executing_depth = []          # The macro name currently working on is the last name in the array.
 global macro_executing_args         # Depth, array of arguments given to macro.
@@ -4166,20 +4170,15 @@ def get_list_sep_rem(string):
 
 def is_float(strg, type_float):
     tree = calculate.parse(strg)            # parse the string
-#PRINT    print_debug("is_float - tree={} strg={} type_float={}".format(tree,strg,type_float))
     if tree is None or len(tree) != 2:
-#PRINT        print_debug("is_float #1- None, None")
         return None, None
     elif tree[0] is not None and tree[0].startswith('ERROR'):
         sexpr = tree[0]
-#PRINT        print_debug("is_float #2- {}, {}".format(strg, sexpr))
         return strg, sexpr
     elif tree[1] is None:
-#PRINT        print_debug("is_float #3- {}, {}".format(strg, "bad input to calculator#1"))
         return strg, "variable '{}' is not set".format(strg)
     # fi
     elif tree[1] == '.':
-#PRINT        print_debug("is_float #4- {}, {}".format(strg, "bad input to calculator#2"))
         return strg, "bad input to calculator#2"
     # fi
     if type_float:
@@ -4187,7 +4186,6 @@ def is_float(strg, type_float):
             sexpr = float(tree[1])
             return sexpr, None
         except:
-#PRINT            print_debug("is_float #5- {}, {}".format(strg, "bad input to calculator#3"))
             return strg, "bad input to calculator#3"
         # yrt
     # fi
@@ -4968,7 +4966,10 @@ def replace_macro(command, t_args, line):
     global macro_line                   # Depth, line in macro array.
     global i_line
     global macro_i_line
+    global macro_delim
+    global macro_arg_delim
 
+    name = command
     if t_args is None or t_args == '':
         if macro_arguments[command] != []:
             print_error("macro command does not have any arguments, but needs {}.".format(macro_arguments[command]), line)
@@ -4976,52 +4977,76 @@ def replace_macro(command, t_args, line):
         # fi
         wargs = None
     else:
-        wargs = arglist(t_args, line, False)
-        if len(wargs) != len(macro_arguments[command]):
-            print_error("macro command has {} arguments, but needs {}.".format(wargs, macro_arguments[command]), line)
+        # Get rid of multiple spaces/tabs.
+        t_args = re.sub(r'\s+', r' ', t_args)
+        # Get rid of spaces before/after commas/semicolons.
+        t_args = re.sub(r'\s*([,;])\s*', r'\1', t_args)
+        if t_args[0] != macro_delim[name]:
+            print_error("macro {} does not have right delimiter after name argument, but needs '{}'.".format(name,macro_delim[name]), line)
             return
         # fi
+        t_args = t_args[1:]
+        wargs = []
+        n = 0
+        for a in macro_arguments[name]:
+            c = macro_arg_delim[name][n]
+            if c is None and (n == len(macro_arg_delim[name]) - 1) and (t_args or t_args == ''):
+                delim_at = len(t_args)          # CANNOT CHECK, might want those delimiters!
+            elif c is None and wargs and wargs != '':
+                print_error("macro {} does not have right delimiter after argument#{}, needs end-of-line".format(name,n+1), line)
+                return
+            else:
+                delim_at = t_args.find(c)
+                if delim_at < 0:
+                    print_error("macro {} does not have right delimiter after argument#{}, needs '{}'.".format(name,n+1,c), line)
+                    return
+                # fi
+            # fi
+            wargs.append(t_args[0:delim_at])
+            t_args = t_args[delim_at + 1:]
+            n = n + 1
+        # rof
+    # fi
+    if len(wargs) != len(macro_arguments[name]):
+        print_error("macro {} does not have right number of arguments ({}), needs {}.".format(name,len(wargs),len(macro_arguments[name])), line)
     # fi
     macro_executing_depth.append(command)
     macrodepth = len(macro_executing_depth)
     macro_executing_args[macrodepth] = wargs
-    macro_line[macrodepth] = 0             # First line in buffer.
+    macro_line[macrodepth] = 0              # First line in buffer.
+
     t_line = i_line
-    for i in range(0,len(t_line)):       # Save current depth of line.
+    for i in range(0,len(t_line)):          # Save current depth of line.
        t_line[i] = 'rmacr: ' + t_line[i][7:]
     # rof
     macro_i_line[macrodepth] = t_line       # Save current depth of line.
 # End of replace_macro
 
 # ----------------------------------------------------------------------------
-#   macro name,arg1,arg2,...,argn
-#     body of macro
-#   endm
-#         Changes arg1 to passed in usage.
-#   name  first,second arg,something    # example 3 arguments - spaces allowed.
-# See "endm" above for trivial example.
-#
-# Macros must not be existing commands -- replace existing macro with warning.
+# Note: if terminating delimiter is end of line -- stay? I think it can be
+# done with last_voice_staff variable.
 
 def do_macro(t_args, line):
-    global commands
-    global macro_defining               # If defining macro.
-    global macro_buffer                 # Name of macro, array of lines for macro.
-    global macro_arguments              # Name of macro, array of arguments for macro.
+    global macro_buffer
+    global macro_delim
+    global macro_arguments
+    global macro_arg_delim
+    global macro_defining
 
     if t_args is None or t_args == '':
         print_error("macro command does not have any arguments.", line)
-        return
+        return ''
     # fi
-
-    wargs = arglist(t_args, line, False)
+    # Get rid of multiple spaces/tabs.
+    t_args = re.sub(r'\s+', r' ', t_args)
+    # Get rid of spaces before/after commas/semicolons.
+    t_args = re.sub(r'\s*([,;])\s*', r'\1', t_args)
+    wargs = [i for i in re.split(r'(\w+|\W+)', t_args) if i]
     if not wargs or len(wargs) < 1:
         print_error("no macro name.", line)
         return
     # fi
-
     name = wargs[0]
-    args = wargs[1:]
     if name in commands:
         print_error("macro ({}) would replace existing command".format(name), line)
         return
@@ -5029,9 +5054,30 @@ def do_macro(t_args, line):
     if name in macro_buffer:
         print_warning("macro ({}) will replace existing macro".format(name), line)
     # fi
+    if len(wargs) == 1:
+        delim = None
+    else:
+        delim = wargs[1]
+        wargs = wargs[2:]
+    # fi
 
     macro_buffer[name] = []             # No lines in buffer.
-    macro_arguments[name] = args
+    macro_delim[name] = delim           # Delimiter after macro.
+    macro_arguments[name] = []          # Arguments
+    macro_arg_delim[name] = []          # Delimiters after arguments.
+    n = 0
+    while n < len(wargs):
+        arg = wargs[n]
+        n = n + 1
+        if n < len(wargs):
+            delim = wargs[n]
+            n = n + 1
+        else:
+            delim = None
+        # fi
+        macro_arguments[name].append(arg)
+        macro_arg_delim[name].append(delim)
+    # elihw
     macro_defining = name
     return
 # End of do_macro
@@ -5266,7 +5312,6 @@ def do_debug(t_args, line):
     global args
     global debug_count
 
-#PRINT    print_debug("do_debug - t_args={}".format(t_args))
     debug_count = debug_count + 1
 
     if t_args is None or t_args == '':
@@ -5568,6 +5613,15 @@ def do_natural(t_args, line):
     print_error("NOTDONEYET - do_natural", line)
     return
 # End of do_natural
+
+# ----------------------------------------------------------------------------
+# Not likely to ever do.
+#   midi(o300 + MIDCHN - 1, PATNUM)
+
+def do_midi(t_args, line):
+    print_error("NOTDONEYET - do_midi", line)
+    return
+# End of do_midi
 
 # ----------------------------------------------------------------------------
 #   goto    6.5,x,8,2,... $$ repeat and/or skip.  "x" = continue, forwards, backwards. No Max arguments?
@@ -7493,7 +7547,6 @@ def do_vars_parens(arg, a, line, create_it):
         while w < len(aftertoken):
             c = aftertoken[w]
             w = w + 1
-#--            print_debug("do_vars_parens - w={} c={} aftertoken={} dimensions={}".format(w,c,aftertoken,dimensions))
             if c == enddelim:
                 break
             # fi
@@ -7605,7 +7658,6 @@ def do_vars_parens(arg, a, line, create_it):
 def do_vars(t_args, line):
     global macro_executing_depth
 
-#PRINT    print_debug("do_vars - t_args={}".format(t_args))
     if t_args is None or t_args == '':
         print_error("vars needs at least one argument", line)
         return
@@ -7654,7 +7706,6 @@ def do_vars(t_args, line):
         createlocalvar(token, None, len(macro_executing_depth), None)       # Not set, nor any type yet.
         wary = getvarmaclevel(token, len(macro_executing_depth))
     # elihw
-#PRINT    print_debug("do_vars - calculate.local_arrays={}".format(calculate.local_arrays))
     return
 #   End of do_vars
 
@@ -7752,6 +7803,7 @@ commands = {
              'measure' : (do_measure,   True),
              'meter'   : (do_meter,     True),
              'middlec' : (do_middle_c,  True),
+             'midi'    : (do_midi,      True),
              'mytitle' : (do_title,     False),         # title alternative
              'natural' : (do_natural,   False),
              'page'    : (do_page,      True),
@@ -8659,8 +8711,6 @@ def get_vol_note(temp1, onvoice, line):
                     f1 = S_vlprint[j][0]
                     f2 = S_vlprint[j][1]
                     type_error = None
-#--                    print_debug("type(f1)={} f1={}".format(type(f1),f1))
-#--                    print_debug("type(f2)={} f2={}".format(type(f2),f2))
                     if f1 < 0 and not args.horizontal and not args.vertical:
                         f1 = determine_s_vol(f1, onvoice, line)
                     # fi
@@ -9012,15 +9062,24 @@ def process_notes(line):
             onenotevolume = None
             while True:
                 for c in macro_buffer:
-                    t = temp1[0:len(c) + 1]
-                    if c != '' and c + '(' == t:
+#??                    t = temp1[0:len(c) + 1]
+                    t = temp1[0:len(c)+1]
+                    if c + macro_delim[c] == t:
                         therest = temp1[len(c)+1:]
-                        f = therest.find(')')
-                        if f < 0:
-                            print_error("m:{} macro {} does not have a closing parenthesis".format(measure_on, c), line)
-                            return
+                        # NOTDONEYET - macros here... vvv
+                        # Need to match argument delimiters ... end of line == None.
+                        q = len(macro_arg_delim[c])
+                        if macro_arg_delim[c][q-1] is None:
+                            f = len(therest)
+                        else:
+                            f = therest.find(macro_arg_delim[c][q-1])
+                            if f < 0:
+                                print_error("m:{} macro {} does not have a closing delimiter '{}'".format(measure_on, c,macro_arg_delim[c][q-1]), line)
+                                return
+                            # fi
+                            f = f + 1
                         # fi
-                        margs = [ therest[0:f] ]
+                        margs = macro_delim[c] + therest[0:f]
                         temp1 = therest[f+1:]
                         # 1) Create and put in a temporary macro with no arguments for temp1
                         #    (rest of line), if anything in temp1 (not None, nor '').
@@ -9033,7 +9092,9 @@ def process_notes(line):
                                 macro_buffer[m_name] = [ temp1 + "," + ",".join(rest_wargs_on_line) ]
                             # fi
                             # macro_defining = m_name               # No need, we did it.
+                            macro_delim[m_name] = ''                # No delimiter after name - never directly called?
                             macro_arguments[m_name] = []
+                            macro_arg_delim[m_name] = []            # Delimiters between arguments -- NOTDONEYET
                             macro_internal = macro_internal + 1     # Next internal macro.
                             macro_executing_depth.append(m_name)    # Add in the name.
                             macrodepth = len(macro_executing_depth) # one more to do.
@@ -9041,6 +9102,7 @@ def process_notes(line):
                             macro_line[macrodepth] = 0              # First line in buffer.
                         # fi
                         replace_macro(c, margs, line)
+                        # NOTDONEYET - macros here ... ^^^
                         return                                      # Go out and read line for macro.
                     # fi
                 # rof
@@ -9737,7 +9799,6 @@ def read_csv_file(l):
 def replace_array_char(wary, thetoken, aftertoken, original_line):
     global measure_on
 
-#--     print_debug("replace_array_char('{}','{}','{}',)".format(wary[numarry_name], thetoken, aftertoken))
     # Find end of array. Need add/match ()[]{}.
     w = 0
     while w < len(aftertoken) and aftertoken[w] in [ "\t", ' ' ]:
@@ -9745,8 +9806,6 @@ def replace_array_char(wary, thetoken, aftertoken, original_line):
     # elihw
     if w >= len(aftertoken):
         print_warning("Found character variable {}, but no dimensions.".format(wary), original_line)
-#--         print_debug("replace_array_char #1- thetoken={} aftertoken={}".format(thetoken, aftertoken))
-#--         print_debug("replace_array_char #a- returning '{}'".format(thetoken + aftertoken))
         return thetoken, aftertoken
     # fi
     e = []
@@ -9757,16 +9816,12 @@ def replace_array_char(wary, thetoken, aftertoken, original_line):
         enddelim = ']'
     else:
         print_warning("Found character variable {}, but no parenthesis for dimension.".format(wary), original_line)
-#--         print_debug("replace_array_char #2- thetoken={} aftertoken={}".format(thetoken, aftertoken))
-#--         print_debug("replace_array_char #b- returning '{}'".format(thetoken + aftertoken))
         return thetoken, aftertoken
     # fi
     e.append(enddelim)
     w = w + 1
     if w >= len(aftertoken):
         print_warning("Found character variable {}, but no closing {}.".format(wary, enddelim), original_line)
-#--         print_debug("replace_array_char #3- thetoken={} aftertoken={}".format(thetoken, aftertoken))
-#--         print_debug("replace_array_char #c- returning '{}'".format(thetoken + aftertoken))
         return thetoken, aftertoken
     # fi
     while True:
@@ -9778,8 +9833,6 @@ def replace_array_char(wary, thetoken, aftertoken, original_line):
             # fi
             if w >= len(aftertoken):
                 print_warning("Found character variable {}, but not closing {}.".format(wary, enddelim), original_line)
-#--                 print_debug("replace_array_char #4- thetoken={} aftertoken={}".format(thetoken, aftertoken))
-#--                 print_debug("replace_array_char #d- returning '{}'".format(thetoken + aftertoken))
                 return thetoken, aftertoken
             elif c == '(':
                 enddelim = ')'
@@ -9808,15 +9861,11 @@ def replace_array_char(wary, thetoken, aftertoken, original_line):
     f1, type_error = is_float(f, False)     # Want a string.
     if type_error is not None or f1 is None:
         print_warning("m:{}".format(measure_on) + type_error, original_line)
-#PRINT        print_debug("replace_array_char #5- thetoken={} aftertoken={}".format(thetoken, aftertoken))
-#PRINT        print_debug("replace_array_char #e- returning '{}'".format(thetoken + aftertoken))
         return thetoken, aftertoken
     elif type(f1) is not str:
-#PRINT        print_debug("replace_array_char #f1- returning type(f1)={} f1='{}' s='{}'".format(type(f1), f1, s))
         f1 = str(f1)
     # fi
     # Need to retokenize.
-#PRINT    print_debug("replace_array_char #f2- returning type(f1)={} f1='{}' s='{}'".format(type(f1), f1, s))
     return f1, s
 # End of replace_array_char
 
@@ -9825,7 +9874,6 @@ def replace_array_char(wary, thetoken, aftertoken, original_line):
 def replace_char_var(line, linestarts, lineends, original_line):
     global whichlocalchars
 
-#--     print_debug("replace_char_var - Entering(, {}, {},)".format(linestarts,lineends))
     cnt = 0
     beforetokenline = line[0:linestarts]
     token = ntoken = line[linestarts:lineends]
@@ -9869,12 +9917,10 @@ def replace_char_var(line, linestarts, lineends, original_line):
             ntoken = ntoken[a:lt]
             ntoken, aftertoken = replace_array_char(whichlocalcharswary[w], ntoken, aftertoken, original_line)
             ntoken = beforetokenline + beforetoken + ntoken + aftertoken
-#--             print_debug("replace_char_var - '{}' '{}' '{}'".format(beforetoken, ntoken, aftertoken))
             return ntoken
         # fi
     # rof
 
-#--     print_debug("replace_char_var - returning '{}'".format(line))
     return line
 # End of replace_char_var
 
@@ -9918,18 +9964,14 @@ def char_var_subst_whole_string(strg, line):
     if whichlocalchars == []:
         return strg
     # fi
-#PRINT    print_debug("char_var_subst_whole_string - Entering {}".format(strg))
     o_strg = strg
     w = 0
     while w < len(strg):
         linestarts,lineends = next_token(w, strg)
         if linestarts is None:
-#PRINT            print_debug("char_var_subst_whole_string - returning '{}'".format(strg))
             return strg
          # fi
-#PRINT        print_debug("char_var_subst_whole_string #a- '{}'".format(strg[linestarts:lineends]))
         strg = replace_char_var(strg, linestarts, lineends, line)
-#PRINT        print_debug("char_var_subst_whole_string #b- strg={}".format(strg))
         if strg != o_strg:
             o_strg = strg
             w = 0
@@ -9938,24 +9980,20 @@ def char_var_subst_whole_string(strg, line):
             w = lineends
         # fi
     # elihw
-#PRINT    print_debug("char_var_subst_whole_string - returning '{}'".format(strg))
     return strg
 # End of char_var_subst_whole_string
 
 # ============================================================================
 def char_var_subst_first_token(line):
     if whichlocalchars == []:
-#--         print_debug("char_var_subst_first_token #a- returning '{}'".format(line))
         return line
     # fi
     repeat = True
     lineends = first_token(line)
     if lineends is None:
-#--         print_debug("char_var_subst_first_token #b- returning '{}'".format(line))
         return line                             # Nothing to change.
     # fi
     replacedline = replace_char_var(line, 0, lineends, line)
-#--     print_debug("char_var_subst_first_token #c- replacedline '{}'".format(replacedline))
     return replacedline
 # End of char_var_subst_first_token
 
@@ -10015,9 +10053,7 @@ def process_line(line):
         # fi
         numcharvar = 0
         while True:
-#PRINT            print_debug("process_line #1 - t_args={}".format(t_args))
             nline = char_var_subst_whole_string(t_args, line).strip()
-#PRINT            print_debug("process_line #2 - nline={}".format(nline))
             if nline == t_args:
                 break
             # fi
@@ -10035,7 +10071,6 @@ def process_line(line):
         elif command[0] == '%':             # Change single percent to double percent signs.
             command = '%%'
         # fi
-#PRINT        print_debug("process_line - command={}".format(command))
         if command in commands:
             try:
                 r = commands[command][0]    # Had an error once ... thus try/expect.
@@ -10105,7 +10140,6 @@ def dothefile():
                     # fi
                     continue
                 # fi
-#--                     print_debug("dothefile - calling char_var_subst_first_token({})".format(line))
                 nline = char_var_subst_first_token(line)
                 if nline != line:
                     numcharvar = numcharvar + 1
@@ -10118,7 +10152,6 @@ def dothefile():
                     continue        # might have putd's or continuation line.
                 # fi
             else:
-#--                     print_debug("dothefile - calling char_var_subst_whole_string({})".format(line))
                 nline = char_var_subst_whole_string(line, line).rstrip()
                 if nline != line:
                     numcharvar = numcharvar + 1
