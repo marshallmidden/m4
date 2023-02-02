@@ -1,5 +1,7 @@
 #!/usr/bin/python3 -B
 # ----------------------------------------------------------------------------
+# If variable is set as character, make sure it isn't a command first! Return False.
+# ----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 # ----------------------------------------------------------------------------
 # TO DO:            2022-12-31_18-08-00
@@ -527,6 +529,27 @@ def Log2(x):
 #   End of Log2
 
 # ----------------------------------------------------------------------------
+def print_i_line(line):
+    global i_line
+    global macro_i_line
+    global macro_executing_depth
+
+    macrodepth = len(macro_executing_depth)
+    k = None
+    for i in macro_i_line[macrodepth] + i_line:
+        j = i.rstrip()              # In case there are new-lines, etc.
+        if j != k:
+            print("                  - '{}'".format(j), file=sys.stderr, flush=True)
+        # fi
+        k = j
+    # rof
+    line = line.rstrip()
+    if k is None or line != k[7:]:
+        print("                  - 'line:  {}'".format(line), file=sys.stderr, flush=True)
+    # fi
+    return
+# End of print_i_line
+
 # ----------------------------------------------------------------------------
 def print_error(strg, line):
     global linecount
@@ -536,8 +559,8 @@ def print_error(strg, line):
     errors_happened = 1             # When exiting, do 1 instead of 0
 
     print("ERROR -", strg, file=sys.stderr, flush=True)
-    print("  File {} Line {} - '{}'".format(which_file_in, linecount, line), file=sys.stderr, flush=True)
-    return
+    print("  File {} Line {}".format(which_file_in, linecount, line), file=sys.stderr, flush=True)
+    print_i_line(line)
 # End of print_error
 
 # ----------------------------------------------------------------------------
@@ -546,7 +569,8 @@ def print_warning(strg, line):
     global which_file_in
 
     print("WARNING -", strg, file=sys.stderr, flush=True)
-    print("  File {} Line {} - '{}'".format(which_file_in, linecount, line), file=sys.stderr, flush=True)
+    print("  File {} Line {}".format(which_file_in, linecount, line), file=sys.stderr, flush=True)
+    print_i_line(line)
     return
 # End of print_warning
 
@@ -607,119 +631,197 @@ import calculate
 
 calculate.cexp_parser()                         # initialize parser
 
-def createvar(arg,val,typ):
-    # Find in calculate.arrys.
-    for wary in calculate.arrays:
-        if arg == wary[calculate.numarry_name]:             # Ignore macro level
-            print_error_no_line("createvar variable already exists, arg={}".format(arg))
-            sys.exit(1)
+numarry_name        = calculate.numarry_name        # The name of the variable.
+numarry_maclevel    = calculate.numarry_maclevel    # The macro level was in effect when created.
+numarry_indexes     = calculate.numarry_indexes     # The array indexes. []=value, [3]=1-dimen, [2,4]=2-dimen.
+numarry_values      = calculate.numarry_values      # Array of values ([0] for not an array).
+numarry_value_type  = calculate.numarry_value_type  # Array of types None=not-set, 0=int/float, 1= character string
+
+# ----------------------------------------------------------------------------
+global whichlocalchars
+whichlocalchars = []
+global whichlocalcharswary
+whichlocalcharswary = {}
+
+# ----------------------------------------------------------------------------
+def recompute_whichlocalchars():
+    global whichlocalchars
+    global whichlocalcharswary
+
+    new_which = {}
+#--    for wary in calculate.arrays + calculate.local_arrays + calculate.note_arrays:
+    for wary in calculate.arrays + calculate.local_arrays:
+        if 1 in wary[numarry_value_type]:
+            if wary[numarry_name] not in new_which:
+                new_which[wary[numarry_name]] = wary
+            else:
+                a = new_which[wary[numarry_name]]
+                if wary[numarry_maclevel] > a[numarry_maclevel]:
+                    new_which[wary[numarry_name]] = wary
+                # fi
+            # fi
         # fi
     # rof
-    wary = [ arg,     0, [ ], [ val ],    [ typ ] ]
+    whichlocalcharswary = new_which
+    new_which = sorted(new_which, key=len)
+    new_which.reverse()
+    whichlocalchars = new_which
+# End of recompute_whichlocalchars
+
+# ----------------------------------------------------------------------------
+def createvar(arg, val, maclev, typ):
+    for wary in calculate.arrays + calculate.local_arrays + calculate.note_arrays:
+        if arg == wary[numarry_name]:
+            if wary[numarry_maclevel] == maclev:
+                return False                    # Already exists.
+            # fi
+        # fi
+    # rof
+    wary = [ arg, maclev, [ ], [ val ],    [ typ ] ]
     calculate.arrays.append(wary)
-    return
+    if typ == 1:
+        recompute_whichlocalchars()
+    # fi
+    return True
 # End of createvar
 
-def setvar(arg,val,typ):
-    # Find in calculate.arrys.
-    for wary in calculate.arrays:
-        if arg == wary[calculate.numarry_name]:             # Ignore macro level
-            wary[calculate.numarry_values][0] = val
-            wary[calculate.numarry_value_type][0] = typ
-            return
+# ----------------------------------------------------------------------------
+def createlocalvar(arg, val, maclev, typ):
+    for wary in calculate.local_arrays + calculate.arrays + calculate.note_arrays:
+        if arg == wary[numarry_name]:
+            if wary[numarry_maclevel] == maclev:
+                return False                    # Already exists.
+            # fi
         # fi
     # rof
-    print_error_no_line("setvar unable to find arg={}".format(arg))
-    sys.exit(1)
-# End of setvar
-
-def getvar(arg):
-    # Find in calculate.arrys.
-    for wary in calculate.arrays:
-        if arg == wary[calculate.numarry_name]:             # Ignore macro level
-            return wary[calculate.numarry_values][0]
-        # fi
-    # rof
-    print_error_no_line("getvar unable to find arg={}".format(arg))
-    sys.exit(1)
-# End of getvar
-
-def createlocalvar(arg,val,typ):
-    # Find in calculate.arrys.
-    for wary in calculate.local_arrays:
-        if arg == wary[calculate.numarry_name]:             # Ignore macro level
-            print_error_no_line("createlocalvar variable already exists, arg={}".format(arg))
-            sys.exit(1)
-        # fi
-    # rof
-    wary = [ arg,     0, [ ], [ val ],    [ typ ] ]
+    wary = [ arg, maclev, [ ], [ val ],    [ typ ] ]
     calculate.local_arrays.append(wary)
+    if typ == 1:
+        recompute_whichlocalchars()
+    # fi
     return
 # End of createlocalvar
 
-def setlocalvar(arg,val,typ):
-    # Find in calculate.arrys.
-    for wary in calculate.local_arrays:
-        if arg == wary[calculate.numarry_name]:             # Ignore macro level
-            wary[calculate.numarry_values][0] = val
-            wary[calculate.numarry_value_type][0] = typ
-            return
+# ----------------------------------------------------------------------------
+def createnotevar(arg, val, maclev, typ):
+    for wary in calculate.local_arrays + calculate.arrays + calculate.note_arrays:
+        if arg == wary[numarry_name]:
+            if wary[numarry_maclevel] == maclev:
+                return False                    # Already exists.
+            # fi
         # fi
     # rof
-    print_error_no_line("setlocalvar unable to find arg={}".format(arg))
-    sys.exit(1)
-# End of setlocalvar
+    wary = [ arg, maclev, [ ], [ val ],    [ typ ] ]
+    calculate.note_arrays.append(wary)
+    if typ == 1:
+        recompute_whichlocalchars()
+    # fi
+    return
+# End of createlocalvar
 
-def getlocalvar(arg):
-    # Find in calculate.arrys.
-    for wary in calculate.local_arrays:
-        if arg == wary[calculate.numarry_name]:             # Ignore macro level
-            return wary[calculate.numarry_values][0]
+# ----------------------------------------------------------------------------
+def chkvar(arg):
+    maxmaclev = -1
+    maxwary = None
+    for wary in calculate.arrays + calculate.local_arrays:
+        if arg == wary[numarry_name]:
+            if wary[numarry_maclevel] > maxmaclev:
+                maxmaclev = wary[numarry_maclevel]
+                maxwary = wary
+            # fi
         # fi
     # rof
-    print_error_no_line("getlocalvar unable to find arg={}".format(arg))
-    sys.exit(1)
-# End of getlocalvar
+    return maxwary
+# End of chkvar
 
-# Default ancient musicomp values -- not used within this script/program. (For input files.)
-createvar('pause', 4, 0)
-createvar('grace', 4, 0)
-createvar('voice', -1, 0)               # no voices yet.
+# ----------------------------------------------------------------------------
+def setvar(arg, val, typ):
+    global commands
+
+    if arg in commands and typ != 0:
+        return False    # Must not set character variable to a command name.
+    # fi
+    wary = chkvar(arg)
+    if wary is None or (len(wary[numarry_indexes]) > 1 and wary[numarry_indexes][0] > 1):
+        return False    # Does not exist.
+    # fi
+    wary[numarry_values][0] = val
+    wary[numarry_value_type][0] = typ
+    if typ == 1:
+        recompute_whichlocalchars()
+    # fi
+    return True
+# End of setvar
+
+# ----------------------------------------------------------------------------
+def getvar(arg):
+    wary = chkvar(arg)
+    if wary is None or (len(wary[numarry_indexes]) > 1 and wary[numarry_indexes][0] > 1):
+        print_error_no_line("getvar - multidimensional array ... without dimensions", 'getvar')
+        return None
+    # fi
+    return wary[numarry_values][0]
+# End of getval
+
+# ----------------------------------------------------------------------------
+def getvarmaclevel(arg, maclev):
+    for wary in calculate.arrays + calculate.local_arrays:
+        if arg == wary[numarry_name] and maclev == wary[numarry_maclevel]:
+            return wary[numarry_values][0]
+        # fi
+    # rof
+    return None
+# End of getvarmaclevel
+
+# ----------------------------------------------------------------------------
+#-- # Test character variables
+#-- createlocalvar('DEF', 'def0', 0, 1)
+#-- createlocalvar('DEFINE', 'debug', 0, 1)
+#-- wary = [ 'DEFINE', 0, [2,2], [ 'debug11','debug12','debug21','debug22' ], [ 1,1,1,1 ] ] ; calculate.local_arrays.append(wary) ; recompute_whichlocalchars()
+#-- createlocalvar('ABC', 'abc0', 0, 1)
+#-- createlocalvar('Hidebug12there', 'debug', 0, 1)
+#--createlocalvar('VOICE', 'voiceargument', 0, 1)
+
+# ----------------------------------------------------------------------------
+ # Default ancient musicomp values -- not used within this script/program. (For input files.)
+createlocalvar('pause', 4, 0, 0)
+createlocalvar('grace', 4, 0, 0)
+createlocalvar('voice', -1, 0, 0)               # no voices yet.
 
 # IMS variables
 # NOTDONEYET - accent
-createvar('accent', 10, 0)              # light accent
+createlocalvar('accent', 10, 0, 0)              # light accent
 # NOTDONEYET - aaccent
-createvar('aaccent', 20, 0)             # heavy accent
+createlocalvar('aaccent', 20, 0, 0)             # heavy accent
 # NOTDONEYET - arp
-createvar('arp', 1/32, 0)               # Default arpeggiation length
+createlocalvar('arp', 1/32, 0, 0)               # Default arpeggiation length
 # NOTDONEYET - fermata
-createvar('fermata', 1, 0)              # fermata
+createlocalvar('fermata', 1, 0, 0)              # fermata
 # NOTDONEYET - ferma
-createvar('lferm', 1, 0)                # No fermata yet.
+createlocalvar('lferm', 1, 0, 0)                # No fermata yet.
 # NOTDONEYET - stac
-createvar('stac', 0.25, 0)              # Staccato length multiplier - used to be 4, but IMS is 1/4.
+createlocalvar('stac', 0.25, 0, 0)              # Staccato length multiplier - used to be 4, but IMS is 1/4.
 # NOTDONEYET - marc
-createvar('marc', 0.5, 0)               # Marcato length multipliers.
-createvar('time', 0, 0)                 # The "time" in measure for current voice. (staff?)
+createlocalvar('marc', 0.5, 0, 0)               # Marcato length multipliers.
+createlocalvar('time', 0, 0, 0)                 # The "time" in measure for current voice. (staff?)
 
 # IMS "if" variables.  -1 is true
-createvar('print', 0, 0)                # if compiling for printing - args.abc is true
-createvar('play', 0, 0)                 # if compiling for playing  - args.fluidsynth or args.midi1csv
+createlocalvar('print', 0, 0, 0)                # if compiling for printing - args.abc is true
+createlocalvar('play', 0, 0, 0)                 # if compiling for playing  - args.fluidsynth or args.midi1csv
 # NOTDONEYET - lime
-createvar('lime', 0, 0)                 # if compiling for lime (does not apply)
+createlocalvar('lime', 0, 0, 0)                 # if compiling for lime (does not apply)
 # NOTDONEYET - include
-createvar('include', 0, 0)              # if compiling an include file (does not apply)
+createlocalvar('include', 0, 0, 0)              # if compiling an include file (does not apply)
 
 # New default musicomp values for debugging, etc.
-createvar('page', -1, 0)                # Page number from page command.
-createvar('measure', -1, 0)             # measure number from last measure command.
+createlocalvar('page', -1, 0, 0)                # Page number from page command.
+createlocalvar('measure', -1, 0, 0)             # measure number from last measure command.
 
 # Default MIDI control values.
-createvar('default_reverb', 0, 0)       # No reverb.
-createvar('default_pan', 64, 0)         # Center of left<->right balance.
-createvar('default_intensity', 100, 0)  # Volume = intensity% * velocity% * vol(ff)%.
-createvar('default_velocity', 120, 0)   # Note attack (when played. (Leave 7) Appears to be volume.
+createlocalvar('default_reverb', 0, 0, 0)       # No reverb.
+createlocalvar('default_pan', 64, 0, 0)         # Center of left<->right balance.
+createlocalvar('default_intensity', 100, 0, 0)  # Volume = intensity% * velocity% * vol(ff)%.
+createlocalvar('default_velocity', 120, 0, 0)   # Note attack (when played. (Leave 7) Appears to be volume.
 
 #-----------------------------------------------------------------------------
 from itertools import permutations
@@ -736,13 +838,13 @@ def the_perms(pre, mystr, d):
 #-----------------------------------------------------------------------------
 # For suffix on time -- many variations, but do not duplicate z's with l's.
 #-- NOTDONEYET - add/subtract these easily?
-createlocalvar('w', 1, 0)                      # w = 1 for whole note time
-createlocalvar('h', 2, 0)                      # h = 2 for half note time
-createlocalvar('q', 4, 0)                      # q = 4 for quarter note time
-createlocalvar('e', 8, 0)                      # e = 8 for eighth note time
-createlocalvar('d', 1, 0)                      # d = for dotted note.
-createlocalvar('dd', 1, 0)                     # dd = for double dotted note.
-createlocalvar('th', 1, 0)                     # th = for 4c8th note type notation.
+createnotevar('w', 1, 0, 0)                      # w = 1 for whole note time
+createnotevar('h', 2, 0, 0)                      # h = 2 for half note time
+createnotevar('q', 4, 0, 0)                      # q = 4 for quarter note time
+createnotevar('e', 8, 0, 0)                      # e = 8 for eighth note time
+createnotevar('d', 1, 0, 0)                      # d = for dotted note.
+createnotevar('dd', 1, 0, 0)                     # dd = for double dotted note.
+createnotevar('th', 1, 0, 0)                     # th = for 4c8th note type notation.
 
 # This makes each permuation evaluate to '1.
 d = {}
@@ -753,7 +855,7 @@ d = the_perms('', 'sbtal', d)
 d = the_perms('d', 'sbtal', d)
 d = the_perms('dd', 'sbtal', d)
 for k in d:
-    createlocalvar(k, 1, 0)                     # Create all the local variables.
+    createnotevar(k, 1, 0, 0)                     # Create all the local variables.
 # rof
 # ----------------------------------------------------------------------------
 #++ import inspect
@@ -888,18 +990,18 @@ for i in vlprint:
     v_name_print[ vlprint[ i ] ] = i
 # rof
 
-createvar('vppppp', v_name_print[ 'ppppp' ], 0)
-createvar('vpppp', v_name_print[ 'pppp' ], 0)
-createvar('vppp', v_name_print[ 'ppp' ], 0)
-createvar('vpp', v_name_print[ 'pp' ], 0)
-createvar('vp', v_name_print[ 'p' ], 0)
-createvar('vmp', v_name_print[ 'mp' ], 0)
-createvar('vmf', v_name_print[ 'mf' ], 0)
-createvar('vf', v_name_print[ 'f' ], 0)
-createvar('vff', v_name_print[ 'ff' ], 0)
-createvar('vfff', v_name_print[ 'fff' ], 0)
-createvar('vffff', v_name_print[ 'ffff' ], 0)
-createvar('vfffff', v_name_print[ 'fffff' ], 0)
+createlocalvar('vppppp', v_name_print[ 'ppppp' ], 0, 0)
+createlocalvar('vpppp', v_name_print[ 'pppp' ], 0, 0)
+createlocalvar('vppp', v_name_print[ 'ppp' ], 0, 0)
+createlocalvar('vpp', v_name_print[ 'pp' ], 0, 0)
+createlocalvar('vp', v_name_print[ 'p' ], 0, 0)
+createlocalvar('vmp', v_name_print[ 'mp' ], 0, 0)
+createlocalvar('vmf', v_name_print[ 'mf' ], 0, 0)
+createlocalvar('vf', v_name_print[ 'f' ], 0, 0)
+createlocalvar('vff', v_name_print[ 'ff' ], 0, 0)
+createlocalvar('vfff', v_name_print[ 'fff' ], 0, 0)
+createlocalvar('vffff', v_name_print[ 'ffff' ], 0, 0)
+createlocalvar('vfffff', v_name_print[ 'fffff' ], 0, 0)
 
 global S_vlprint                    # First is this note volume, 2nd is following note volumes.
 S_vlprint = { 'ffffp':[ getvar('vffff'), getvar('vp') ],      # ffff for one note, then p.
@@ -1375,6 +1477,8 @@ drum_sounds = {
 }
 
 # ----------------------------------------------------------------------------
+global last_voice_staff
+last_voice_staff = ''               # For continuation lines.
 global args
 global errors_happened
 errors_happened = 0                 # system exit, 0 = okay, 1 = errors happened
@@ -1383,6 +1487,8 @@ global which_file_in
 which_file_in = 'stdin'
 global linecount
 linecount = 0
+global i_line                       # Array of line as it is changed by macro arguments, putd, char vars, etc.
+i_line = []
 
 global putds                        # "micro" and it's replacement/substitution.
 putds    = { }                      # dictionary of from:to
@@ -1574,15 +1680,21 @@ macro_internal = 0                  # Number for internal macros (note processin
 global macro_defining               # If defining macro.
 macro_defining = None
 global macro_buffer                 # Name of macro, array of lines for macro.
-macro_buffer = { '':''}
+macro_buffer = { }
+global macro_delim                  # Name of macro, array of first delimiter after name.
+macro_delim = { }
 global macro_arguments              # Name of macro, array of arguments for macro.
-macro_arguments = { '':''}
+macro_arguments = { }
+global macro_arg_delim              # Name of macro, array of delimiters between arguments for macro.
+macro_arg_delim = { }
 global macro_executing_depth        # If processing macro ... reading from macro buffer.
 macro_executing_depth = []          # The macro name currently working on is the last name in the array.
 global macro_executing_args         # Depth, array of arguments given to macro.
 macro_executing_args = { 0:[] }
 global macro_line                   # Depth, line in macro array.
 macro_line = { 0:0 }                # Depth, macro name
+global macro_i_line                 # Depth, saved i_line in entered macro.
+macro_i_line = { 0:[] }             # Depth, i_line when entered macro
 
 global header                       # Header to print at top of file.
 
@@ -1617,10 +1729,6 @@ fluidsynth_done = False             # Set True if done with midi1csv printing in
 #-- global first_reset_voice
 #-- first_reset_voice = True            # Only do a reset controller with first voice.
 
-global do_csv_read
-do_csv_read = False                 # Set true if first line says it is a csv file. :)
-
-# ----------------------------------------------------------------------------
 # ----------------------------------------------------------------------------
 # Returns: lengthl - value given, like 4 for quarter note.
 #          lengthf - value in floating, 0.25 for a quarter note.
@@ -3259,33 +3367,33 @@ def process_fs_check(what, lth, min_next, vtlines, tempo_s, tempo_l):
         t = lines[this_time[v]].split(' ', 1) # 2 elements
         time = float(t[0])
         while time <= min_next:
-            str = t[1]
-            if str == 'End_track ':
+            strg = t[1]
+            if strg == 'End_track ':
                 pass
-            elif str[0:lth] == what:
-                really_print_output("{}".format(str))
-            elif str[0:5] == 'echo ':           # echo "measure xxx"
-                if str[0:14] == 'echo "measure ':
-                    if str not in measure_1st_only:
-                        really_print_output("{}".format(str))
-                        measure_1st_only.append(str)
+            elif strg[0:lth] == what:
+                really_print_output("{}".format(strg))
+            elif strg[0:5] == 'echo ':           # echo "measure xxx"
+                if strg[0:14] == 'echo "measure ':
+                    if strg not in measure_1st_only:
+                        really_print_output("{}".format(strg))
+                        measure_1st_only.append(strg)
                     # fi
-                elif str != fs_other_echo:
-                    really_print_output("{}".format(str))
-                    fs_other_echo = str
+                elif strg != fs_other_echo:
+                    really_print_output("{}".format(strg))
+                    fs_other_echo = strg
                 # fi
-            elif str[0:7] == 'select ':
-                really_print_output("{}".format(str))
-            elif str[0:4] == 'set ':
-                really_print_output("{}".format(str))
-            elif str[0:6] == 'reset ':
-                really_print_output("{}".format(str))
-            elif str[0:5] == 'load ':
-                really_print_output("{}".format(str))
-            elif str[0:5] == 'prog ':
-                really_print_output("{}".format(str))
-            elif str[0:6] == 'tempo ':
-                x = str[6:].split()
+            elif strg[0:7] == 'select ':
+                really_print_output("{}".format(strg))
+            elif strg[0:4] == 'set ':
+                really_print_output("{}".format(strg))
+            elif strg[0:6] == 'reset ':
+                really_print_output("{}".format(strg))
+            elif strg[0:5] == 'load ':
+                really_print_output("{}".format(strg))
+            elif strg[0:5] == 'prog ':
+                really_print_output("{}".format(strg))
+            elif strg[0:6] == 'tempo ':
+                x = strg[6:].split()
                 if len(x) < 1 or len(x) > 2:
                     print_error_no_line("Tempo needs a speed - line={}".format(t))
                 elif len(x) == 1:
@@ -3293,14 +3401,14 @@ def process_fs_check(what, lth, min_next, vtlines, tempo_s, tempo_l):
                     tempo_s = int(1/(int(x[0]) / (60.0 * 1000000.0)))
                     tempo_l = 4
                 else:
-                    tempo_s, tempo_l = str[6:].split()
+                    tempo_s, tempo_l = strg[6:].split()
                 # fi
 #--                really_print_output("echo tempo {} {}".format(tempo_s, tempo_l))
-            elif str[0:3] == 'cc ':
+            elif strg[0:3] == 'cc ':
                 break
-            elif str[0:8] == 'noteoff ':
+            elif strg[0:8] == 'noteoff ':
                 break
-            elif str[0:7] == 'noteon ':
+            elif strg[0:7] == 'noteon ':
                 break
             else:
                 print_error_no_line("Unrecognized - line={}".format(t))
@@ -3427,7 +3535,6 @@ def print_out_fluidsynth():
             # fi
             t = lines[this_time[v]].split(' ', 1) # 2 elements
             time = float(t[0])
-            str = t[1]
             if min_next > time:
                 min_next = time
             # fi
@@ -3865,10 +3972,8 @@ def do_pass2():
     if args.vertical or args.horizontal:
         print_out_v_or_h()
     elif args.midi1csv or args.fluidsynth:
-        if not do_csv_read:
-            print_out_midi1csv_notes()
-            check_voices_without_notes()
-        # fi
+        print_out_midi1csv_notes()
+        check_voices_without_notes()
     else:       # ABC
         print_out_abc()
         print_output("")
@@ -3889,7 +3994,8 @@ def do_pass2():
 
 # ----------------------------------------------------------------------------
 # Get a line. Put it in "line" and return it.
-def get_line():
+def read_next_line():
+    global i_line
     global linecount
     global args
     global file_name
@@ -3899,7 +4005,6 @@ def get_line():
     global macro_buffer                 # Name of macro, array of lines for macro.
     global macro_arguments              # Name of macro, array of arguments for macro.
     global errors_happened
-    global next_time_line
 
     if macro_executing_depth != []:
         l = len(macro_executing_depth)
@@ -3908,23 +4013,65 @@ def get_line():
         linenumber = macro_line[macrodepth]
         lines = macro_buffer[the_macro]
         if linenumber >= len(lines):
-            p = macro_executing_depth.pop()
+            # del is zero starting index - Use it to delete macro created variables.
+            c = []
+            for w in range(0, len(calculate.arrays)):
+                if calculate.arrays[w][numarry_maclevel] == l:
+                    c.append(w)
+                # fi
+            # rof
+            if c != []:
+                c.reverse()
+                for w in c:
+                    del calculate.arrays[w]
+                # rof
+            # fi
+            c = []
+            for w in range(0, len(calculate.local_arrays)):
+                if calculate.local_arrays[w][numarry_maclevel] == l:
+                    c.append(w)
+                # fi
+            # rof
+            if c != []:
+                c.reverse()
+                for w in c:
+                    del calculate.local_arrays[w]
+                # rof
+            # fi
+            c = []
+            for w in range(0, len(calculate.note_arrays)):
+                if calculate.note_arrays[w][numarry_maclevel] == l:
+                    c.append(w)
+                # fi
+            # rof
+            if c != []:
+                c.reverse()
+                for w in c:
+                    del calculate.note_arrays[w]
+                # rof
+            # fi
+            macro_executing_depth.pop()
             del macro_line[l]
             del macro_executing_args[l]
             return '', ''
         # fi
         line = macro_buffer[the_macro][linenumber]
+        i_line = [ 'macro: ' + line ]                           # Line as given from macro text buffer
         def_args = macro_arguments[the_macro]
         rep_args = macro_executing_args[l]
         for j in range(0, len(def_args)):
             line = line.replace(def_args[j], rep_args[j])
         # rof
+        i_line.append('margs: ' + line)                         # Line after argument processing done
         macro_line[macrodepth] = linenumber + 1
-        line = line.replace("\t", ' ')              # tabs to spaces
+#--        # Example in IMS documentation with "HZ".
+#--        line = line.replace("\t", ' ')                          # tabs to spaces
+#--        line = line.strip()                                     # Macro line does not have leading spaces.
         return line, ''
     # fi
 
     full_line = ''
+    i_line = []
     while True:
         try:
             if args.rest and len(args.rest) >= 1:
@@ -3945,11 +4092,12 @@ def get_line():
                 sys.exit(errors_happened)
             # fi
             linecount = linecount + 1
+            i_line.append('input: ' + line)         # Line as given from input file.
             if line:
-                line = line.rstrip()                                    # trailing spaces gone.
-                if line and line[-1] == '\\':                           # if continued on next line
+                line = line.rstrip()                # trailing spaces gone.
+                if line and line[-1] == '\\':       # if continued on next line
                     line = line[:-1]
-                    line = line.rstrip()                                # trailing spaces gone.
+                    line = line.rstrip()            # trailing spaces gone.
                     full_line += line
                     continue
                 # fi
@@ -3961,20 +4109,21 @@ def get_line():
                     commentdollardollar = commentdollardollar.rstrip()  # trailing spaces gone
                     full_line = re.sub(r'[$][$].*$', '', full_line)
                 # fi
-                # Convert tabs to spaces.
-                full_line = full_line.replace("\t", ' ')
-                full_line = full_line.rstrip()                                    # trailing spaces gone.
-                # NOTDONEYET, the input from Plato Printouts where character ' is a shift.
-                # Convert ' followed by something as a "shift".  '; = :   'a = A
+#-- need to know continued line ... 8 spaces or start with a tab.
+#--                # Convert tabs to spaces.
+#--                full_line = full_line.replace("\t", ' ')
+                i_line.append('input: ' + full_line)            # Line as fixed.
                 return full_line, commentdollardollar
             # fi
         except EOFError:
             if full_line != '':
+                i_line.append('input: ' + full_line)            # Line as fixed or whatever.
                 return full_line, commentdollardollar
             # fi
             pass            # print("Read gave EOF", file=sys.stderr, flush=True)
         except SystemExit:
             if full_line != '':
+                i_line.append('input: ' + full_line)            # Line as fixed or whatever.
                 return full_line, commentdollardollar
             # fi
             pass            # print("Read gave system exit", file=sys.stderr, flush=True)
@@ -3982,6 +4131,7 @@ def get_line():
             print_error_no_line("Read got keyboard interrupt")
         except:
             if full_line != '':
+                i_line.append('input: ' + full_line)            # Line as fixed or whatever.
                 return full_line, commentdollardollar
             # fi
             print_error_no_line("Read got a processing error")
@@ -3991,7 +4141,7 @@ def get_line():
     # elihw
     do_pass2()
     sys.exit(errors_happened)
-# End of get_line
+# End of read_next_line
 
 # ----------------------------------------------------------------------------
 def split_line(line):
@@ -3999,7 +4149,8 @@ def split_line(line):
     if line:
         # Split line on spaces, then process line.
         while True:
-            t = line.split(' ', 1)
+#--            t = line.split(' ', 1)
+            t = re.split(r'[ \t]', line, 1)
             if t and t[0] and len(t) == 2 and t[1]:
                 t[1] = t[1].strip()
             # fi
@@ -4061,24 +4212,29 @@ def get_list_sep_rem(string):
 #   value   -- So far computed value
 #   type_error -- type of error
 
-def is_float(strg):
+def is_float(strg, type_float):
     tree = calculate.parse(strg)            # parse the string
-
-    if tree is not None and len(tree) == 2:
-        if tree[0] is not None and tree[0].startswith('ERROR'):
-            sexpr = tree[0]
-            return strg, sexpr
-        # fi
-        if tree[1] == '.':
-            return strg, "bad input to calculator"
-        # fi
+    if tree is None or len(tree) != 2:
+        return None, None
+    elif tree[0] is not None and tree[0].startswith('ERROR'):
+        sexpr = tree[0]
+        return strg, sexpr
+    elif tree[1] is None:
+        return strg, "variable '{}' is not set".format(strg)
+    # fi
+    elif tree[1] == '.':
+        return strg, "bad input to calculator#2"
+    # fi
+    if type_float:
         try:
             sexpr = float(tree[1])
             return sexpr, None
         except:
-            return strg, "bad input to calculator"
+            return strg, "bad input to calculator#3"
+        # yrt
     # fi
-    return None, None
+    recompute_whichlocalchars()
+    return tree[1], None
 # End of is_float
 
 # ----------------------------------------------------------------------------
@@ -4371,17 +4527,18 @@ def arglist(wline, line, integers):
         c = wline[l]
         if c == ':' and firstcolon == 0:
             firstcolon = 1
-        elif firstcolon == 1 and 'c' != ' ':
+        elif firstcolon == 1 and (c != ' ' and c != "\t"):
             firstcolon = 2
         elif firstcolon == 2:
             if args.spaces:
                 splitter.append(' ')
+                splitter.append("\t")
             # fi
             firstcolon = 3
         # fi
         if c in splitter and np == 0 and nb == 0 and nc == 0:    # we want to split on commas
             if integers:
-                n, msg = is_float(newstr)
+                n, msg = is_float(newstr, True)
                 if msg is not None or n is None:
                     print_error("Range first number bad. {}".format(msg), line)
                     return ''
@@ -4406,7 +4563,7 @@ def arglist(wline, line, integers):
                     print_error("Range needs number before 'STARTING..ENDING'", line)
                     return ''
                 # fi
-                first, msg = is_float(newstr)
+                first, msg = is_float(newstr, True)
                 if msg is not None or first is None:
                     print_error("Range first number bad. {}".format(msg), line)
                     return ''
@@ -4425,7 +4582,7 @@ def arglist(wline, line, integers):
                     last = wline[l+2:]
                     l = lth + 1
                 # yrt
-                last, msg = is_float(last)
+                last, msg = is_float(last, True)
                 if last is None or last == '' or msg is not None:
                     print_error("Range last number bad. {}".format(msg), line)
                     return ''
@@ -4498,7 +4655,7 @@ def arglist(wline, line, integers):
         newline.append('')
     elif newstr != '':
         if integers:
-            n, msg = is_float(newstr)
+            n, msg = is_float(newstr, True)
             if msg is not None or n is None:
                 print_error("Range first number bad. {}".format(msg), line)
                 return ''
@@ -4524,29 +4681,29 @@ def do_change(t_args, line):
     global macro_buffer
     global commands
 
-    if t_args is None or len(t_args) == 0:
+    if t_args is None or t_args == '':
         print_error("change does not have three or four arguments.", line)
         return
     # fi
-    t_args = t_args[0].split(' ')
-    if t_args is None or len(t_args) < 3 or len(t_args) > 4:
+    wargs = re.split(r'[ \t]', t_args)
+    if wargs is None or len(wargs) < 3 or len(wargs) > 4:
         print_error("change -- there is not three or four arguments.", line)
         return
     # fi
-    if len(t_args) == 4:
-        if t_args[0] != 'command' or t_args[2] != 'to':
+    if len(wargs) == 4:
+        if wargs[0] != 'command' or wargs[2] != 'to':
             print_error("change -- command is not first argument of four and to is not third.", line)
             return
         # fi
-        t_args = t_args[1:]
-    elif len(t_args) == 3:
-        if t_args[1] != 'to':
+        wargs = wargs[1:]
+    elif len(wargs) == 3:
+        if wargs[1] != 'to':
             print_error("change -- to is not second argument.", line)
             return
         # fi
     # fi
-    old = t_args[0]
-    new = t_args[2]
+    old = wargs[0]
+    new = wargs[2]
     # make sure new name does not exist already. -- error
     if new in commands:
         if commands[new] == commands[old]:
@@ -4585,6 +4742,7 @@ def do_comment(t_args, line):
 
 def do_spaces(t_args, line):
     global args
+
     args.spaces = True
     return
 # End of do_spaces
@@ -4598,29 +4756,29 @@ def do_copy(t_args, line):
     global macro_buffer
     global commands
 
-    if t_args is None or len(t_args) == 0:
+    if t_args is None or t_args == '':
         print_error("copy does not have three or four arguments.", line)
         return
     # fi
-    t_args = t_args[0].split(' ')
-    if t_args is None or len(t_args) < 3 or len(t_args) > 4:
+    wargs = re.split(r'[ \t]', t_args)
+    if wargs is None or len(wargs) < 3 or len(wargs) > 4:
         print_error("copy - there is not three or four arguments.", line)
         return
     # fi
-    if len(t_args) == 4:
-        if t_args[0] != 'command' or t_args[2] != 'to':
+    if len(wargs) == 4:
+        if wargs[0] != 'command' or wargs[2] != 'to':
             print_error("copy - command is not first argument of four and to is not third.", line)
             return
         # fi
-        t_args = t_args[1:]
-    elif len(t_args) == 3:
-        if t_args[1] != 'to':
+        wargs = wargs[1:]
+    elif len(wargs) == 3:
+        if wargs[1] != 'to':
             print_error("copy - to is not second argument.", line)
             return
         # fi
     # fi
-    old = t_args[0]
-    new = t_args[2]
+    old = wargs[0]
+    new = wargs[2]
     # make sure new name does not exist already. -- error
     if new in commands and old in commands:
         if commands[new] == commands[old]:
@@ -4651,7 +4809,7 @@ def do_title(t_args, line):
     global header
     global args
 
-    if t_args is None or len(t_args) == 0:
+    if t_args is None or t_args == '':
         #-- print_warning("Title does not have any text.", line)
         if args.vertical or args.horizontal:
             header = header + "title   \n"
@@ -4663,16 +4821,13 @@ def do_title(t_args, line):
         return
     # fi
     # T: Title of tune        (can have multiple)
-    t = line.split(' ', 1)
-    if not t or len(t) < 2:
-        t = [ ' ', ' ' ]
-    # fi
+#--     t = line.split(' ', 1)
     if args.vertical or args.horizontal:
-        header = header + "title   {}\n".format(t[1])
+        header = header + "title   {}\n".format(t_args)
     elif args.midi1csv or args.fluidsynth:
-        header.append(t[1])
+        header.append(t_args)
     else:           # ABC
-        header = header + "T:{}\n".format(t[1])
+        header = header + "T:{}\n".format(t_args)
     # fi
     return
 # End of do_title
@@ -4733,12 +4888,12 @@ def do_tempo(t_args, line):
     global mlth
     global vl
 
-    if t_args is None or len(t_args) == 0:
+    if t_args is None or t_args == '':
         print_error("tempo does not have one or two arguments.", line)
         return
     # fi
-    t_args = t_args[0].split(',')
-    if t_args is None or len(t_args) == 0 or len(t_args) > 2:
+    wargs = t_args.split(',')
+    if wargs is None or len(wargs) == 0 or len(wargs) > 2:
         print_error("tempo - there is not one or two arguments.", line)
         return
     # fi
@@ -4754,7 +4909,7 @@ def do_tempo(t_args, line):
 
     #   f1 is value   -- So far computed value
     #   type_error -- type of error
-    f1, type_error = is_float(t_args[0])
+    f1, type_error = is_float(wargs[0], True)
     if type_error is not None:
         print_error("tempo does not have first argument as a floating number. {}".format(type_error), line)
         return
@@ -4763,7 +4918,7 @@ def do_tempo(t_args, line):
         print_error("tempo does not have first argument as a floating number.", line)
         return
     # fi
-    if len(t_args) == 1:
+    if len(wargs) == 1:
         x = f1 / 60.0
         if measure_on == '':
             tempo_speed_default = x
@@ -4773,9 +4928,9 @@ def do_tempo(t_args, line):
         tempo_now_note_length[measure_on] = 1.0
         return
     # fi
-    xxx = t_args[1].replace('d', '*1.5')
-    # f2, type_error = is_float(t_args[1])
-    f2, type_error = is_float(xxx)
+    xxx = wargs[1].replace('d', '*1.5')
+    # f2, type_error = is_float(wargs[1], True)
+    f2, type_error = is_float(xxx, True)
     if type_error is not None:
         print_error("Tempo error - {}".format(type_error), line)
         return
@@ -4848,70 +5003,203 @@ def do_endm(t_args, line):
 # End of do_endm
 
 # ----------------------------------------------------------------------------
+# strng         is string where token name is.
+# delim         is the delimiter character looking for.
+# original_line for error printing..
+#
+# Returns where in strng delimiter is. -1 if not found. 0=first character.
+
+def find_del_macro_arg(strng, delim, original_line):
+    global measure_on
+
+    w = 0
+    while w < len(strng):
+        c = strng[w]
+        if c == delim:
+            return w                        # Delimiter immediately - blank argument.,
+        # fi
+        e = []
+        c = strng[w]
+        if c == '(':
+            enddelim = ')'
+        elif c == '[':
+            enddelim = ']'
+        else:
+            enddelim = None
+        # fi
+        e.append(enddelim)
+        w = w + 1
+        if w > len(strng):
+            print_error("macro argument terminator '{}' not found.".format(delim), original_line)
+            return -1
+        # fi
+        while enddelim is not None:
+            while w < len(strng):
+                c = strng[w]
+                w = w + 1
+                if c == enddelim:
+                    break
+                # fi
+                if w >= len(strng):
+                    print_error("macro argument nested parenthesis, did not find closing {}.".format(enddelim), original_line)
+                    return -1
+                elif c == '(':
+                    enddelim = ')'
+                    e.append(enddelim)
+                elif c == '[':
+                    enddelim = ']'
+                    e.append(enddelim)
+                elif c == '{':
+                    enddelim = '}'
+                    e.append(enddelim)
+                # fi
+            # elihw
+            enddelim = e.pop()
+            if e == []:
+                break
+            # fi
+        # elihw
+    # elihw
+    return -1
+# End of find_del_macro_arg
+
+# ----------------------------------------------------------------------------
 def replace_macro(command, t_args, line):
     global macro_arguments              # Name of macro, array of arguments for macro.
     global macro_executing_depth        # If processing macro ... reading from macro buffer.
     global macro_executing_args         # Depth, array of arguments given to macro.
     global macro_line                   # Depth, line in macro array.
+    global i_line
+    global macro_i_line
+    global macro_delim
+    global macro_arg_delim
 
-    if t_args is None or len(t_args) == 0:
+    name = command
+    if t_args is None or t_args == '':
         if macro_arguments[command] != []:
             print_error("macro command does not have any arguments, but needs {}.".format(macro_arguments[command]), line)
             return
         # fi
         wargs = None
     else:
-        wargs = arglist(t_args[0], line, False)
-        if len(wargs) != len(macro_arguments[command]):
-            print_error("macro command has {} arguments, but needs {}.".format(wargs, macro_arguments[command]), line)
-            return
+        # Get rid of multiple spaces/tabs.
+        t_args = re.sub(r'\s+', r' ', t_args)
+        # Get rid of spaces before/after commas/semicolons.
+        t_args = re.sub(r'\s*([,;])\s*', r'\1', t_args)
+        if t_args[0] != macro_delim[name]:
+            if macro_delim[name] == ',' and t_args[0] in [' ', "\t"]:
+                pass
+            else:
+                print_error("macro '{}' does not have right delimiter after name argument, but needs '{}'.".format(name,macro_delim[name]), line)
+                return
+            # fi
         # fi
+        t_args = t_args[1:]
+        wargs = []
+        n = 0
+        for a in macro_arguments[name]:
+            c = macro_arg_delim[name][n]
+            # End of line delimiter (it is known to be the last argument).
+            if c is None and (n == len(macro_arg_delim[name]) - 1) and (t_args or t_args == ''):
+                delim_at = len(t_args)          # CANNOT CHECK, might want those delimiters!
+            elif c is None and wargs and wargs != '':
+                print_error("macro {} does not have right delimiter after argument#{}, needs end-of-line".format(name,n+1), line)
+                return
+            else:
+                # Get to delimiter here.        NOTDONEYET - the following needs to tokenize and find delimiter.
+                delim_at = find_del_macro_arg(t_args, c, line)
+                if delim_at < 0:
+                    print_error("macro {} does not have right delimiter after argument#{}, needs '{}'.".format(name,n+1,c), line)
+                    return
+                # fi
+            # fi
+            wargs.append(t_args[0:delim_at])
+            t_args = t_args[delim_at + 1:]
+            n = n + 1
+        # rof
+    # fi
+    if macro_arguments[name] is None:
+        l = 0
+    else:
+        l = len(macro_arguments[name])
+    # fi
+    if wargs is None:
+        w = 0
+    else:
+        w = len(wargs)
+    # fi
+    if w != l:
+        print_error("macro {} does not have right number of arguments ({}), needs {}.".format(name,len(wargs),len(macro_arguments[name])), line)
     # fi
     macro_executing_depth.append(command)
     macrodepth = len(macro_executing_depth)
     macro_executing_args[macrodepth] = wargs
-    macro_line[macrodepth] = 0             # First line in buffer.
+    macro_line[macrodepth] = 0              # First line in buffer.
+
+    t_line = i_line
+    for i in range(0,len(t_line)):          # Save current depth of line.
+       t_line[i] = 'rmacr: ' + t_line[i][7:]
+    # rof
+    macro_i_line[macrodepth] = t_line       # Save current depth of line.
 # End of replace_macro
 
 # ----------------------------------------------------------------------------
-#   macro name,arg1,arg2,...,argn
-#     body of macro
-#   endm
-#         Changes arg1 to passed in usage.
-#   name  first,second arg,something    # example 3 arguments - spaces allowed.
-# See "endm" above for trivial example.
-#
-# Macros must not be existing commands -- replace existing macro with warning.
+# Note: if terminating delimiter is end of line -- stay? I think it can be
+# done with last_voice_staff variable.
 
 def do_macro(t_args, line):
-    global commands
-    global macro_defining               # If defining macro.
-    global macro_buffer                 # Name of macro, array of lines for macro.
-    global macro_arguments              # Name of macro, array of arguments for macro.
+    global macro_buffer
+    global macro_delim
+    global macro_arguments
+    global macro_arg_delim
+    global macro_defining
 
-    if t_args is None or len(t_args) == 0:
+    if t_args is None or t_args == '':
         print_error("macro command does not have any arguments.", line)
-        return
+        return ''
     # fi
-
-    wargs = arglist(t_args[0], line, False)
+    # Get rid of multiple spaces/tabs.
+    t_args = re.sub(r'\s+', r' ', t_args)
+    # Get rid of spaces before/after commas/semicolons.
+    t_args = re.sub(r'\s*([,;])\s*', r'\1', t_args)
+    wargs = [i for i in re.split(r'(\w+|\W+)', t_args) if i]
     if not wargs or len(wargs) < 1:
         print_error("no macro name.", line)
         return
     # fi
-
     name = wargs[0]
-    args = wargs[1:]
     if name in commands:
         print_error("macro ({}) would replace existing command".format(name), line)
         return
     # fi
+    wargs = wargs[1:]
     if name in macro_buffer:
         print_warning("macro ({}) will replace existing macro".format(name), line)
     # fi
+    if len(wargs) == 0:
+        delim = None
+    else:
+        delim = wargs[0]
+        wargs = wargs[1:]
+    # fi
 
     macro_buffer[name] = []             # No lines in buffer.
-    macro_arguments[name] = args
+    macro_delim[name] = delim           # Delimiter after macro.
+    macro_arguments[name] = []          # Arguments
+    macro_arg_delim[name] = []          # Delimiters after arguments.
+    n = 0
+    while n < len(wargs):
+        arg = wargs[n]
+        n = n + 1
+        if n < len(wargs):
+            delim = wargs[n]
+            n = n + 1
+        else:
+            delim = None
+        # fi
+        macro_arguments[name].append(arg)
+        macro_arg_delim[name].append(delim)
+    # elihw
     macro_defining = name
     return
 # End of do_macro
@@ -4921,8 +5209,8 @@ def macro_define(command, t_args, line):
     global macro_defining               # If defining macro.
     global macro_buffer                 # Name of macro, array of lines for macro.
 
-    if t_args and len(t_args) > 0:
-        macro_buffer[macro_defining].append(command + ' ' + ' '.join(t_args))
+    if t_args and t_args != '':
+        macro_buffer[macro_defining].append(command + ' ' + t_args)
     else:
         macro_buffer[macro_defining].append(command)
     # fi
@@ -4936,12 +5224,12 @@ def macro_define(command, t_args, line):
 # Stop when no change occurs, or 100 tries. (Catches A -> B -> A loops.)
 
 def do_putd(t_args, line):
-    if t_args is None or len(t_args) == 0:
+    if t_args is None or t_args == '':
         print_error("putd does not have an argument.", line)
         return
     # fi
-    c = t_args[0][0]                    # The separation character.
-    two = t_args[0].split(c)
+    c = t_args[0]                    # The separation character.
+    two = t_args.split(c)
     if len(two) != 4 or two[0] != '' or two[3] != '':
         print_error("putd should look like '/zzz/a,b,c/' - not right number of separators ({}).".format(c), line)
         return
@@ -4981,6 +5269,46 @@ def do_endif(t_args, line):
 # End of do_endif
 
 # ----------------------------------------------------------------------------
+#       elseif          $$ elseif clause of an "if elseif else endif" sequence.
+
+def do_else_if(t_args, line):
+    global ifdepth
+    global iftest
+
+    if t_args is None or t_args == '':
+        print_error("elseif command does not have exactly one argument.", line)
+        return
+    # fi
+    if ifdepth == 0 or iftest[ifdepth] == 1 or iftest[ifdepth] == 2:
+        print_error("elseif command while not in an if command", line)
+        return
+    # fi
+    if iftest[ifdepth] == -1:           # already processing, handle as normal if.
+        iftest[ifdepth] = 3             # Switch to skipping elseif and else.
+        return
+    # fi
+    if iftest[ifdepth] != 0:            # skipping if, want to do else or elseif.
+        # if iftest[ifdepth] == 3:            # skip both if and else, want endif
+        # NOTE: do not test for if/else/endif ... second else.
+        return;
+    # fi
+    wargs = arglist(t_args, line, False)
+    if not wargs or len(wargs) < 1:
+        print_error("no elseif argument.", line)
+        return
+    # fi
+    value, type_error = is_float(wargs[0], True)
+    if type_error is not None or value is None:
+        print_error("elseif unable to determine value ({}).".format(wargs[0]), line)
+        return
+    # fi
+    value =  -1 if value < 0 or value > 0 else 0   # 0 is false, otherwise everything is true.
+    if value < 0:
+        iftest[ifdepth] = -1            # Switch to as if processing.
+    # fi
+# End of do_else
+
+# ----------------------------------------------------------------------------
 #       else            $$ else clause of an "if else endif" sequence.
 
 def do_else(t_args, line):
@@ -4993,10 +5321,10 @@ def do_else(t_args, line):
     # fi
 
     if iftest[ifdepth] == -1:           # already processing, handle as normal if.
-        iftest[ifdepth] = 2             # Switch to skipping else.
+        iftest[ifdepth] = 2             # Switch to skipping elseif and else.
         return
     # fi
-    if iftest[ifdepth] == 0:            # skipping if, want to do else.
+    if iftest[ifdepth] == 0:            # skipping if, want to do else or elseif.
         iftest[ifdepth] = 1             # Switch to processing else.
         return
     # fi
@@ -5009,6 +5337,7 @@ def do_else(t_args, line):
 #       if      -1      $$ Start of an "if else endif" sequence.
 #       if      0       $$ False
 #       if      1       $$ Non-zero is true.
+#       elseif          $$ if if was false, is this true? Else do the else clause. (optional)
 #       else            $$ if if was false, do the else clause. (optional)
 #       endif           $$ end of the if else.
 
@@ -5016,7 +5345,7 @@ def do_if(t_args, line):
     global iftest                       # check if after if or else.
     global ifdepth                      # level of if/else/endif
 
-    if t_args is None or len(t_args) == 0:
+    if t_args is None or t_args == '':
         print_error("if command does not have exactly one argument.", line)
         return
     # fi
@@ -5026,12 +5355,12 @@ def do_if(t_args, line):
     # if iftest[ifdepth] == 2:            # skipping in else, ignore if and else processing, want endif.
     # if iftest[ifdepth] == 3:            # skip both if and else, want endif
     if iftest[ifdepth] == -1 or iftest[ifdepth] == 1:   # process this if normally.
-        wargs = arglist(t_args[0], line, False)
+        wargs = arglist(t_args, line, False)
         if not wargs or len(wargs) < 1:
             print_error("no if argument.", line)
             return
         # fi
-        value, type_error = is_float(wargs[0])
+        value, type_error = is_float(wargs[0], True)
         if type_error is not None or value is None:
             print_error("if unable to determine if value ({}).".format(wargs[0]), line)
             return
@@ -5056,13 +5385,13 @@ def do_marker(t_args, line):
 
     fill_voice_mlth(False, line)                   # Need to make measure for other voices up to here "mlth".
 
-    if t_args is None or len(t_args) == 0:
+    if t_args is None or t_args == '':
         value = '0'
     else:
-        value, type_error = is_float(t_args[0])
+        value, type_error = is_float(t_args, False)
         if type_error is not None or value is None:
-            print_warning("marker unable to compute value({}) - using text string.".format(t_args[0]), line)
-            value = str(t_args[0])
+            print_warning("marker unable to compute value({}) - using text string.".format(t_args), line)
+            value = str(t_args)
         else:
             value = str(int(round(value)))      # Stupid python language upgrade incompatibility.
         # fi
@@ -5107,18 +5436,26 @@ def do_debug(t_args, line):
 
     debug_count = debug_count + 1
 
-    if t_args is None or len(t_args) == 0:
+    if t_args is None or t_args == '':
         value = 'count: ' + str(debug_count)
     else:
-        wargs = arglist(t_args[0], line, False)
+        wargs = arglist(t_args, line, False)
         if not wargs or len(wargs) < 1:
             value = 'count: ' + str(debug_count)
         else:
-            value, type_error = is_float(wargs[0])
-            if type_error is not None or value is None:
-                value = 'message: ' + t_args[0]
+            value, type_error = is_float(wargs[0], False)
+            if type_error is not None or value == 'error parsing':
+                if re.match(r'variable .* is not set', type_error):
+                    print_warning("wargs[0]={} has type_error={}".format(wargs[0],type_error), line)
+                # fi
+                value = 'message: ' + ' '.join(wargs) + ' -- ' + t_args
+            elif value is None:
+                print_warning("wargs[0]={} is not set".format(wargs[0]), line)
+                value = 'message: ' + ' '.join(wargs) + ' -- ' + t_args
+            if type_error is not None or value is None or value == 'error parsing':
+                value = 'message: ' + ' '.join(wargs) + ' -- ' + t_args
             else:
-                value = 'value: ' + str(value) + ' -- ' + t_args[0]
+                value = 'value: ' + str(value) + ' -- ' + t_args
             # fi
         # fi
     # fi
@@ -5132,11 +5469,11 @@ def do_debug(t_args, line):
 def do_randp(t_args, line):
     global array_of_random_numbers
 
-    if t_args is None or len(t_args) == 0:
+    if t_args is None or t_args == '':
         print_error("randp command does not have exactly one argument.", line)
         return
     # fi
-    wargs = arglist(t_args[0], line, False)
+    wargs = arglist(t_args, line, False)
     if not wargs or len(wargs) < 1:
         print_error("no randp argument.", line)
         return
@@ -5148,7 +5485,7 @@ def do_randp(t_args, line):
         ran = array_of_random_numbers.pop()
     # fi
     computeit = wargs[0] + '=' + str(ran)       # Do the assignment.
-    value, type_error = is_float(computeit)
+    value, type_error = is_float(computeit, True)
     if type_error is not None or value is None:
         print_error("randp unable to assign value({}) to first argument({}).".format(wargs[0], value), line)
         return
@@ -5162,17 +5499,17 @@ def do_randp(t_args, line):
 def do_setperm(t_args, line):
     global array_of_random_numbers
 
-    if t_args is None or len(t_args) != 1 or t_args[0] == '':
+    if t_args is None or t_args == '':
         print_error("setperm command does not have any arguments.", line)
         return
     # fi
-    wargs = arglist(t_args[0], line, False)
+    wargs = arglist(t_args, line, False)
     if not wargs or len(wargs) != 1:
         print_error("Need exactly one setperm argument", line)
         return
     # fi
 
-    value, type_error = is_float(wargs[0])     # From 1 to value.
+    value, type_error = is_float(wargs[0], True)     # From 1 to value.
     if type_error is not None or value is None or value < 1:
         print_error("setperm unable to compute reasonable value({}) for number of unique random numbers.".format(wargs[0]), line)
         return
@@ -5186,24 +5523,24 @@ def do_setperm(t_args, line):
 #   randu   m1,10       $$ random number between 1 and 10 put into variable m1.
 
 def do_randu(t_args, line):
-    if t_args is None or len(t_args) <= 0 or t_args[0] == '':
+    if t_args is None or t_args == '':
         print_error("randu command does not have any arguments.", line)
         return
     # fi
-    wargs = arglist(t_args[0], line, False)
+    wargs = arglist(t_args, line, False)
     if not wargs or len(wargs) < 1:
         print_error("no randu arguments", line)
         return
     # fi
 
-    value, type_error = is_float(wargs[1])     # From 1 to value.
+    value, type_error = is_float(wargs[1], True)     # From 1 to value.
     if type_error is not None or value is None or value < 1:
         print_error("randu unable to compute reasonable value({}) to store in ({}).".format(wargs[1], wargs[0]), line)
         return
     # fi
     ran = random.randint(1, int(round(value)))  # Random value.
     computeit = wargs[0] + '=' + str(ran)       # Do the assignment.
-    value, type_error = is_float(computeit)
+    value, type_error = is_float(computeit, True)
     if type_error is not None or value is None:
         print_error("randu unable to assign value({}) to first argument({}).".format(wargs[0], value), line)
         return
@@ -5235,16 +5572,16 @@ def do_delay(t_args, line):
 
     fill_voice_mlth(False, line)               # Need to make measure for other voices up to here "mlth".
 
-    if t_args is None or len(t_args) <= 0 or t_args[0] == '':
+    if t_args is None or t_args == '':
         print_error("delay command does not have any arguments.", line)
         return
     # fi
-    wargs = arglist(t_args[0], line, False)
+    wargs = arglist(t_args, line, False)
     if not wargs or len(wargs) < 1:
         print_error("no delay arguments", line)
         return
     # fi
-    value, type_error = is_float(wargs[0])
+    value, type_error = is_float(wargs[0], True)
     if type_error is not None or value is None:
         print_error("delay unable to compute value({}).".format(wargs[0]), line)
         return
@@ -5291,7 +5628,7 @@ def do_pitch(t_args, line):
     global measure_on
     global mlth
 
-    if t_args is None or len(t_args) <= 0 or t_args[0] == '':
+    if t_args is None or t_args == '':
         print_error("pitch does not have an expression to process", line)
         return
     # fi
@@ -5303,9 +5640,9 @@ def do_pitch(t_args, line):
         # fi
     # rof
 
-    m = t_args[0]
+    m = t_args
 
-    f, type_error = is_float(m)
+    f, type_error = is_float(m, True)
     if type_error is not None:
         print_error("Tempo error - {}".format(type_error), line)
         return
@@ -5329,7 +5666,7 @@ def do_temper(t_args, line):
 
 # ----------------------------------------------------------------------------
 # Not likely to do.
-#   tuning ??            $$ 
+#   tuning ??            $$
 
 def do_tuning(t_args, line):
     print_error("NOTDONEYET - do_tuning", line)
@@ -5338,7 +5675,7 @@ def do_tuning(t_args, line):
 
 # ----------------------------------------------------------------------------
 # Not likely to do. No nameset processing ... use "instrument" instead.
-#   instr ??            $$ 
+#   instr ??            $$
 
 def do_instr(t_args, line):
     print_error("NOTDONEYET - do_instr", line)
@@ -5347,7 +5684,7 @@ def do_instr(t_args, line):
 
 # ----------------------------------------------------------------------------
 # Not likely to do. Use "cpp" or similar preprocessors instead.
-#   include ??            $$ 
+#   include ??            $$
 
 def do_include(t_args, line):
     print_error("NOTDONEYET - do_include", line)
@@ -5356,7 +5693,7 @@ def do_include(t_args, line):
 
 # ----------------------------------------------------------------------------
 # Not likely to do. Doesn't make sense until other IMS processing is done.
-#   format ??            $$ 
+#   format ??            $$
 
 def do_format(t_args, line):
     print_error("NOTDONEYET - do_format", line)
@@ -5365,7 +5702,7 @@ def do_format(t_args, line):
 
 # ----------------------------------------------------------------------------
 # Not likely to do. Doesn't make sense until other IMS processing is done.
-#   print ??            $$ 
+#   print ??            $$
 
 def do_print(t_args, line):
     print_error("NOTDONEYET - do_print", line)
@@ -5400,6 +5737,15 @@ def do_natural(t_args, line):
 # End of do_natural
 
 # ----------------------------------------------------------------------------
+# Not likely to ever do.
+#   midi(o300 + MIDCHN - 1, PATNUM)
+
+def do_midi(t_args, line):
+    print_error("NOTDONEYET - do_midi", line)
+    return
+# End of do_midi
+
+# ----------------------------------------------------------------------------
 #   goto    6.5,x,8,2,... $$ repeat and/or skip.  "x" = continue, forwards, backwards. No Max arguments?
 #                       counter is number of times reached.
 #   measure 78
@@ -5427,11 +5773,11 @@ def do_goto(t_args, line):
         return
     # fi
 
-    if t_args is None or len(t_args) == 0:
+    if t_args is None or t_args == '':
         print_error("goto needs at least one argument", line)
         return
     # fi
-    wline = t_args[0]
+    wline = t_args
     # Get rid of all white spoce.
     wline = ''.join(wline.split())
     wargs = arglist(wline, line, False)
@@ -5458,7 +5804,7 @@ def do_goto(t_args, line):
             # fi
         # rof
         if f1 is None:
-            f1, type_error = is_float(v)
+            f1, type_error = is_float(v, True)
             if type_error is not None or f1 is None:
                 # Error, use it as string instead.
                 f1 = str(v)
@@ -5525,11 +5871,11 @@ def do_decode(t_args, line):
     global key_sig
     global key_voice
 
-    if t_args is None or len(t_args) <= 0 or t_args[0] == '':
+    if t_args is None or t_args == '':
         print_error("decode command does not have any arguments.", line)
         return
     # fi
-    wargs = arglist(t_args[0], line, False)
+    wargs = arglist(t_args, line, False)
 
     if not wargs or len(wargs) < 1:
         print_error("no decode arguments", line)
@@ -5602,7 +5948,7 @@ def do_decode(t_args, line):
     else:
         computeit = wargs[0] + '=' + str(thenote) + '+3-12-12'  # Convert from midi note to musicomp value.
     # fi
-    value, type_error = is_float(computeit)
+    value, type_error = is_float(computeit, True)
     if type_error is not None or value is None:
         print_error("decode note unable to assign value({}) to first argument({}).".format(thenote, wargs[0]), line)
         return
@@ -5657,7 +6003,7 @@ def do_decode(t_args, line):
 #--     # fi
 
     computeit = wargs[1] + '=' + str(timeofnote)    # Should be floating number.
-    value, type_error = is_float(computeit)
+    value, type_error = is_float(computeit, True)
     if type_error is not None or value is None:
         print_error("decode note unable to assign value({}) to second argument({}).".format(timeofnote, wargs[1]), line)
         return
@@ -5671,7 +6017,7 @@ def do_decode(t_args, line):
     # fi
 
     computeit = wargs[2] + '=' + str(r_suffixes)
-    value, type_error = is_float(computeit)
+    value, type_error = is_float(computeit, True)
     if type_error is not None or value is None:
         print_error("decode note unable to assign value({}) to third argument({}).".format(r_suffixes, wargs[2]), line)
         return
@@ -5689,20 +6035,20 @@ def do_clef(t_args, line):
     global clef
     global measure_on
 
-    if t_args is None or len(t_args) != 1:
+    if t_args is None or t_args == '':
         print_error("clef does not have arguments.", line)
         return
     # fi
 
-    t_args[0] = re.sub(r'\s*,\s*', ',', t_args[0])
+    targs = re.sub(r'\s*,\s*', ',', t_args)
 
-    vargs = t_args[0].split()
+    vargs = targs.split()
     if len(vargs) <= 0 or len(vargs) > 2:
         print_error("clef does not have correct number of arguments.", line)
         return
     # fi
     if len(vargs) == 1:
-        wargs = arglist(t_args[0], line, False)
+        wargs = arglist(targs, line, False)
         if not wargs or len(wargs) < 1:
             print_error("no clef selection arguments", line)
             return
@@ -5721,7 +6067,7 @@ def do_clef(t_args, line):
         return
     # fi
     for w in wargs:
-        f1, type_error = is_float(w)
+        f1, type_error = is_float(w, True)
         if type_error is not None:
             print_error("clef error - {}".format(type_error), line)
             return
@@ -5745,14 +6091,14 @@ def do_bars(t_args, line):
     global bars
     global measure_on
 
-    if t_args is None or len(t_args) <= 0 or t_args[0] == '':
+    if t_args is None or t_args == '':
         print_error("bars does not have an expression to process", line)
         return
     # fi
 
-    m = t_args[0]
+    m = t_args
 
-    f, type_error = is_float(m)
+    f, type_error = is_float(m, True)
     if type_error is not None:
         print_error("bars error - {}".format(type_error), line)
         return
@@ -5776,18 +6122,18 @@ def do_middle_c(t_args, line):
     global middle_c
     global measure_on
 
-    if t_args is None or len(t_args) <= 0:
+    if t_args is None:
         print_error("middlec does not have a note to process", line)
         return
     # fi
-    if t_args[0] == '':
+    if t_args == '':
         compute_middle_c(39)
         return
     # fi
-    note_to_decode = t_args[0]
+    note_to_decode = t_args
     temp3 = 0                                   # character pointer
     if note_to_decode[0] == '(':
-        thenote, type_error = is_float(note_to_decode)
+        thenote, type_error = is_float(note_to_decode, True)
         if type_error is not None:
             print_error("middlec does not have a valid number in parenthesis", line)
             return
@@ -5830,7 +6176,7 @@ def do_meter(t_args, line):
     global args
     global mlth
 
-    if t_args is None or len(t_args) <= 0 or t_args[0] == '':
+    if t_args is None or t_args == '':
         print_error("meter does not have an expression to process", line)
         return
     # fi
@@ -5842,10 +6188,10 @@ def do_meter(t_args, line):
         # fi
     # rof
 
-    m = t_args[0]
+    m = t_args
     m = re.sub(r',', r'/', m)
 
-    f, type_error = is_float(m)
+    f, type_error = is_float(m, True)
     if type_error is not None:
         print_error("meter error - {}".format(type_error), line)
         return
@@ -5857,7 +6203,7 @@ def do_meter(t_args, line):
     meter = m
     measure_meter[measure_on] = m                       # Save text for meter.
 
-    f, type_error = is_float(m)
+    f, type_error = is_float(m, True)
     if type_error is not None:
         print_error("meter error - {}".format(type_error), line)
         return
@@ -5890,11 +6236,11 @@ def do_meter(t_args, line):
 #           (,[,{, },],)                            $$ Parenthesis
 
 def do_calc(t_args, line):
-    if t_args is None or len(t_args) <= 0:
+    if t_args is None or t_args == '':
         print_error("calc does not have an expression to process", line)
         return
     # fi
-    f, type_error = is_float(t_args[0])
+    f, type_error = is_float(t_args, False)
     if type_error is not None:
         print_error("calc error - {}".format(type_error), line)
         return
@@ -6001,15 +6347,15 @@ def do_key(t_args, line):
     global vl
     global minor_key_to_major
 
-    if t_args is None or len(t_args) != 1:
+    if t_args is None or t_args == '':
         print_error("key command does not have arguments", line)
         return
     # fi
 
-    t_args[0] = re.sub(r'\s*,\s*', ',', t_args[0])
-    t_args[0] = re.sub(r'\s*\.\.\s*', '..', t_args[0])
+    targs = re.sub(r'\s*,\s*', ',', t_args)
+    targs = re.sub(r'\s*\.\.\s*', '..', targs)
     # Voice numbers (optional), followed by key name, with major/minor (optional).
-    vargs = t_args[0].split()
+    vargs = targs.split()
 
     if len(vargs) <= 0 or len(vargs) > 3:
         print_error("key command does not have correct number of arguments", line)
@@ -6106,7 +6452,7 @@ def do_key(t_args, line):
         return
     # fi
     for w in wargs:
-        f1, type_error = is_float(w)
+        f1, type_error = is_float(w, True)
         if type_error is not None:
             print_error("key error - {}".format(type_error), line)
             return
@@ -6146,16 +6492,16 @@ def do_cis(t_args, line):
     global measure_on
     global instruments
 
-    if t_args is None or len(t_args) != 1:
+    if t_args is None or t_args == '':
         print_error("cis does not have one or two arguments.", line)
         return
     # fi
 
-    t_args[0] = re.sub(r'\s*,\s*', ',', t_args[0])
+    targs = re.sub(r'\s*,\s*', ',', t_args)
 
-    vargs = t_args[0].split()
+    vargs = targs.split()
 
-    f1, type_error = is_float(vargs[0])
+    f1, type_error = is_float(vargs[0], True)
     if type_error is not None:
         print_error("cis error - {}".format(type_error), line)
         return
@@ -6206,7 +6552,7 @@ def do_cis(t_args, line):
             pan[measure_on][cis] = int(getvar('default_pan'))
             intensity[measure_on][cis] = int(getvar('default_intensity'))
         else:
-            f1, type_error = is_float(i)
+            f1, type_error = is_float(i, True)
             if type_error is not None:
                 print_error("cis error - {}".format(type_error), line)
                 return
@@ -6245,7 +6591,7 @@ def do_cis(t_args, line):
 def get_volume_number(name, line, command_name):
     global vlprint
 
-    v, type_error = is_float(name)
+    v, type_error = is_float(name, True)
     if type_error is not None:
         for j in vlprint:
             if name == vlprint[j]:
@@ -6322,8 +6668,8 @@ def do_volume_both(t_args, line, command_name):
         return
     # fi
     # All spaces before or after commas is gone.
-    t_args[0] = re.sub(r'\s*,\s*', ',', t_args[0])
-    vargs = t_args[0].split()
+    targs = re.sub(r'\s*,\s*', ',', t_args)
+    vargs = targs.split()
     if len(vargs) <= 0 or len(vargs) > 2:
         print_error("{} does not have correct number of arguments.".format(command_name), line)
         return
@@ -6355,7 +6701,7 @@ def do_volume_both(t_args, line, command_name):
         wargs = arglist(vargs[0], line, True)
         v = get_volume_number(vargs[1], line, command_name)
         for i in range(1, len(wargs)+1):
-            f1, type_error = is_float(wargs[i-1])
+            f1, type_error = is_float(wargs[i-1], True)
             if type_error is not None:
                 print_error("volume error - {}".format(type_error), line)
                 return
@@ -6424,7 +6770,7 @@ def do_voice(t_args, line):
     global instruments
     global drum_sounds
 
-    if t_args is None or len(t_args) != 1:
+    if t_args is None or t_args == '':
         print_error("voice does not have one argument.", line)
         return
     # fi
@@ -6436,10 +6782,10 @@ def do_voice(t_args, line):
         # fi
     # rof
 
-    t_args[0] = re.sub(r'\s*,\s*', ',', t_args[0])
+    targs = re.sub(r'\s*,\s*', ',', t_args)
 
-    vargs = t_args[0].split()
-    f1, type_error = is_float(vargs[0])
+    vargs = targs.split()
+    f1, type_error = is_float(vargs[0], True)
     if type_error is not None:
         print_error("voice error - {}".format(type_error), line)
         return
@@ -6483,7 +6829,7 @@ def do_voice(t_args, line):
                 pan[measure_on][i+1] = int(getvar('default_pan'))
                 intensity[measure_on][i+1] = int(getvar('default_intensity'))
             else:
-                f1, type_error = is_float(j)
+                f1, type_error = is_float(j, True)
                 if type_error is not None:
                     print_error("voice error - {}".format(type_error), line)
                     return
@@ -6521,26 +6867,41 @@ def do_voice(t_args, line):
 # Set page. This is only used for --pages argument to musicomp2abc command to
 # limit which pages to do output for (.fs, .mid, .csv, .abc, .v, .h).
 
+global page_warn_once
+page_warn_once = True
+
 def do_page(t_args, line):
     global cstop_processing
     global pages_to_do
     global args
+    global page_warn_once
 
-    if t_args is None or len(t_args) != 1:
+    if t_args is None or t_args == '':
         print_error("Page missing argument.", line)
         return
     # fi
 
-    vargs = t_args[0]
-    n, mesg = is_float(vargs)
+    vargs = t_args
+    n, mesg = is_float(vargs, False)
     if mesg is not None or n is None:
-        setvar('page', vargs, 1)        # Character string
+        if page_warn_once:
+            print_warning("ONCE: page is a command, and cannot set character string variable to it.", line)
+            page_warn_once = False
+        # fi
+        setvar('page', -1, 0)           # integer/floating value
         n = vargs
-    else:
-        if type(n) is float and n.is_integer():
+    elif type(n) is float:
+        if n.is_integer():
             n = int(n)
         # fi
         setvar('page', n, 0)            # integer/floating value
+    else:
+        if page_warn_once:
+            print_warning("ONCE: page is a command, and cannot set character string variable to it.", line)
+            page_warn_once = False
+        # fi
+        setvar('page', -1, 0)           # integer/floating value
+        n = vargs
     # fi
 
     if args.pages == None or args.pages == '':
@@ -6562,6 +6923,9 @@ def do_page(t_args, line):
 #       calc    m10 = 2
 #       measure m10 = m10 + 1   $$ can be calculated.
 #       measure                 $$ auto-increment from last (if it was a number).
+
+global measure_warn_once
+measure_warn_once = True
 
 def do_measure(t_args, line):
     global measure_on
@@ -6595,6 +6959,7 @@ def do_measure(t_args, line):
     global commentonline
     global measures_to_do
     global cstop_processing
+    global measure_warn_once
 
     # Process possible --xpose argument as xpose command before first measure.
     if args.xpose != '':
@@ -6602,7 +6967,7 @@ def do_measure(t_args, line):
         args.xpose = ''
     # fi
 
-    if t_args is None or len(t_args) != 1:  # Auto-incement from last measure if it was a number.
+    if t_args is None or t_args == '':  # Auto-incement from last measure if it was a number.
         if measure_on == '':
             print_error("Measure missing argument, auto-increment can only work after one is a number.", line)
             return
@@ -6611,26 +6976,43 @@ def do_measure(t_args, line):
             print_error("Blank measure can only occur after measure is a number - was {}".format(measure_on), line)
             return
         # fi
-        t_args = [str(int(measure_on) + 1)]
+        t_args = str(int(measure_on) + 1)
     # fi
 
-    vargs = t_args[0]
-    if vargs[0].isnumeric() and not vargs.isnumeric() and vargs.isalnum():     # Starts with number and has letters in the middle.
+    vargs = t_args
+    # Starts with number and has letters in the middle.
+    # NOTE: character variable in middle of string problem. But, want "12a" as string.  notes_array NOTDONEYET
+    if vargs[0].isnumeric() and not vargs.isnumeric() and vargs.isalnum():
+        if measure_warn_once:
+            print_warning("ONCE: measure is a command, and cannot set character string variable to it.", line)
+            measure_warn_once = False
+        # fi
+        setvar('measure', -1, 0)
         f1 = str(vargs)
-        setvar('measure', f1, 1)         # Variable cannot be a string.
     else:
-        f1, type_error = is_float(vargs)
+        f1, type_error = is_float(vargs, False)
         if type_error is not None or f1 is None or 'a' in vargs:
-            # Error, use it as string instead.
+            if measure_warn_once:
+                print_warning("ONCE: measure is a command, and cannot set character string variable to it.", line)
+                measure_warn_once = False
+            # fi
+            setvar('measure', -1, 0)
             f1 = str(vargs)
-            setvar('measure', f1, 1)     # Variable cannot be a string.
-        else:
-            if type(f1) is float and f1.is_integer():
+        elif type(f1) is float:
+            if f1.is_integer():
                 f1 = int(f1)
             # fi
             setvar('measure', f1, 0)
             f1 = str(f1)
+        else:
+            if measure_warn_once:
+                print_warning("ONCE: measure is a command, and cannot set character string variable to it.", line)
+                measure_warn_once = False
+            # fi
+            setvar('measure', -1, 0)
+            f1 = str(vargs)
         # fi
+    # fi
 
     # Check if in measures_to_do
     if args.measures and args.measures != '':
@@ -6761,16 +7143,16 @@ def do_instrument(t_args, line):
     global drum_sound
     global mlth
 
-    if t_args is None or len(t_args) != 1:
+    if t_args is None or t_args == '':
         print_error("instrument does not have arguments.", line)
         return
     # fi
 
     # Want a list of number separated by commas, followed by a space and an instrument name/number.
-    t_args[0] = re.sub(r'\s*,\s*', ',', t_args[0])
-    t_args[0] = re.sub(r'\s*\.\.\s*', '..', t_args[0])
+    targs = re.sub(r'\s*,\s*', ',', t_args)
+    targs = re.sub(r'\s*\.\.\s*', '..', targs)
     # Voice numbers, followed by instrument name.
-    vargs = t_args[0].split()
+    vargs = targs.split()
 
     INST = " ".join(vargs[1:]).lower()
     foundinstrument = None
@@ -6790,7 +7172,7 @@ def do_instrument(t_args, line):
     # fi
     if foundinstrument is None:
         print_warning("do_instrument - instruments does not have INST={}".format(INST), line)
-        f1, type_error = is_float(INST)
+        f1, type_error = is_float(INST, True)
         if type_error is not None:
             print_error("instrument error - {}".format(type_error), line)
             return
@@ -6820,7 +7202,7 @@ def do_instrument(t_args, line):
         return
     # fi
     for w in wargs:
-        f1, type_error = is_float(w)
+        f1, type_error = is_float(w, True)
         if type_error is not None:
             print_error("instrument error - {}".format(type_error), line)
             return
@@ -6852,14 +7234,14 @@ def do_reverb(t_args, line):
     global reverb
     global measure_on
 
-    if t_args is None or len(t_args) != 1:
+    if t_args is None or t_args == '':
         print_error("reverb does not have arguments.", line)
         return
     # fi
 
-    t_args[0] = re.sub(r'\s*,\s*', ',', t_args[0])
+    targs = re.sub(r'\s*,\s*', ',', t_args)
 
-    vargs = t_args[0].split()
+    vargs = targs.split()
     if len(vargs) <= 0 or len(vargs) > 2:
         print_error("reverb does not have correct number of arguments.", line)
         return
@@ -6868,7 +7250,7 @@ def do_reverb(t_args, line):
         r = 0
     else:
         r = vargs[1]
-        f1, type_error = is_float(r)
+        f1, type_error = is_float(r, True)
         if type_error is not None:
             print_error("reverb error - {}".format(type_error), line)
             return
@@ -6892,7 +7274,7 @@ def do_reverb(t_args, line):
         return
     # fi
     for w in wargs:
-        f1, type_error = is_float(w)
+        f1, type_error = is_float(w, True)
         if type_error is not None:
             print_error("reverb error - {}".format(type_error), line)
             return
@@ -6917,14 +7299,14 @@ def do_intensity(t_args, line):
     global intensity
     global measure_on
 
-    if t_args is None or len(t_args) != 1:
+    if t_args is None or t_args == '':
         print_error("intensity does not have arguments.", line)
         return
     # fi
 
-    t_args[0] = re.sub(r'\s*,\s*', ',', t_args[0])
+    targs = re.sub(r'\s*,\s*', ',', t_args)
 
-    vargs = t_args[0].split()
+    vargs = targs.split()
     if len(vargs) <= 0 or len(vargs) > 2:
         print_error("intensity does not have correct number of arguments.", line)
         return
@@ -6933,7 +7315,7 @@ def do_intensity(t_args, line):
         intens = 0
     else:
         intens = vargs[1]
-        f1, type_error = is_float(intens)
+        f1, type_error = is_float(intens, True)
         if type_error is not None:
             print_error("intensity error - {}".format(type_error), line)
             return
@@ -6956,7 +7338,7 @@ def do_intensity(t_args, line):
         return
     # fi
     for w in wargs:
-        f1, type_error = is_float(w)
+        f1, type_error = is_float(w, True)
         if type_error is not None:
             print_error("intensity error - {}".format(type_error), line)
             return
@@ -6983,14 +7365,14 @@ def do_pan(t_args, line):
     global pan
     global measure_on
 
-    if t_args is None or len(t_args) != 1:
+    if t_args is None or t_args == '':
         print_error("pan does not have arguments.", line)
         return
     # fi
 
-    t_args[0] = re.sub(r'\s*,\s*', ',', t_args[0])
+    targs = re.sub(r'\s*,\s*', ',', t_args)
 
-    vargs = t_args[0].split()
+    vargs = targs.split()
     if len(vargs) <= 0 or len(vargs) > 2:
         print_error("pan does not have correct number of arguments.", line)
         return
@@ -6999,7 +7381,7 @@ def do_pan(t_args, line):
         p = 0
     else:
         p = vargs[1]
-        f1, type_error = is_float(p)
+        f1, type_error = is_float(p, True)
         if type_error is not None:
             print_error("pan error - {}".format(type_error), line)
             return
@@ -7021,7 +7403,7 @@ def do_pan(t_args, line):
         return
     # fi
     for w in wargs:
-        f1, type_error = is_float(w)
+        f1, type_error = is_float(w, True)
         if type_error is not None:
             print_error("pan error - {}".format(type_error), line)
             return
@@ -7073,12 +7455,12 @@ def do_xpose(t_args, line):
         print_warning("Ignoring xpose parsing for --abc output format. ", line)
         return
     # fi
-    if t_args is None or len(t_args) != 1:
+    if t_args is None or t_args == '':
         print_error("xpose does not have arguments.", line)
         return
     # fi
-    t_args[0] = re.sub(r'\s*,\s*', ',', t_args[0])
-    vargs = t_args[0].split()
+    targs = re.sub(r'\s*,\s*', ',', t_args)
+    vargs = targs.split()
     if len(vargs) <= 0 or len(vargs) > 4:
         print_error("xpose does not have correct number of arguments.", line)
         return
@@ -7123,7 +7505,7 @@ def do_xpose(t_args, line):
             if kl in key_sig:
                 x = '0'                 # shifting amount
             else:       # is a number?
-                f1, type_error = is_float(kl)
+                f1, type_error = is_float(kl, True)
                 if type_error is not None:
                     print_error("xpose error#1 - {}".format(type_error), line)
                     return
@@ -7149,7 +7531,7 @@ def do_xpose(t_args, line):
         else:       # is a number?
             x = kl
             kl = None
-            f1, type_error = is_float(x)
+            f1, type_error = is_float(x, True)
             if type_error is not None:
                 print_error("xpose error#2 - {}".format(type_error), line)
                 return
@@ -7169,7 +7551,7 @@ def do_xpose(t_args, line):
         # fi
     # fi
 
-    f1, type_error = is_float(x)
+    f1, type_error = is_float(x, True)
     if type_error is not None:
         print_error("xpose error#3 - {}".format(type_error), line)
         return
@@ -7196,7 +7578,7 @@ def do_xpose(t_args, line):
         kprint_lc = key_sig_int[key_default]    # Key name extracted.
     # fi
     for w in wargs:
-        f1, type_error = is_float(w)
+        f1, type_error = is_float(w, True)
         if type_error is not None:
             print_error("xpose error#4 - {}".format(type_error), line)
             return
@@ -7219,6 +7601,264 @@ def do_xpose(t_args, line):
     # rof
     return
 # End of do_xpose
+
+# ----------------------------------------------------------------------------
+def do_encode(t_args, line):
+    if t_args is None or t_args == '':
+        print_error("encode does not have a variable, nor string to assign to it.", line)
+        return
+    # fi
+    assign = t_args.find('=')
+    if assign <= 0:
+        print_error("encode does not have a name followed by an assignment character.", line)
+        return
+    # fi
+    strng = t_args[assign+1:].strip()            # Toss spaces before and after.
+    token = t_args[0:assign].strip()             # Toss spaces before and after.
+
+    # Are there any Parenthesis?
+    a = token.find('(')
+    if a >= 0:
+        wary, h = do_vars_parens(token, a, line, False)
+    else:
+        a = token.find('[')
+        if a >= 0:
+            wary, h = do_vars_parens(token, a, line, False)
+        else:
+            chk = setvar(token, strng, 1)
+            if not chk:
+                print_error("variable name {} does not exist or cannot be created.".format(token), line)
+            # fi
+            return
+        # fi
+    # fi
+    wary[numarry_values][h] = strng
+    wary[numarry_value_type][h] = 1         # Character string
+    recompute_whichlocalchars()
+# End of do_encore
+
+# ----------------------------------------------------------------------------
+# arg       - string with variable name with parens in it.
+# a         - where the first parenthesis is located.
+# line      - for error messages, original line.
+# create_it - True if should create variable. False means it must exist correctly.
+
+def do_vars_parens(arg, a, line, create_it):
+    global macro_executing_depth
+
+    if a == 0:
+        print_error("variable definition {} does not have a name before parenthesis.".format(arg), line)
+        return
+    # fi
+    token = arg[0:a]
+    if not token[0].isalnum():
+        print_error("variable name {} does not start with a alphabetic character.".format(arg))
+        return
+    # fi
+    for t in token[1:]:
+        if not t.isalnum() and t != '_':
+            print_error("variable name {} does not have all alphanumeric characters or '_'.".format(arg))
+            return
+        # fi
+    # rof
+    if create_it:                       # Creating, must not exist at this level.
+        wary = getvarmaclevel(token, len(macro_executing_depth))
+        if wary is not None:
+            print_error("variable name {} redefined at current macro depth level {}".format(token, macro_executing_depth), line)
+            return
+        # fi
+    else:                               # Fetching variable, it must exist.
+        wary = chkvar(token)
+        if wary is None:
+            print_error("variable name {} does not exist.".format(token), line)
+            return
+        # fi
+    # fi
+    aftertoken = arg[a:]
+    w = 0
+    e = []
+    c = aftertoken[w]
+    if c == '(':
+        enddelim = ')'
+    elif c == '[':
+        enddelim = ']'
+    else:
+        print_warning("Internal problem? variable {}, but no parenthesis for dimension.".format(arg), line)
+        return
+    # fi
+    e.append(enddelim)
+    w = w + 1
+    if w >= len(aftertoken):
+        print_warning("Found character variable {}, but no closing {}.".format(wary, enddelim), line)
+        return
+    # fi
+    dimensions = []
+    before_comma = 1
+    while True:
+        while w < len(aftertoken):
+            c = aftertoken[w]
+            w = w + 1
+            if c == enddelim:
+                break
+            # fi
+            if w >= len(aftertoken):
+                print_error("variable {}, but no closing {} -- {}.".format(token, enddelim, arg), line)
+                return
+            elif c == '(':
+                enddelim = ')'
+                e.append(enddelim)
+            elif c == '[':
+                enddelim = ']'
+                e.append(enddelim)
+            elif len(e) == 1 and c == ',':
+                f1 = aftertoken[before_comma:w-1]
+                f, type_error = is_float(f1, True)
+                if type_error is not None:
+                    print_error("dimension '{}' does not have argument as an integer. {}".format(f1,type_error), line)
+                    return
+                # fi
+                if type(f) is not float:
+                    print_error("dimension '{}' is not an integer. {}".format(f1,type_error), line)
+                    return
+                # fi
+                if f.is_integer():
+                    f = int(f)
+                # fi
+                if f is None:
+                    print_error("dimension does not have first argument as an integer.", line)
+                    return
+                # fi
+                dimensions.append(f)
+                before_comma = w
+            # fi
+        # elihw
+        enddelim = e.pop()
+        if e == []:
+            f1 = aftertoken[before_comma:w-1]
+            f, type_error = is_float(f1, True)
+            if type_error is not None:
+                print_error("dimension '{}' does not have argument as an integer. {}".format(f1,type_error), line)
+                return
+            # fi
+            if type(f) is not float:
+                print_error("dimension value '{}' is not an integer. {}".format(f1,type_error), line)
+                return
+            # fi
+            if f.is_integer():
+                f = int(f)
+            # fi
+            if f is None:
+                print_error("dimension does not have {} argument as an integer.".format(len(dimensions)+1), line)
+                return
+            # fi
+            dimensions.append(f)
+            break
+        # fi
+    # elihw
+    if w < len(aftertoken):
+        print_error("variable {}, characters after closing dimensional delimiter '{}' -- {}.".format(token, enddelim, arg), line)
+        return
+    # fi
+    if wary is not None:                                # It exists already. :)
+        if len(wary[numarry_indexes]) != len(dimensions):
+            print_error("variable {} with {} dimensions does not match dimensions {}.".format(token, len(wary[numarry_indexes]), len(dimensions)), line)
+            return None
+        # fi
+        l = len(dimensions)
+        x = mult = wary[numarry_indexes][0]             # Max dimension of first.
+        h = dimensions[0] - 1                           # array index into numarry_values & numarry_value_type
+        for a in range(1, l):
+            d = dimensions[a]
+            x = wary[numarry_indexes][a]
+            if d < 1 or d > x:
+                print_error("variable {} dimension#{} {} not in range 1 thru {}".format(token, a+1, d, x), line)
+                return None, None
+            # fi
+            h = h + (d-1) * mult
+            mult = mult * x
+        # rof
+        return wary, h                                  # variable array, and index into values.
+    # fi
+    num = 1
+    for w in dimensions:
+        num = num * w
+    # rof
+    values = []
+    typevalues = []
+    for i in range(0,num):
+        values.append(None)
+        typevalues.append(None)
+    # rof
+    wary = [ token, len(macro_executing_depth), dimensions, values, typevalues ]
+    calculate.local_arrays.append(wary)
+# End of do_vars_parens
+        
+# ----------------------------------------------------------------------------
+# do_vars    cows, EAT, grass(2,10), TOO(2,2)
+#
+# Define numeric or character variables.
+#
+# Above, "cows" is a single numeric variable. "grass" is a 2 by 10 array of
+# numeric variables. One and two dimensional arrays are allowed.
+#
+# "EAT" is a character variable. TOO is a two dimensional character variable.
+#
+# Variables defined within a macro are local to that macro and any macros it
+# calls. Newly defined variables are initialized to zero.
+
+def do_vars(t_args, line):
+    global macro_executing_depth
+
+    if t_args is None or t_args == '':
+        print_error("vars needs at least one argument", line)
+        return
+    # fi
+    # Get rid of all white spoce.
+    wline = ''.join(t_args.split())
+    wargs = arglist(wline, line, False)
+    if len(wargs) == 0:
+        print_error("var needs at least one argument", line)
+        return
+    # fi
+    # Process each variable name.
+    for token in wargs:
+        # Are there any Parenthesis?
+        a = token.find('(')
+        if a >= 0:
+            do_vars_parens(token, a, line, True)
+            continue
+        # fi
+        a = token.find('[')
+        if a >= 0:
+            do_vars_parens(token, a, line, True)
+            continue
+        # fi
+        if not token[0].isalnum():
+            print_error("variable name {} does not start with a alphabetic character.".format(arg))
+            return
+        # fi
+        okay = True
+        for t in token[1:]:
+            if not t.isalnum() and t != '_':
+                print_error("variable name {} does not start with a alphabetic character.".format(arg))
+                okay = False
+                break
+            # fi
+        # rof
+        if not okay:
+            continue
+        # fi
+        # Normal variable name here.
+        wary = getvarmaclevel(token, len(macro_executing_depth))
+        if wary is not None:
+            print_error("variable name {} redefined at current macro depth level {}".format(token, macro_executing_depth, line))
+            continue
+        # fi
+        createlocalvar(token, None, len(macro_executing_depth), None)       # Not set, nor any type yet.
+        wary = getvarmaclevel(token, len(macro_executing_depth))
+    # elihw
+    return
+#   End of do_vars
 
 # ----------------------------------------------------------------------------
 # See abc notation for format of %%staves command for printing.
@@ -7291,7 +7931,10 @@ commands = {
              'debug'   : (do_debug,     False),
              'decode'  : (do_decode,    False),
              'delay'   : (do_delay,     False),
+             'elif'    : (do_else_if,   False),
              'else'    : (do_else,      False),
+             'elseif'  : (do_else_if,   False),
+             'encode'  : (do_encode,    False),
              'end'     : (do_cstopnow,  True),          # cstop* alternative
              'endif'   : (do_endif,     False),
              'endm'    : (do_endm,      False),
@@ -7311,6 +7954,7 @@ commands = {
              'measure' : (do_measure,   True),
              'meter'   : (do_meter,     True),
              'middlec' : (do_middle_c,  True),
+             'midi'    : (do_midi,      True),
              'mytitle' : (do_title,     False),         # title alternative
              'natural' : (do_natural,   False),
              'page'    : (do_page,      True),
@@ -7338,6 +7982,7 @@ commands = {
              'transpose' : (do_xpose,   True),          # xpose alternative
              'tuning'  : (do_tuning,    False),         # IMS - will not do
              'unit'    : (do_measure,   True),          # measure alternative
+             'vars'    : (do_vars,      False),
              'voice'   : (do_voice,     True),
              'volume'  : (do_volume,    True),
              'volumes' : (do_volumes,   True),
@@ -7527,7 +8172,7 @@ def getnote(note_to_decode, voice, line, update_defaults):
                     temp3 = temp2 + 1           # temp2 has last matched )
                     therest = note_to_decode[temp3:]
                     note_to_decode = note_to_decode[0:temp3]
-                    thenote, type_error = is_float(note_to_decode)
+                    thenote, type_error = is_float(note_to_decode, True)
                     if type_error is not None:
                         return therest, thenote, type_error
                     # fi
@@ -7588,7 +8233,7 @@ def getnote(note_to_decode, voice, line, update_defaults):
                 return '', None, normal_note
             # fi
             number_in_sequence = note_to_decode[0:sc]
-            number_in_sequence, type_error = is_float(number_in_sequence)
+            number_in_sequence, type_error = is_float(number_in_sequence, True)
             if type_error is not None:
                 print_error(type_error, line)
                 return '', None, None                # ???
@@ -7985,7 +8630,7 @@ def get_time(therest, line):
     if not therest:
         pass
     elif not therest[0].isalpha():    # if not a note or modifier (computable)
-        vwork, type_error = is_float(therest)
+        vwork, type_error = is_float(therest, True)
         # errorrest = everything after value -- if error occurs.
         # vwork = value calculated before error (even if not error).
         # type_error = message of error type.
@@ -8189,11 +8834,10 @@ def get_vol_note(temp1, onvoice, line):
     global vlprint
     global measure_on
 
-    if temp1[0] == ' ':
-        therest = temp1[5:]
-    else:
-        therest = temp1[4:]
-    # fi
+    while temp1[0] == ' ' or temp1[0] == "\t":
+        temp1 = temp1[1:]
+    # elihw
+    therest = temp1[4:]         # get rid of vol()
     sc = therest.find(')')
     if sc < 0 or sc == 0:
         print_error("m:{} v{} A 'vol(' needs a number followed by a ')' -- ')' or number is missing".format(measure_on, onvoice), line)
@@ -8202,7 +8846,7 @@ def get_vol_note(temp1, onvoice, line):
     f2 = -1                         # No volume setting after the "vol"
     s1 = therest[0:sc]
     therest = therest[sc+1:]
-    f1, type_error = is_float(s1)
+    f1, type_error = is_float(s1, True)
     if type_error is not None or f1 is None:
         for j in vlprint:
             if s1 == vlprint[j]:
@@ -8254,11 +8898,10 @@ def get_vol_note(temp1, onvoice, line):
 def get_cresc(temp1, line):
     global measure_on
 
-    if temp1[0] == ' ':
-        therest = temp1[7:]
-    else:
-        therest = temp1[6:]
-    # fi
+    while temp1[0] == ' ' or temp1[0] == "\t":
+        temp1 = temp1[1:]
+    # elihw
+    therest = temp1[6:]
     sc = therest.find(',')
     if sc < 0 or sc == 0:
         print_error("m:{} A 'cresc(' needs a number followed by a ',' -- ',' or number is missing".format(measure_on), line)
@@ -8274,7 +8917,7 @@ def get_cresc(temp1, line):
     therest = s2[sc+1:]
     s2 = s2[0:sc]
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-    f1, type_error = is_float(s1)
+    f1, type_error = is_float(s1, True)
     if type_error is not None:
         for j in vlprint:
             if s1 == vlprint[j]:
@@ -8301,7 +8944,7 @@ def get_cresc(temp1, line):
         f1 = s1
     # fi
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-    f2, type_error = is_float(s2)
+    f2, type_error = is_float(s2, True)
     if type_error is not None:
         print_error("m:{} cresc(xxx,yyy) did not get have a time value - {}".format(measure_on, type_error), line)
         return '', None, None
@@ -8329,7 +8972,7 @@ def do_vol_cresc(temp1, onvoice, line, prenote, postnote, onenotevolume):
     global vlprint
 
     while True:
-        if temp1[0:4] == 'vol(' or temp1[0:5] == ' vol(':
+        if re.match(r'^[ \t]*vol[(]', temp1):
             therest, onenotevolume, f2, s1 = get_vol_note(temp1, onvoice, line)
             # onenotevolume for midi1csv format.
             if onenotevolume is None:
@@ -8356,18 +8999,22 @@ def do_vol_cresc(temp1, onvoice, line, prenote, postnote, onenotevolume):
             temp1 = therest
             continue
         # fi
-        if (temp1[0:5] == 'cres(' or temp1[0:4] == 'cre(' or temp1[0:3] == 'cr(' or
-            temp1[0:6] == ' cres(' or temp1[0:5] == ' cre(' or temp1[0:4] == ' cr(' or
-            temp1[0:5] == 'dimi(' or temp1[0:4] == 'dim(' or temp1[0:3] == 'di(' or
-            temp1[0:6] == ' dimi(' or temp1[0:5] == ' dim(' or temp1[0:4] == ' di('):
+        if (re.match(r'^[ \t]*cres[(]', temp1) or re.match(r'^[ \t]*cre[(]', temp1) or
+            re.match(r'^[ \t]*cr[(]', temp1) or
+            re.match(r'^[ \t]*dimi[(]', temp1) or re.match(r'^[ \t]*dim[(]', temp1) or
+            re.match(r'^[ \t]*di[(]', temp1)):
+#--        if (temp1[0:5] == 'cres(' or temp1[0:4] == 'cre(' or temp1[0:3] == 'cr(' or
+#--            temp1[0:6] == ' cres(' or temp1[0:5] == ' cre(' or temp1[0:4] == ' cr(' or
+#--            temp1[0:5] == 'dimi(' or temp1[0:4] == 'dim(' or temp1[0:3] == 'di(' or
+#--            temp1[0:6] == ' dimi(' or temp1[0:5] == ' dim(' or temp1[0:4] == ' di('):
             print_error("m:{} v{} cresc() and dimin() are incorrectly written.".format(measure_on, onvoice), line)
             return temp1, None, prenote, postnote
         # fi
 
         crd = None
-        if temp1[0:6] == 'cresc(' or temp1[0:7] == ' cresc(':
+        if re.match(r'^[ \t]*cresc[(]', temp1):
             crd = True
-        elif temp1[0:6] == 'dimin(' or temp1[0:7] == ' dimin(':
+        elif re.match(r'^[ \t]*dimin[(]', temp1):
             crd = False
         # fi
         if crd is not None:
@@ -8420,6 +9067,7 @@ def do_vol_cresc(temp1, onvoice, line, prenote, postnote, onenotevolume):
 # --spaces means allow: " " between notes, instead of commas. No pre/post spacing.
 
 def process_notes(line):
+    global last_voice_staff
     global voices                       # number of voices
     global cis                          # if cis active, non-zero.
     global time                         # set default note length (time) dictionary
@@ -8453,7 +9101,7 @@ def process_notes(line):
     if not args.spaces:
         wline = re.sub(r'([^,)]) ', r'\1', wline)    # ', ' left alone, elsewise strip spaces.
     # fi
-    wline = re.sub(r'^  *v', 'v', wline)          # strip spaces before "v" (for voice number).
+    wline = re.sub(r'^\s+v', 'v', wline)          # strip spaces before "v" (for voice number).
     wargs = arglist(wline, line, False)
 
 # NOTDONEYET --spaces
@@ -8481,7 +9129,7 @@ def process_notes(line):
             # fi
             s1 = s1[0:sc]
 
-            f1, type_error = is_float(s1)
+            f1, type_error = is_float(s1, True)
             if type_error is not None:
                 print_error(type_error, line)
                 return
@@ -8495,6 +9143,7 @@ def process_notes(line):
                 print_error("m:{} voice number must be between 1 and {} inclusive. Not ({})".format(measure_on, MAXVOICES, f1), line)
                 return
             # fi
+            last_voice_staff = 'v' + str(f1) + ':'  # For continuation lines.
             do_set_voices(f1, line)
             cis = f1
             wargs[0] = (wargs[0])[sc+2:]
@@ -8507,18 +9156,19 @@ def process_notes(line):
     # fi
 # ...........................................................................
     if cis == 0:                        # if not doing only one voice continuously for a while...
+        last_voice_staff = ''
         if len(wargs) > voices:
             print_error("m:{} too many arguments ({}), greater than voices (>{})".format(measure_on, len(wargs), voices), line)
             return
         # fi
         measlth = 0
         for i in range(0, len(wargs)):
-            if not(wargs[i] == '' or wargs[i] == ' '):
+            if not(wargs[i] == '' or wargs[i] == ' ' or wargs[i] == "\t"):
                 measlth = max(measlth, mlth[i+1][measure_on])
             # fi
         # rof
         for i in range(0, len(wargs)):
-            if not(wargs[i] == '' or wargs[i] == ' '):
+            if not(wargs[i] == '' or wargs[i] == ' ' or wargs[i] == "\t"):
                 l = measlth - mlth[i+1][measure_on]
                 if l > 0:
                     nl = (MIDICLICKSPERQUARTER * 4) / l
@@ -8555,7 +9205,7 @@ def process_notes(line):
                 rest_wargs_on_line = wargs[vnumber +1:]
             # fi
             prenote = ''
-            if temp1 and temp1[0] == ' ':
+            if temp1 and (temp1[0] == ' ' or temp1[0] == "\t"):
                 prenote = ' '
                 temp1 = temp1[1:]
             # fi
@@ -8563,15 +9213,29 @@ def process_notes(line):
             onenotevolume = None
             while True:
                 for c in macro_buffer:
-                    t = temp1[0:len(c) + 1]
-                    if c != '' and c + '(' == t:
+#??                    t = temp1[0:len(c) + 1]
+                    t = temp1[0:len(c)+1]
+                    if macro_delim[c] is None:
+                        md = ''
+                    else:
+                        md = macro_delim[c]
+                    # fi
+                    if c + md == t:
                         therest = temp1[len(c)+1:]
-                        f = therest.find(')')
-                        if f < 0:
-                            print_error("m:{} macro {} does not have a closing parenthesis".format(measure_on, c), line)
-                            return
+                        # NOTDONEYET - macros here... vvv
+                        # Need to match argument delimiters ... end of line == None.
+                        q = len(macro_arg_delim[c])
+                        if macro_arg_delim[c][q-1] is None:
+                            f = len(therest)
+                        else:
+                            f = therest.find(macro_arg_delim[c][q-1])
+                            if f < 0:
+                                print_error("m:{} macro {} does not have a closing delimiter '{}'".format(measure_on, c,macro_arg_delim[c][q-1]), line)
+                                return
+                            # fi
+                            f = f + 1
                         # fi
-                        margs = [ therest[0:f] ]
+                        margs = md + therest[0:f]
                         temp1 = therest[f+1:]
                         # 1) Create and put in a temporary macro with no arguments for temp1
                         #    (rest of line), if anything in temp1 (not None, nor '').
@@ -8584,7 +9248,9 @@ def process_notes(line):
                                 macro_buffer[m_name] = [ temp1 + "," + ",".join(rest_wargs_on_line) ]
                             # fi
                             # macro_defining = m_name               # No need, we did it.
+                            macro_delim[m_name] = ''                # No delimiter after name - never directly called?
                             macro_arguments[m_name] = []
+                            macro_arg_delim[m_name] = []            # Delimiters between arguments -- NOTDONEYET
                             macro_internal = macro_internal + 1     # Next internal macro.
                             macro_executing_depth.append(m_name)    # Add in the name.
                             macrodepth = len(macro_executing_depth) # one more to do.
@@ -8592,6 +9258,7 @@ def process_notes(line):
                             macro_line[macrodepth] = 0              # First line in buffer.
                         # fi
                         replace_macro(c, margs, line)
+                        # NOTDONEYET - macros here ... ^^^
                         return                                      # Go out and read line for macro.
                     # fi
                 # rof
@@ -8606,7 +9273,7 @@ def process_notes(line):
                 break
             # fi
 
-            if type(thenote) == str and (thenote == '' or thenote == ' '):
+            if type(thenote) == str and (thenote == '' or thenote == ' ' or thenote == "\t"):
                 break
             # fi
 
@@ -8640,7 +9307,7 @@ def process_notes(line):
             if typenote == trill_note:
                 therest, thenote, typenote = getnote(therest, onvoice, line, True)
                 leading_space = False
-                if thenote and type(thenote) is str and len(thenote) > 0 and thenote[0] == ' ':
+                if thenote and type(thenote) is str and len(thenote) > 0 and (thenote[0] == ' ' or thenote == "\t"):
                     thenote = thenote[1:]
                     leading_space = True
                 # fi
@@ -8717,7 +9384,7 @@ def process_notes(line):
                     return
                 # fi
                 therest = therest[f+1:]
-                np, type_error = is_float(num)
+                np, type_error = is_float(num, True)
                 if np is None or np == 0 or type_error is not None:
                     print_error("m:{} trill is not legal, number of notes to play".format(measure_on), line)
                     return
@@ -8900,7 +9567,7 @@ def process_notes(line):
                 # fi
             elif typenote == sequence_note:
                 leading_space = False
-                if therest and len(therest) > 0 and therest[0] == ' ':
+                if therest and len(therest) > 0 and (therest[0] == ' ' or therest[0] == ' '):
                     therest = therest[1:]
                     leading_space = True
                 # fi
@@ -8919,7 +9586,7 @@ def process_notes(line):
                 for sn in range(0, number_in_sequence):
                     s_postnote = ''
                     s_prenote = ''
-                    if therest[0:4] == 'vol(' or therest[0:5] == ' vol(':
+                    if re.match(r'^[ \t]*vol[(]', therest):
                         therest, onenotevolume, f2, s1 = get_vol_note(therest, onvoice, line)
                         # onenotevolume for midi1csv format.
                         if onenotevolume is None:
@@ -9222,7 +9889,7 @@ def process_notes(line):
                     append_tie = append_tie + 's'
                 else:           # ABC
                     # thenote = '.' + thenote                   # . before the note for staccato
-                    if len(thenote) > 0 and thenote[0] == ' ':  # Special leading space!
+                    if len(thenote) > 0 and (thenote[0] == ' ' or thenote[0] == "\t"):  # Special leading space!
                         thenote = ' .' + thenote[1:]            # . before the note for staccato
                     else:
                         thenote = '.' + thenote                 # . before the note for staccato
@@ -9271,8 +9938,227 @@ def read_csv_file(l):
 # End of read_csv_file
 
 # ============================================================================
+# 1) For largest character name to smallest character name:
+#   A) for all tokens /^[a-zA-Z][a-zA-Z0-9_]*/
+#   B) for longest names, from the start first.
+#      Then 1 less, from start, then from end (if matches /^[a-z]/).
+#   C) go to above if not found until down to won't fit for #1.
+# 2) Then one less, goto A) above.
+
+# ============================================================================
+#-- ntoken, aftertoken = replace_array_char(wary, thetoken, aftertoken, original_line)
+# wary          is array entry ... 
+# thetoken      is string where token name is.
+# aftertoken    is the string after the token name, where dimensional value(s) are.
+# original_line for error printing.
+
+def replace_array_char(wary, thetoken, aftertoken, original_line):
+    global measure_on
+
+    # Find end of array. Need add/match ()[]{}.
+    w = 0
+    while w < len(aftertoken) and aftertoken[w] in [ "\t", ' ' ]:
+        w = w + 1
+    # elihw
+    if w >= len(aftertoken):
+        print_warning("Found character variable {}, but no dimensions.".format(wary), original_line)
+        return thetoken, aftertoken
+    # fi
+    e = []
+    c = aftertoken[w]
+    if c == '(':
+        enddelim = ')'
+    elif c == '[':
+        enddelim = ']'
+    else:
+        print_warning("Found character variable {}, but no parenthesis for dimension.".format(wary), original_line)
+        return thetoken, aftertoken
+    # fi
+    e.append(enddelim)
+    w = w + 1
+    if w >= len(aftertoken):
+        print_warning("Found character variable {}, but no closing {}.".format(wary, enddelim), original_line)
+        return thetoken, aftertoken
+    # fi
+    while True:
+        while w < len(aftertoken):
+            c = aftertoken[w]
+            w = w + 1
+            if c == enddelim:
+                break
+            # fi
+            if w >= len(aftertoken):
+                print_warning("Found character variable {}, but not closing {}.".format(wary, enddelim), original_line)
+                return thetoken, aftertoken
+            elif c == '(':
+                enddelim = ')'
+                e.append(enddelim)
+            elif c == '[':
+                enddelim = ']'
+                e.append(enddelim)
+            elif c == '{':
+                enddelim = '}'
+                e.append(enddelim)
+            # fi
+        # elihw
+        enddelim = e.pop()
+        if e == []:
+            break
+        # fi
+    # elihw
+    if w < len(aftertoken):
+        s = aftertoken[w:]
+    else:
+        s = ''
+    # fi
+    # f will be the thing to pass to is_float. s = rest of string.
+    f = thetoken + aftertoken[0:w]
+
+    f1, type_error = is_float(f, False)     # Want a string.
+    if type_error is not None or f1 is None:
+        print_warning("m:{}".format(measure_on) + type_error, original_line)
+        return thetoken, aftertoken
+    elif type(f1) is not str:
+        f1 = str(f1)
+    # fi
+    # Need to retokenize.
+    return f1, s
+# End of replace_array_char
+
+# ============================================================================
+#--     replacedline = replace_char_var(line, linestarts, lineends, original_line)
+def replace_char_var(line, linestarts, lineends, original_line):
+    global whichlocalchars
+
+    cnt = 0
+    beforetokenline = line[0:linestarts]
+    token = ntoken = line[linestarts:lineends]
+    aftertokenline = line[lineends:]
+
+    for w in whichlocalchars:
+        if w not in ntoken:
+            continue
+        # fi
+        a = ntoken.find(w)
+        if a == -1:
+            continue
+        # fi
+        lw = len(w)
+        lt = len(ntoken)
+        if lw + a != lt and len(whichlocalcharswary[w][numarry_indexes]) != 0:
+            print_warning("Found character variable {}, but not at end of token, and it needs dimensions.".format(w), original_line)
+            continue
+        # fi
+        if a > 0:
+            beforetoken = ntoken[0:a]
+        else:
+            beforetoken = ''
+        # fi
+        if lw + a != lt:
+            aftertoken = ntoken[a+lw:] + aftertokenline
+        else:
+            aftertoken = '' + aftertokenline
+        # fi
+        if len(whichlocalcharswary[w][numarry_indexes]) == 0:
+            if whichlocalcharswary[w][numarry_value_type][0] is None:   # if not set
+                continue
+            elif whichlocalcharswary[w][numarry_value_type][0] == 0:    # if number
+                b = str(whichlocalcharswary[w][numarry_values][0])
+            else:                                                       # if character string
+                b = whichlocalcharswary[w][numarry_values][0]
+            # fi
+            ntoken = beforetokenline + beforetoken + b + aftertoken
+            return ntoken
+        else:
+            ntoken = ntoken[a:lt]
+            ntoken, aftertoken = replace_array_char(whichlocalcharswary[w], ntoken, aftertoken, original_line)
+            ntoken = beforetokenline + beforetoken + ntoken + aftertoken
+            return ntoken
+        # fi
+    # rof
+
+    return line
+# End of replace_char_var
+
+# ============================================================================
+# Go past all delimiters to an alpha for possible starting of character variable.
+# Returns start of token, and start of delimiter or EOLN.
+
+def next_token(startat, strg):
+    while startat < len(strg) and not strg[startat].isalpha():
+        startat = startat + 1
+    # elihw
+    if startat >= len(strg):
+        return None, None
+    # fi
+    startoftoken = startat
+    while startat < len(strg) and (strg[startat].isalnum() or strg[startat] == '_'):
+        startat = startat + 1
+    # elihw
+    return startoftoken, startat
+# End of next_token
+
+# ============================================================================
+# Returns start of first token (MUST BE zero), and start of delimiter.
+
+def first_token(strg):
+    # Token must start with alpha.
+    if strg is None or strg == '' or not strg[0].isalpha():
+        return None
+    # fi
+    looking = 0
+    while looking < len(strg) and (strg[looking].isalnum() or strg[looking] == '_'):
+        looking = looking + 1
+    # elihw
+    return looking
+# End of first_token
+
+# ============================================================================
+def char_var_subst_whole_string(strg, line):
+    global whichlocalchars
+
+    if whichlocalchars == []:
+        return strg
+    # fi
+    o_strg = strg
+    w = 0
+    while w < len(strg):
+        linestarts,lineends = next_token(w, strg)
+        if linestarts is None:
+            return strg
+         # fi
+        strg = replace_char_var(strg, linestarts, lineends, line)
+        if strg != o_strg:
+            o_strg = strg
+            w = 0
+            i_line.append('chrvs: ' + o_strg)             # Line as fixed or whatever.
+        else:
+            w = lineends
+        # fi
+    # elihw
+    return strg
+# End of char_var_subst_whole_string
+
+# ============================================================================
+def char_var_subst_first_token(line):
+    if whichlocalchars == []:
+        return line
+    # fi
+    repeat = True
+    lineends = first_token(line)
+    if lineends is None:
+        return line                             # Nothing to change.
+    # fi
+    replacedline = replace_char_var(line, 0, lineends, line)
+    return replacedline
+# End of char_var_subst_first_token
+
+# ============================================================================
+# process_line([t0, t1], line) => possible command, rest of line, with delimiter after possible command.
 # Parse and process line.
-def process_line(t, line):
+
+def process_line(line):
+    global last_voice_staff
     global iftest                       # check if after if or else.
     global ifdepth                      # level of if/else/endif
     global commands
@@ -9281,18 +10167,22 @@ def process_line(t, line):
     global macro_buffer                 # Name of macro, array of lines for macro.
     global measure_on
 
-    if not t or len(t) == 0 or not t[0] or t[0].lstrip() == '':
-        return
-    elif len(t) == 1 or (len(t) == 2 and t[1] == ''):
-        command = t[0].lstrip()
-        t_args = None
-    else:
-        command = t[0].lstrip()
-        t_args = t[1:]
-        if t_args and len(t_args) >= 0:
-            t_args[0] = t_args[0].lstrip()
-        # fi
+    t0 = re.sub(r'^([a-zA-Z0-9%_]*).*$', r'\1', line, count=1)   # First token on line.
+    t1 = re.sub(r'^[a-zA-Z0-9%_]*(.*)$', r'\1', line, count=1)   # Rest of line.
+
+    command = t0.lstrip()
+    t_args = t1.strip()
+    if command == '':
+        command = t_args
+        t_args = ''
     # fi
+
+    if len(t1) > 0:
+        delimiter = t1[0]
+    else:
+        delimiter = None
+    # fi
+    # Note: t0 + t1 = line. :) [Thus know how to do things in character variable substitution.]
 
     if cstop_processing:
         # Read until cstart found (or end of file)
@@ -9317,11 +10207,35 @@ def process_line(t, line):
         if command is None:             # Ignore nothing given.
             return
         # fi
-        if command in macro_buffer.keys():
-            replace_macro(command, t_args, line)
-            return                      # Henceforth get lines from macro_buffer.
+        if command in commands and commands[command][0] in (do_vars, do_encode, do_calc):
+            # Do NOT substitute variables on these lines.
+            commands[command][0](t_args, line)      # Process command vars, encode, or calc.
+            return
         # fi
-        if command[0] == '%':           # Change single percent to double percent signs.
+        numcharvar = 0
+        while True:
+            nline = char_var_subst_whole_string(t_args, line).strip()
+            if nline == t_args:
+                break
+            # fi
+            numcharvar = numcharvar + 1
+            if numcharvar > 25:
+                print_error("Over 25 character variable substitutions done on arguments - loop?", line)
+                break
+            # fi
+            t_args = nline
+            i_line.append('chrvs: ' + command + ' ' + line)             # Line as fixed or whatever.
+        # elihw
+        if command is None or command == '':
+            return
+        # fi
+        if command in macro_buffer:
+            if delimiter in [ ' ',"\t"]:
+                t_args = ',' + t_args
+            # fi
+            replace_macro(command, t_args, line)
+            return                          # Henceforth get lines from macro_buffer.
+        elif command[0] == '%':             # Change single percent to double percent signs.
             command = '%%'
         # fi
         if command in commands:
@@ -9338,17 +10252,120 @@ def process_line(t, line):
             print_error("Notes after a goto are not allowed. measure='{}'".format(measure_on), line)
             return
         # fi
+
         process_notes(line)
-    else:                               # Here if false for "if" -- special else, or in else, or both.
-        if t[0] in commands:
-            if commands[t[0]][0] in (do_cstopnow, do_if, do_else, do_endif):
-                commands[t[0]][0](t_args, line)
-            # fi
-        # fi
+
         return
+    # fi
+    # Do not do macros in false part of if/elif/else section.
+    if command in commands:
+        if commands[command][0] in (do_cstopnow, do_if, do_else, do_else_if, do_endif):
+            commands[command][0](t_args, line)
+        # fi
     # fi
     return
 # End of process_line
+
+# ----------------------------------------------------------------------------
+def dothefile():
+    global last_voice_staff
+    global commentonline
+    global precomment
+    global linecount
+    global which_file_in
+
+    precomment = ''
+    while True:
+        line, commentonline = read_next_line()
+        line = line.rstrip()
+        if not line:
+            continue
+        # fi
+        num_putd = 0
+        numcharvar = 0
+        while True:
+            if macro_defining is None:
+                if line[0] == "\t" or re.match(r'^        ', line):
+                    # This is a continuation line.
+                    line = last_voice_staff + ' ' + line.strip()
+                    break
+                # fi
+                line = line.lstrip()
+                if line and line[0] == '=':
+                    line = process_putd(line)
+                    i_line.append('putd:  ' + line)             # Line as fixed or whatever.
+                    if len(line) > 0 and line[0] == '=':
+                        num_putd += 1
+                        if num_putd > 25:
+                            print_error("Over 25 putd's done on line", line)
+                            break
+                        # fi
+                        continue
+                    # fi
+                elif len(line) >= 1 and line[0] == '.' and (len(line) == 1 or (line[1] == "\t" or line[1] == ' ')):
+                    line = line[1:].lstrip()
+                    if len(line) == 0:
+                        break
+                    # fi
+                    continue
+                # fi
+                nline = char_var_subst_first_token(line)
+                if nline != line:
+                    numcharvar = numcharvar + 1
+                    if numcharvar > 25:
+                        print_error("Over 25 character variable substitutions done on first token of line", line)
+                        break
+                    # fi
+                    line = nline
+                    i_line.append('charv: ' + line)             # Line as fixed or whatever.
+                    continue        # might have putd's or continuation line.
+                # fi
+            else:
+                nline = char_var_subst_whole_string(line, line).rstrip()
+                if nline != line:
+                    numcharvar = numcharvar + 1
+                    if numcharvar > 25:
+                        print_error("Over 25 character variable substitutions done on line", line)
+                        break
+                    # fi
+                    line = nline
+                    i_line.append('chrvs: ' + line)             # Line as fixed or whatever.
+                    continue        # might have putd's or continuation line.
+                # fi
+            # fi
+            break
+        # elihw
+        if len(line) == 0:          # Ignore empty line.
+            continue
+        elif line[0] == "\t":
+            line = (' ' * 8) + line[1:]
+        # fi
+        if line.startswith('^        '):
+            print_error("continuation line -- NOTDONEYET!",line)
+        else:
+            line = line.strip()     # Strip leading and trailing spaces.
+        # fi
+        if len(line) == 0:          # Ignore empty line.
+            continue
+        # fi
+        # If command == '*' ignore.
+        if line[0] == '*':
+            precomment = precomment + line + "\n"   # Comment line.
+        elif line[0] == '#':        # C pre-processor line.
+            # Parse # line to get line number and file.
+            uxit = re.sub('^ *# ([0-9]+) "([^"]+)".*$', r"\1 \2", line)
+            if uxit != line:               # If no 3rd argument (flags).
+                wxit = re.split(r' ', uxit, maxsplit = 1)
+                linecount = int(wxit[0]) - 1
+                which_file_in = wxit[1]
+            # fi
+        else:                       # Note: empty blank line passed through.
+            process_line(line)
+            precomment = ''
+        # fi
+    # elihw
+    return
+# End of dothefile
 
 # ----------------------------------------------------------------------------
 def parse_args():
@@ -9522,7 +10539,7 @@ def parse_args():
                 typ = 1             # character string
                 break
             # rof
-            createvar(sdef, sdefs[1], typ)   # pre-define
+            createlocalvar(sdef, sdefs[1], len(macro_executing_depth), typ)   # pre-define
         # rof
     return
 # End of parse_args
@@ -9541,11 +10558,7 @@ def main():
     global measure_on
     global key_default
     global key_voice
-    global commentonline
-    global precomment
     global which_file_in
-    global linecount
-    global do_csv_read
 
     parse_args()
     if args.vertical or args.horizontal:
@@ -9591,74 +10604,7 @@ def main():
         # fi
     # fi
 
-    precomment = ''
-    while True:
-        line, commentonline = get_line()
-        if line:
-            if do_csv_read:
-                read_csv_file(line)
-                continue
-            # fi
-            if (linecount == 1 and args.fluidsynth):
-                if line[:17] == '0, 0, Header, 1, ':
-                    do_csv_read = True
-                    continue
-                # fi
-            # fi
-            # Split line on spaces, then process line.
-            num_putd = 0
-            while True:
-                if macro_defining is None:
-                    if line and line[0] == '=':
-                        line = process_putd(line)
-                        if len(line) > 0 and line[0] == '=':
-                            num_putd += 1
-                            if num_putd > 100:
-                                print_error("Over 100 putd's done on line", line)
-                                break
-                            # fi
-                            continue
-                        # fi
-                    # fi
-                # fi
-                line = re.sub(r'   *', r' ', line)                      # multiple spaces to single.
-                t0 = re.sub(r'(^ *[^ ]*).*$', r'\1', line, count=1)     # First non-space thing on line.
-                t1 = re.sub(r'^ *[^ ]*', '', line, count=1)             # Everything after first thing.
-                t_tmp = t0.lstrip()                                     # For command lookup.
-                t = [ t0, t1 ]                                          # Note: a leading space.
-                if t_tmp and t_tmp == '.':                              # Indented lines - plato "."
-                    # If command == '.' toss '.'
-                    if len(t) == 2 and t[1]:
-                        line = t[1]
-                    else:
-                        t = None
-                        line = None
-                        break
-                    # fi
-                    continue                                            # Try again to get line.
-                # fi
-                break
-            # elihw
-
-            if t_tmp and t_tmp[0]:
-                # If command == '*' ignore.
-                if t_tmp[0] != '*' and line[0] != '*' and t_tmp[0] != '#' and line[0] != '#':
-                    process_line(t, line)
-                    precomment = ''
-                elif line[0] == '#':
-                    # Parse # line to get line number and file.
-                    uxit = re.sub('^ *# ([0-9]+) "([^"]+)".*$', r"\1 \2", line)
-                    if uxit != line:               # If no 3rd argument (flags).
-                        wxit = re.split(r' ', uxit, maxsplit = 1)
-                        linecount = int(wxit[0]) - 1
-                        which_file_in = wxit[1]
-                    # fi
-                else:
-                    precomment = precomment + line + "\n"
-                # fi
-            # fi
-        # fi
-    # elihw
+    dothefile()
     return
 # End of main
 
