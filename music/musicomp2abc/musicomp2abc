@@ -649,7 +649,6 @@ def recompute_whichlocalchars():
     global whichlocalcharswary
 
     new_which = {}
-#--    for wary in calculate.arrays + calculate.local_arrays + calculate.note_arrays:
     for wary in calculate.arrays + calculate.local_arrays:
         if 1 in wary[numarry_value_type]:
             if wary[numarry_name] not in new_which:
@@ -3993,7 +3992,11 @@ def do_pass2():
 # End of do_pass2
 
 # ----------------------------------------------------------------------------
-# Get a line. Put it in "line" and return it.
+# Get the next line, file, or macro.
+# Return:
+#   full_line           - the line without $$ comments.
+#   commentdollardollar - The $$ comment, with the two dollar signs.
+
 def read_next_line():
     global i_line
     global linecount
@@ -4013,7 +4016,7 @@ def read_next_line():
         linenumber = macro_line[macrodepth]
         lines = macro_buffer[the_macro]
         if linenumber >= len(lines):
-            # del is zero starting index - Use it to delete macro created variables.
+            # No lines left, delete macro created variables.
             c = []
             for w in range(0, len(calculate.arrays)):
                 if calculate.arrays[w][numarry_maclevel] == l:
@@ -4050,6 +4053,7 @@ def read_next_line():
                     del calculate.note_arrays[w]
                 # rof
             # fi
+            # Delete rest of macro variables.
             macro_executing_depth.pop()
             del macro_line[l]
             del macro_executing_args[l]
@@ -4064,9 +4068,6 @@ def read_next_line():
         # rof
         i_line.append('margs: ' + line)                         # Line after argument processing done
         macro_line[macrodepth] = linenumber + 1
-#--        # Example in IMS documentation with "HZ".
-#--        line = line.replace("\t", ' ')                          # tabs to spaces
-#--        line = line.strip()                                     # Macro line does not have leading spaces.
         return line, ''
     # fi
 
@@ -4139,8 +4140,7 @@ def read_next_line():
         # yrt
         break
     # elihw
-    do_pass2()
-    sys.exit(errors_happened)
+    return None, None
 # End of read_next_line
 
 # ----------------------------------------------------------------------------
@@ -4957,6 +4957,7 @@ def do_tempo(t_args, line):
 def do_cstopnow(t_args, line):
     global errors_happened
 
+    print_error("cstop* processing should be done elsewhere?", line)
     do_pass2()
     sys.exit(errors_happened)
 # End of do_cstopnow
@@ -10373,31 +10374,35 @@ def process_line(line):
 
     if cstop_processing:
         # Read until cstart found (or end of file)
-        if command in commands and commands[command][1]:    # If flag to process while in cstop.
+        if command in commands and commands[command][0] == do_cstopnow:
+            return True
+        elif command in commands and commands[command][1]:  # If flag to process while in cstop.
             commands[command][0](t_args, line)              # Process some commands while cstop-ped.
         # fi
-        return                          # Done with current cstop processing.
+        return False                    # Done with current cstop processing.
     # fi
 
     if macro_defining is not None:
-        if command in commands and commands[command][0] in (do_endm, do_cstopnow):
+        if command in commands and commands[command][0] == do_cstopnow:
+            return True
+        elif command in commands and commands[command][0] == do_endm:
             commands[command][0](t_args, line)      # Process command endm or cstop*.
-            return
+            return False
         # fi
         macro_define(command, t_args, line)
-        return
+        return False
     # fi
 
     # Doing if section or else section.
     if iftest[ifdepth] == -1 or iftest[ifdepth] == 1:
         # Try to process command.
         if command is None:             # Ignore nothing given.
-            return
+            return False
         # fi
         # Do NOT substitute variables for these commands: vars, encode, calc.
         if command in commands and commands[command][0] in (do_vars, do_encode, do_calc, do_calcc, do_calcs):
             commands[command][0](t_args, line)      # Process command vars, encode, or calc.
-            return
+            return False
         # fi
         numcharvar = 0
         while True:
@@ -10414,14 +10419,14 @@ def process_line(line):
             i_line.append('2chvs: ' + t_args)             # Line as fixed or whatever.
         # elihw
         if command is None or command == '':
-            return
+            return False
         # fi
         if command in macro_buffer:
             if delimiter in [ ' ',"\t"]:
                 t_args = ',' + t_args
             # fi
             replace_macro(command, t_args, line)
-            return                          # Henceforth get lines from macro_buffer.
+            return False                    # Henceforth get lines from macro_buffer.
         elif command[0] == '%':             # Change single percent to double percent signs.
             command = '%%'
         # fi
@@ -10433,11 +10438,11 @@ def process_line(line):
                 print("    ", sys.exc_info()[0], sys.exc_info, file=sys.stderr, flush=True)
             # fi
             r(t_args, line)
-            return
+            return False
         # fi
         if measure_on in goto_table:
             print_error("Notes after a goto are not allowed. measure='{}'".format(measure_on), line)
-            return
+            return False
         # fi
 
         if delimiter in [' ', '\s']:
@@ -10446,16 +10451,17 @@ def process_line(line):
             nline = command + t_args
         # fi
         process_notes(nline, line)
-
-        return
+        return False
     # fi
     # Do not do macros in false part of if/elif/else section.
     if command in commands:
-        if commands[command][0] in (do_cstopnow, do_if, do_else, do_else_if, do_endif):
+        if commands[command][0] == do_cstopnow:
+            return True
+        elif commands[command][0] in (do_if, do_else, do_else_if, do_endif):
             commands[command][0](t_args, line)
         # fi
     # fi
-    return
+    return False
 # End of process_line
 
 # ----------------------------------------------------------------------------
@@ -10469,10 +10475,13 @@ def dothefile():
     precomment = ''
     while True:
         line, commentonline = read_next_line()
-        line = line.rstrip()
+        if line is None and commentonline is None:
+            return
+        # fi
         if not line:
             continue
         # fi
+        line = line.rstrip()
         num_putd = 0
         numcharvar = 0
         while True:
@@ -10551,7 +10560,7 @@ def dothefile():
                 which_file_in = wxit[1]
             # fi
         else:                       # Note: empty blank line passed through.
-            process_line(line)
+            ifdone = process_line(line)
             precomment = ''
         # fi
     # elihw
@@ -10796,6 +10805,8 @@ def main():
     # fi
 
     dothefile()
+
+    do_pass2()
     return
 # End of main
 
@@ -10804,9 +10815,10 @@ if __name__ == '__main__':
     main()
 # fi
 # ----------------------------------------------------------------------------
-exit(errors_happened)
+sys.exit(errors_happened)
+#-- exit(errors_happened)       # Does NOT work as a programmer might expect.
 # ----------------------------------------------------------------------------
-# End of file musicomp2abc
+# End of program musicomp2abc
 # ----------------------------------------------------------------------------
 
 # Header:
@@ -11588,3 +11600,4 @@ exit(errors_happened)
 #     126 Mono Operation
 #     127 Poly Mode
 # ----------------------------------------------------------------------------
+# End of file musicomp2abc
