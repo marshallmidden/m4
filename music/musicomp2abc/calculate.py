@@ -86,6 +86,11 @@ numarry_value_type = 4      # Array of types None=not-set, 0=int/float, 1= chara
 #--            [ 1 ] ]    # character string
 #-- local_arrays.append(warray)
 #-- 
+#-- warray = [ 'CHARSTRING', 8,
+#--            [ 2 ], 
+#--            [ '3e+4 4c8 [4d2 5a] 3c4 5a2', 'second-argument' ],
+#--            [ 1,1 ] ]    # character strings
+#-- local_arrays.append(warray)
 #-----------------------------------------------------------------------------
 class SymbolDesc:
     def __init__(self, symbol, lprio, rprio, eval):
@@ -117,7 +122,7 @@ def next_token(string):
     c = string[0]                           # Character in string
     if c in [ '"', "'" ]:
         if len(string) >= 1:
-            x = string[1:].find(c)           # Find the terminating single/double quote.
+            x = string[1:].find(c)          # Find the terminating single/double quote.
             if x >= 0:
                 therest = string[x+2:]
                 strng = string[1:x+1]
@@ -159,7 +164,7 @@ def next_token(string):
                 return string[1:], c, 'MISMATCH #a len(string)={}'.format(len(string))
             # fi
             return None, c, 'MISMATCH #b len(string)={}'.format(len(string))
-        elif c == '=' and len(string) >= 2:   # Possible ==, =>, =<
+        elif c == '=' and len(string) >= 2: # Possible ==, =>, =<
             if string[1] == '=':
                 return string[2:], '==', 'OPER'
             elif string[1] == '>':
@@ -168,17 +173,17 @@ def next_token(string):
                 return string[2:], '<=', 'OPER'
             # fi
             return string[1:], '=', 'OPER'
-        elif c == '!' and len(string) >= 2:   # Possible !=
+        elif c == '!' and len(string) >= 2: # Possible !=
             if string[1] == '=':
                 return string[2:], '!=', 'OPER'
             # fi
             return None, c, 'MISMATCH #c len(string)={}'.format(len(string))
-        elif c == '<' and len(string) >= 2:   # Possible <=
+        elif c == '<' and len(string) >= 2: # Possible <=
             if string[1] == '=':
                 return string[2:], '<=', 'OPER'
             # fi
             return string[1:], '<', 'OPER'
-        elif c == '>' and len(string) >= 2:   # Possible <=
+        elif c == '>' and len(string) >= 2: # Possible <=
             if string[1] == '=':
                 return string[2:], '>=', 'OPER'
             # fi
@@ -189,10 +194,10 @@ def next_token(string):
         # fi
         return None, c, 'OPER'
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-    elif c.isalpha():                         # First character is [a-zA-Z].
+    elif c.isalpha():                       # First character is [a-zA-Z].
         m = re.match(r'[_a-zA-Z0-9]+', string)
         ret = strg = m.group(0)             # We know there is at least one character.
-        if strg == 'lpause':                 # convert a few names to the other name.
+        if strg == 'lpause':                # convert a few names to the other name.
             ret = 'pause'
         elif strg == 'lstac':
             ret = 'stac'
@@ -203,7 +208,7 @@ def next_token(string):
             return string[len(strg):], ret, 'ID'
         # fi
         return None, ret, 'ID'
-    elif c.isdigit() or c == '.':             # First is a digit.
+    elif c.isdigit() or c == '.':           # First is a digit.
         m = re.match(r'[0-9.]+', string)
         strg = m.group(0)                   # We know there is at least one character.
         if strg.count('.') > 1:             # Only one decimal place in a number.
@@ -213,7 +218,7 @@ def next_token(string):
             return string[len(strg):], b, 'NUMBER'
         # fi
         return None, strg, 'NUMBER'
-    elif re.match(r'[\[\](){}]', c):          # Known parenthesis/brackets/braces.
+    elif re.match(r'[\[\](){}]', c):        # Known parenthesis/brackets/braces.
         if len(string) > 1:                 # Something after this alphabetic string.
             return string[1:], c, 'SYNTAX'
         # fi
@@ -235,14 +240,22 @@ def tokenize(code):
     last_token = ''
     while code is not None and code != '':
         therest, token, kind = next_token(code)
-        if (((last_kind in ['NUMBER', 'ID']) and (kind in ['NUMBER', 'ID'])) or
-            ((last_kind == 'SYNTAX' and kind == 'SYNTAX') and
-# NOTDONEYET = {}
-             (last_token in [')', ']', '}'] and token in ['(', '[', '{'])) or
-# NOTDONEYET = {}
-            (last_kind == 'SYNTAX' and last_token in [')',']','}'] and
-             (kind == 'ID' or kind == 'NUMBER')) ):
+#PRINT        print("tokenize - {},{},{}=next_token({})".format(therest,token,kind,code), file=sys.stderr,flush=True) # PRINT
+        if (last_kind == 'SYNTAX' and kind == 'SYNTAX' and
+              (last_token == ')' and token == '{')):
+            # character string token limiting.
+#PRINT            print("tokenize - imply TOKEN-LIMITING", file=sys.stderr,flush=True) # PRINT
+            yield ['OPER', 'TOKEN-LIMITING']
+        elif last_kind in ['NUMBER', 'ID'] and kind in ['NUMBER', 'ID']:
             # Implied multiplication between numbers and id's.
+            yield ['OPER', '*']
+        elif (last_kind == 'SYNTAX' and kind == 'SYNTAX' and
+              (last_token in [')', ']', '}'] and token in ['(', '[', '{'])):
+            # Implied multiplication between () and ().
+            yield ['OPER', '*']
+        elif (last_kind == 'SYNTAX' and last_token in [')',']','}'] and
+              (kind == 'ID' or kind == 'NUMBER') ):
+            # Implied multiplication between () and numbers or id.
             yield ['OPER', '*']
         # fi
         yield [kind, token]
@@ -520,6 +533,20 @@ def compute_value(op, arg1, arg2):
             return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ 'NUMBER',  -1 if int(a1) == -1 or int(a2) == -1 else 0 ]
+
+    elif op == 'TOKEN-LIMITING':
+        if t1 != 'CHAR':
+            return [ "ERROR - first operand must be a character variable a1='{}' t1={}".format(a1,t1), None ]
+        elif t2 not in ['NUMBER', 'COMMA']:
+            return [ "ERROR - second operand must be a NUMBER or comma separated values a2='{}' t2={}".format(a2,t2), None ]
+        elif t2 == 'COMMA' and len(a2) != 2:
+            return [ "ERROR - second operand comma separated values more than 2 a2='{}' t2={}".format(a2,t2), None ]
+        elif t2 == 'NUMBER':
+            x = get_tokens_from_char(a1, a2, None)
+        else:
+            x = get_tokens_from_char(a1, a2[0], a2[1])
+        # fi
+        return [ 'CHAR',  x ]
     # fi
 
     return [ "ERROR - unknown operator '{}' '{}' '{}'".format(arg1, op, arg2) , None ]
@@ -550,7 +577,7 @@ def quotes_eval(args):
 
 #-----------------------------------------------------------------------------
 def binary_eval(args):
-#PRINT    print('binary_eval - Entering args={}'.format(args))    # PRINT
+#PRINT    print('binary_eval - Entering args={}'.format(args), file=sys.stderr,flush=True)    # PRINT
     if args is None or len(args) != 3:
         return [ 'ERROR - binary_eval wrong number of arguments, args={}'.format(args), None ]
     # fi
@@ -627,20 +654,20 @@ def register_postsymbol(oper, lprio, rprio, eval=None):
 
 #-----------------------------------------------------------------------------
 def id_symbol(id):
-#PRINT    print('id_symbol - Entering id={}'.format(id))  # PRINT
+#PRINT    print('id_symbol - Entering id={}'.format(id), file=sys.stderr,flush=True)  # PRINT
     return SymbolDesc(id, 99999, 100000, identity_eval)
 # End of id_symbol
 
 #-----------------------------------------------------------------------------
 def evaluate_handle(args):
-#PRINT    print('evaluate_handle - Entering args={}'.format(args))  # PRINT
+#PRINT    print('evaluate_handle - Entering args={}'.format(args), file=sys.stderr,flush=True)  # PRINT
     for i in args:
         if type(i) == SymbolDesc:
             a = i.eval(args)
             return a
         # fi
     # rof
-    raise RuntimeError('Internal error: no eval found in {}'.format(args))
+    raise RuntimeError('Internal error: no eval found in {}'.format(args), file=sys.stderr,flush=True)
 # End of evaluate_handle
 
 #-----------------------------------------------------------------------------
@@ -655,7 +682,7 @@ def advance():
 #PRINT    print('advance - Entering')   # PRINT
     try:
         cur_token = lexer.__next__()                    # [ kind, item ]
-#PRINT        print('advance - cur_token={}'.format(cur_token)) # PRINT
+#PRINT        print('advance - cur_token={}'.format(cur_token), file=sys.stderr,flush=True) # PRINT
     except StopIteration:
         cur_token = None
     # yrt
@@ -676,7 +703,7 @@ def cur_sym(allow_presymbol):
     global presymbols
     global cur_token
     
-#PRINT    print("cur_sym - Entering cur_token='{}'".format(cur_token), file=sys.stderr, flush=True)   # PRINT
+#PRINT    print("cur_sym - Entering cur_token='{}' allow_presymbol={}".format(cur_token,allow_presymbol), file=sys.stderr, flush=True)   # PRINT
     if cur_token is None:
         return None
     elif cur_token[0] == 'ID':                              # kind
@@ -772,14 +799,11 @@ def parse(s):
 
 def get_tokens_from_char(strng, start, lth):
     start = int(round(start)) - 1
-#--    print("get_tokens_from_char - Entering strng={} start={} lth={}".format(strng,start,lth), file=sys.stderr, flush=True)
+#PRINT    print("get_tokens_from_char - Entering strng={} start={} lth={}".format(strng,start,lth), file=sys.stderr, flush=True)  # PRINT
     if strng is None or strng == '' or start < 0:
         return ''
     # fi
-#--    print("get_tokens_from_char - #1", file=sys.stderr, flush=True)
-#--     a = [i for i in re.split(r'(\d+|\W+)', strng) if i]
-    a = [i for i in re.split(r'(\w+|[ \t]*\W+[ \t]*)', strng) if i]
-#--    print("a={}".format(a), file=sys.stderr, flush=True)
+    a = [i for i in re.split(r'([a-zA-Z0-9_+-]+|[ \t]*[^a-zA-Z0-9_+-]+[ \t]*)', strng) if i]
     # Get rid of only spaces.
     new = []
     for i in a:
@@ -790,9 +814,7 @@ def get_tokens_from_char(strng, start, lth):
         x = x.replace("\t", '')
         new.append(x)
     # rof
-#--    print("new={}".format(new), file=sys.stderr, flush=True)
     if len(new) < start:
-#--        print("len(new)={}".format(len(new)), file=sys.stderr, flush=True)
         return ''
     # fi
     if lth is None:
@@ -800,14 +822,10 @@ def get_tokens_from_char(strng, start, lth):
     else:
         lth = int(round(start + lth))
     # fi
-#--    print("lth={}".format(lth), file=sys.stderr, flush=True)
-#--    print("new={} start={} lth={}".format(new,start,lth), file=sys.stderr, flush=True)
     x = new[start : lth]
-#--    print("x={}".format(x), file=sys.stderr, flush=True)
     w = ''
     prev = ''
     for y in x:
-#--        print("y={}".format(y), file=sys.stderr, flush=True)
         if y == '':
             w = w + ' '
         elif re.match(r'\w+', prev) and re.match(r'\w+', y):
@@ -816,9 +834,7 @@ def get_tokens_from_char(strng, start, lth):
             w = w + y
         # fi
         prev = y
-#--        print("w={}".format(w), file=sys.stderr, flush=True)
     # rof
-#--    print("get_tokens_from_char - w={}".format(w), file=sys.stderr, flush=True)
     return w
 # End of get_tokens_from_char
 
@@ -829,7 +845,7 @@ def result_functions(arg1, arg2):
     global local_arrays
     global note_arrays
 
-#PRINT    print('result_functions - #1 arg1={} arg2={}'.format(arg1,arg2))  # PRINT
+#PRINT    print('result_functions - #1 arg1={} arg2={}'.format(arg1,arg2), file=sys.stderr,flush=True)  # PRINT
     if arg1[0] != 'ID':
         # 'NUMBER' -- implied multiply
         # Do implied multiply
@@ -858,7 +874,7 @@ def result_functions(arg1, arg2):
         fu = functions[arg1[1]]
         wh = fu[0]
         ar = fu[1]
-#PRINT        print('result_functions - #2 fu={}'.format(fu))  # PRINT
+#PRINT        print('result_functions - #2 fu={}'.format(fu), file=sys.stderr,flush=True)  # PRINT
         if arg2[0] not in ar:
             return [ "ERROR - function '{}' called with wrong argument type {} vs {}".format(arg1[1], arg2[0], ar), None ]
         # fi
@@ -1344,7 +1360,7 @@ def f_print(arg):
         print(a)
         return arg
     else:
-        print('PRINT: UNKNOWN TYPE={}'.format(arg))
+        print('PRINT: UNKNOWN TYPE={}'.format(arg), file=sys.stderr,flush=True)
         return arg
     # fi
 # End of f_print
@@ -1520,21 +1536,24 @@ def cexp_parser():
     # Assignment.
     register_postsymbol('=',                               5,   4)                      # r to l
     register_presymbol('"' + "'",                          6,   7, quotes_eval)         # quotes to eoln
-    register_postsymbol(',',                               9,   8)                      # l to r
-    # Cominbation.
-    register_postsymbol(['$or$', '$and$'],                10,  11)                      # l to r
+    # Special, dimensions, functions.
+    register_postsymbol(',',                              11,  10)                      # l to r
+    # Special, character string token limiting.
+    register_postsymbol('TOKEN-LIMITING',                 21,  22)                      # l to r
+    # Combination.
+    register_postsymbol(['$or$', '$and$'],                30,  31)                      # l to r
     # Logical.
-    register_postsymbol(['>','>=','<','<=','==','!='],    20,  21)                      # l to r
+    register_postsymbol(['>','>=','<','<=','==','!='],    40,  41)                      # l to r
     # Bitwise.
     register_postsymbol(['$union$', '$mask$', '$diff$',
-                         '$cls$', '$ars$'],               30,  31)                      # l to r
+                         '$cls$', '$ars$'],               50,  51)                      # l to r
     # Math.
-    register_postsymbol(['+', '-'],                       40,  41)                      # l to r
-    register_postsymbol('/',                              50,  51)                      # l to r
-    register_postsymbol('*',                              60,  61)                      # l to r
-    register_postsymbol('**',                             71,  70)                      # r to l
+    register_postsymbol(['+', '-'],                       60,  61)                      # l to r
+    register_postsymbol('/',                              70,  71)                      # l to r
+    register_postsymbol('*',                              80,  81)                      # l to r
+    register_postsymbol('**',                             91,  90)                      # r to l
     # Leading + or -.
-    register_presymbol(['+', '-'],                        81,  80, unary_eval)          # r to l
+    register_presymbol(['+', '-'],                       101, 100, unary_eval)          # r to l
     # Parenthesis.
     register_postsymbol('(',                            1000,   1, open_paren_eval)     # l to r
     register_postsymbol(')',                               1, 1000, close_paren_eval)   # r to l
