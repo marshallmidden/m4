@@ -52,6 +52,7 @@ TESTS_PDF= ${TESTS:=.pdf}
 #+ TESTS_WAV = ${TESTS:=.wav}
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
+#-- MUSICOMP2ABC = ~/ims/imscomp
 MC_ARGS =
 #++ MC_ARGS = --warn_octave_accidental
 #-- MC_ARGS = --noxpose --voices=9
