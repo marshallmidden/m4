@@ -1,8 +1,14 @@
 #-----------------------------------------------------------------------------
-#++ SONGS  = b-6
-SONGS  = A1
+SONGS  = A
+SONGS += A1
+SONGS += A2
+#-- SONGS += A3
+SONGS += A4
+SONGS += A5
+SONGS += A6
+SONGS += A7
 #-----------------------------------------------------------------------------
-TESTS  = testing
+#-- TESTS  = testing
 #-----------------------------------------------------------------------------
 SONGS_E = ${SONGS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
@@ -81,7 +87,7 @@ clean:
 	rm -f ${SONGS_PDF} ${TESTS_PDF}
 	rm -f ${SONGS_E} ${TESTS_E}
 	rm -f *.stderr
-	rm -f *.h *.v *.csv *.mid *.E
+	rm -f *.h *.v *.csv *.mid *.E *.fs *.pdf *.ps *.abc
 #-----------------------------------------------------------------------------
 .PHONY: check
 check:

@@ -23,14 +23,12 @@ import re
 import math
 #-----------------------------------------------------------------------------
 #++ import inspect
-#++ print(inspect.currentframe().f_code.co_name, '#0')
+#++ print(inspect.currentframe().f_code.co_name, '#0', file=sys.stderr, flush=True)
 #-----------------------------------------------------------------------------
 global arrays
 arrays = [ ]
 global local_arrays
 local_arrays = [ ]
-global note_arrays
-note_arrays = [ ]
 #-----------------------------------------------------------------------------
 numarry_name = 0            # The name of the variable.
 numarry_maclevel = 1        # The macro level was in effect when created.
@@ -286,7 +284,6 @@ def identity_eval(args):
 def get_value(arg):
     global arrays
     global local_arrays
-    global note_arrays
 
 #PRINT    print("get_value - Entering arg='{}'".format(arg), file=sys.stderr,flush=True)  # PRINT
     if arg[0].startswith('ERROR'):
@@ -321,10 +318,9 @@ def get_value(arg):
 
     maxmaclev = -1
     maxwary = None
-#--    print('arrays={}'.format(arrays))
-#--    print('local_arrays={}'.format(local_arrays))
-#--    print('note_arrays={}'.format(note_arrays))
-    for wary in arrays + local_arrays + note_arrays:
+#--    print('arrays={}'.format(arrays), file=sys.stderr, flush=True)
+#--    print('local_arrays={}'.format(local_arrays), file=sys.stderr, flush=True)
+    for wary in arrays + local_arrays:
 #--        print('arg[1]={} wary[numarry_name]={}'.format(arg[1],wary[numarry_name]), file=sys.stderr, flush=True)
         if arg[1] == wary[numarry_name]:
             if wary[numarry_maclevel] >  maxmaclev:
@@ -353,7 +349,6 @@ def get_value(arg):
 def compute_value(op, arg1, arg2):
     global arrays
     global local_arrays
-    global note_arrays
 
 #PRINT    print("compute_value - Entering op='{}' arg1={} arg2={}".format(op,arg1,arg2), file=sys.stderr,flush=True)  # PRINT
     a2 = get_value(arg2)
@@ -386,7 +381,7 @@ def compute_value(op, arg1, arg2):
         # arrays here.
         maxmaclev = -1
         maxwary = None
-        for wary in arrays + local_arrays + note_arrays:
+        for wary in arrays + local_arrays:
             if a == wary[numarry_name]:
                 if wary[numarry_maclevel] >  maxmaclev:
                     maxmaclev = wary[numarry_maclevel]
@@ -542,9 +537,13 @@ def compute_value(op, arg1, arg2):
         elif t2 == 'COMMA' and len(a2) != 2:
             return [ "ERROR - second operand comma separated values more than 2 a2='{}' t2={}".format(a2,t2), None ]
         elif t2 == 'NUMBER':
+#PRINT            print('compute_value #1- calling get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
             x = get_tokens_from_char(a1, a2, None)
+#PRINT            print('compute_value #2- after get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
         else:
+#PRINT            print('compute_value #3- calling get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
             x = get_tokens_from_char(a1, a2[0], a2[1])
+#PRINT            print('compute_value #3- after get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
         # fi
         return [ 'CHAR',  x ]
     # fi
@@ -593,7 +592,7 @@ def binary_eval(args):
 
 #-----------------------------------------------------------------------------
 def unary_eval(args):
-#PRINT    print('unary_eval - Entering args={}')    # PRINT
+#PRINT    print('unary_eval - Entering args={}', file=sys.stderr, flush=True)    # PRINT
     if len(args) != 2:
         return [ 'ERROR - unary_eval args={}'.format(args), None ]
     elif type(args[0]) == SymbolDesc and type(args[1]) != SymbolDesc:
@@ -679,7 +678,7 @@ def advance():
     global lexer
     global cur_token
 
-#PRINT    print('advance - Entering')   # PRINT
+#PRINT    print('advance - Entering', file=sys.stderr, flush=True)   # PRINT
     try:
         cur_token = lexer.__next__()                    # [ kind, item ]
 #PRINT        print('advance - cur_token={}'.format(cur_token), file=sys.stderr,flush=True) # PRINT
@@ -724,7 +723,7 @@ def cur_sym(allow_presymbol):
 
 #-----------------------------------------------------------------------------
 def parse_to(prio):
-#PRINT    print('parse_to - Entering')  # PRINT
+#PRINT    print('parse_to - Entering', file=sys.stderr, flush=True)  # PRINT
     args = []
     while True:
         assert len(args) == 0 or (len(args) == 1 and type(args[0]) != SymbolDesc)
@@ -804,16 +803,21 @@ def get_tokens_from_char(strng, start, lth):
         return ''
     # fi
     a = [i for i in re.split(r'([a-zA-Z0-9_+-]+|[ \t]*[^a-zA-Z0-9_+-]+[ \t]*)', strng) if i]
+#PRINT    print("get_tokens_from_char - a={}".format(a), file=sys.stderr, flush=True)  # PRINT
     # Get rid of only spaces.
     new = []
     for i in a:
         if i in ' ':
             continue
         # fi
-        x = i.replace(' ', '')
-        x = x.replace("\t", '')
+#PRINT        print("get_tokens_from_char - #0a", file=sys.stderr, flush=True)  # PRINT
+#--        x = i.replace(' ', '')
+#--        x = x.replace("\t", '')
+        x = re.sub(r'\s+', r' ', i)
+#PRINT        print("get_tokens_from_char - #0b", file=sys.stderr, flush=True)  # PRINT
         new.append(x)
     # rof
+#PRINT    print("get_tokens_from_char - #1", file=sys.stderr, flush=True)  # PRINT
     if len(new) < start:
         return ''
     # fi
@@ -822,9 +826,11 @@ def get_tokens_from_char(strng, start, lth):
     else:
         lth = int(round(start + lth))
     # fi
+#PRINT    print("get_tokens_from_char - #2", file=sys.stderr, flush=True)  # PRINT
     x = new[start : lth]
     w = ''
     prev = ''
+#PRINT    print("get_tokens_from_char - #3", file=sys.stderr, flush=True)  # PRINT
     for y in x:
         if y == '':
             w = w + ' '
@@ -835,6 +841,8 @@ def get_tokens_from_char(strng, start, lth):
         # fi
         prev = y
     # rof
+#PRINT    print("get_tokens_from_char - #4", file=sys.stderr, flush=True)  # PRINT
+#PRINT    print("get_tokens_from_char - return {}".format(w), file=sys.stderr, flush=True)  # PRINT
     return w
 # End of get_tokens_from_char
 
@@ -843,7 +851,6 @@ def result_functions(arg1, arg2):
     global functions
     global arrays
     global local_arrays
-    global note_arrays
 
 #PRINT    print('result_functions - #1 arg1={} arg2={}'.format(arg1,arg2), file=sys.stderr,flush=True)  # PRINT
     if arg1[0] != 'ID':
@@ -879,9 +886,9 @@ def result_functions(arg1, arg2):
             return [ "ERROR - function '{}' called with wrong argument type {} vs {}".format(arg1[1], arg2[0], ar), None ]
         # fi
         try:
-#PRINT            print('result_functions - #11')  # PRINT
+#PRINT            print('result_functions - #11', file=sys.stderr, flush=True)  # PRINT
             a = wh(arg2)
-#PRINT            print('result_functions - #12')  # PRINT
+#PRINT            print('result_functions - #12', file=sys.stderr, flush=True)  # PRINT
             return a
         except:
             return [ "ERROR - performing function '{}' with argument '{}'".format(arg1, arg2), None ]
@@ -891,7 +898,7 @@ def result_functions(arg1, arg2):
     if arg2[0] in ['NUMBER', 'COMMA', 'CHAR']:
         maxmaclev = -1
         maxwary = None
-        for wary in arrays + local_arrays + note_arrays:
+        for wary in arrays + local_arrays:
             if arg1[1] == wary[numarry_name]:
                 if wary[numarry_maclevel] > maxmaclev:
                     maxmaclev = wary[numarry_maclevel]
@@ -962,7 +969,9 @@ def result_functions(arg1, arg2):
             if type(a2[1]) is not int and type(a2[1]) is not float: 
                 return [ "ERROR - character token fetching needs first argument as integer, but this has {}".format(type(a2[1][0])), None ]
             # fi
+#PRINT            print('result_functions #1- calling get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
             x = get_tokens_from_char(a1[1],a2[1],None)
+#PRINT            print('result_functions #2- after get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
         elif a2[0] == 'COMMA':              # Go from token number a2[1][0] for length a2[1][1]
             if len(a2[1]) != 2:
                 return [ "ERROR - character token fetching needs 1 or 2 arguments, but this has {}".format(len(a2[1])), None ]
@@ -972,7 +981,9 @@ def result_functions(arg1, arg2):
             elif type(a2[1][1]) is not int and type(a2[1][1]) is not float: 
                 return [ "ERROR - character token fetching needs second argument as integer, but this has {}".format(type(a2[1][0])), None ]
             # fi
+#PRINT            print('result_functions #3- calling get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
             x = get_tokens_from_char(a1[1], a2[1][0], a2[1][1])
+#PRINT            print('result_functions #4- after get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
         else:
             return [ "ERROR - character token fetching has bad type ({}) for token indexes".format(a2[0]), None ]
         # fi
@@ -1589,7 +1600,7 @@ def get_line():
             linecount = linecount + 1
             if line:
                 # delete anything from $$ onwards.
-                line = re.sub('[$][$].*$', '', line)
+                line = re.sub(r'[$][$].*$', r'', line)
                 # ignore leading and trailing spaces.
                 line = line.strip()
                 return line
