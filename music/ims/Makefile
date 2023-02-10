@@ -1,14 +1,15 @@
 #-----------------------------------------------------------------------------
-SONGS  = A
-SONGS += A1
-SONGS += A2
-#-- SONGS += A3
-SONGS += A4
-SONGS += A5
-SONGS += A6
-SONGS += A7
+SONGS  = b-6
 #-----------------------------------------------------------------------------
 #-- TESTS  = testing
+TESTS  = A
+TESTS += A1
+TESTS += A2
+#-- TESTS += A3
+TESTS += A4
+TESTS += A5
+TESTS += A6
+TESTS += A7
 #-----------------------------------------------------------------------------
 SONGS_E = ${SONGS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
@@ -45,23 +46,23 @@ CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp
 .SUFFIXES: .abc _m.ps .E .fs .csv .mid .pdf
 # output $@   -- input $<
 %.fs:  %.E
-	${IMSCOMP} ${MC_ARGS} --two --fluidsynth $< $@ || rm -f $@
+	${IMSCOMP} ${MC_ARGS} --two --fluidsynth $< $@
 %.csv:  %.E
-	${IMSCOMP} ${MC_ARGS} --midi1csv $< $@ || rm -f $@
+	${IMSCOMP} ${MC_ARGS} --midi1csv $< $@
 %.mid:  %.csv
-	csvmidi $< $@ || (rm -f $@ ; exit 1)
+	csvmidi $< $@
 %.abc:  %.E
-	${IMSCOMP} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
+	${IMSCOMP} ${MC_ARGS} --abc $< $@
 %_m.ps: %.abc
 	(${ABCM2PS} -l -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@)
 %.pdf:	%_m.ps
-	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
+	${PS2PDF} $< $@
 %.E: %.gcs
-	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
+	${CPP} $< -o $@
 %.v:    %.E ${IMSCOMP}
-	${IMSCOMP} ${MC_ARGS} --vert $< $@ || (rm -f $@ ; exit 1)
+	${IMSCOMP} ${MC_ARGS} --vert $< $@
 %.h:    %.E ${IMSCOMP}
-	${IMSCOMP} ${MC_ARGS} --hori $< $@ || (rm -f $@ ; exit 1)
+	${IMSCOMP} ${MC_ARGS} --hori $< $@
 #-----------------------------------------------------------------------------
 .PHONY: help
 help:
