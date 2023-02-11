@@ -272,6 +272,7 @@ def identity_eval(args):
         # fi
     elif len(args) == 2:
         a = args[0]
+        a = fix_to_number(a[0],a[1])        # Convert char to number.
         if a[0] == 'NUMBER':
             a[1] = float(a[1])
             return [ a ]
@@ -346,11 +347,34 @@ def get_value(arg):
 # End of get_value
 
 #-----------------------------------------------------------------------------
+def fix_to_number(t,a):
+    if t == 'CHAR':
+        try:
+            a = float(a)
+            t = 'NUMBER'
+        except:
+            pass
+        # fi
+    # fi
+    return t, a
+# End of fix_to_number
+
+#-----------------------------------------------------------------------------
+#        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
+# Try to make both a1 and a2 numbers.
+def fix_to_numbers(t1,a1,t2,a2):
+#DEBUG    print("fix_to_numbers - Entering t1={} a1={} t2={} a2={}".format(t1,a1,t2,a2), file=sys.stderr,flush=True)  # PRINT
+    t1, a1 = fix_to_number(t1, a1)
+    t2, a2 = fix_to_number(t2, a2)
+    return t1,a1,t2,a2
+# End of fix_to_numbers
+
+#-----------------------------------------------------------------------------
 def compute_value(op, arg1, arg2):
     global arrays
     global local_arrays
 
-#PRINT    print("compute_value - Entering op='{}' arg1={} arg2={}".format(op,arg1,arg2), file=sys.stderr,flush=True)  # PRINT
+#DEBUG    print("compute_value - Entering types:{} {} {} , vals:'{}' '{}' '{}'".format(type(op),type(arg1),type(arg2),op,arg1,arg2), file=sys.stderr,flush=True)  # PRINT
     a2 = get_value(arg2)
     t2 = a2[0]
     if a2 is None:
@@ -454,36 +478,66 @@ def compute_value(op, arg1, arg2):
 
     # Math: +, -, *, /, **
     if op == '+':
-        return [ t1, a1 + a2 ]
+        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
+        if (t1 == 'NUMBER' and t2 == 'NUMBER') or (t1 == 'CHAR' and t2 == 'CHAR'):
+            return [ t1, a1 + a2 ]
+        elif t1 == 'CHAR' or t2 == 'CHAR':
+            return [ t1, str(a1) + str(a2) ]
+        # fi
+        return [ "ERROR - Arguments are not Numbers or Characters a1='{}' a2='{}'".format(a1,a2), None ]
     # fi
     if op == '-':
-        if t2 != 'NUMBER':
+        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
+        if t1 != 'NUMBER' or t2 != 'NUMBER':
             return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ t1,  a1 - a2 ]
     elif op == '*':
-        if t2 != 'NUMBER':
+        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
+        if t1 != 'NUMBER' or t2 != 'NUMBER':
             return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ t1,  a1 * a2 ]
     elif op == '/':
-        if t2 != 'NUMBER':
+        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
+        if t1 != 'NUMBER' or t2 != 'NUMBER':
             return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
+        if a2 == 0:
+            return [ "ERROR - Second argument is zero a1='{}' a2='{}'".format(a1,a2), None ]
+        # fi
+        f = a1 / a2
         return [ t1,  a1 / a2 ]
     elif op == '**':
-        if t2 != 'NUMBER':
+        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
+        if t1 != 'NUMBER' or t2 != 'NUMBER':
             return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ t1,  a1 ** a2 ]
     # Logical: >, >=, <=, <, ==, !=
     elif op == '<=':
+        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
+        if t1 != 'NUMBER' or t2 != 'NUMBER':
+            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+        # fi
         return [ 'NUMBER', -1 if a1 <= a2 else 0 ]
     elif op == '>=':
+        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
+        if t1 != 'NUMBER' or t2 != 'NUMBER':
+            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+        # fi
         return [ 'NUMBER',  -1 if a1 >= a2 else 0 ]
     elif op == '>':
+        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
+        if t1 != 'NUMBER' or t2 != 'NUMBER':
+            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+        # fi
         return [ 'NUMBER',  -1 if a1 > a2 else 0 ]
     elif op == '<':
+        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
+        if t1 != 'NUMBER' or t2 != 'NUMBER':
+            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+        # fi
         return [ 'NUMBER',  -1 if a1 < a2 else 0 ]
     elif op == '==':
         return [ 'NUMBER',  -1 if a1 == a2 else 0 ]
@@ -492,39 +546,46 @@ def compute_value(op, arg1, arg2):
 
     # Bitwise: $cls$, $ars$, $mask$, $union$, $diff$
     elif op == '$mask$':
-        if t2 != 'NUMBER':
+        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
+        if t1 != 'NUMBER' or t2 != 'NUMBER':
             return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ 'NUMBER',  int(a1) & int(a2) ]
     elif op == '$union$':
-        if t2 != 'NUMBER':
+        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
+        if t1 != 'NUMBER' or t2 != 'NUMBER':
             return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ 'NUMBER',  int(a1) | int(a2) ]
     elif op == '$cls$':
-        if t2 != 'NUMBER':
+        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
+        if t1 != 'NUMBER' or t2 != 'NUMBER':
             return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ 'NUMBER',  int(a1) << int(a2) ]
     elif op == '$ars$':
-        if t2 != 'NUMBER':
+        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
+        if t1 != 'NUMBER' or t2 != 'NUMBER':
             return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ 'NUMBER',  int(a1) >> int(a2) ]
     elif op == '$diff$':
-        if t2 != 'NUMBER':
+        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
+        if t1 != 'NUMBER' or t2 != 'NUMBER':
             return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ 'NUMBER',  int(a1) ^ int(a2) ]             # xor
 
     # combination: $and$, $or$
     elif op == '$and$':
-        if t2 != 'NUMBER':
+        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
+        if t1 != 'NUMBER' or t2 != 'NUMBER':
             return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ 'NUMBER',  -1 if int(a1) == -1 and int(a2) == -1 else 0 ]
     elif op == '$or$':
-        if t2 != 'NUMBER':
+        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
+        if t1 != 'NUMBER' or t2 != 'NUMBER':
             return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ 'NUMBER',  -1 if int(a1) == -1 or int(a2) == -1 else 0 ]
@@ -539,7 +600,7 @@ def compute_value(op, arg1, arg2):
         elif t2 == 'NUMBER':
 #PRINT            print('compute_value #1- calling get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
             x = get_tokens_from_char(a1, a2, None)
-#PRINT            print('compute_value #2- after get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
+            print('compute_value #2- after get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
         else:
 #PRINT            print('compute_value #3- calling get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
             x = get_tokens_from_char(a1, a2[0], a2[1])
@@ -603,8 +664,12 @@ def unary_eval(args):
         elif arg1[0].startswith('ERROR'):
             return arg1
         elif arg1[0] != 'NUMBER':
-            return [ "ERROR - Argument2 is not a Number arg1='{}'".format(arg1), None ]
-        elif op == '-':
+            arg1[0], arg1[1] = fix_to_number(arg1[0], arg1[1])
+            if arg1[0] != 'NUMBER':
+                return [ "ERROR - Argument2 is not a Number arg1='{}'".format(arg1), None ]
+            # fi
+        # fi
+        if op == '-':
             arg1[1] = 0.0 - arg1[1]
         # fi
         return [ arg1 ]
@@ -852,7 +917,7 @@ def result_functions(arg1, arg2):
     global arrays
     global local_arrays
 
-#PRINT    print('result_functions - #1 arg1={} arg2={}'.format(arg1,arg2), file=sys.stderr,flush=True)  # PRINT
+#DEBUG    print('result_functions - #1 arg1={} arg2={}'.format(arg1,arg2), file=sys.stderr,flush=True)  # PRINT
     if arg1[0] != 'ID':
         # 'NUMBER' -- implied multiply
         # Do implied multiply
@@ -870,7 +935,7 @@ def result_functions(arg1, arg2):
         elif a2[0].startswith('ERROR'):
             return a2
         elif a2[0] != 'NUMBER':
-            return [ "ERROR - value is not a Number a2='{}'".format(a2), None ]
+            return [ "ERROR #1- value is not a Number a2='{}'".format(a2), None ]
         # fi
         a = [ 'NUMBER',  a1[1] * a2[1] ]
         return a
@@ -997,7 +1062,7 @@ def result_functions(arg1, arg2):
     elif a2[0].startswith('ERROR'):
         return a2
     elif a2[0] != 'NUMBER':
-        return [ "ERROR - value is not a Number a2='{}'".format(a2), None ]
+        return [ "ERROR #2- value is not a Number a2='{}'".format(a2), None ]
     elif a1 and a2:
         a = [ 'NUMBER', a1[1] * a2[1] ]
         return a
@@ -1049,7 +1114,7 @@ def common_grouping_eval(args, txt, open_char, close_char):
             elif a2[0].startswith('ERROR'):
                 return a2
             elif a2[0] != 'NUMBER':
-                return [ "ERROR - value is not a Number a2='{}'".format(a2), None ]
+                return [ "ERROR #3- value is not a Number a2='{}'".format(a2), None ]
             # fi
             return [[ 'NUMBER',  a1[1] * a2[1] ]]
         #fi
@@ -1086,7 +1151,7 @@ def common_grouping_eval(args, txt, open_char, close_char):
             elif a2[0].startswith('ERROR'):
                 return a2
             elif a2[0] != 'NUMBER':
-                return [ "ERROR - value is not a Number a2='{}'".format(a2), None ]
+                return [ "ERROR #4- value is not a Number a2='{}'".format(a2), None ]
             # fi
             return [[ 'NUMBER',  a1[1] * a2[1] ]]
         #fi
@@ -1126,7 +1191,7 @@ def common_grouping_eval(args, txt, open_char, close_char):
             elif a2[0].startswith('ERROR'):
                 return a2
             elif a2[0] != 'NUMBER':
-                return [ "ERROR - value is not a Number a2='{}'".format(a2), None ]
+                return [ "ERROR #5- value is not a Number a2='{}'".format(a2), None ]
             # fi
             a = [[ 'NUMBER',  a1[1] * a2[1] ]]
             return a

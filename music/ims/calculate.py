@@ -272,6 +272,7 @@ def identity_eval(args):
         # fi
     elif len(args) == 2:
         a = args[0]
+        a = fix_to_number(a[0],a[1])        # Convert char to number.
         if a[0] == 'NUMBER':
             a[1] = float(a[1])
             return [ a ]
@@ -346,26 +347,25 @@ def get_value(arg):
 # End of get_value
 
 #-----------------------------------------------------------------------------
+def fix_to_number(t,a):
+    if t == 'CHAR':
+        try:
+            a = float(a)
+            t = 'NUMBER'
+        except:
+            pass
+        # fi
+    # fi
+    return t, a
+# End of fix_to_number
+
+#-----------------------------------------------------------------------------
 #        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
 # Try to make both a1 and a2 numbers.
 def fix_to_numbers(t1,a1,t2,a2):
 #DEBUG    print("fix_to_numbers - Entering t1={} a1={} t2={} a2={}".format(t1,a1,t2,a2), file=sys.stderr,flush=True)  # PRINT
-    if t1 == 'CHAR':
-        try:
-            a1 = float(a1)
-            t1 = 'NUMBER'
-        except:
-            pass
-        # fi
-    # fi
-    if t2 == 'CHAR':
-        try:
-            a2 = float(a2)
-            t2 = 'NUMBER'
-        except:
-            pass
-        # fi
-    # fi
+    t1, a1 = fix_to_number(t1, a1)
+    t2, a2 = fix_to_number(t2, a2)
     return t1,a1,t2,a2
 # End of fix_to_numbers
 
@@ -600,7 +600,7 @@ def compute_value(op, arg1, arg2):
         elif t2 == 'NUMBER':
 #PRINT            print('compute_value #1- calling get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
             x = get_tokens_from_char(a1, a2, None)
-#PRINT            print('compute_value #2- after get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
+            print('compute_value #2- after get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
         else:
 #PRINT            print('compute_value #3- calling get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
             x = get_tokens_from_char(a1, a2[0], a2[1])
@@ -664,8 +664,12 @@ def unary_eval(args):
         elif arg1[0].startswith('ERROR'):
             return arg1
         elif arg1[0] != 'NUMBER':
-            return [ "ERROR - Argument2 is not a Number arg1='{}'".format(arg1), None ]
-        elif op == '-':
+            arg1[0], arg1[1] = fix_to_number(arg1[0], arg1[1])
+            if arg1[0] != 'NUMBER':
+                return [ "ERROR - Argument2 is not a Number arg1='{}'".format(arg1), None ]
+            # fi
+        # fi
+        if op == '-':
             arg1[1] = 0.0 - arg1[1]
         # fi
         return [ arg1 ]
