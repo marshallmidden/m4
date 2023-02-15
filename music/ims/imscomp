@@ -1,10 +1,5 @@
 #!/usr/bin/python3 -B
 # ----------------------------------------------------------------------------
-# Macros, when checking, check name, and arguments after it -- delimiters and number.
-# macro_... are dictionaries of macro_number ...
-# Need find all names matching + longest number of arguments first, then downwards.
-
-# ----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 # ----------------------------------------------------------------------------
 # Variables to do:
@@ -1632,14 +1627,18 @@ cstop_processing = False            # True if after a cstop.
 
 global macro_defining               # If currently defining a macro.
 macro_defining = None
-#NOTDONEYET - process
+global macro_defining_count         # Nested macro defining count.
+macro_defining_count = 0
 # Processes execute on a staff line. (process_notes -- maybe rename/change/fix/modify to process_staves?)
 global process_defining             # If currently defining a process.
 process_defining = None
-#NOTDONEYET - loop
+global process_defining_count       # Nested process defining count.
+process_defining_count = 0
 # loop -> endloop.  Count nested.
 global loop_defining                # If currently defining a loop.
 loop_defining = None
+global loop_defining_count          # Nested loop defining count.
+loop_defining_count = 0
 
 # Macro definition, and for searching for matching, and arguments/terminators for executing.
 global macro_number                 # Increment for each macro defined.
@@ -1670,6 +1669,8 @@ process_buffer = [ ]
 #NOTDONEYET - loop
 global loop_number                  # Increment for each nested loop.
 loop_number = 0                     # Matches len(following).
+global loop_location                # line where loop starts...
+loop_location = [ ]
 global loop_value_variable          # testing value if "loop a<b", else variable "loop m1=4,12,2"
 loop_value_variable = [ ]
 global loop_increment               # If None, then loop is "loop a<b" type. Else the increment.
@@ -1677,7 +1678,7 @@ loop_increment = [ ]
 global loop_final_value             # If > or < when assigning/increment/decrement - depending on sign loop_increment.
 loop_final_value = [ ]
 global loop_buffer                  # loop number: array of lines for nested loops.
-process_buffer = [ ]
+loop_buffer = [ ]
 
 global all_unique_macro_names       # Dictionary 'name': [ numbers ] -- From numbers, get terminators, etc.
 all_unique_macro_names = { }
@@ -3909,6 +3910,8 @@ def do_pass2():
     global vl
     global ifdepth
     global macro_defining
+    global process_defining
+    global loop_defining
     global lmp_executing_number
     global errors_happened
     global goto_table
@@ -3919,7 +3922,13 @@ def do_pass2():
         print_warning_no_line("Inside an if block (depth={}) when end of file or cstop* reached".format(ifdepth))
     # fi
     if macro_defining is not None:
-        print_error_no_line("Inside defining macro {}, no endm reached.".format(macro_defining))
+        print_error_no_line("Inside defining macro {}, no endm reached.".format(macro_name[macro_defining]))
+    # fi
+    if process_defining is not None:
+        print_error_no_line("Inside defining process {}, no endprocess reached.".format(process_name[process_defining]))
+    # fi
+    if loop_defining is not None:
+        print_error_no_line("Inside defining loop {} at line number {}, no endloop reached.".format(loop_defining, loop_location[loop_defining]))
     # fi
     if lmp_executing_number > 0:
         print_error_no_line("Processing {} depth (nesting) is {}.".format(lmp_executing_type[lmp_executing_number], lmp_executing_number))
@@ -5223,9 +5232,6 @@ def replace_macro(cnumber, t_args, line):
 # End of replace_macro
 
 # ----------------------------------------------------------------------------
-# Note: if terminator is end of line -- stay? I think it can be
-# done with last_voice_staff variable.
-
 def do_macro(t_args, line):
     global macro_number
     global macro_name
@@ -5234,6 +5240,7 @@ def do_macro(t_args, line):
     global macro_arg_terminator
     global macro_buffer
     global macro_defining
+    global macro_defining_count
     global all_unique_macro_names
 
     if t_args is None or t_args == '':
@@ -5292,8 +5299,6 @@ def do_macro(t_args, line):
         argument_names.append(arg)
         argument_terminators.append(terminator)
     # elihw
-#-- NOTDONEYET - MACRO must check later if name and terminators match. do_macro()
-#--    print_warning("NOTDONEYET - MACRO {} must check later if name and terminators match.".format(name), line)
     # Check if name and terminators match previous macro - if so, warning and replace. (Delete old one.)
     macro_name.append(name)                             # Array of names, duplicates allowed.
     macro_name_terminator.append(firstterminator)       # Terminator after macro.
@@ -5301,27 +5306,202 @@ def do_macro(t_args, line):
     macro_arg_terminator.append(argument_terminators)   # Terminators after arguments.
     macro_buffer.append([])                             # No lines in buffer.
     macro_defining = macro_number
+    macro_defining_count = macro_defining_count + 1
     if name not in all_unique_macro_names:
         all_unique_macro_names[name] = [ macro_number ]
     else:
         all_unique_macro_names[name].append(macro_number)
     # fi
     macro_number = macro_number + 1
-#DEBUG    print_debug("do_macro - macro_name={}".format(macro_name))
-#DEBUG    print_debug("do_macro - macro_name_terminator={}".format(macro_name_terminator))
-#DEBUG    print_debug("do_macro - macro_arguments={}".format(macro_arguments))
-#DEBUG    print_debug("do_macro - macro_arg_terminator={}".format(macro_arg_terminator))
-#DEBUG    print_debug("do_macro - macro_defining={}".format(macro_defining))
-#DEBUG    print_debug("do_macro - macro_number={}".format(macro_number))
-#DEBUG    print_debug("do_macro - all_unique_macro_names={}".format(all_unique_macro_names))
+    print_debug("do_macro - macro_name={}".format(macro_name))
+    print_debug("do_macro - macro_name_terminator={}".format(macro_name_terminator))
+    print_debug("do_macro - macro_arguments={}".format(macro_arguments))
+    print_debug("do_macro - macro_arg_terminator={}".format(macro_arg_terminator))
+    print_debug("do_macro - macro_defining={}".format(macro_defining))
+    print_debug("do_macro - macro_number={}".format(macro_number))
+    print_debug("do_macro - all_unique_macro_names={}".format(all_unique_macro_names))
     return
 # End of do_macro
 
 # ----------------------------------------------------------------------------
+def do_process(t_args, line):
+    global process_defining
+    global process_defining_count
+    global process_number
+    global process_name
+    global process_argument
+    global process_buffer
+
+    if t_args is None or t_args == '':
+        print_error("process command does not have any arguments.", line)
+        return ''
+    # fi
+    # Get rid of multiple spaces/tabs.
+    t_args = re.sub(r'\s+', r' ', t_args)
+    # Get rid of spaces before/after commas/semicolons.
+    t_args = re.sub(r'\s*([,;])\s*', r'\1', t_args)
+    # Split on [a-z0-9A-Z_] and not. (Identifier alphanumeric or underscore)
+    wargs = [i for i in re.split(r'(\w+|\W+)', t_args) if i]
+    if not wargs or len(wargs) < 3 or wargs == '':
+        print_error("no process name.", line)
+        return
+    # fi
+    name = wargs[0]
+    if name in commands:
+        print_error("process ({}) would replace existing command".format(name), line)
+        return
+    # fi
+    if name in process_name:
+        print_error("process ({}) would replace existing process".format(name), line)
+        return
+    # fi
+    if wargs[1] != ',':
+        print_error("process ({}) needs comma separator to named argument, not '{}'".format(name, wargs[1]), line)
+        return
+    # fi
+    if not re.match(r'^\w+', wargs[2]):
+        print_error("process ({}) needs named argument, not '{}'".format(name, wargs[2]), line)
+        return
+    # fi
+    # Check if name and terminators match previous process.
+    process_name.append(name)                           # Array of names, duplicates NOT allowed.
+    process_argument.append(wargs[2])                   # Argument.
+    process_buffer.append([])                           # No lines in buffer.
+    process_defining = process_number
+    process_number = process_number + 1
+    process_defining_count = process_defining_count + 1
+    print_debug("do_process - process_name={}".format(process_name))
+    print_debug("do_process - process_argument={}".format(process_argument))
+    print_debug("do_process - process_defining={}".format(process_defining))
+    print_debug("do_process - process_number={}".format(process_number))
+    print_debug("do_process - process_defining_count={}".format(process_defining_count))
+    print_debug("do_process - process_buffer={}".format(process_buffer))
+    return
+# End of do_process
+
+# ----------------------------------------------------------------------------
+#   do / loop
+#   loop m1=1,10,1
+#   loop m1=1,10
+#   loop m1 == 0
+#   loop                                                # outloop or endloop to get out.
+
+def do_loop(t_args, line):                              # NOTDONEYET
+    global loop_defining
+    global loop_defining_count
+    global loop_number
+    global loop_location
+    global loop_value_variable
+    global loop_increment
+    global loop_final_value
+    global loop_buffer
+    global linecount
+
+    lvv = None
+    li = None
+    lfv = None
+    firstarg = None
+    if t_args is None or t_args == '':
+        pass
+    else:
+        x = [ ]
+        sg = t_args
+        termination = None
+        while len(sg) > 0:
+            a = find_terminator_macro_arg(sg, [';', ','], line)
+            if a < 0:
+                break
+            # fi
+            x.append(sg[:a])
+            termination = sg[a]
+            sg = sg[a+1:]
+        # elihw
+        if termination is not None:
+            x.append(sg)
+        # fi
+        if len(x) > 2:
+            print_error("loop with too many arguments ({})".format(len(x)), line)
+            return
+        elif len(x) <= 0:                       # No arguments, outloop/endloop to get out.
+            pass
+        elif len(x) == 1:
+            lvv = x[0]
+        elif len(x) == 2 or len(x) == 3:
+            # Split on = (assignment).
+            a = find_terminator_macro_arg(x[0], [ '=' ], line)
+            if a < 0:
+                print_error("loop with {} arguments needs first to be a variable to assign to".format(len(x)), line)
+                return
+            # fi
+            lvv = x[0][0:a+1]                              # The assignment is present.
+            if len(x) == 2:
+                li = 1
+            else:
+                f, type_error = is_float(x[2], True)            # The increment.
+                if type_error is not None:
+                    print_error("loop - increment is not a value {}".format(type_error), line)
+                    return
+                # fi
+                if f is None:
+                    print_error("loop - increment did not return expression as a value", line)
+                    return
+                # fi
+                li = f
+            # fi
+            f, type_error = is_float(x[1], True)            # The final value.
+            if type_error is not None:
+                print_error("loop - final value is not a value {}".format(type_error), line)
+                return
+            # fi
+            if f is None:
+                print_error("loop - final value did not return expression as a value", line)
+                return
+            # fi
+            lfv = f
+#--            f, type_error = is_float(x[0], True)            # The first value.
+#--            if type_error is not None:
+#--                print_error("loop - initial value is not a value {}".format(type_error), line)
+#--                return
+#--            # fi
+#--            if f is None:
+#--                print_error("loop - initial value did not return expression as a value", line)
+#--                return
+#--            # fi
+#--            # The initial value has been set.
+        # fi
+    # fi
+    loop_location.append(linecount)
+    loop_increment.append(li)
+    loop_value_variable.append(lvv)
+    loop_final_value.append(lfv)
+    loop_buffer.append([])
+    loop_defining = loop_number
+    loop_defining_count = loop_defining_count + 1
+    loop_number = loop_number + 1
+    print_debug("do_loop - loop_location={}".format(loop_location))
+    print_debug("do_loop - loop_increment={}".format(loop_increment))
+    print_debug("do_loop - loop_value_variable={}".format(loop_value_variable))
+    print_debug("do_loop - loop_final_value={}".format(loop_final_value))
+    print_debug("do_loop - loop_defining_count={}".format(loop_defining_count))
+    print_debug("do_loop - loop_buffer={}".format(loop_buffer))
+    return
+# End of do_loop
+
+# ----------------------------------------------------------------------------
 def macro_define(command, t_args, line):
     global macro_defining               # If defining macro.
+    global macro_defining_count
     global macro_buffer                 # Name of macro, array of lines for macro.
 
+    if command in commands and commands[command][0] == do_macro:
+        macro_defining_count = macro_defining_count + 1
+    elif command in commands and commands[command][0] == do_endm:
+        macro_defining_count = macro_defining_count - 1
+        if macro_defining_count <= 0:
+            commands[command][0](t_args, line)              # Process command endm.
+            return
+        # fi
+    # fi
     if t_args and t_args != '':
         if t_args[0] not in [' ', "\t"] and not t_args[0].isalnum():
             macro_buffer[macro_defining].append(command + t_args)
@@ -5333,6 +5513,60 @@ def macro_define(command, t_args, line):
     # fi
     return
 # End of macro_define
+
+# ----------------------------------------------------------------------------
+def process_define(command, t_args, line):
+    global process_defining               # If defining process.
+    global process_defining_count         # If defining process.
+    global process_buffer                 # Name of process, array of lines for process.
+
+    if command in commands and commands[command][0] == do_process:
+        process_defining_count = process_defining_count + 1
+    elif command in commands and commands[command][0] == do_endprocess:
+        process_defining_count = process_defining_count - 1
+        if process_defining_count <= 0:
+            commands[command][0](t_args, line)              # Process command endprocess.
+            return
+        # fi
+    # fi
+    if t_args and t_args != '':
+        if t_args[0] not in [' ', "\t"] and not t_args[0].isalnum():
+            process_buffer[process_defining].append(command + t_args)
+        else:
+            process_buffer[process_defining].append(command + ' ' + t_args)
+        # fi
+    else:
+        process_buffer[process_defining].append(command)
+    # fi
+    return
+# End of process_define
+
+# ----------------------------------------------------------------------------
+def loop_define(command, t_args, line):
+    global loop_defining               # If defining loop.
+    global loop_defining_count         # If defining loop.
+    global loop_buffer                 # Name of loop, array of lines for loop.
+
+    if command in commands and commands[command][0] == do_loop:
+        loop_defining_count = loop_defining_count + 1
+    elif command in commands and commands[command][0] == do_endloop:
+        loop_defining_count = loop_defining_count - 1
+        if loop_defining_count <= 0:
+            commands[command][0](t_args, line)              # Process command endloop.
+            return
+        # fi
+    # fi
+    if t_args and t_args != '':
+        if t_args[0] not in [' ', "\t"] and not t_args[0].isalnum():
+            loop_buffer[loop_defining].append(command + t_args)
+        else:
+            loop_buffer[loop_defining].append(command + ' ' + t_args)
+        # fi
+    else:
+        loop_buffer[loop_defining].append(command)
+    # fi
+    return
+# End of loop_define
 
 # ----------------------------------------------------------------------------
 # putd ... if already existing, replace with warning.
@@ -8090,23 +8324,33 @@ def do_percents(t_args, line):
 # End of do_percents
 
 # ----------------------------------------------------------------------------
-# ----------------------------------------------------------------------------
 #   endloop
 #   endloop m1 == 0
 
-def do_endloop(t_args, line):                           # NOTDONEYET
-    print_error("NOTDONEYET - do_endloop", line)
+def do_endloop(t_args, line):
+    global loop_defining
+
+    if loop_defining is None:
+        print_error("endloop command while not defining a loop", line)
+        return
+    # fi
+    loop_defining = None
     return
 # End of do_endloop
 
 # ----------------------------------------------------------------------------
-#   endprocess
+def do_endprocess(t_args, line):
+    global process_defining
 
-def do_endprocess(t_args, line):                        # NOTDONEYET
-    print_error("NOTDONEYET - do_processloop", line)
+    if process_defining is None:
+        print_error("endprocess command while not defining a process", line)
+        return
+    # fi
+    process_defining = None
     return
-# End of do_endprocessp
+# End of do_endprocess
 
+# ----------------------------------------------------------------------------
 # ----------------------------------------------------------------------------
 # Not likely to ever do. Use key command.
 #   flat    b,e         flat/sharp are cumulative -- double flats, etc.
@@ -8141,17 +8385,6 @@ def do_instr(t_args, line):                             # NOTDONEYET
 # End of do_instr
 
 # ----------------------------------------------------------------------------
-#   do / loop
-#   loop m1=1,10,1
-#   loop m1=1,10
-#   loop m1 == 0
-
-def do_loop(t_args, line):                              # NOTDONEYET
-    print_error("NOTDONEYET - do_loop", line)
-    return
-# End of do_loop
-
-# ----------------------------------------------------------------------------
 # Not likely to ever do.
 #   midi(o300 + MIDCHN - 1, PATNUM)
 
@@ -8178,13 +8411,6 @@ def do_print(t_args, line):                             # NOTDONEYET
 # End of do_print
 
 # ----------------------------------------------------------------------------
-#   process ARGUMENT
-
-def do_process(t_args, line):                           # NOTDONEYET
-    print_error("NOTDONEYET - do_process", line)
-    return
-# End of do_process
-
 # ----------------------------------------------------------------------------
 #   break
 #   outloop
@@ -10689,6 +10915,8 @@ def process_line(line):
     global commands
     global cstop_processing
     global macro_defining               # If defining macro.
+    global process_defining             # If defining process.
+    global loop_defining                # If defining loop.
     global measure_on
 
 #DEBUG    print_debug("process_line - line='{}'".format(line))
@@ -10703,16 +10931,23 @@ def process_line(line):
             commands[command][0](t_args, line)              # Process some commands while cstop-ped.
         # fi
         return False                    # Done with current cstop processing.
-# NOTDONEYET - process_defining and loop_defining. Remember nesting of loop and macros. (++, --endm)
     elif macro_defining is not None:
         if command in commands and commands[command][0] == do_cstopnow:
             return True                                     # End of file!
-        elif command in commands and commands[command][0] == do_endm:
-            commands[command][0](t_args, line)              # Process command endm.
-            return False
         # fi
-# NOTDONEYET - process_defining and loop_defining. Remember nesting of loop and macros. (++, --endm)
         macro_define(command, t_args, line)
+        return False
+    elif process_defining is not None:
+        if command in commands and commands[command][0] == do_cstopnow:
+            return True                                     # End of file!
+        # fi
+        process_define(command, t_args, line)
+        return False
+    elif loop_defining is not None:
+        if command in commands and commands[command][0] == do_cstopnow:
+            return True                                     # End of file!
+        # fi
+        loop_define(command, t_args, line)
         return False
     # Doing if section or else section. And NORMAL processing.
     elif iftest[ifdepth] == -1 or iftest[ifdepth] == 1:
