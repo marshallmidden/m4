@@ -42,11 +42,11 @@ numarry_value_type = 4      # Array of types None=not-set, 0=int/float, 1= chara
 #--            [ 0 ] ]       #  int/float
 #-- arrays.append(warray)
 #-- 
-#-- warray = [ 'abc1', 8,
-#--            [ 2 ],           # 1 dimension
-#--            [ 'abc1', 123.001 ],
-#--            [ 1, 0 ] ]       # Character string, int/float
-#-- arrays.append(warray)
+warray = [ 'abc1', 8,
+           [ 2 ],           # 1 dimension
+           [ None, None ],
+           [ None, None ] ]       # Character string, int/float
+arrays.append(warray)
 #-- 
 #-- warray = [ 'abc2', 8,
 #--            [ 1, 2 ],        # 2 dimensions
@@ -288,15 +288,21 @@ def get_value(arg):
 
 #PRINT    print("get_value - Entering arg='{}'".format(arg), file=sys.stderr,flush=True)  # PRINT
     if arg[0].startswith('ERROR'):
+#PRINT        print("get_value - #a", file=sys.stderr,flush=True)  # PRINT
         return arg
     elif arg[0] == 'NUMBER':
+#PRINT        print("get_value - #b - type(arg[1])={} arg[1]='{}'".format(type(arg[1]),arg[1]), file=sys.stderr,flush=True)  # PRINT
         arg[1] = float(arg[1])
+#PRINT        print("get_value - #b1 - type(arg[1])={} arg[1]='{}'".format(type(arg[1]),arg[1]), file=sys.stderr,flush=True)  # PRINT
         return arg
     elif arg[0] == 'COMMA':
+#PRINT        print("get_value - #c", file=sys.stderr,flush=True)  # PRINT
         return arg
     elif arg[0] == 'CHAR':
+#PRINT        print("get_value - #d", file=sys.stderr,flush=True)  # PRINT
         return arg
     elif arg[0] == 'ADDRESS':
+#PRINT        print("get_value - #e", file=sys.stderr,flush=True)  # PRINT
         a = arg[1]
         idx = a[0]
         warray = a[1]
@@ -312,11 +318,14 @@ def get_value(arg):
             arg[0] = 'CHAR'
             arg[1] = where_value
         # fi
+#PRINT        print("get_value - #f", file=sys.stderr,flush=True)  # PRINT
         return arg
     elif arg[0] != 'ID':
+#PRINT        print("get_value - #g", file=sys.stderr,flush=True)  # PRINT
         return [ "ERROR - get_value - unrecognized variable type='{}'".format(arg), None ]
     # fi
 
+#PRINT    print("get_value - #h", file=sys.stderr,flush=True)  # PRINT
     maxmaclev = -1
     maxwary = None
 #--    print('arrays={}'.format(arrays), file=sys.stderr, flush=True)
@@ -330,6 +339,7 @@ def get_value(arg):
             # fi
         # fi
     # rof
+#PRINT    print("get_value - #i", file=sys.stderr,flush=True)  # PRINT
     if maxwary is None:
         return [ "ERROR - get_value - unrecognized variable='{}'".format(arg), None ]
     elif len(maxwary[numarry_indexes]) != 0:
@@ -343,6 +353,7 @@ def get_value(arg):
         arg[0] = 'CHAR'
         arg[1] = str(maxwary[numarry_values][0])
     # fi
+#PRINT    print("get_value - #z", file=sys.stderr,flush=True)  # PRINT
     return arg
 # End of get_value
 
@@ -363,7 +374,7 @@ def fix_to_number(t,a):
 #        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
 # Try to make both a1 and a2 numbers.
 def fix_to_numbers(t1,a1,t2,a2):
-#DEBUG    print("fix_to_numbers - Entering t1={} a1={} t2={} a2={}".format(t1,a1,t2,a2), file=sys.stderr,flush=True)  # PRINT
+#PRINT    print("fix_to_numbers - Entering t1={} a1={} t2={} a2={}".format(t1,a1,t2,a2), file=sys.stderr,flush=True)  # PRINT
     t1, a1 = fix_to_number(t1, a1)
     t2, a2 = fix_to_number(t2, a2)
     return t1,a1,t2,a2
@@ -374,19 +385,30 @@ def compute_value(op, arg1, arg2):
     global arrays
     global local_arrays
 
-#DEBUG    print("compute_value - Entering types:{} {} {} , vals:'{}' '{}' '{}'".format(type(op),type(arg1),type(arg2),op,arg1,arg2), file=sys.stderr,flush=True)  # PRINT
+#PRINT    print("compute_value - Entering types:{} {} {} , vals:'{}' '{}' '{}'".format(type(op),type(arg1),type(arg2),op,arg1,arg2), file=sys.stderr,flush=True)  # PRINT
     a2 = get_value(arg2)
+#PRINT    print("compute_value - after get_value a2='{}'".format(a2), file=sys.stderr,flush=True)  # PRINT
     t2 = a2[0]
     if a2 is None:
         return [ "ERROR - Argument2 is None a2='{}'".format(a2), None ]
     elif t2.startswith('ERROR'):
         return a2
-    elif t2 not in [ 'NUMBER', 'CHAR', 'COMMA' ]:
+    # fi
+    if arg1 is None:
+        return [ "ERROR - Argument1 is None arg1='{}'".format(arg1), None ]
+    elif arg1[0].startswith('ERROR'):
+#PRINT        print("compute_value - #a", file=sys.stderr,flush=True)  # PRINT
+        return arg1
+    # fi
+    if t2 not in [ 'NUMBER', 'CHAR', 'COMMA' ]:
         return [ "ERROR - Argument2 is not a Number, character string, or comma list - a2='{}'".format(a2), None ]
     elif op == '=':
+#PRINT        print("compute_value - #b", file=sys.stderr,flush=True)  # PRINT
         t1 = arg1[0]
         a = arg1[1]
+#PRINT        print("compute_value - #c", file=sys.stderr,flush=True)  # PRINT
         if t1 == 'ADDRESS':
+#PRINT            print("compute_value - #d", file=sys.stderr,flush=True)  # PRINT
             idx = a[0]
             warray = a[1]
             warray[numarry_values][idx] = arg2[1]
@@ -397,11 +419,14 @@ def compute_value(op, arg1, arg2):
             else:
                 return [ "ERROR - ADDRESS and arg2 unrecognized '{}'".format(arg2), None]
             # fi
+#PRINT            print("compute_value - #e", file=sys.stderr,flush=True)  # PRINT
             return arg2
         elif t1 != 'ID':
+#PRINT            print("compute_value - #f", file=sys.stderr,flush=True)  # PRINT
             return [ "ERROR - Argument1 is not a variable name arg1='{}'".format(arg1), None ]
         # fi
 
+#PRINT        print("compute_value - #g", file=sys.stderr,flush=True)  # PRINT
         # arrays here.
         maxmaclev = -1
         maxwary = None
@@ -413,6 +438,7 @@ def compute_value(op, arg1, arg2):
                 # fi
             # fi
         # rof
+#PRINT        print("compute_value - #h", file=sys.stderr,flush=True)  # PRINT
         if maxwary is None:
             print("Assignment to unknown variable '{}', creating it='{}'".format(arg1, a2), file=sys.stderr,flush=True)
             if arg2[0] == 'NUMBER':
@@ -424,12 +450,15 @@ def compute_value(op, arg1, arg2):
         elif maxwary[numarry_indexes] != []:
             return [ "ERROR - compute_value - variable is array '{}'".format(arg), None ]
         elif arg2[0] == 'NUMBER':
+#PRINT            print("compute_value - #i", file=sys.stderr,flush=True)  # PRINT
             maxwary[numarry_value_type][0] = 0
             maxwary[numarry_values][0] = float(arg2[1])
         else:                                   # Assume CHAR
+#PRINT            print("compute_value - #j", file=sys.stderr,flush=True)  # PRINT
             maxwary[numarry_value_type][0] = 1
             maxwary[numarry_values][0] = arg2[1]
         # fi
+#PRINT        print("compute_value - #k", file=sys.stderr,flush=True)  # PRINT
         return arg2
     # fi
 
@@ -600,7 +629,7 @@ def compute_value(op, arg1, arg2):
         elif t2 == 'NUMBER':
 #PRINT            print('compute_value #1- calling get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
             x = get_tokens_from_char(a1, a2, None)
-            print('compute_value #2- after get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
+#PRINT            print('compute_value #2- after get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
         else:
 #PRINT            print('compute_value #3- calling get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
             x = get_tokens_from_char(a1, a2[0], a2[1])
@@ -796,12 +825,15 @@ def parse_to(prio):
         if sym is None or prio >= sym.lprio:
             break
         # fi
+#PRINT        print('parse_to - args={}'.format(args), file=sys.stderr, flush=True)  # PRINT
         while True:
+#PRINT            print('parse_to - args={} sym={}'.format(args,sym), file=sys.stderr, flush=True)  # PRINT
             args.append(sym)
             advance()
             curprio = sym.rprio
             next = parse_to(curprio)
             if next is not None:
+#PRINT                print('parse_to - args={} next={}'.format(args,next), file=sys.stderr, flush=True)  # PRINT
                 args.append(next)
             # fi
             sym = cur_sym(next is None)
@@ -810,6 +842,7 @@ def parse_to(prio):
             # fi
         # elihw
 
+#PRINT        print('parse_to - calling evaluate_handle', file=sys.stderr, flush=True)  # PRINT
         args = evaluate_handle(args)
         if args and len(args) > 1 and args[0].startswith('ERROR'):
             return args
@@ -917,7 +950,7 @@ def result_functions(arg1, arg2):
     global arrays
     global local_arrays
 
-#DEBUG    print('result_functions - #1 arg1={} arg2={}'.format(arg1,arg2), file=sys.stderr,flush=True)  # PRINT
+#PRINT    print('result_functions - #1 arg1={} arg2={}'.format(arg1,arg2), file=sys.stderr,flush=True)  # PRINT
     if arg1[0] != 'ID':
         # 'NUMBER' -- implied multiply
         # Do implied multiply
@@ -982,8 +1015,8 @@ def result_functions(arg1, arg2):
                     return [ "ERROR - result_functions - variable needs 1 dimension to array '{}' not {}".format(arg1, l) ]
                 elif d < 1 or d > maxwary[numarry_indexes][0]:
                     return [ 'ERROR - result_functions - variable {} 1st dimension {} not in range 1 thru {}'.format(arg1, d, maxwary[numarry_indexes][0]) ]
-                elif maxwary[numarry_value_type][d-1] is None:
-                    return [ 'ERROR - result_functions - variable {}({}) is not set'.format(arg1, d) ]
+#--                elif maxwary[numarry_value_type][d-1] is None:
+#--                    return [ 'ERROR - result_functions - variable {}({}) is not set'.format(arg1, d) ]
                 # fi
                 arg = [ 'ADDRESS', [ d - 1, maxwary] ]
                 return arg
