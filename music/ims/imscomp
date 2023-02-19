@@ -801,7 +801,7 @@ createlocalvar('default_pan', 64, 0, 0)         # Center of left<->right balance
 createlocalvar('default_intensity', 100, 0, 0)  # Volume = intensity% * velocity% * vol(ff)%.
 createlocalvar('default_velocity', 120, 0, 0)   # Note attack (when played. (Leave 7) Appears to be volume.
 
-#-----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
 #++ import inspect
 #++ print(inspect.currentframe().f_code.co_name, '#0', file=sys.stderr, flush=True)
 # ----------------------------------------------------------------------------
@@ -3980,7 +3980,7 @@ def delete_executing_variables(l):
     recompute_whichlocalchars()
 # End of delete_executing_variables
 
-#-----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
 def get_next_macro_line(l):
     global lmp_executing_number
     global lmp_executing_which
@@ -4014,7 +4014,7 @@ def get_next_macro_line(l):
     return line
 # End of get_next_macro_line
 
-#-----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
 # Types:
 #   a) loop m1=1,10,1
 #   b) loop m1=1,10
@@ -4175,7 +4175,7 @@ def get_next_loop_line(l):
     return line
 # End of get_next_loop_line
 
-#-----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
 # Get the next line, file, or macro.
 # Return:
 #   full_line           - the line without $$ comments.
@@ -5130,6 +5130,529 @@ def to_abc_note(note_number):
 # End of to_abc_note
 
 # ----------------------------------------------------------------------------
+#   decode  3c+             $$ One argument - sets defaults for voice/staff.
+def set_default_ims(t_args, line):
+    global args
+    global measure_on
+    global key_sig
+    global key_voice
+    global time
+    global key_voice
+
+    wargs = arglist(t_args, line, False)
+
+    if not wargs or len(wargs) < 1:
+        print_error("no decode arguments", line)
+        return
+    # fi
+    if len(wargs) != 1:
+        print_error("Not correct number of arguments for set_default_ims commmand", line)
+        return
+    # fi
+    voice = getvar_checkokay('voice', line)     # Interesting - get last time used. :)
+    # Save what type of processing we are doing.
+    save_current_type = [args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc]
+    savekeyvoice = key_voice[measure_on][voice]
+    # ------------------------------------------------------------------------------
+    if args.vertical or args.horizontal:
+        k = key_sig[savekeyvoice]           # Convert to number.
+    elif args.midi1csv or args.fluidsynth:
+        k = savekeyvoice
+    else:                                   # ABC
+        # Convert to normal format.
+        k = savekeyvoice.lower()
+        k = k.replace('b', '-')             # Does multiple flats
+        k = k.replace('#', '+')             # Does multiple sharps.
+        k = k.replace('=', 'n')             # Does multiple naturals.
+        k = key_sig[k]                      # Convert to number.
+    # fi
+    # ------------------------------------------------------------------------------
+    # Set to midi format -- so we have a value.
+    args.horizontal = False
+    args.vertical = False
+    args.midi1csv = True
+    args.fluidsynth = False
+    args.abc = False
+    key_voice[measure_on][voice] = k
+
+    wnote = wargs[0]
+    therest, thenote, typenote = getnote(wnote, voice, line, True)  # Set defaults.
+
+    # Restore type of processing we are doing.
+    args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc = save_current_type
+    key_voice[measure_on][voice] = savekeyvoice
+
+    if therest is None or thenote is None:
+        print_warning("decode note had error with note {}".format(wnote), line)
+        return
+    # fi
+    if typenote != normal_note:
+        print_warning("decode note is not of type normal_note -- ({})".format(typenote), line)
+        return
+    # fi
+
+    # Get the time value for the note.
+    timeofnote, r_suffixes, number_dots = get_time(therest, line)
+
+    if r_suffixes is None or number_dots is None:
+        print_error("decode - Error getting time for note", line)
+        return
+    # fi
+    # suffix_legato = 16            -- glide to next note.
+    # suffix_tied = 2               -- tied
+    # suffix_staccato = 1           -- staccato
+    # suffix_dotted = -1
+    # suffix_normal = 0
+    # bits are $union$'ed together for multiple modifiers.
+    # number_dots are how many "d" (dotted) were found.
+    if timeofnote is None or timeofnote == 0:
+        if number_dots != 0:
+            print_error("cannot have dotted syntax on a default note length.", line)
+            return
+        # fi
+        timeofnote = time[getvar_checkokay('voice', line)]      # Interesting - get last time used. :)
+    # fi
+    if number_dots != 0:
+        p = timeofnote / 2.0
+        for i in range(1, number_dots+1):
+            timeofnote = timeofnote + p
+            p = p / 2.0
+        # rof
+    # fi
+    time[voice] = timeofnote
+    return
+# End of set_default_ims
+
+# ----------------------------------------------------------------------------
+# Original gsw type decode.
+#   decode  m1,3c+          $$ note number for 3c+ into m1
+#   decode  m1,m2,3c+4      $$ note number for 3c+ into m1, note length (4) in m2.
+#   decode  m1,m2,m3,3c+4l  $$ note number for 3c+ into m1, note length (4) in m2, 16 into m3.
+
+def decode_gsw(t_args, line):
+    global args
+    global measure_on
+    global key_sig
+    global key_voice
+
+    wargs = arglist(t_args, line, False)
+    if not wargs or len(wargs) < 1:
+        print_error("no decode arguments", line)
+        return
+    # fi
+    if len(wargs) > 4 or len(wargs) == 1:
+        print_error("Not correct number of arguments for decode commmand", line)
+        return
+    # fi
+    voice = getvar_checkokay('voice', line)     # Interesting - get last time used. :)
+    # Save what type of processing we are doing.
+    save_current_type = [args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc]
+    savekeyvoice = key_voice[measure_on][voice]
+    # ------------------------------------------------------------------------------
+    if args.vertical or args.horizontal:
+        k = key_sig[savekeyvoice]           # Convert to number.
+    elif args.midi1csv or args.fluidsynth:
+        k = savekeyvoice
+    else:                                   # ABC
+        # Convert to normal format.
+        k = savekeyvoice.lower()
+        k = k.replace('b', '-')             # Does multiple flats
+        k = k.replace('#', '+')             # Does multiple sharps.
+        k = k.replace('=', 'n')             # Does multiple naturals.
+        k = key_sig[k]                      # Convert to number.
+    # fi
+    # ------------------------------------------------------------------------------
+    # Set to midi format -- so we have a value.
+    args.horizontal = False
+    args.vertical = False
+    args.midi1csv = True
+    args.fluidsynth = False
+    args.abc = False
+    key_voice[measure_on][voice] = k
+
+    if len(wargs) == 2:         # decode m1,3c4
+        w_note = wargs[1]
+    elif len(wargs) == 3:       # decode m1,m2,3c4
+        w_note = wargs[2]
+    else:                   # 4
+        w_note = wargs[3]       # decode m1,m2,m3,3c4
+    # fi
+    # Ignore leading space.
+    therest, thenote, typenote = getnote(w_note, voice, line, False)
+
+    # Restore type of processing we are doing.
+    args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc = save_current_type
+    key_voice[measure_on][voice] = savekeyvoice
+
+    if therest is None or thenote is None:
+        print_warning("decode note had error with note {}".format(w_note), line)
+        return
+    # fi
+    if therest and len(therest) > 0 and len(wargs) == 2:
+        print_warning("decode note has information ({}) after the note {}".format(therest, w_note), line)
+    # fi
+    if typenote != normal_note:
+        print_warning("decode note is not of type normal_note -- ({})".format(typenote), line)
+        return
+    # fi
+    if thenote <= 12 + 12 - 3:
+        computeit = wargs[0] + '=' + '0'                       # rest = 0
+    else:
+        computeit = wargs[0] + '=' + str(thenote) + '+3-12-12'  # Convert from midi note to musicomp value.
+    # fi
+    value, type_error = is_float(computeit, True)
+    if type_error is not None or value is None:
+        print_error("decode note unable to assign value({}) to first argument({}).".format(thenote, wargs[0]), line)
+        return
+    # fi
+    if len(wargs) < 3:      # 3 or 4 arguments continue.
+        return
+    # fi
+
+    # Get the time value for the note.
+    timeofnote, r_suffixes, number_dots = get_time(therest, line)
+
+    if r_suffixes is None or number_dots is None:
+        print_error("decode - Error getting time for note", line)
+        return
+    # fi
+    # suffix_legato = 16            -- glide to next note.
+    # suffix_tied = 2               -- tied
+    # suffix_staccato = 1           -- staccato
+    # suffix_dotted = -1
+    # suffix_normal = 0
+    # bits are $union$'ed together for multiple modifiers.
+    # number_dots are how many "d" (dotted) were found.
+    if timeofnote is None or timeofnote == 0:
+        if number_dots != 0:
+            print_error("cannot have dotted syntax on a default note length.", line)
+            return
+        # fi
+        timeofnote = time[getvar_checkokay('voice', line)]      # Interesting - get last time used. :)
+    # fi
+    if number_dots != 0:
+        p = timeofnote / 2.0
+        for i in range(1, number_dots+1):
+            timeofnote = timeofnote + p
+            p = p / 2.0
+        # rof
+    # fi
+#--     if typenote == gsw_operand:
+#--         print_error("NOTDONEYET - doing decode of gsw operand type of note", line)
+#--         return
+#--     # fi
+#--     if typenote == freqency_note:
+#--         print_error("NOTDONEYET - doing decode of freqency type of note", line)
+#--         return
+#--     # fi
+#--     if typenote == trill_note:
+#--         print_error("NOTDONEYET - doing decode of trill of notes", line)
+#--         return
+#--     # fi
+#--     if typenote == sequence_note:
+#--         print_error("NOTDONEYET - doing decode of sequence of notes", line)
+#--         return
+#--     # fi
+
+    computeit = wargs[1] + '=' + str(timeofnote)    # Should be floating number.
+    value, type_error = is_float(computeit, True)
+    if type_error is not None or value is None:
+        print_error("decode note unable to assign value({}) to second argument({}).".format(timeofnote, wargs[1]), line)
+        return
+    # fi
+
+    if len(wargs) == 3:      # 4 arguments, get suffixes after the note.
+        if r_suffixes != 0:
+            print_warning("decode note has information after the time, suffixes={}".format(r_suffixes), line)
+        # fi
+        return
+    # fi
+
+    computeit = wargs[2] + '=' + str(r_suffixes)
+    value, type_error = is_float(computeit, True)
+    if type_error is not None or value is None:
+        print_error("decode note unable to assign value({}) to third argument({}).".format(r_suffixes, wargs[2]), line)
+        return
+    # fi
+    return
+# End of decode_gsw
+
+# ----------------------------------------------------------------------------
+# ? decode  note; {octave,notename,sharp,flat,natural,tuplet,notelength,dot},variable; [...]
+# -1 if not standard note. Defaults normally apply.
+#   l, s, m, t, z, a, aa, @W, @X    1 if modifier present, 0 if not, or not a note.
+# If staff-line word (which sets till changed):
+#   arp, fermata, legato, marcato, staccato, tie, slur, lh, rh
+#   [ ]                     : start/end of chord (1, 0 if not)
+#   glissando               : Starting pitch of glissando = 1
+#   volumenumber            : 0 to 100% (probably here do 0 to 127.
+#   volumename              : 1 = vfff, 2 = vff ... 8 = vppp.   -1 if not a volume, 0 if numerical.
+#   crescendo               : 1 = start of crescendo, 0 if not.
+#   diminuendo              : 1 = start of diminuendo, 0 if not.
+#   position                : 0 to 100% (probably here do 0 to 127) for numerical position (pan value).
+#   pan                     : 1 - start of pan, 0 if not. (Moving between two.) Like cresendo/glissando.
+#   notenumber              : IMS 48 = 4c, etc. Default 3c=60, as per cyber1 (1978 era) musicomp.
+#   duration                : 0.25 if 1/4 note. -1 if not a note.
+
+def decode_ims(t_args, line):
+    global args
+    global measure_on
+    global key_sig
+    global key_voice
+
+#--    print_debug("decode_ims - Entering t_args={}".format(t_args))
+    if not t_args:
+        print_error("no decode arguments", line)
+        return
+    # fi
+    voice = getvar_checkokay('voice', line)     # Interesting - get last time used. :)
+    if voice <= 0:
+        print_error("decode works on voice lines, voice=({})".format(voice), line)
+        return
+    # fi
+
+    sg = t_args
+    x = []                                                  # Argument list.
+    t = []                                                  # Terminator after argument list.
+    count = 0
+    while len(sg) > 0:
+        a = find_terminator_macro_arg(sg, [';', ','], line)
+        if a < 0:
+            break
+        # fi
+        if (count & 1) == 0:
+            if sg[a] != ';':
+                print_error("decode needs semi-colon every other argument", line)
+                return
+            # fi
+        else:
+            if sg[a] != ',':
+                print_error("decode needs comma every other argument", line)
+                return
+            # fi
+        # fi
+        x.append(sg[:a])                                    # The argument.
+        t.append(sg[a])                                     # The terminator.
+        sg = sg[a+1:]
+        count = count + 1
+    # elihw
+    if len(sg) > 0:
+        x.append(sg)                                        # The argument.
+        t.append(None)                                      # The terminator.
+    # fi
+
+    # Save what type of processing we are doing.
+    save_current_type = [args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc]
+    savekeyvoice = key_voice[measure_on][voice]
+    # ------------------------------------------------------------------------------
+    if args.vertical or args.horizontal:
+        k = key_sig[savekeyvoice]           # Convert to number.
+    elif args.midi1csv or args.fluidsynth:
+        k = savekeyvoice
+    else:                                   # ABC
+        # Convert to normal format.
+        k = savekeyvoice.lower()
+        k = k.replace('b', '-')             # Does multiple flats
+        k = k.replace('#', '+')             # Does multiple sharps.
+        k = k.replace('=', 'n')             # Does multiple naturals.
+        k = key_sig[k]                      # Convert to number.
+    # fi
+    # ------------------------------------------------------------------------------
+    # Set to horizontal format -- so we have a text 3c+ from getnote.
+    args.horizontal = False
+    args.vertical = False
+    args.midi1csv = True
+    args.fluidsynth = False
+    args.abc = False
+    key_voice[measure_on][voice] = k
+
+    w_note = x[0]
+    therest, midinote, typenote = getnote(w_note, voice, line, False)
+
+    # What does key_voice have to me?
+    args.horizontal = True
+    args.midi1csv = False
+    key_voice[measure_on][voice] = key_sig_int[k]
+    a, thenote, b = getnote(w_note, voice, line, False)
+
+    # Restore type of processing we are doing.
+    args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc = save_current_type
+    key_voice[measure_on][voice] = savekeyvoice
+
+    if therest is None or thenote is None:
+        print_warning("decode note had error with note {}".format(w_note), line)
+        return
+    # fi
+    if typenote != normal_note:
+        print_warning("decode note is not of type normal_note -- ({})".format(typenote), line)
+        return
+    # fi
+
+    # Get the time value for the note.
+    timeofnote, r_suffixes, number_dots = get_time(therest, line)
+
+    if r_suffixes is None or number_dots is None:
+        print_error("decode - Error getting time for note", line)
+        return
+    # fi
+    note_octave = -1
+    note_notename = -1
+    note_sharp = -1
+    note_flat = -1
+    note_natural = -1
+    note_tuplet = -1
+    note_notelength = -1
+    note_dot = number_dots
+    if thenote is str:
+        note_octave = thenote[0]
+        note_notename = thenote[1]
+        if len(thenote) >= 2:
+            sfn = thenote[2:]
+            if sfn == '+':
+                note_sharp = 1
+            elif sfn == '++':
+                note_sharp = 2
+            elif sfn == '-':
+                note_flat = 1
+            elif sfn == '--':
+                note_flat = 2
+            elif sfn == 'n':
+                note_natural = 1
+            else:
+                print_error("decode - sharp/flat/natural unrecognized ('{}')".format(sfn), line)
+            # fi
+        # fi
+        note_tuplet = -1                    # NOTDONEYET
+        note_notelength = -1                # NOTDONEYET
+    else:                               # Follows is not a standard note.
+        note_octave = -1
+        note_notename = -1
+        note_sharp = -1
+        note_flat = -1
+        note_natural = -1
+        note_tuplet = -1                    # NOTDONEYET
+        note_notelength = -1
+    # fi
+    note_l = 0
+    note_s = 0
+    note_m = 0
+    note_t = 0
+    note_z = 0 # Same as note_l here.
+    note_a = 0                              # NOTDONEYET
+    note_aa = 0                             # NOTDONEYET
+    if (r_suffixes & suffix_legato) != 0:
+        note_l = 1
+        note_z = 1
+    if (r_suffixes & suffix_staccato) != 0:
+        note_s = 1
+    if (r_suffixes & suffix_marcato) != 0:
+        note_m = 1
+    if (r_suffixes & suffix_tied) != 0:
+        note_t = 1
+    if (r_suffixes & suffix_emphasis) != 0:
+        note_a = 1
+    # fi
+
+# If staff-line word (which sets till changed):
+    note_arp = 0                    # NOTDONEYET
+    note_fermata = 0                # NOTDONEYET
+    note_legato = 0                 # NOTDONEYET
+    note_marcato = 0                # NOTDONEYET
+    note_staccato = 0               # NOTDONEYET
+    note_tie = 0                    # NOTDONEYET
+    note_slur = 0                   # NOTDONEYET
+    note_lh = 0                     # NOTDONEYET
+    note_rh = 0                     # NOTDONEYET
+    note_chord_start = 0            # NOTDONEYET
+    note_chord_end = 0              # NOTDONEYET [ ] : start/end of chord (1, 0 if not)
+    note_glissando = 0              # NOTDONEYET    : Starting pitch of glissando = 1
+    note_volumenumber = vl[voice][measure_on]     # : 0 to 100% (probably here do 0 to 127.)
+    note_volumename = -1            # Do not do this. : 1 = vfff, 2 = vff ... 8 = vppp. -1 not volume, 0 if numerical.
+    note_crescendo = 0              # NOTDONEYET    : crescendo 1 = start of crescendo, 0 if not.
+    note_diminuendo = 0             # NOTDONEYET    : 1 = start of diminuendo, 0 if not.
+    note_position = 0               # NOTDONEYET    : 0 to 100% (probably 0 to 127) for numerical position (pan value).
+    note_pan = 0                    # NOTDONEYET    : 1 - start pan, 0 if not. (Moving between two.)
+
+    if timeofnote is None or timeofnote == 0:
+        timeofnote = time[getvar_checkokay('voice', line)]      # Interesting - get last time used. :)
+    # fi
+    if number_dots != 0:
+        p = timeofnote / 2.0
+        for i in range(1, number_dots+1):
+            timeofnote = timeofnote + p
+        p = p / 2.0
+        # rof
+    # fi
+    note_duration = timeofnote      #               : 0.25 if 1/4 note. -1 if not a note.
+    note_notenumber = midinote      #               : IMS 48 = 4c, etc. Default 3c=60, as per cyber1 (1978) musicomp.
+    if timeofnote == 0:
+        q = 0
+    else:
+        q = 1.0 / timeofnote
+        if q.is_integer():
+            q = int(q)
+        # fi
+    # fi
+    note_notelength = str(q)
+
+    convertit = {
+        "octave": note_octave,
+        "notename": note_notename,
+        "sharp": note_sharp,
+        "flat": note_flat,
+        "natural": note_natural,
+        "tuplet": note_tuplet,
+        "notelength": note_notelength,
+        "dot": note_dot,
+        "octave": note_octave,
+        "sharp": note_sharp,
+        "flat": note_flat,
+        "natural": note_natural,
+        "notelength": note_notelength,
+        "l": note_l,
+        "s": note_s,
+        "m": note_m,
+        "t": note_t,
+        "z": note_z,
+        "a": note_a,
+        "aa": note_aa,
+        "arp": note_arp,
+        "fermata": note_fermata,
+        "legato": note_legato,
+        "marcato": note_marcato,
+        "staccato": note_staccato,
+        "tie": note_tie,
+        "slur": note_slur,
+        "lh": note_lh,
+        "rh": note_rh,
+        "chord_start": note_chord_start,
+        "chord_end": note_chord_end,
+        "glissando": note_glissando,
+        "volumenumber": note_volumenumber,
+        "volumename": note_volumename,
+        "crescendo": note_crescendo,
+        "diminuendo": note_diminuendo,
+        "position": note_position,
+        "pan": note_pan,
+        "duration": note_duration,
+        "notenumber": note_notenumber,
+    }
+    for i in range(1, len(x), 2):
+        if x[i] not in convertit:
+            print_error("decode - unknown name ({})".format(x[i]), line)
+            return
+        # fi
+        computeit = x[i + 1] + '=' + str(convertit[x[i]])
+        value, type_error = is_float(computeit, True)
+        if type_error is not None or value is None:
+            print_error("decode note unable to assign value({}) to second argument({}).".format(convertit[x[i]],x[i+1]), line)
+            return
+        # fi
+    # rof
+    return
+# End of decode_ims
+
+# ----------------------------------------------------------------------------
 #       bars    7+1             $$ The first one must be one more than wanted -- due to "measure 0"
 #                               $$ setting things line meter up. Dunno, it works.
 #       bars    7               $$ Group the next 7 bars on one staff line -- .abc file.
@@ -5634,12 +6157,13 @@ def do_cstopnow(t_args, line):
 # End of do_cstopnow
 
 # ----------------------------------------------------------------------------
-#   decode  m1,3c+          $$ note number for 3c+ into m1
-#   decode  m1,m2,3c+4      $$ note number for 3c+ into m1, note length (4) in m2.
-#   decode  m1,m2,m3,3c+4l  $$ note number for 3c+ into m1, note length (4) in m2, 16 into m3.
-#   decode  3c+             $$ One argument - sets defaults for voice/staff.
+#   decode  3c+             $$ IMS - One argument - sets defaults for voice/staff.
+#   decode  m1,3c+          $$ GSW - note number for 3c+ into m1
+#   decode  m1,m2,3c+4      $$ GSW - note number for 3c+ into m1, note length (4) in m2.
+#   decode  m1,m2,m3,3c+4l  $$ GSW - note number for 3c+ into m1, note length (4) in m2, 16 into m3.
 #
-#   decode  note; {octave,notename,sharp,flat,natural,tuplet,notelength,dot},variable; [...]
+# ? decode  note; {octave,notename,sharp,flat,natural,tuplet,notelength,dot},variable; [...]
+#
 # -1 if not standard note. Defaults normally apply.
 #   l, s, m, t, z, a, aa, @W, @X    1 if modifier present, 0 if not, or not a note.
 # If staff-line word (which sets till changed):
@@ -5666,161 +6190,17 @@ def do_cstopnow(t_args, line):
 #   suffix_normal = 0           # No suffix.
 
 def do_decode(t_args, line):
-    global args
-    global measure_on
-    global key_sig
-    global key_voice
-
+#--    print_debug("do_decode - Entering t_args={}".format(t_args))
     if t_args is None or t_args == '':
         print_error("decode command does not have any arguments.", line)
         return
     # fi
-    wargs = arglist(t_args, line, False)
-
-    if not wargs or len(wargs) < 1:
-        print_error("no decode arguments", line)
-        return
-    # fi
-    if len(wargs) > 4 or len(wargs) == 1:
-        print_error("Not correct number of arguments for decode commmand", line)
-        return
-    # fi
-    # Save what type of processing we are doing.
-    saveargsh = args.horizontal
-    saveargsv = args.vertical
-    saveargsm = args.midi1csv
-    saveargsf = args.fluidsynth
-    saveargabc = args.abc
-    savekeyvoice = key_voice[measure_on][1]
-    # ------------------------------------------------------------------------------
-    if args.vertical or args.horizontal:
-        k = key_sig[savekeyvoice]           # Convert to number.
-    elif args.midi1csv or args.fluidsynth:
-        k = savekeyvoice
-    else:                                   # ABC
-        # Convert to normal format.
-        k = savekeyvoice.lower()
-        k = k.replace('b', '-')             # Does multiple flats
-        k = k.replace('#', '+')             # Does multiple sharps.
-        k = k.replace('=', 'n')             # Does multiple naturals.
-        k = key_sig[k]                      # Convert to number.
-    # fi
-    # ------------------------------------------------------------------------------
-    # Set to midi format -- so we have a value.
-    args.horizontal = False
-    args.vertical = False
-    args.midi1csv = True
-    args.fluidsynth = False
-    args.abc = False
-    key_voice[measure_on][1] = k
-
-    if len(wargs) == 2:         # decode m1,3c4
-        w_note = wargs[1]
-    elif len(wargs) == 3:       # decode m1,m2,3c4
-        w_note = wargs[2]
-    else:                   # 4
-        w_note = wargs[3]       # decode m1,m2,m3,3c4
-    # fi
-    # Ignore leading space.
-    therest, thenote, typenote = getnote(w_note, 1, line, False)
-
-    # Restore type of processing we are doing.
-    args.horizontal = saveargsh
-    args.vertical = saveargsv
-    args.midi1csv = saveargsm
-    args.fluidsynth = saveargsf
-    args.abc = saveargabc
-    key_voice[measure_on][1] = savekeyvoice
-
-    if therest is None or thenote is None:
-        print_warning("decode note had error with note {}".format(w_note), line)
-        return
-    # fi
-    if therest and len(therest) > 0 and len(wargs) == 2:
-        print_warning("decode note has information ({}) after the note {}".format(therest, w_note), line)
-    # fi
-    if typenote != normal_note:
-        print_warning("decode note is not of type normal_note -- ({})".format(typenote), line)
-        return
-    # fi
-    if thenote <= 12 + 12 - 3:
-        computeit = wargs[0] + '=' + '0'                       # rest = 0
+    if t_args.find(';') > 0:            # if IMS format decode command (with pairs)
+        decode_ims(t_args, line)
+    elif t_args.find(',') < 0:          # No arguments - set default values for note
+        set_default_ims(t_args, line)
     else:
-        computeit = wargs[0] + '=' + str(thenote) + '+3-12-12'  # Convert from midi note to musicomp value.
-    # fi
-    value, type_error = is_float(computeit, True)
-    if type_error is not None or value is None:
-        print_error("decode note unable to assign value({}) to first argument({}).".format(thenote, wargs[0]), line)
-        return
-    # fi
-    if len(wargs) < 3:      # 3 or 4 arguments continue.
-        return
-    # fi
-
-    # Get the time value for the note.
-    timeofnote, r_suffixes, number_dots = get_time(therest, line)
-
-    if r_suffixes is None or number_dots is None:
-        print_error("decode - Error getting time for note", line)
-        return
-    # fi
-    # suffix_legato = 16            -- glide to next note.
-    # suffix_tied = 2               -- tied
-    # suffix_staccato = 1           -- staccato
-    # suffix_dotted = -1
-    # suffix_normal = 0
-    # bits are $union$'ed together for multiple modifiers.
-    # number_dots are how many "d" (dotted) were found.
-    if timeofnote is None or timeofnote == 0:
-        if number_dots != 0:
-            print_error("cannot have dotted syntax on a default note length.", line)
-            return
-        # fi
-        timeofnote = time[getvar_checkokay('voice', line)]      # Interesting - get last time used. :)
-    # fi
-    if number_dots != 0:
-        p = timeofnote / 2.0
-        for i in range(1, number_dots+1):
-            timeofnote = timeofnote + p
-            p = p / 2.0
-        # rof
-    # fi
-#--     if typenote == gsw_operand:
-#--         print_error("NOTDONEYET - doing decode of gsw operand type of note", line)
-#--         return
-#--     # fi
-#--     if typenote == freqency_note:
-#--         print_error("NOTDONEYET - doing decode of freqency type of note", line)
-#--         return
-#--     # fi
-#--     if typenote == trill_note:
-#--         print_error("NOTDONEYET - doing decode of trill of notes", line)
-#--         return
-#--     # fi
-#--     if typenote == sequence_note:
-#--         print_error("NOTDONEYET - doing decode of sequence of notes", line)
-#--         return
-#--     # fi
-
-    computeit = wargs[1] + '=' + str(timeofnote)    # Should be floating number.
-    value, type_error = is_float(computeit, True)
-    if type_error is not None or value is None:
-        print_error("decode note unable to assign value({}) to second argument({}).".format(timeofnote, wargs[1]), line)
-        return
-    # fi
-
-    if len(wargs) == 3:      # 4 arguments, get suffixes after the note.
-        if r_suffixes != 0:
-            print_warning("decode note has information after the time, suffixes={}".format(r_suffixes), line)
-        # fi
-        return
-    # fi
-
-    computeit = wargs[2] + '=' + str(r_suffixes)
-    value, type_error = is_float(computeit, True)
-    if type_error is not None or value is None:
-        print_error("decode note unable to assign value({}) to third argument({}).".format(r_suffixes, wargs[2]), line)
-        return
+        decode_gsw(t_args, line)
     # fi
     return
 # End of do_decode
@@ -8323,7 +8703,7 @@ minor_key_to_major = {
     'a-': 'c-'
 }
 
-#-----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
 def get_volume_number(name, line, command_name):
     global vlprint
 
@@ -8820,14 +9200,14 @@ commands = {
              'debug'   : (do_debug,     False),
              'decode'  : (do_decode,    False),
              'delay'   : (do_delay,     False),
-             'do'      : (do_loop,      False),         # NOTDONEYET
+             'do'      : (do_loop,      False),
              'elif'    : (do_else_if,   False),
              'else'    : (do_else,      False),
              'elseif'  : (do_else_if,   False),
              'encode'  : (do_encode,    False),
              'end'     : (do_cstopnow,  True),          # cstop* alternative
              'endif'   : (do_endif,     False),
-             'endloop' : (do_endloop,   False),         # NOTDONEYET
+             'endloop' : (do_endloop,   False),
              'endm'    : (do_endm,      False),
              'endmacro': (do_endm,      False),         # endm alternative
              'exit'    : (do_cstopnow,  True),          # cstop* alternative
@@ -8876,7 +9256,11 @@ commands = {
              'xpose'   : (do_xpose,     True),
              '%%'      : (do_percents,  True),
 
-             'endprocess':(do_endprocess, False),       # NOTDONEYET
+             'endprocess':(do_endprocess, False),       # NOTDONEYET - saved code, but doesn't execute yet.
+             'process' : (do_process,   False),         # NOTDONEYET - saved code, but doesn't execute yet.
+
+             'staff'   : (do_staff,     False),         # NOTDONEYET - must do, then chords... .
+
              'flat'    : (do_flat,      False),         # NOTDONEYET
              'format'  : (do_format,    False),         # IMS - will not do     NOTDONEYET
              'include' : (do_include,   False),         # IMS - will not do     NOTDONEYET
@@ -8884,10 +9268,8 @@ commands = {
              'midi'    : (do_midi,      False),         # NOTDONEYET
              'natural' : (do_natural,   False),         # NOTDONEYET
              'print'   : (do_print,     False),         # IMS - will not do     NOTDONEYET
-             'process' : (do_process,   False),         # NOTDONEYET
              'sharp'   : (do_sharp,     False),         # NOTDONEYET
              'slide'   : (do_slide,     False),         # NOTDONEYET
-             'staff'   : (do_staff,     False),         # NOTDONEYET
              'temper'  : (do_temper,    False),         # NOTDONEYET
              'tuning'  : (do_tuning,    False),         # IMS - will not do     NOTDONEYET
              # '.' -- handled specially.
@@ -9014,6 +9396,11 @@ def compute_middle_c(f):
 compute_middle_c(middle_c)          # Default to 3c
 
 # ----------------------------------------------------------------------------
+# Input:
+#       note_to_decode  - String of note to be decoded.
+#       voice           - for defaults, voice for this note.
+#       line            - semi-original line for error messages
+#       update_defaults - decode gsw method does not change defaults. 1 Argument IMS does.
 # return:
 #       therest (for time)
 #       thenote         Convert to abc format for note, octave.
@@ -9049,27 +9436,14 @@ def getnote(note_to_decode, voice, line, update_defaults):
         return '', 0, normal_note
     elif not note_to_decode or note_to_decode == '':
         return '', '', normal_note
-#--    elif note_to_decode[0] == '{' or note_to_decode[0] == '[' or note_to_decode[0] == '(':
     elif note_to_decode[0] == '(':
-#--        if note_to_decode[0] == '{':            # gsw oprnd     { }
-#--            print_error("m:{} gsw_operand {...} is not handled".format(measure_on), line)
-#--            return '', '', gsw_operand
-#--        elif note_to_decode[0] == '[':          # frequency     [ ]
-#--            print_error("m:{} frequency_note [...] is not handled".format(measure_on), line)
-#--            return '', '', freqency_note
-#--        else:
         typenote = normal_note              # return normal note
-#--        # fi
         work3 = 1
         #  must balance parens since note is followed by time
-        #  [440]4
-        # balance parens
         for temp2 in range(temp3 + 1, len(note_to_decode)):
             work4 = note_to_decode[temp2]
-#--            if work4 == '(' or work4 == '[' or work4 == '{':
             if work4 == '(':
                 work3 = work3 + 1               # count ('s
-#--            elif work4 == ')' or work4 == ']' or work4 == '}':
             elif work4 == ')':
                 work3 = work3 - 1               # subtract  )'s
                 if work3 < 1:
@@ -9085,10 +9459,6 @@ def getnote(note_to_decode, voice, line, update_defaults):
                         return therest, thenote, type_error
                     # fi
                     thenote = int(round(thenote))
-#--                    if typenote == freqency_note:  # if freq calculate it
-#--                        #-- thenote = freq(thenote)
-#--                        thenote = 968000/thenote    # NOT handled anywhere.
-#--                    elif typenote == normal_note:
                     if typenote == normal_note:
                         if thenote != 0 and (args.midi1csv or args.fluidsynth):
                             thenote = thenote + 12 + 12 - 3     # 3c -> 39 must be 60 for midi.
