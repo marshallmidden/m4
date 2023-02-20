@@ -715,18 +715,18 @@ def setvar(arg, val, typ):
     global commands
 
     if arg in commands and typ != 0:
-        return False    # Must not set character variable to a command name.
+        return None                 # Must not set character variable to a command name.
     # fi
     wary = chkvar(arg)
     if wary is None or (len(wary[numarry_indexes]) > 1 and wary[numarry_indexes][0] > 1):
-        return False    # Does not exist.
+        return None                 # Does not exist.
     # fi
     wary[numarry_values][0] = val
     wary[numarry_value_type][0] = typ
     if typ == 1:
         recompute_whichlocalchars()
     # fi
-    return True
+    return wary                     # Index is 0 into pointer wary.
 # End of setvar
 
 # ----------------------------------------------------------------------------
@@ -5614,6 +5614,11 @@ def decode_ims(t_args, line):
         # fi
     # fi
     note_notelength = str(q)
+    if note_notename == 'r' or note_notename == 0 or note_notenumber == 0:
+        note_type = 4               # Rest
+    else:                           # NOTDONEYET - note_type == 1, for (48,0.25) format type.
+        note_type = 0               # Presume 3c4 type of note.
+    # fi
 
     convertit = {
         "octave": note_octave,
@@ -6416,7 +6421,7 @@ def get_defaults_for_note(t_args, voice, line):
         print_error("decode - Error getting time for note", line)
         return None, 0, 0, 0, 0, 0, 0, 0
     # fi
-    
+
     note_sharp = note_flat = note_natural = note_octave = -1
     if thenote is str:
         note_octave = thenote[0]
@@ -6480,94 +6485,280 @@ def get_defaults_for_note(t_args, voice, line):
 # defaults to be used for any note items missing.
 
 def do_encode(t_args, line):
+    global measure_on
+    global last_voice_staff
+
     if t_args is None or t_args == '':
+        print_error("encode does not have a variable, nor string to assign to it.", line)
+        return
+    # fi
+    t_args = t_args.strip()                     # Toss spaces before and after.
+    if t_args is None or t_args == '':          # Check again. :)
         print_error("encode does not have a variable, nor string to assign to it.", line)
         return
     # fi
     assign = t_args.find('=')
     if assign <= 0:
-        print_error("encode does not have a name followed by an assignment character.", line)
+        print_error("encode does not have a variable followed by an assignment character.", line)
         return
     # fi
-    strng = t_args[assign+1:].strip()            # Toss spaces before and after.
-    token = t_args[0:assign].strip()             # Toss spaces before and after.
+    strng = t_args[assign+1:].strip()            # Toss spaces before and after.    After Assignment.
+    variable = t_args[0:assign].strip()          # Toss spaces before and after.    The Variable.
 
     # Are there any Parenthesis?
-    a = token.find('(')
+    a = variable.find('(')
+    wary = None
+    h = None
     if a >= 0:
-        wary, h = do_vars_parens(token, a, line, False)
+        wary, h = do_vars_parens(variable, a, line, False)
         if wary is None:
             return
         # fi
     else:
-        a = token.find('[')
+        a = variable.find('[')
         if a >= 0:
-            wary, h = do_vars_parens(token, a, line, False)
+            wary, h = do_vars_parens(variable, a, line, False)
             if wary is None:
                 return
             # fi
         else:
-            chk = setvar(token, strng, 1)
-            if not chk:
+            wary = setvar(variable, strng, 1)
+            if not wary:
                 print_error("variable name {} does not exist or cannot be created.".format(token), line)
+                return
             # fi
-            return
+            # Note: Changed later. :)
+            h = 0                               # Just a variable, not an array.
         # fi
     # fi
 
+    # At this point we have 'variable' with where to put the results of encode. (wary...)
+    # strng = everthing after the assignment character.
+
     a = strng.find(';')
-    if a < 0:                               # No Semi-colon's, just set string variable.
+    if a < 0:                                   # No Semi-colon's, just set string variable.
         wary[numarry_values][h] = strng
-        wary[numarry_value_type][h] = 1     # Character string
+        wary[numarry_value_type][h] = 1         # Character string
         recompute_whichlocalchars()
         return
-    elif a == 0:
-        print_error("encode has semicolon at end of line, that is not allowed.", line)
-        return
-    endif
-    # semi-colons with comma pairs -- except for explict.
-    t_args = strng[0:a]                     # Set t_args to string up to the semi-colon.
-    strng = strng[a+1:]                     # Toss semi-colon, now get arguments.
+    # fi
 
     voice = getvar_checkokay('voice', line)     # Interesting - get last time used. :)
     if voice <= 0:
         print_error("encode with semi-colons works on voice lines, voice=({})".format(voice), line)
         return
     # fi
-    while len(strng) > 0:                   # Get first token.
-        a = find_terminator_macro_arg(strng, [';', ','], line)
+
+    # semi-colons with comma pairs -- except for explict. ... pairs starts here.
+    pairs = strng[a+1:].strip()                 # Toss semi-colon, now get paired arguments i.e. x,y;
+    strng = strng[0:a].strip()                  # Set strng to string up to the semi-colon.
+
+    while len(pairs) > 0:                   # Get first token.
+        a = find_terminator_macro_arg(pairs, [';', ','], line)
         # 'after','upto','explicit','number','staffname'
-        if token == 'explict':
-            if a < 0 or strng[a] == ';':        # End of line (no more semicolons), or no comma.
-                print_error("encode explicit is only item without a paired variable", line)
-                return
-            else:
-                print_error("encode explicit must not have comma after it.", line)
+        if a < 0:
+            token = pairs                       # Can only be explicit... .
+            if token not in ['explicit', 'staffname']:
+                print_error("encode has semicolon without a variable, but is not explicit/staffname.", line)
                 return
             # fi
-            octave, note, notelength, midinote, duration, sharps, flats, natural = get_defaults_for_note(t_args, voice, line)
+        elif a == 0:
+            print_error("encode has semicolon at end of line, that is not allowed.", line)
+            return
+        elif pairs[a] == ';':                   # End of line (no more semicolons), or no comma.
+            token = pairs[0:a].strip()
+            if token not in ['explicit', 'staffname']:
+                print_error("encode has semicolon without a variable, but is not explicit/staffname.", line)
+                return
+            # fi
+        else:                                   # Comma separator.
+            token = pairs[0:a].strip()
+            pairs = pairs[a+1:].strip()
+            # Still need to get argument for pair.
+        # fi
+
+        if token == 'explict':
+            octave, notename, notelength, notenumber, duration, sharp, flat, natural = get_defaults_for_note(strng, voice, line)
+            strng = ''                          # No longer needed, create new.
             if octave is None:
-                return                      # Error occurred.
+                return                          # Error occurred.
             # fi
             if a < 0:
-                strng = ''
+                pairs = ''
             else:
-                strng = strng[a+1:]         # Toss semi-colon, now get any next arguments.
+                pairs = pairs[a+1:]             # Toss semi-colon, now get any next arguments.
+            # fi
+            if midinote == 0:
+                note_type = 4                   # rest.
+            else:
+                note_type = 0                   # normal note.
+            # fi
+            if strng != '':
+                strng = strng + ' '
+            # fi
+            if notenumber == 0:
+                strng = strng + 'r'
+            else:
+                strng = strng + str(octave) + str(notename)
+            # fi
+            if notelength > 0:
+                if notelength.is_integer():
+                    strng = strng + str(int(notelength))
+                else:
+                    strng = strng + '(' + str(duration) + ')'
+                # fi
+                if sharp > 0:
+                    strng = strng + '+' * sharp
+                if flat > 0:
+                    strng = strng + '-' * flat
+                if natural > 0:
+                    strng = strng + 'n' * natural
+                # fi
             # fi
             continue
-        elif token == 'after':
-            pass    # NOTDONEYET
-        elif token == 'before':
-            pass    # NOTDONEYET
-        elif token == 'number':
-            pass    # NOTDONEYET
         elif token == 'staffname':
-            pass    # NOTDONEYET
+            if last_voice_staff is None:
+                print_error("encode staffname with no staff or voice number specified yet.", line)
+                return
+            # fi
+            if strng != '':
+                strng = strng + ' '
+            # fi
+            if last_voice_staff is str:
+                strng = strng + last_voice_staff
+            elif last_voice_staff is int:
+                strng = strng + 'v' + str(last_voice_staff)
+            else:
+                print_error("encode staffname with no staff or integer voice number ({}) specified yet.".format(last_voice_staff), line)
+                return
+            # fi
+            strng = strng + ':'             # Do staff names have a : after them in encode? I say yes.
+            continue
+        # fi
+
+        # Get paired item (usually variable?).
+        a = find_terminator_macro_arg(pairs, [';'], line)
+        if a < 0:
+            secondary = pairs               # Last item.
+            pairs = ''
+        elif a == 0:
+            print_error("encode has null paired item, that is not allowed.", line)
+            return
         else:
-            pass    # NOTDONEYET
+            secondary = pairs[0:a].strip()
+            pairs = pairs[a+1:].strip()
+        # fi
+
+        # 'after','upto','number'
+        if token == 'after':
+            a = strng.find(secondary)
+            if a >= 0:
+                strng = strng[a + 1:]
+            else:
+                strng = ''
+            # fi
+            continue
+        elif token in ['before', 'upto']:
+            a = strng.find(secondary)
+            if a >= 0:
+                strng = strng[0:a]
+            else:
+                strng = ''
+            # fi
+            continue
+        elif token == 'number':
+            # Convert number to string and append to end of string.
+            value, type_error = is_float(secondary, True)
+            if type_error is not None or value is None:
+                print_error("encode '{}' unable to determine number value from '{}'.".format(token,secondary), line)
+                return
+            # fi
+            if strng != '':
+                strng = strng + ' '
+            # fi
+            if value.is_integer():
+                strng = strng + str(int(value))
+            else:
+                strng = strng + str(value)
+            # fi
+            continue
+        # fi:
+
+        value, type_error = is_float(secondary, False)
+        if type_error is not None or value is None:
+            print_error("encode '{}' unable to determine number value from '{}'.".format(token,secondary), line)
+            return
+        # fi
+        if value.is_integer():
+            value = int(value)
+        # fi
+
+        if token == 'octave':
+            strng = strng + str(value)
+        elif token == 'notename':
+            strng = strng + str(value)
+        elif token == 'notenumber':
+            if value == 0:
+                strng = strng + 'r'
+            else:
+                strng = strng + '(' + value + ')'
+            # fi
+        elif token == 'notelength':
+            if value > 0:
+                if value.is_integer():
+                    strng = strng + str(int(value))
+                else:
+                    strng = strng + '(' + str(value) + ')'
+                # fi
+            # fi
+        elif token == 'duration':
+            strng = strng + '(' + str(value) + ')'
+        elif token == 'sharp':
+            if value > 0:
+                strng = strng + '+' * value
+            # fi
+        elif token == 'flat':
+            if value > 0:
+                strng = strng + '-' * value
+            # fi
+        elif token == 'natural':
+            if value > 0:
+                strng = strng + 'n' * value
+            # fi
+        elif token == 'dot':
+            if value > 0:
+                strng = strng + 'd' * value
+            # fi
+        elif token in [ 'l', 's', 'm', 't', 'z', 'a', 'g']:
+            if value > 0:
+                strng = strng + token
+            # fi
+        elif token in [ 'treble', 'bass', 'soprano', 'alto', 'tenor', 'normal',
+                         'perc', 'nohead', 'oloz', 'floz', 'oharm', 'fharm',
+                         '[', ']', 'trem0', 'trem1', 'trem2', 'trem3',
+                         'stemsoff', 'stemson', 'tuplet', 'aa', 'gg', 
+                         'arp', 'fermata', 'legato', 'marcato', 'staccato',
+                         'tie', 'slur', 'lh', 'rh', 'glissando',
+                         'volumenumber', 'volumename',
+                         'crescendo', 'diminuendo',
+                         'position', 'pan']:
+            if value > 0:
+                if strng != '':
+                    strng = strng + ' '
+                # fi
+                strng = strng + 'token NOTDONEYET'
+            # fi
+        elif token == 'type':
+            note_type = value               # IGNORE THIS?? :)
+        else:
+            print_error("encode argument '{}' unrecognized, cannot assign '{}'.".format(token,value), line)
+            return
         # fi
     # elihw
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+    wary[numarry_values][h] = strng
+    wary[numarry_value_type][h] = 1         # Character string
+    recompute_whichlocalchars()
     return
 # End of do_encode
 
