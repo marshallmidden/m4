@@ -42,11 +42,11 @@ numarry_value_type = 4      # Array of types None=not-set, 0=int/float, 1= chara
 #--            [ 0 ] ]       #  int/float
 #-- arrays.append(warray)
 #-- 
-warray = [ 'abc1', 8,
-           [ 2 ],           # 1 dimension
-           [ None, None ],
-           [ None, None ] ]       # Character string, int/float
-arrays.append(warray)
+#-- warray = [ 'abc1', 8,
+#--            [ 2 ],           # 1 dimension
+#--            [ None, None ],
+#--            [ None, None ] ]       # Character string, int/float
+#-- arrays.append(warray)
 #-- 
 #-- warray = [ 'abc2', 8,
 #--            [ 1, 2 ],        # 2 dimensions
@@ -518,19 +518,19 @@ def compute_value(op, arg1, arg2):
     if op == '-':
         t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
         if t1 != 'NUMBER' or t2 != 'NUMBER':
-            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+            return [ "ERROR - #a Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ t1,  a1 - a2 ]
     elif op == '*':
         t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
         if t1 != 'NUMBER' or t2 != 'NUMBER':
-            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+            return [ "ERROR - #b Arguments are not Numbers (first:{},'{}') (second:{},'{}')".format(t1,a1,t2,a2), None ]
         # fi
         return [ t1,  a1 * a2 ]
     elif op == '/':
         t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
         if t1 != 'NUMBER' or t2 != 'NUMBER':
-            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+            return [ "ERROR - #c Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         if a2 == 0:
             return [ "ERROR - Second argument is zero a1='{}' a2='{}'".format(a1,a2), None ]
@@ -540,32 +540,32 @@ def compute_value(op, arg1, arg2):
     elif op == '**':
         t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
         if t1 != 'NUMBER' or t2 != 'NUMBER':
-            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+            return [ "ERROR - #d Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ t1,  a1 ** a2 ]
     # Logical: >, >=, <=, <, ==, !=
     elif op == '<=':
         t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
         if t1 != 'NUMBER' or t2 != 'NUMBER':
-            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+            return [ "ERROR - #e Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ 'NUMBER', -1 if a1 <= a2 else 0 ]
     elif op == '>=':
         t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
         if t1 != 'NUMBER' or t2 != 'NUMBER':
-            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+            return [ "ERROR - #f Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ 'NUMBER',  -1 if a1 >= a2 else 0 ]
     elif op == '>':
         t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
         if t1 != 'NUMBER' or t2 != 'NUMBER':
-            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+            return [ "ERROR - #g Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ 'NUMBER',  -1 if a1 > a2 else 0 ]
     elif op == '<':
         t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
         if t1 != 'NUMBER' or t2 != 'NUMBER':
-            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+            return [ "ERROR - #h Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ 'NUMBER',  -1 if a1 < a2 else 0 ]
     elif op == '==':
@@ -577,31 +577,31 @@ def compute_value(op, arg1, arg2):
     elif op == '$mask$':
         t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
         if t1 != 'NUMBER' or t2 != 'NUMBER':
-            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+            return [ "ERROR - #i Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ 'NUMBER',  int(a1) & int(a2) ]
     elif op == '$union$':
         t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
         if t1 != 'NUMBER' or t2 != 'NUMBER':
-            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+            return [ "ERROR - #j Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ 'NUMBER',  int(a1) | int(a2) ]
     elif op == '$cls$':
         t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
         if t1 != 'NUMBER' or t2 != 'NUMBER':
-            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+            return [ "ERROR - #k Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ 'NUMBER',  int(a1) << int(a2) ]
     elif op == '$ars$':
         t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
         if t1 != 'NUMBER' or t2 != 'NUMBER':
-            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+            return [ "ERROR - #l Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ 'NUMBER',  int(a1) >> int(a2) ]
     elif op == '$diff$':
         t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
         if t1 != 'NUMBER' or t2 != 'NUMBER':
-            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+            return [ "ERROR - #m Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ 'NUMBER',  int(a1) ^ int(a2) ]             # xor
 
@@ -609,13 +609,13 @@ def compute_value(op, arg1, arg2):
     elif op == '$and$':
         t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
         if t1 != 'NUMBER' or t2 != 'NUMBER':
-            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+            return [ "ERROR - #n Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ 'NUMBER',  -1 if int(a1) == -1 and int(a2) == -1 else 0 ]
     elif op == '$or$':
         t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
         if t1 != 'NUMBER' or t2 != 'NUMBER':
-            return [ "ERROR - Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
+            return [ "ERROR - #o Arguments are not Numbers a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
         return [ 'NUMBER',  -1 if int(a1) == -1 or int(a2) == -1 else 0 ]
 
