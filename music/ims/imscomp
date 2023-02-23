@@ -6589,6 +6589,19 @@ def get_defaults_for_note(t_args, voice, line):
 # End of get_defaults_for_note
 
 # ----------------------------------------------------------------------------
+def makeint(value):
+    if type(value) is str:
+        try:
+            value = float(value)
+        except:
+            print_error("encode argument value '{}' must be integer".format(value), line)
+            return None
+        # yrt
+    # fi
+    return int(value)
+# End of makeint
+
+# ----------------------------------------------------------------------------
 #   encode  A=hi there; after,hi; upto,re
 #   encode  A=4c4; octave,3; notelength,2
 #
@@ -6692,7 +6705,7 @@ def do_encode(t_args, line):
 
     # Initial in case we decode.
     octave = notename = notelength = notenumber = duration = -1
-    sharp = flat = natural = 0
+    sharp = flat = natural = dot = 0
 
     while len(pairs) > 0:                       # Get first token.
         a = find_terminator_macro_arg(pairs, [';', ','], line)
@@ -6703,11 +6716,13 @@ def do_encode(t_args, line):
                 print_error("encode has semicolon without a variable, that is not explicit/staffname.", line)
                 return
             # fi
+            pairs = ''
         elif a == 0:
             print_error("encode has semicolon at end of line, that is not allowed.", line)
             return
         elif pairs[a] == ';':                   # End of line (no more semicolons), or no comma.
             token = pairs[0:a].strip()
+            pairs = pairs[a+1:].strip()
             if token not in ['explicit', 'staffname']:
                 print_error("encode has semicolon without a variable, that is not explicit/staffname.", line)
                 return
@@ -6741,6 +6756,7 @@ def do_encode(t_args, line):
         elif token == 'staffname':
             if tagtype == 2:
                 print_error("encode '{}' done after note processing".format(token), line)
+                return
             # fi
             tagtype = 1
             if last_voice_staff is None:
@@ -6750,9 +6766,9 @@ def do_encode(t_args, line):
             if restore_staff != '':
                 restore_staff = restore_staff + ' '
             # fi
-            if last_voice_staff is str:
+            if type(last_voice_staff) is str:
                 restore_staff = restore_staff + last_voice_staff
-            elif last_voice_staff is int:
+            elif type(last_voice_staff) is int or type(last_voice_staff) is float:
                 restore_staff = restore_staff + 'v' + str(last_voice_staff)
             else:
                 print_error("encode staffname with no staff or integer voice number ({}) specified yet.".format(last_voice_staff), line)
@@ -6827,12 +6843,12 @@ def do_encode(t_args, line):
             if newnumber != '':
                 newnumber = newnumber + ' '
             # fi
-            if type(value) is str:
-                newnumber = newnumber + value
-            elif type(value) is float and value.is_integer():
-                newnumber = newnumber + str(int(value))
+            if type(secondary) is str:
+                newnumber = newnumber + secondary
+            elif type(secondary) is float and secondary.is_integer():
+                newnumber = newnumber + str(int(secondary))
             else:
-                newnumber = newnumber + str(value)
+                newnumber = newnumber + str(secondary)
             # fi
             continue
         # fi:
@@ -6840,8 +6856,6 @@ def do_encode(t_args, line):
         if tagtype == 1:
             print_error("encode '{}' done after string processing".format(token), line)
         elif tagtype == 0:
-# Don't know if the following is correct.
-# NOTDONEYET - will this decoding be correct?
             octave, notename, notelength, notenumber, duration, sharp, flat, natural = get_defaults_for_note(strng, voice, line)
         # fi
         tagtype = 2
@@ -6865,46 +6879,53 @@ def do_encode(t_args, line):
         # fi
 
         if token == 'octave':
-            if type(value) is str:
-                try:
-                    value = float(value)
-                    if value.is_integer():
-                        value = int(value)
-                    else:
-                        print_error("encode argument '{}' must be integer, not '{}'.".format(token,value), line)
-                        return
-                    # fi
-                except:
-                    print_error("encode argument '{}' must be integer, not '{}'.".format(token,value), line)
-                    return
-                # yrt
-            else:
-                value = int(value)
+            octave = makeint(value)
+            if octave is None:
+                return
             # fi
-            octave = value
             notenumber = -1
         elif token == 'notename':
             notename = value
             notenumber = -1
         elif token == 'notenumber':
-            notenumber = value
+            notenumber = makeint(value)
+            if notenumber is None:
+                return
+            # fi
             notename = -1
         elif token == 'notelength':
-            notelength = value
+            notelength = makeint(value)
+            if notelength is None:
+                return
+            # fi
             duration = -1
         elif token == 'duration':
             duration = value
             notelength = -1
         elif token == 'sharp':
-            sharp = value
+            sharp = makeint(value)
+            if sharp is None:
+                return
+            # fi
         elif token == 'flat':
-            flat = value
+            flat = makeint(value)
+            if flat is None:
+                return
+            # fi
         elif token == 'natural':
-            natural = value
+            natural = makeint(value)
+            if natural is None:
+                return
+            # fi
         elif token == 'dot':
-            dot = value
+            dot = makeint(value)
+            if dot is None:
+                return
+            # fi
         elif token in [ 'l', 's', 'm', 't', 'z', 'a', 'g']:
-            suffix = suffix + token
+            if type(value) is int and value > 0:
+                suffix = suffix + token
+            # fi
         elif token in [ 'arp', 'trem0', 'trem1', 'trem2', 'trem3', 'fermata',
                         'lh', 'rh', 'normal','perc', 'nohead', 'oloz', 'floz',
                         'oharm', 'fharm', 'legato', 'tie', 'staccato',
@@ -6912,27 +6933,19 @@ def do_encode(t_args, line):
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
                         '[', ']', 
                         'stemsoff', 'stemson', 'tuplet', 'aa', 'gg', 
-                        'glissando',
-                        'volumenumber', 'volumename',
-                        'crescendo', 'diminuendo',
-                        'position', 'pan']:
+                        'glissando', 'crescendo', 'diminuendo',
+                        'treble', 'bass', 'soprano', 'alto', 'tenor']:
             if type(value) is int and value > 0:
                 if prefix != '':
                     prefix = prefix + ' '
-                #fi
+                # fi
                 prefix = prefix + token
             # fi
-        # NOTDONEYET
-        elif token in [ 'treble', 'bass', 'soprano', 'alto', 'tenor', '[', ']', 
-                        'stemsoff', 'stemson', 'tuplet', 'aa', 'gg', 'glissando',
-                        'volumenumber', 'volumename', 'crescendo', 'diminuendo',
-                        'position', 'pan']:
-            if type(value) is int and value > 0:
-                if prefix != '':
-                    prefix = prefix + ' '
-                #fi
-                prefix = prefix + token
+        elif token in [ 'volumenumber', 'volumename', 'position', 'pan']:
+            if prefix != '':
+                prefix = prefix + ' '
             # fi
+            prefix = prefix + token + ' ' + str(value)
         elif token == 'type':
             note_type = value               # IGNORE THIS?? :)
             if note_type == 4:              # Rest
@@ -7004,6 +7017,9 @@ def do_encode(t_args, line):
 
         if notelength > 0:
             n = n + str(notelength)
+            for d in range(0,dot):
+                n = n + 'd'
+            # rof
         else:
             if duration in legal_mc_notes:
                 n = n + legal_mc_notes[duration]
@@ -7012,14 +7028,14 @@ def do_encode(t_args, line):
             # fi
         # fi
         newstrng = n
-#--    else:                                   # tagtype = 1
-#--        newstrng = newstrng
+    else:                                   # tagtype = 1
+        newstrng = strng
     # fi
     if prefix != '':
         newstrng = prefix + ' ' + newstrng
     # fi
     if suffix != '':
-        newstrng = newstrng + ' ' + suffix
+        newstrng = newstrng + suffix
     # fi
     if newnumber != '':
         newstrng = newstrng + ' ' + newnumber
@@ -9167,7 +9183,7 @@ def do_xpose(t_args, line):
         else:
             kl = None
         # fi
-    #fi
+    # fi
     if len(vargs) > 1:
         if len(vargs) == 4:
             print_error("xpose command only allows 3 arguments.".format(kl), line)
