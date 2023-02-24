@@ -1379,8 +1379,11 @@ drum_sounds = {
 }
 
 # ----------------------------------------------------------------------------
+global staff_name                   # Staff names, with key pair as array of voice numbers.
+staff_name = {}
 global last_voice_staff
 last_voice_staff = None             # For continuation lines.
+
 global args
 global errors_happened
 errors_happened = 0                 # system exit, 0 = okay, 1 = errors happened
@@ -4397,7 +4400,7 @@ def is_anything(strg):
     elif tree[0] is not None and tree[0].startswith('ERROR'):
         return strg, tree[0]
     elif tree[0] == 'COMMA':
-        return tree[0], tree[1] 
+        return tree[0], tree[1]
     elif tree[1] is None:
         return strg, "variable '{}' is not set".format(strg)
     # fi
@@ -4870,16 +4873,13 @@ def arglist(wline, line, integers):
 #
 # Returns where in strng termination is. -1 if not found. 0=first character.
 
-def find_terminator_macro_arg(strng, terminator, original_line):
+def find_terminator_in_string(strng, terminator, original_line):
     global measure_on
 
-#DEBUG    print_debug("find_terminator_macro_arg - Entering ('{}','{}')".format(strng,terminator))
     w = 0
     while w < len(strng):
         c = strng[w]
-#DEBUG        print_debug("find_terminator_macro_arg - w={} c='{}'".format(w,c))
         if c in terminator:
-#DEBUG            print_debug("find_terminator_macro_arg - terminator@w={}".format(w))
             return w                        # Terminator immediately - blank argument.,
         # fi
         e = []
@@ -4924,9 +4924,8 @@ def find_terminator_macro_arg(strng, terminator, original_line):
             # fi
         # elihw
     # elihw
-#DEBUG    print_debug("find_terminator_macro_arg - no terminator")
     return -1
-# End of find_terminator_macro_arg
+# End of find_terminator_in_string
 
 # ----------------------------------------------------------------------------
 # Input:
@@ -4989,7 +4988,7 @@ def replace_macro(cnumber, t_args, line):
                 return False
             else:
                 # Get to terminator here.        NOTDONEYET - the following needs to tokenize and find terminator.
-                terminator_at = find_terminator_macro_arg(t_args, c, line)
+                terminator_at = find_terminator_in_string(t_args, c, line)
                 if terminator_at < 0:
                     print_error("macro {} does not have right terminator after argument#{}, needs '{}'.".format(command,n+1,c), line)
                     return False
@@ -5469,7 +5468,7 @@ def decode_ims(t_args, line):
     t = []                                                  # Terminator after argument list.
     count = 0
     while len(sg) > 0:
-        a = find_terminator_macro_arg(sg, [';', ','], line)
+        a = find_terminator_in_string(sg, [';', ','], line)
         if a < 0:
             break
         # fi
@@ -5902,7 +5901,7 @@ def do_calcs(t_args, line):
     sg = t_args
     termination = None
     while len(sg) > 0:
-        a = find_terminator_macro_arg(sg, [';', ','], line)
+        a = find_terminator_in_string(sg, [';', ','], line)
         if a < 0:
             break
         # fi
@@ -5962,7 +5961,7 @@ def do_calcc(t_args, line):
     sg = t_args
     termination = None
     while len(sg) > 0:
-        a = find_terminator_macro_arg(sg, [';', ','], line)
+        a = find_terminator_in_string(sg, [';', ','], line)
         if a < 0:
             break
         # fi
@@ -6712,7 +6711,7 @@ def do_encode(t_args, line):
     sharp = flat = natural = dot = 0
 
     while len(pairs) > 0:                       # Get first token.
-        a = find_terminator_macro_arg(pairs, [';', ','], line)
+        a = find_terminator_in_string(pairs, [';', ','], line)
         # 'after','upto','explicit','number','staffname', 'string'
         if a < 0:
             token = pairs                       # Can only be explicit... .
@@ -6782,7 +6781,7 @@ def do_encode(t_args, line):
         # fi
 
         # Get paired item (usually variable?).
-        a = find_terminator_macro_arg(pairs, [';'], line)
+        a = find_terminator_in_string(pairs, [';'], line)
         if a < 0:
             secondary = pairs                       # Last item.
             pairs = ''
@@ -6935,8 +6934,8 @@ def do_encode(t_args, line):
                         'oharm', 'fharm', 'legato', 'tie', 'staccato',
                         'marcato', 'slur',
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-                        '[', ']', 
-                        'stemsoff', 'stemson', 'tuplet', 'aa', 'gg', 
+                        '[', ']',
+                        'stemsoff', 'stemson', 'tuplet', 'aa', 'gg',
                         'glissando', 'crescendo', 'diminuendo',
                         'treble', 'bass', 'soprano', 'alto', 'tenor']:
             if type(value) is int and value > 0:
@@ -7698,7 +7697,7 @@ def do_loop(t_args, line):
         x = [ ]
         sg = t_args
         while len(sg) > 0:
-            a = find_terminator_macro_arg(sg, [';', ','], line)
+            a = find_terminator_in_string(sg, [';', ','], line)
             if a < 0:
                 break
             # fi
@@ -7715,7 +7714,7 @@ def do_loop(t_args, line):
             lvv = x[0]
         elif len(x) == 2 or len(x) == 3:
             # Split on = (assignment).
-            a = find_terminator_macro_arg(x[0], [ '=' ], line)
+            a = find_terminator_in_string(x[0], [ '=' ], line)
             if a < 0:
                 print_error("loop with {} arguments needs first to be a variable to assign to".format(len(x)), line)
                 return
@@ -9833,8 +9832,61 @@ def do_slide(t_args, line):                             # NOTDONEYET
 # ----------------------------------------------------------------------------
 #   staff    -- complicated arguments, staff name, voices, etc.
 
-def do_staff(t_args, line):                             # NOTDONEYET
-    print_error("NOTDONEYET - do_staff", line)
+def do_staff(t_args, line):
+    global staff_name
+
+    if t_args is None or t_args == '':
+        print_error("staff does not have a name argument.", line)
+        return
+    # fi
+    targs = re.sub(r'\s*', '', t_args)              # Toss spaces.
+    if t_args is None or t_args == '':
+        print_error("staff does not have a name argument.", line)
+        return
+    # fi
+    # Returns where in strng termination is. -1 if not found. 0=first character.
+    x = find_terminator_in_string(t_args, [':'], line)
+    if x < 0:
+        sn = t_args                                 # Staff name.
+        v = None                                    # No voices.
+    elif x == 0:
+        print_error("staff does not have a name argument before the colon(:)", line)
+        return
+    else:
+        sn = t_args[0:x]
+        if x+1 >= len(t_args):
+            v = None
+        else:
+            v = t_args[x+1:]
+        # fi
+    # fi
+    if v is not None:
+        vs = arglist(v, line, True)                 # Arguments are numbers.
+        v = []
+        for w in vs:
+            f1, type_error = is_float(w, is_float_number)
+            if type_error is not None:
+                print_error("staff error - {}".format(type_error), line)
+                return
+            # fi
+            if f1 is None:
+                print_error("voice {} is not a number.".format(w), line)
+                return
+            # fi
+            f1 = int(round(f1))
+            if f1 < 1  or f1 > MAXVOICES:       # If out of range.
+                print_error("number of voices must between 1 and {} inclusive. Not ({})".format(MAXVOICES, f1), line)
+                return
+            # fi
+            do_set_voices(f1, line)             # If voices not set up yet, set them up.
+            fill_voice_mlth(False, line)        # Need to make measure for other voices up to here "mlth".
+            v.append(f1)
+        # fi
+    # fi
+
+    staff_name[sn] = v                          # Create or change it.
+    last_voice_staff = sn
+    cis = sn                                    # No longer doing just one voice.   NOTDONEYET - set voice to staff.
     return
 # End of do_staff
 
