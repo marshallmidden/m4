@@ -448,7 +448,8 @@ def compute_value(op, arg1, arg2):
             # fi
             return arg2
         elif maxwary[numarry_indexes] != []:
-            return [ "ERROR - compute_value - variable is array '{}'".format(arg), None ]
+#PRINT            print("compute_value - #h1", file=sys.stderr,flush=True)  # PRINT
+            return [ "ERROR - compute_value - variable is array '{}'".format(arg1), None ]
         elif arg2[0] == 'NUMBER':
 #PRINT            print("compute_value - #i", file=sys.stderr,flush=True)  # PRINT
             maxwary[numarry_value_type][0] = 0
@@ -1721,7 +1722,7 @@ def get_line():
 #-----------------------------------------------------------------------------
 # Parse and process line.
 def process_line(t, line):
-#--     print("process_line - Entering line='{}'".format(line), file=sys.stderr, flush=True)    # PRINT
+#PRINT    print("process_line - Entering line='{}'".format(line), file=sys.stderr, flush=True)    # PRINT
     wline = line.strip()                 # Ignore leading and trailing whitespace.
     if wline == 'quit' or wline == 'exit':
         sys.exit(0)
