@@ -1,15 +1,22 @@
 #-----------------------------------------------------------------------------
-SONGS  = b-6
+#-- SONGS  = b-6
+SONGS  =
 #-----------------------------------------------------------------------------
 #-- TESTS  = testing
 TESTS  = A
 TESTS += A1
 TESTS += A2
-#-- TESTS += A3
 TESTS += A4
 TESTS += A5
 TESTS += A6
 TESTS += A7
+TESTS += DECODE
+TESTS += ENCODE
+TESTS += L
+TESTS += L1
+TESTS += N
+TESTS += P1
+TESTS += STAFF
 #-----------------------------------------------------------------------------
 SONGS_E = ${SONGS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
