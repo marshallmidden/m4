@@ -5816,6 +5816,8 @@ def do_calcc(t_args, line):
 def do_change(t_args, line):
     global all_unique_macro_names
     global commands
+    global staff_keywords
+    global staff_name
 
     if t_args is None or t_args == '':
         print_error("change does not have three or four arguments.", line)
@@ -5848,6 +5850,12 @@ def do_change(t_args, line):
         print_error("copy new name already exists as different command.", line)
     elif new in all_unique_macro_names:
         print_error("change new name already exists as macro.", line)
+        return
+    elif new in staff_keywords:
+        print_error("change new name already exists as staff keyword.", line)
+        return
+    elif new in staff_name:
+        print_error("change new name already exists as staff name.", line)
         return
     if old not in commands:
         print_error("change old name does not exist.", line)
@@ -6041,6 +6049,8 @@ def do_comment(t_args, line):
 def do_copy(t_args, line):
     global all_unique_macro_names
     global commands
+    global staff_keywords
+    global staff_name
 
     if t_args is None or t_args == '':
         print_error("copy does not have three or four arguments.", line)
@@ -6073,6 +6083,12 @@ def do_copy(t_args, line):
         print_error("copy new name already exists as different command.", line)
     elif new in all_unique_macro_names:
         print_error("copy new name already exists as macro.", line)
+        return
+    elif new in staff_name:
+        print_error("copy new name already exists as staff name.", line)
+        return
+    elif new in staff_keywords:
+        print_error("copy new name already exists as staff keyword.", line)
         return
     # fi
     if old == '*' or old == '#':
@@ -7585,6 +7601,9 @@ def do_macro(t_args, line):
     global macro_defining
     global macro_defining_count
     global all_unique_macro_names
+    global staff_keywords
+    global staff_name
+    global commands
 
 #DEBUG    print_debug("do_macro - t_args='{}'".format(t_args))
     if t_args is None or t_args == '':
@@ -7604,6 +7623,12 @@ def do_macro(t_args, line):
     name = wargs[0]
     if name in commands:
         print_error("macro ({}) would replace existing command".format(name), line)
+        return
+    elif name in staff_name:
+        print_error("macro ({}) would replace existing staff name".format(name), line)
+        return
+    elif name in staff_keywords:
+        print_error("macro ({}) would replace existing staff keyword".format(name), line)
         return
     # fi
     wargs = wargs[1:]
@@ -8276,6 +8301,7 @@ def do_process(t_args, line):
     global process_name
     global process_argument
     global process_buffer
+    global staff_keywords
 
     if t_args is None or t_args == '':
         print_error("process command does not have any arguments.", line)
@@ -8295,16 +8321,19 @@ def do_process(t_args, line):
     if name in commands:
         print_error("process ({}) would replace existing command".format(name), line)
         return
-    # fi
-    if name in process_name:
+    elif name in staff_keywords:
+        print_error("process ({}) would replace existing staff keyword".format(name), line)
+        return
+    elif name in staff_name:
+        print_error("process ({}) would replace existing staff name".format(name), line)
+        return
+    elif name in process_name:
         print_error("process ({}) would replace existing process".format(name), line)
         return
-    # fi
-    if wargs[1] != ',':
+    elif wargs[1] != ',':
         print_error("process ({}) needs comma separator to named argument, not '{}'".format(name, wargs[1]), line)
         return
-    # fi
-    if not re.match(r'^\w+', wargs[2]):
+    elif not re.match(r'^\w+', wargs[2]):
         print_error("process ({}) needs named argument, not '{}'".format(name, wargs[2]), line)
         return
     # fi
@@ -8582,7 +8611,7 @@ def do_staff(t_args, line):
         print_error("staff does not have a name argument.", line)
         return
     # fi
-    targs = re.sub(r'\s+', '', t_args)              # Toss spaces.
+    targs = re.sub(r'\s+', '', t_args)          # Toss spaces.
 #DEBUG    print_debug("do_staff - #a t_args='{}'".format(t_args))
     if t_args is None or t_args == '':
         print_error("staff does not have a name argument.", line)
@@ -8592,8 +8621,8 @@ def do_staff(t_args, line):
     x = find_terminator_in_string(t_args, [':'], line)
 #DEBUG    print_debug("do_staff - #b x='{}'".format(x))
     if x < 0:
-        sn = t_args                                 # Staff name.
-        v = None                                    # No voices.
+        sn = t_args                             # Staff name.
+        v = None                                # No voices.
     elif x == 0:
         print_error("staff does not have a name argument before the colon(:)", line)
         return
@@ -8624,7 +8653,15 @@ def do_staff(t_args, line):
                 print_error("number of voices must between 1 and {} inclusive. Not ({})".format(MAXVOICES, f1), line)
                 return
             # fi
-            initialize_set_voices(f1, line)             # If voices not set up yet, set them up.
+            # Check if voice already used in a stave.
+            for a in staff_name:
+                # Allow staff to be redefined. Can delete voices too.
+                if f1 in staff_name[a] and a != sn:
+                    print_error("voice {} used in staff {} already".format(w, a), line)
+                    return
+                # fi
+            # rof
+            initialize_set_voices(f1, line)     # If voices not set up yet, set them up.
             fill_voice_mlth(False, line)        # Need to make measure for other voices up to here "mlth".
             v.append(f1)
         # fi
@@ -8632,6 +8669,7 @@ def do_staff(t_args, line):
 #DEBUG    print_debug("do_staff - #d sn='{}' v='{}'".format(sn, v))
 
     staff_name[sn] = v                          # Create or change it.
+#DEBUG    print_debug("do_staff - #e staff_name='{}'".format(staff_name))
     last_voice_staff = sn
     cis = sn                                    # No longer doing just one voice.   NOTDONEYET - set voice to staff.
     do_spaces('on', line)                       # Process spaces or commas -- no spaces in middle of notes.
@@ -11736,7 +11774,7 @@ def process_notes(line, original_line):
             timeofnote, r_suffixes, number_dots = get_time(therest, original_line)
 
             if r_suffixes is None or number_dots is None:
-                print_error("m:{} Error getting time for note ({}) - ({}) -> timeofnote={} r_suffixes={} number_dots={} therest={}".format(measure_on, thenote, therest, timeofnote, r_suffixes, number_dots, therest), original_line)
+                print_error("m:{} Error getting time for note ('{}') - ('{}') -> timeofnote='{}' r_suffixes='{}' number_dots='{}' therest='{}'".format(measure_on, thenote, therest, timeofnote, r_suffixes, number_dots, therest), original_line)
                 return
             # fi
             # suffix_legato = 16            -- glide to next note.
@@ -11880,7 +11918,7 @@ def parens_match(enddelim, aftertoken, w, original_line):
     e.append(enddelim)
     w = w + 1
     if w >= len(aftertoken):
-        print_warning("Found character variable, but no closing {}.".format(enddelim), original_line)
+        print_warning("Found character variable, but no closing '{}'.".format(enddelim), original_line)
         return None
     # fi
     while True:
@@ -11891,7 +11929,7 @@ def parens_match(enddelim, aftertoken, w, original_line):
                 break
             # fi
             if w >= len(aftertoken):
-                print_warning("Found character variable, but not closing {}.".format(enddelim), original_line)
+                print_warning("Found character variable, but not closing '{}'.".format(enddelim), original_line)
                 return None
             elif c == '(':
                 enddelim = ')'
@@ -11933,7 +11971,7 @@ def fix_if_limiting_tokens(strng, aftertoken, original_line):
     if w < len(aftertoken):
         if aftertoken[w] == '{':                # partial token selection ...
             prew = parens_match('}', aftertoken, w, original_line)
-#DEBUG            print_debug("fix_if_limiting_tokens - after parens_match prew='{}' aftertoken='{}' w={}".format(prew, aftertoken, w))
+#DEBUG            print_debug("fix_if_limiting_tokens - after parens_match prew='{}' aftertoken='{}' w='{}'".format(prew, aftertoken, w))
             if prew is None:
                 return strng, aftertoken
             # fi
@@ -11970,14 +12008,14 @@ def fix_if_limiting_tokens(strng, aftertoken, original_line):
 def replace_array_char(wary, thetoken, aftertoken, original_line):
     global measure_on
 
-#DEBUG    print_debug("replace_array_char - Entering(wary={} thetoken={} aftertoken={}".format(wary, thetoken, aftertoken))
+#DEBUG    print_debug("replace_array_char - Entering(wary='{}' thetoken='{}' aftertoken='{}'".format(wary, thetoken, aftertoken))
     # Find end of array. Need add/match ()[]{}.
     w = 0
     while w < len(aftertoken) and aftertoken[w] in [ "\t", ' ' ]:
         w = w + 1
     # elihw
     if w >= len(aftertoken):
-        print_warning("Found character variable {}, but no dimensions.".format(thetoken), original_line)
+        print_warning("Found character variable '{}', but no dimensions.".format(thetoken), original_line)
         return thetoken, aftertoken
     # fi
     c = aftertoken[w]
@@ -11986,7 +12024,7 @@ def replace_array_char(wary, thetoken, aftertoken, original_line):
     elif c == '[':
         enddelim = ']'
     else:
-        print_warning("Found character variable {}, but no parenthesis for dimension.".format(wary), original_line)
+        print_warning("Found character variable '{}', but no parenthesis for dimension.".format(wary), original_line)
         return thetoken, aftertoken
     # fi
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
@@ -12052,7 +12090,7 @@ def replace_char_var(strng, linestarts, lineends, original_line, not_this_one):
 #?     break
 #? # fi
         if lw + a != lt and len(whichlocalcharswary[w][numarry_indexes]) != 0:
-            print_warning("Found character variable {}, but not at end of token, and it needs dimensions.".format(w), original_line)
+            print_warning("Found character variable '{}', but not at end of token, and it needs dimensions.".format(w), original_line)
             continue
         # fi
         if a > 0:
@@ -12151,9 +12189,9 @@ def char_var_subst_whole_string(strg, line, not_this_one):
 #DEBUG            print_debug("char_var_subst_whole_string - #B")
             return strg
          # fi
-#DEBUG        print_debug("char_var_subst_whole_string - #C linestarts={} lineends={} w={} strg={}".format(linestarts, lineends, w, strg))
+#DEBUG        print_debug("char_var_subst_whole_string - #C linestarts='{}' lineends='{}' w='{}' strg='{}'".format(linestarts, lineends, w, strg))
         strg = replace_char_var(strg, linestarts, lineends, line, not_this_one)
-#DEBUG        print_debug("char_var_subst_whole_string - #D, strg={} o_strg={}".format(strg, o_strg))
+#DEBUG        print_debug("char_var_subst_whole_string - #D, strg='{}' o_strg='{}'".format(strg, o_strg))
         if strg != o_strg:
             o_strg = strg
             w = 0
@@ -12182,9 +12220,12 @@ def char_var_subst_first_token(line):
 # End of char_var_subst_first_token
 
 # ============================================================================
-def compute_command_args(line):
-    t0 = re.sub(r'^([a-zA-Z0-9%_*]*).*$', r'\1', line, count=1)   # First token on line.
-    t1 = re.sub(r'^[a-zA-Z0-9%_*]*(.*)$', r'\1', line, count=1)   # Rest of line.
+def compute_command_args(expand_line):
+    if not expand_line:
+        return '', '', ''
+    # fi
+    t0 = re.sub(r'^([a-zA-Z0-9%_*]*).*$', r'\1', expand_line, count=1)   # First token on expand_line.
+    t1 = re.sub(r'^[a-zA-Z0-9%_*]*(.*)$', r'\1', expand_line, count=1)   # Rest of expand_line.
 
     command = t0.lstrip()
     t_args = t1.strip()
@@ -12194,7 +12235,7 @@ def compute_command_args(line):
     else:
         delimiter = ''
     # fi
-    # Note: t0 + t1 = line. :) [Thus know how to do things in character variable substitution.]
+    # Note: t0 + t1 = expand_line. :) [Thus know how to do things in character variable substitution.]
     return command, t_args, delimiter
 # End of compute_command_args
 
@@ -12212,7 +12253,7 @@ def replace_process(last_voice_staff, token, next_tokens, line):        # NOTDON
 # ============================================================================
 def keyword_midi(token, delimiter, next_tokens, line):
     command, t_args, delimiter = compute_command_args(next_tokens)
-    print_error("NOTDONEYET - keyword midi {}".format(command), line)
+    print_error("NOTDONEYET - keyword midi '{}'".format(command), line)
     return t_args
 # End of keyword_midi
 
@@ -12261,10 +12302,12 @@ def pv(token, delimiter, next_tokens, line):
     if delimiter == '(':
         pass
     # fi
+    return None, None, None
 # End of pv
 
 # ============================================================================
 def keyword_pan(token, delimiter, next_tokens, line):
+    print_debug("keyword_pan - ENTERING token='{}' delimiter='{}' next_tokens='{}'".format(token, delimiter, next_tokens))
     token, delimiter, next_tokens = pv(token, delimiter, next_tokens, line)
     command, t_args, delimiter = compute_command_args(next_tokens)
     print_debug("keyword_pan - #1 command='{}' t_args='{}' delimiter='{}'".format(command, t_args, delimiter))
@@ -12302,26 +12345,26 @@ def keyword_key(token, delimiter, next_tokens, line):
 
 # ============================================================================
 def keyword_tremolo(token, delimiter, next_tokens, line):
-    print_warning("NOTDONEYET - keyword {}".format(token), line)
+    print_warning("NOTDONEYET - keyword '{}'".format(token), line)
     return next_tokens
 # End of keyword_tremolo
 
 # ============================================================================
 def keyword_note_modifier(token, delimiter, next_tokens, line):
-    print_warning("NOTDONEYET - keyword {}".format(token), line)
+    print_warning("NOTDONEYET - keyword '{}'".format(token), line)
     return next_tokens
 # End of keyword_modifiers
 
 # ============================================================================
 def keyword_note_show(token, delimiter, next_tokens, line):
-    print_warning("NOTDONEYET - keyword {}".format(token), line)
+    print_warning("NOTDONEYET - keyword '{}'".format(token), line)
     return next_tokens
 # End of keyword_note_show
 
 # ============================================================================
 def keyword_note_show1(token, delimiter, next_tokens, line):
     command, t_args, delimiter = compute_command_args(next_tokens)
-    print_warning("NOTDONEYET - keyword {} {}".format(token, command), line)
+    print_warning("NOTDONEYET - keyword '{}' '{}'".format(token, command), line)
     return t_args
 # End of keyword_note_show
 
@@ -12411,7 +12454,7 @@ def process_keyword(token, delimiter, next_tokens, line):
 
 def process_notes_for_staff(token, delimiter, next_tokens, line):       # NOTDONDYET
     command, t_args, delimiter = compute_command_args(next_tokens)
-    print_debug("NOTDONEYET - process_notes_for_staff - token={} {} t_args={}".format(token, delimiter, t_args))
+    print_debug("NOTDONEYET - process_notes_for_staff - token='{}' '{}' t_args='{}'".format(token, delimiter, t_args))
     return t_args
 # End of process_notes_for_staff
 
@@ -12454,67 +12497,81 @@ def process_staff_notes(command, delimiter, t_args, line):
     global process
     global last_voice_staff
 
-    print_debug("process_staff_notes - command='{}' delimiter='{}' t_args='{}'".format(command, delimiter, t_args))
+#DEBUG    print_debug("process_staff_notes - Entering command='{}' delimiter='{}' t_args='{}'".format(command, delimiter, t_args))
     token = command
     tdelim = delimiter
     next_tokens = t_args.strip()
-    print_debug("process_staff_notes - next_tokens='{}'".format(next_tokens))
+#DEBUG    print_debug("process_staff_notes - next_tokens='{}'".format(next_tokens))
     while token is not None and token != '':
-        print_debug("process_staff_notes - #1 token={}".format(token))
+#DEBUG        print_debug("process_staff_notes - #1 token='{}'".format(token))
         if token in all_unique_macro_names:
-            print_debug("process_staff_notes - #2 token={} in all_unique_macro_names".format(token))
+#DEBUG            print_debug("process_staff_notes - #2 token='{}' in all_unique_macro_names".format(token))
             if tdelim in [' ', '\s']:
                 next_tokens = (tdelim + next_tokens).strip()
             # fi
             if lmp_executing_number > 25:
                 print_error("m:{} macro {} nesting to depth of more than 25".format(measure_on, token), line)
-                return                                          # Error ... ouch, many errors will follow. *sigh*
+                return                                      # Error ... ouch, many errors will follow. *sigh*
             # fi
             for cnumber in all_unique_macro_names[token]:
                 # Need to put this line to be processed after macro...
                 # NOTE: return from replace_macro of false means macro didn't match correctly.
                 if replace_macro(cnumber, next_tokens, line):
-                    return                                      # Henceforth get lines from macro_buffer.
+                    return                                  # Henceforth get lines from macro_buffer.
                 # fi
             # rof
             print_warning("m:{} macro {} did not match terminators correctly...".format(measure_on, token), line)
         # fi
         if token == 'begin':
-            print_error("NOTDONEYET - begin", line)
+            print_error("NOTDONEYET - process_staff_notes, begin", line)
         elif token == 'quit':
-            print_error("NOTDONEYET - quit", line)
-        elif token in staff_name and tdelim == ':':
-            print_debug("process_staff_notes - #3 token={} tdelim=':'".format(token))
-            if next_tokens[0] != ':':
-                print_error("process_staff_notes - staff name messed up", line)
-                return
-            # fi
-            next_tokens = next_tokens[1:].strip()
-            # Switch to staff_name.
-            last_voice_staff = token
-            # Use of tokens in new voice - process if it exists?
+            print_error("NOTDONEYET - process_staff_notes, quit", line)
         elif token in staff_keywords:
-            print_debug("process_staff_notes - #4 token={} tdelim={} next_tokens={}".format(token, tdelim, next_tokens))
+#DEBUG            print_debug("process_staff_notes - #3 token='{}' tdelim='{}' next_tokens='{}'".format(token, tdelim, next_tokens))
             # process keyword - Might take multiple tokens.
             next_tokens = process_keyword(token, tdelim, next_tokens, line).strip()
-        elif last_voice_staff in process and process[last_voice_staff] is not None:
-            print_debug("process_staff_notes - #5 token={} in process'".format(token))
-            # Set argument-name to process to token.
-            if tdelim not in [ "\t", " " ]:
-                next_tokens = (tdelim + next_tokens).strip()
+        elif token in staff_name and tdelim in [':', ',', ' ', "\t", '']:
+#DEBUG            print_debug("process_staff_notes - #4 token='{}' tdelim='{}'".format(token,tdelim))
+            next_staff = []
+            while tdelim in [',', ' ', "\t", '']:
+                next_staff.append(token)
+                if tdelim != '' and tdelim == next_tokens[0]:
+                    next_tokens = next_tokens[1:].strip()
+                # fi
+                token, next_tokens, tdelim = compute_command_args(next_tokens)
+#DEBUG                print_debug("process_staff_notes - #4a token='{}' next_tokens='{}' tdelim='{}'".format(token, next_tokens, tdelim))
+                if token not in staff_name:
+                    print_error("process_staff_notes - staff names must be followed by a colon (':')", line)
+                    return
+                # fi
             # fi
-            replace_process(last_voice_staff, token, nexttokens, line)                    # NOTDONEYET
-            return                                          # Henceforth get lines from macro/loop/process buffer.
+            if tdelim != '' and tdelim == next_tokens[0]:
+                next_staff.append(token)
+                next_tokens = next_tokens[1:].strip()
+            # fi
+            last_voice_staff = next_staff                   # Switch to staff_name.
+#DEBUG            print_debug("process_staff_notes - #4b last_voice_staff='{}'".format(last_voice_staff))
         else:
-            print_debug("process_staff_notes - #6 token='{}' tdelim='{}' next_tokens='{}' must be a note?".format(token, tdelim, next_tokens))
+            print_debug("process_staff_notes - #5 token='{}' tdelim='{}' next_tokens='{}' must be a note?".format(token, tdelim, next_tokens))
+# NOTDONEYET - processes and notes for all last_voice_staff.
+#--            # Use of tokens in new voice - process if it exists?
+#--            if last_voice_staff in process and process[last_voice_staff] is not None:
+#--                print_debug("process_staff_notes - #5 token='{}' in process'".format(token))
+#--                # Set argument-name to process to token.
+#--                if tdelim not in [ "\t", " " ]:
+#--                    next_tokens = (tdelim + next_tokens).strip()
+#--                # fi
+#--                replace_process(last_voice_staff, token, nexttokens, line)                    # NOTDONEYET
+#--                return                                          # Henceforth get lines from macro/loop/process buffer.
+#--            # fi
             # Might take multiple tokens.
             next_tokens = process_notes_for_staff(token, tdelim, next_tokens, line).strip()
-            print_debug("process_staff_notes - #7 next_tokens={}".format(next_tokens))
+            print_debug("process_staff_notes - #7 next_tokens='{}'".format(next_tokens))
         # fi
-        print_debug("process_staff_notes - #8 next_tokens={}".format(next_tokens))
+        print_debug("process_staff_notes - #8 next_tokens='{}'".format(next_tokens))
         # Get next token and tdelim.
         token, next_tokens, tdelim = compute_command_args(next_tokens)
-        print_debug("process_staff_notes - #9 token={} next_tokens={} tdelim={}".format(token, next_tokens, tdelim))
+        print_debug("process_staff_notes - #9 token='{}' next_tokens='{}' tdelim='{}'".format(token, next_tokens, tdelim))
     # elihw
     return
 # End of process_staff_notes
@@ -12631,12 +12688,12 @@ def process_line(line):
         try:
             r = commands[command][0]                        # Had an error once ... thus try/expect.
         except:
-            print_error("m:{} not found processing routine for command {}".format(measure_on), command)
+            print_error("m:{} not found processing routine for command '{}'".format(measure_on), command)
             print("    ", sys.exc_info()[0], sys.exc_info, file=sys.stderr, flush=True)
         # fi
 #DEBUG            print_debug("process_line - normal command - command='{}' t_args='{}'".format(command, t_args))
         r(t_args, line)
-#DEBUG            print_debug("process_line - calculate.local_arrays={}".format(calculate.local_arrays))
+#DEBUG            print_debug("process_line - calculate.local_arrays='{}'".format(calculate.local_arrays))
         return False
     elif measure_on in goto_table:
         print_error("Notes after a goto are not allowed. measure='{}'".format(measure_on), line)
@@ -12715,7 +12772,7 @@ def readthefile():
                     if type(last_voice_staff) is int:
                         line = 'v' + str(last_voice_staff) + ': ' + line.strip()
                     else:
-                        print_error("last_voice_staff ({}) is type={}".format(last_voice_staff, type(last_voice_staff)))
+                        print_error("last_voice_staff '{}' is type='{}'".format(last_voice_staff, type(last_voice_staff)))
                     # fi
                 # fi
             # fi
