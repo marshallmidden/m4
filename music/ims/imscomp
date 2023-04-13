@@ -2,11 +2,26 @@
 # ----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 # ----------------------------------------------------------------------------
-# To start a process, type "begin", followed by the process name on the staff
-# line. The process then devours each item of information on the staff one at
-# a time, performs the functions described in the process on it, then goes on
-# to the next item, continuing until the end of the piece, or a new process is
-# begun on that staff, or the word "quit" is reached.
+# Processes:
+#   To start a process, type "begin", followed by the process name on the staff
+#   line. The process then devours each item of information on the staff one at
+#   a time, performs the functions described in the process on it, then goes on
+#   to the next item, continuing until the end of the piece, or a new process is
+#   begun on that staff, or the word "quit" is reached.
+#   Only one process running. If staff change internally, put notes onto new one.
+#   Does not revert back to original staff/staves, process moves to new staff.
+#?????????????????????????????????????????????????????????????????????????????
+#   What replaces/starts macro?
+#   Need start process after 'begin'?
+#       Need to terminate/exit current one.
+#       a) with new 'begin'.
+#       b) end of file.
+#       c) with 'quit'.
+#   Error if process used without 'begin'.
+#?????????????????????????????????????????????????????????????????????????????
+# Staves:
+#   Allow multiple ones to do all notes -- and process started for staff/staves
+#   ... .
 # ----------------------------------------------------------------------------
 # Variables to do:
 #       accent, aaccent, arp, fermata, ferma, stac, marc
@@ -21,7 +36,7 @@
 # 6) lilypond output for printing.
 # ----------------------------------------------------------------------------
 # TO DO:
-# 1) Select clef=treble or clef=bass by notes min and max notes on staff(s).
+# 1) Select clef=treble or clef=bass by notes min and max notes on staff/staves.
 #       # NOTDONEYET - add ' clef=bass'  (after the number)
 #       # clef can occur each measure (abc, horizontal, vertical format).
 # 2) --vertical and --horizontal: Can save comments on measures? Lines? Like before measures? * ------
@@ -77,7 +92,7 @@
 #   Marcato             ^ over note.
 # A marcato marking indicates that the note should be played louder or more forcefully than
 # a note with a regular accent mark. In organ notation, this sign often does not indicate
-# marcato when in the pedal stave otherwise it still does, but instead that a pedal note
+# marcato when in the pedal staff otherwise it still does, but instead that a pedal note
 # should be played with the toe. When printed above the note it indicates the right foot's
 # toe, and below the note indicates the left foot's toe.
 # ----------------------------------------------------------------------------
@@ -459,7 +474,7 @@
 # Key, volume, note length, tempo
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 #   Rests are lowercase z. Length follows.
-#   Uppercase denote bottom octave (C = middle C on treble stave).
+#   Uppercase denote bottom octave (C = middle C on treble staff).
 #   Comma after the letter means down an octave.
 #   Apostrophe after the letter means up an octave. Multiple ' go up, as ,'s go down.
 #   Lowercase letters are next octave above uppercase. four c's: "C, C c c' "
@@ -1377,7 +1392,7 @@ drum_sounds = {
 # ----------------------------------------------------------------------------
 global staff_name                   # Staff names, with key pair as array of voice numbers.
 staff_name = {}
-global last_voice_staff
+global last_voice_staff             # Staff/staves active. (array)
 last_voice_staff = None             # For continuation lines.
 
 global args
@@ -1450,7 +1465,7 @@ global percents
 percents = { }                      # no %% passthru commands for start of [measure] (for abc).
 percents[''] = []                   # blank measure.
 
-global staves
+global staves                       # Array of array of voices on staff. [ [1,2] [5,6,7] [21] ]
 staves = [ ]
 
 global reverb
@@ -1582,8 +1597,8 @@ global process_defining             # If currently defining a process.
 process_defining = None
 global process_defining_count       # Nested process defining count.
 process_defining_count = 0
-global process                      # Dictionary indexed by staffnames (or numbers).
-process = { }
+global process_running              # If not None, the process number run till quit or another begin or end of file.
+process_running = None
 # loop -> endloop.  Count nested.
 global loop_defining                # If currently defining a loop.
 loop_defining = None
@@ -3940,6 +3955,39 @@ def delete_executing_variables(l):
 # End of delete_executing_variables
 
 # ----------------------------------------------------------------------------
+def get_next_process_line(l):
+    global lmp_executing_number
+    global lmp_executing_which
+    global lmp_executing_type
+    global lmp_executing_line
+    global lmp_executing_i_line
+    global lmp_executing_args
+    global lmp_executing_rest_of_line
+    global i_line
+
+    the_process = lmp_executing_which[l]
+    linenumber = lmp_executing_line[l]
+    lines = process_buffer[the_process]
+    if linenumber >= len(lines):
+        delete_executing_variables(l)
+        # Delete rest of process variables.
+        del lmp_executing_which[l]
+        del lmp_executing_type[l]
+        del lmp_executing_args[l]
+        del lmp_executing_line[l]
+        del lmp_executing_i_line[l]
+        retline = lmp_executing_rest_of_line[l]                   # Stuff after this process (if not EOLN)
+        del lmp_executing_rest_of_line[l]
+        lmp_executing_number = lmp_executing_number - 1
+        return retline
+    # fi
+    line = lines[linenumber]
+    i_line = [ 'process:      {:4d}:'.format(linenumber+1) + line ] # Line as given from process text buffer
+    lmp_executing_line[l] = linenumber + 1
+    return line
+# End of get_next_process_line
+
+# ----------------------------------------------------------------------------
 def get_next_macro_line(l):
     global lmp_executing_number
     global lmp_executing_which
@@ -3967,7 +4015,6 @@ def get_next_macro_line(l):
         return retline
     # fi
     line = lines[linenumber]
-#DEBUG    print_debug("get_next_macro_line - #f line='{}'".format(line))
     i_line = [ 'macro:        {:4d}:'.format(linenumber+1) + line ] # Line as given from macro text buffer
     lmp_executing_line[l] = linenumber + 1
     return line
@@ -4000,20 +4047,15 @@ def get_next_loop_line(l):
 
     the_loop = lmp_executing_which[l]
     linenumber = lmp_executing_line[l]
-#DEBUG    print_debug("get_next_loop_line - Entering, linenumber={}".format(linenumber))
     lines = loop_buffer[the_loop]
     flag = True                 # True = return line in loop_buffer.
                                 # False = done with loop
     if linenumber == 0:
-#DEBUG        print_debug("get_next_loop_line - at start of loop the_loop={} linenumber={}".format(the_loop, linenumber))
         i = loop_increment[the_loop]
-#DEBUG        print_debug("get_next_loop_line - loop_increment={}".format(i))
         if i is None:                           # Type c or d.
-#DEBUG            print_debug("get_next_loop_line - type c or d - 'loop expression'='{}'".format(loop_value_variable[the_loop]))
             if loop_value_variable[the_loop] is not None:       # If not type d.
                 # Compute end test.
                 s2 = loop_value_variable[the_loop]
-#DEBUG                print_debug("get_next_loop_line - type c - 'loop expression' s2='{}'".format(s2))
                 f1, type_error = is_float(s2, is_float_number)
                 if type_error is not None:
                     print_error(type_error, 'in loop')
@@ -4028,17 +4070,13 @@ def get_next_loop_line(l):
                 else:
                     flag = False                                # End of loop!
                 # fi
-#DEBUG            else:                               # Type d, flag already True
-#DEBUG                print_debug("get_next_loop_line - type d - 'loop'")
             # fi
         else:                                                   # Type a or b, test end condition.
             s2 = loop_value_variable[the_loop][:-1]             # Toss ending equal sign
             if i < 0:                           # if negative increment
                 s2 = s2 + ' < ' + str(loop_final_value[the_loop])
-#DEBUG                print_debug("get_next_loop_line - type a/b - 'negative loop' s2={}".format(s2))
             else:
                 s2 = s2 + ' > ' + str(loop_final_value[the_loop])
-#DEBUG                print_debug("get_next_loop_line - type a/b - 'positive loop' s2={}".format(s2))
             # fi
             f1, type_error = is_float(s2, is_float_number)
             if type_error is not None:
@@ -4049,7 +4087,6 @@ def get_next_loop_line(l):
                 print_error("m:{} loop expression error ('{}')".format(measure_on, s2), 'in loop')
                 return ''
             # fi
-#DEBUG            print_debug("get_next_loop_line - f1={}".format(f1))
             if f1 < 0:                                      # True
                 flag = False                                # We are at end of loop
             else:
@@ -4059,9 +4096,7 @@ def get_next_loop_line(l):
     # fi
     if not flag or linenumber >= len(lines):
         # If end of loop expression, process it.
-#DEBUG        print_debug("get_next_loop_line - if end of loop expression, process it.")
         if flag and loop_endloop_exp[the_loop] is not None:
-#DEBUG            print_debug("get_next_loop_line - compute endloop expression")
             # Compute end test.
             s2 = loop_endloop_exp[the_loop]
             f1, type_error = is_float(s2, is_float_number)
@@ -4079,10 +4114,8 @@ def get_next_loop_line(l):
                 flag = False                                # End of loop!
             # fi
         # fi
-#DEBUG        print_debug("get_next_loop_line - delete_executing_variables")
         delete_executing_variables(l)
         if not flag:                                        # END OF LOOP
-#DEBUG            print_debug("get_next_loop_line - at end of loop")
             # Delete rest of loop variables.
             del lmp_executing_which[l]
             del lmp_executing_type[l]
@@ -4105,7 +4138,6 @@ def get_next_loop_line(l):
         if i is not None:                                   # Type a or b.
             s2 = loop_value_variable[the_loop][:-1]             # Toss ending equal sign
             s2 = s2 + '= ' + s2 + ' + ' + str(loop_increment[the_loop])
-#DEBUG            print_debug("get_next_loop_line - compute loop incrementing s2='{}'".format(s2))
             # Compute end test.
             f1, type_error = is_float(s2, is_float_number)
             if type_error is not None:
@@ -4116,19 +4148,16 @@ def get_next_loop_line(l):
                 print_error("m:{} loop incrementing error ('{}')".format(measure_on, s2), 'in loop')
                 return ''
             # fi
-#DEBUG            print_debug("get_next_loop_line - compute loop incrementing gives f1='{}'".format(f1))
             if f1 < 0:                                      # True
                 flag = True
             else:
                 flag = False                                # End of loop!
             # fi
         # fi
-#DEBUG        print_debug("get_next_loop_line - at end of loop, starting over")
         lmp_executing_line[l] = 0
         return ''
     # fi
     line = lines[linenumber]
-#DEBUG    print_debug("get_next_loop_line - line='{}'".format(line))
     i_line = [ 'loop :        {:4d}:'.format(linenumber+1) + line ] # Line as given from loop text buffer
     lmp_executing_line[l] = linenumber + 1
     return line
@@ -4157,8 +4186,7 @@ def read_next_line():
         elif lmp_executing_type[l] == 'loop':
             line = get_next_loop_line(l)
         elif lmp_executing_type[l] == 'process':
-            print_debug("read_next_line - NOTDONEYET - process processing")
-            line = ''
+            line = get_next_process_line(l)
         else:
             print_debug("read_next_line - lmp_executing_type[{}] ('{}') unknown - internal error".format(l, lmp_executing_type[l]))
             line = ''
@@ -4249,7 +4277,6 @@ def read_next_line():
 
 def is_float(strg, type_float):
     tree = calculate.parse(strg)            # parse the string
-#DEBUG    print_debug("is_float - strg='{}' tree={}".format(strg, tree))
     if tree is None or len(tree) != 2:
         return None, None
     elif tree[0] is None and tree[1] == 'error parsing':
@@ -4586,12 +4613,10 @@ nest_terminator = { '(':')', '[':']', '{':'}', "'":"'", '"':'"' }
 def find_terminator_in_string(strng, terminators, original_line):
     global measure_on
 
-#DEBUG    print_debug("find_terminator_in_string - Entering strng='{}".format(strng))
     w = 0
     e = []
     while w < len(strng):
         c = strng[w]
-#DEBUG        print_debug("find_terminator_in_string - #1 w='{}' c='{}'".format(w, c))
         if c in terminators:
             return w                                # Terminator immediately - blank argument.,
         # fi
@@ -4609,7 +4634,6 @@ def find_terminator_in_string(strng, terminators, original_line):
         while endterminator is not None:
             while w < len(strng):
                 c = strng[w]
-#DEBUG                print_debug("find_terminator_in_string - #2 w='{}' c='{}' endterminator='{}'".format(w, c, endterminator))
                 w = w + 1
                 if c == endterminator:
                     break
@@ -4627,7 +4651,6 @@ def find_terminator_in_string(strng, terminators, original_line):
             e.pop()
             if e != []:
                 endterminator = e[-1]
-#DEBUG            print_debug("find_terminator_in_string - #3 w='{}' endterminator='{}' e={}".format(w, endterminator, e))
             else:
                 endterminator = None
                 break
@@ -4641,15 +4664,14 @@ def find_terminator_in_string(strng, terminators, original_line):
 # strng = int_range_to_array(strng, original_line)
 
 def int_range_to_array(strng, original_line):
-#DEBUG    print_debug("int_range_to_array - entering strng='{}'".format(strng))
     a = strng.find('..')
     if a == 0:
-        print_warning("Range does not start with number.", original_line)
+        print_error("Range does not start with number.", original_line)
         return [str(strng)]
     elif a < 0:                                 # Not a range
         strng, msg = is_float(strng, is_float_number)
         if msg is not None or strng is None:
-            print_warning("First number in range bad. {} '{}'".format(msg, strng), original_line)
+            print_error("First number in range bad. {} '{}'".format(msg, strng), original_line)
             return [str(strng)]
         # fi
         if type(strng) is float and strng.is_integer():
@@ -4660,29 +4682,29 @@ def int_range_to_array(strng, original_line):
     first = strng[0:a]
     second = strng[a+2:]
     if second is None or second == '':
-        print_warning("Second number in range bad.", original_line)
+        print_error("Second number in range bad.", original_line)
         return [str(strng)]
     # fi
     n, msg = is_float(first, is_float_number)
     if msg is not None or n is None or n == '':
-        print_warning("Range first number bad. {} '{}'".format(msg, first), original_line)
+        print_error("Range first number bad. {} '{}'".format(msg, first), original_line)
         return [str(strng)]
     # fi
     o, msg = is_float(second, is_float_number)
     if msg is not None or o is None or o == '':
-        print_warning("Range second number bad. {}".format(msg), original_line)
+        print_error("Range second number bad. {}".format(msg), original_line)
         return [str(strng)]
     # fi
     if type(n) is float and n.is_integer():
         first = int(n)
     else:
-        print_warning("Range first number not an integer.", original_line)
+        print_error("Range first number not an integer.", original_line)
         return [str(strng)]
     # fi
     if type(o) is float and o.is_integer():
         second = int(o)
     else:
-        print_warning("Range second number not an integer.", original_line)
+        print_error("Range second number not an integer.", original_line)
         return [str(strng)]
     # fi
     array_args = []
@@ -4690,7 +4712,6 @@ def int_range_to_array(strng, original_line):
         array_args.append(str(first))
         first = first + 1
     # rof
-#DEBUG    print_debug("int_range_to_array - array_args={}".format(array_args))
     return array_args
 # End of int_range_to_array
 
@@ -4702,7 +4723,6 @@ def int_range_to_array(strng, original_line):
 def separate_args(wline, original_line, integers):
     global args
 
-#DEBUG    print_debug("separate_args - wline='{}'".format(wline))
     array_args = []
     splitter = [ ',', ";" ]
     if args.spaces:
@@ -4728,7 +4748,6 @@ def separate_args(wline, original_line, integers):
             array_args.append(arg)
         # fi
     # elihw
-#DEBUG    print_debug("separate_args - array_args={}".format(array_args))
     return array_args
 # End of separate_args
 
@@ -4750,10 +4769,9 @@ def replace_macro(cnumber, t_args, line):
     global i_line
 
     command = macro_name[cnumber]
-#DEBUG    print_debug("replace_macro - command='{}' cnumber={} t_args='{}' line='{}'".format(command, cnumber, t_args, line))
     if t_args is None or t_args == '':
         if macro_arguments[cnumber] != []:
-            print_warning("macro command {} does not have any arguments, but needs {}.".format(command, macro_arguments[cnumber]), line)
+            print_error("macro command {} does not have any arguments, but needs {}.".format(command, macro_arguments[cnumber]), line)
             return False
         # fi
         wargs = None
@@ -4823,7 +4841,7 @@ def replace_macro(cnumber, t_args, line):
         w = len(wargs)
     # fi
     if w != l:
-        print_warning("macro {} does not have right number of arguments ({}), needs {}.".format(command, len(wargs), len(macro_arguments[cnumber])), line)
+        print_error("macro {} does not have right number of arguments ({}), needs {}.".format(command, len(wargs), len(macro_arguments[cnumber])), line)
         return False
     # fi
     level = lmp_executing_number + 1                    # Create variables at next level.
@@ -4860,7 +4878,6 @@ def macro_define(command, t_args, line):
     global macro_defining_count
     global macro_buffer                 # Name of macro, array of lines for macro.
 
-#DEBUG    print_debug("macro_define - command='{}' t_args='{}'".format(command, t_args))
     if command in commands and commands[command][0] == do_macro:
         macro_defining_count = macro_defining_count + 1
     elif command in commands and commands[command][0] == do_endm:
@@ -5032,11 +5049,11 @@ def set_default_ims(t_args, line):
     key_voice[measure_on][voice] = savekeyvoice
 
     if therest is None or thenote is None:
-        print_warning("decode note had error with note {}".format(wnote), line)
+        print_error("decode note had error with note {}".format(wnote), line)
         return
     # fi
     if typenote != normal_note:
-        print_warning("decode note is not of type normal_note -- ({})".format(typenote), line)
+        print_error("decode note is not of type normal_note -- ({})".format(typenote), line)
         return
     # fi
 
@@ -5141,14 +5158,14 @@ def decode_gsw(t_args, line):
     key_voice[measure_on][voice] = savekeyvoice
 
     if therest is None or thenote is None:
-        print_warning("decode note had error with note {}".format(w_note), line)
+        print_error("decode note had error with note {}".format(w_note), line)
         return
     # fi
     if therest and len(therest) > 0 and len(wargs) == 2:
-        print_warning("decode note has information ({}) after the note {}".format(therest, w_note), line)
+        print_error("decode note has information ({}) after the note {}".format(therest, w_note), line)
     # fi
     if typenote != normal_note:
-        print_warning("decode note is not of type normal_note -- ({})".format(typenote), line)
+        print_error("decode note is not of type normal_note -- ({})".format(typenote), line)
         return
     # fi
     if thenote <= 12 + 12 - 3:
@@ -5207,7 +5224,7 @@ def decode_gsw(t_args, line):
 
     if len(wargs) == 3:      # 4 arguments, get suffixes after the note.
         if r_suffixes != 0:
-            print_warning("decode note has information after the time, suffixes={}".format(r_suffixes), line)
+            print_error("decode note has information after the time, suffixes={}".format(r_suffixes), line)
         # fi
         return
     # fi
@@ -5322,7 +5339,7 @@ def decode_ims(t_args, line):
     key_voice[measure_on][voice] = savekeyvoice
 
     if therest is None or thenote is None:
-        print_warning("decode note had error with note {}".format(w_note), line)
+        print_error("decode note had error with note {}".format(w_note), line)
         return
     # fi
 
@@ -5576,43 +5593,34 @@ def do_bars(t_args, line):
 def substitute_non_macro_local(t_args, line):
     global lmp_executing_number
 
-#DEBUG    print_debug("substitute_non_macro_local - #1")
     if lmp_executing_type[lmp_executing_number] in ['macro', 'process']:
         not_this_one = lmp_executing_number
     else:
         not_this_one =  -1                      # Do everything.
     # fi
-#DEBUG    print_debug("substitute_non_macro_local - #2")
     if t_args is None or t_args == '':
         print_error("line does not have a variable, nor string to assign to it.", line)
         return t_args
     # fi
-#DEBUG    print_debug("substitute_non_macro_local - #3")
     t_args = t_args.strip()                     # Toss spaces before and after.
     if t_args is None or t_args == '':          # Check again.
         print_error("encode does not have a variable, nor string to assign to it.", line)
         return t_args
     # fi
-#DEBUG    print_debug("substitute_non_macro_local - #4")
     numcharvar = 0
     while True:
         assign = t_args.find('=')
-#DEBUG        print_debug("substitute_non_macro_local - #5")
         if assign <= 0:
             print_error("encode does not have a variable followed by an assignment character.", line)
             return t_args
         # fi
-#DEBUG        print_debug("substitute_non_macro_local - #6")
         variable = t_args[0:assign].strip()     # Toss spaces before and after.    The Variable.
         strng = t_args[assign+1:].strip()       # Toss spaces before and after.    After Assignment.
         wary = chkvar(variable)
-#DEBUG        print_debug("substitute_non_macro_local - #7")
         if wary is not None and wary[numarry_indexes] == []:    # If not an array variable
             break
         # fi
-#DEBUG        print_debug("substitute_non_macro_local - #8 variable='{}' not_this_one={}".format(variable, not_this_one))
         nline = char_var_subst_whole_string(variable, line, not_this_one).strip()
-#DEBUG        print_debug("substitute_non_macro_local - #9")
         if nline == variable:
             break
         # fi
@@ -5625,7 +5633,6 @@ def substitute_non_macro_local(t_args, line):
         i_line.append('4chvs: ' + t_args)       # Line as fixed or whatever.
     # elihw
 
-#DEBUG    print_debug("substitute_non_macro_local - #10")
     # Now do the right side of the assignment.
     numcharvar = 0
     while True:
@@ -6170,7 +6177,6 @@ def do_cstopnow(t_args, line):
 #   suffix_normal = 0           # No suffix.
 
 def do_decode(t_args, line):
-#DEBUG    print_debug("do_decode - Entering t_args={}".format(t_args))
     if t_args is None or t_args == '':
         print_error("decode command does not have any arguments.", line)
         return
@@ -6201,7 +6207,6 @@ def do_debug(t_args, line):
     global debug_count
     global precomment
 
-#DEBUG    print_debug("do_debug - t_args='{}'".format(t_args))
     precomment = precomment + line + "\n"   # Comment line.
 
     debug_count = debug_count + 1
@@ -6339,11 +6344,11 @@ def get_defaults_for_note(t_args, voice, line):
     args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc = save_current_type
     key_voice[measure_on][voice] = savekeyvoice
     if therest is None or thenote is None:
-        print_warning("note had error with note {}".format(w_note), line)
+        print_error("note had error with note {}".format(w_note), line)
         return None, 0, 0, 0, 0, 0, 0, 0
     # fi
     if typenote != normal_note:
-        print_warning("note is not of type normal_note -- ({})".format(typenote), line)
+        print_error("note is not of type normal_note -- ({})".format(typenote), line)
         return None, 0, 0, 0, 0, 0, 0, 0
     # fi
 
@@ -6440,25 +6445,21 @@ def do_encode(t_args, line):
     global measure_on
     global last_voice_staff
 
-#DEBUG    print_debug("do_encode - #a")
     t_args = substitute_non_macro_local(t_args, line)
     if t_args is None or t_args == '':
         print_error("encode does not have a variable, nor string to assign to it.", line)
         return
     # fi
-#DEBUG    print_debug("do_encode - #b")
     t_args = t_args.strip()                     # Toss spaces before and after.
     if t_args is None or t_args == '':          # Check again. :)
         print_error("encode does not have a variable, nor string to assign to it.", line)
         return
     # fi
-#DEBUG    print_debug("do_encode - #c")
     assign = t_args.find('=')
     if assign <= 0:
         print_error("encode does not have a variable followed by an assignment character.", line)
         return
     # fi
-#DEBUG    print_debug("do_encode - #d")
     strng = t_args[assign+1:].strip()           # Toss spaces before and after.    After Assignment.
     variable = t_args[0:assign].strip()         # Toss spaces before and after.    The Variable.
 
@@ -6466,15 +6467,12 @@ def do_encode(t_args, line):
     a = variable.find('(')
     wary = None
     h = None
-#DEBUG    print_debug("do_encode - #e")
     if a >= 0:
-#DEBUG        print_debug("do_encode - #f")
         wary, h = handle_vars_parens(variable, a, line, False)
         if wary is None:
             return
         # fi
     else:
-#DEBUG        print_debug("do_encode - #g")
         a = variable.find('[')
         if a >= 0:
             wary, h = handle_vars_parens(variable, a, line, False)
@@ -6491,7 +6489,6 @@ def do_encode(t_args, line):
             h = 0                               # Just a variable, not an array.
         # fi
     # fi
-#DEBUG    print_debug("do_encode - #h")
 
     # At this point we have 'variable' with where to put the results of encode. (wary...)
     # strng = everthing after the assignment character.
@@ -6504,13 +6501,11 @@ def do_encode(t_args, line):
         return
     # fi
 
-#DEBUG    print_debug("do_encode - #i")
     voice = getvar_checkokay('voice', line)     # Interesting - get last time used. :)
     if voice < 1:
         voice = 1
     # fi
 
-#DEBUG    print_debug("do_encode - #j")
     # semi-colons with comma pairs -- except for explict. ... pairs starts here.
     pairs = strng[a+1:].strip()                 # Toss semi-colon, now get paired arguments i.e. x,y;
     strng = strng[0:a].strip()                  # Set strng to string up to the semi-colon.
@@ -6804,7 +6799,7 @@ def do_encode(t_args, line):
                     # fi
                 # fi
             else:
-                print_warning("encode has no note name or number ...", line)
+                print_error("encode has no note name or number ...", line)
             # fi
         else:
             nn = notenumber
@@ -6817,7 +6812,7 @@ def do_encode(t_args, line):
                 if notename != -1:
                     n = str(octave) + str(notename)
                 else:
-                    print_warning("encode has no note name or number but octave ...", line)
+                    print_error("encode has no note name or number but octave ...", line)
                 # fi
             elif notename != -1:
                 n = str(notename)
@@ -6996,17 +6991,6 @@ def do_endloop(t_args, line):
     lmp_executing_rest_of_line.append(None)             # Rest of this line. Does not apply
     lmp_executing_i_line.append(t_line)                 # Save current depth of line.
     lmp_executing_number = lmp_executing_number + 1
-#DEBUG    print_debug("do_endloop - lmp_executing_number={}".format(lmp_executing_number))
-#DEBUG    print_debug("do_endloop - lmp_executing_which={}".format(lmp_executing_which))
-#DEBUG    print_debug("do_endloop - lmp_executing_type={}".format(lmp_executing_type))
-#DEBUG    print_debug("do_endloop - loop_location={}".format(loop_location))
-#DEBUG    print_debug("do_endloop - loop_value_variable={}".format(loop_value_variable))
-#DEBUG    print_debug("do_endloop - loop_increment={}".format(loop_increment))
-#DEBUG    print_debug("do_endloop - loop_final_value={}".format(loop_final_value))
-#DEBUG    print_debug("do_endloop - loop_endloop_exp={}".format(loop_endloop_exp))
-#DEBUG    for i in range(0, len(loop_buffer)):
-#DEBUG        print_debug("do_endloop - loop_buffer[{}]={}".format(i, loop_buffer[i]))
-#DEBUG    # rof
     return
 # End of do_endloop
 
@@ -7361,7 +7345,7 @@ def do_instrument(t_args, line):
         # rof
     # fi
     if foundinstrument is None:
-        print_warning("do_instrument - instruments does not have INST={}".format(INST), line)
+        print_error("do_instrument - instruments does not have INST={}".format(INST), line)
         f1, type_error = is_float(INST, is_float_number)
         if type_error is not None:
             print_error("instrument error - {}".format(type_error), line)
@@ -7502,7 +7486,6 @@ def do_loop(t_args, line):
     global loop_buffer
     global linecount
 
-#DEBUG    print_debug("do_loop - t_args={}".format(t_args))
     lvv = None
     li = None
     lfv = None
@@ -7581,12 +7564,6 @@ def do_loop(t_args, line):
     loop_defining = loop_number
     loop_defining_count = loop_defining_count + 1
     loop_number = loop_number + 1
-#DEBUG    print_debug("do_loop - loop_location={}".format(loop_location))
-#DEBUG    print_debug("do_loop - loop_increment={}".format(loop_increment))
-#DEBUG    print_debug("do_loop - loop_value_variable={}".format(loop_value_variable))
-#DEBUG    print_debug("do_loop - loop_final_value={}".format(loop_final_value))
-#DEBUG    print_debug("do_loop - loop_defining_count={}".format(loop_defining_count))
-#DEBUG    print_debug("do_loop - loop_buffer={}".format(loop_buffer))
     return
 # End of do_loop
 
@@ -7605,7 +7582,6 @@ def do_macro(t_args, line):
     global staff_name
     global commands
 
-#DEBUG    print_debug("do_macro - t_args='{}'".format(t_args))
     if t_args is None or t_args == '':
         print_error("macro command does not have any arguments.", line)
         return ''
@@ -7682,13 +7658,6 @@ def do_macro(t_args, line):
         all_unique_macro_names[name].append(macro_number)
     # fi
     macro_number = macro_number + 1
-#DEBUG    print_debug("do_macro - macro_name={}".format(macro_name))
-#DEBUG    print_debug("do_macro - macro_name_terminator={}".format(macro_name_terminator))
-#DEBUG    print_debug("do_macro - macro_arguments={}".format(macro_arguments))
-#DEBUG    print_debug("do_macro - macro_arg_terminator={}".format(macro_arg_terminator))
-#DEBUG    print_debug("do_macro - macro_defining={}".format(macro_defining))
-#DEBUG    print_debug("do_macro - macro_number={}".format(macro_number))
-#DEBUG    print_debug("do_macro - all_unique_macro_names={}".format(all_unique_macro_names))
     return
 # End of do_macro
 
@@ -8077,7 +8046,6 @@ def do_outloop(t_args, line):
     global loop_buffer
     global loop_number
 
-#DEBUG    print_debug("do_outloop - Entering, t_args='{}'".format(t_args))
     l = lmp_executing_number
     if lmp_executing_type[l] != 'loop':
         print_error("outloop reached while not inside a loop", line)
@@ -8344,12 +8312,6 @@ def do_process(t_args, line):
     process_defining = process_number
     process_number = process_number + 1
     process_defining_count = process_defining_count + 1
-#DEBUG    print_debug("do_process - process_name={}".format(process_name))
-#DEBUG    print_debug("do_process - process_argument={}".format(process_argument))
-#DEBUG    print_debug("do_process - process_defining={}".format(process_defining))
-#DEBUG    print_debug("do_process - process_number={}".format(process_number))
-#DEBUG    print_debug("do_process - process_defining_count={}".format(process_defining_count))
-#DEBUG    print_debug("do_process - process_buffer={}".format(process_buffer))
     return
 # End of do_process
 
@@ -8670,6 +8632,7 @@ def do_staff(t_args, line):
 
     staff_name[sn] = v                          # Create or change it.
 #DEBUG    print_debug("do_staff - #e staff_name='{}'".format(staff_name))
+    staves.append(v)                            # For order checking for ABC printing -- indirectly.
     last_voice_staff = sn
     cis = sn                                    # No longer doing just one voice.   NOTDONEYET - set voice to staff.
     do_spaces('on', line)                       # Process spaces or commas -- no spaces in middle of notes.
@@ -9471,13 +9434,13 @@ def handle_vars_parens(arg, a, line, create_it):
     elif c == '[':
         enddelim = ']'
     else:
-        print_warning("Internal problem? variable {}, but no parenthesis for dimension.".format(arg), line)
+        print_error("Internal problem? variable {}, but no parenthesis for dimension.".format(arg), line)
         return None, None
     # fi
     e.append(enddelim)
     w = w + 1
     if w >= len(aftertoken):
-        print_warning("Found character variable {}, but no closing {}.".format(wary, enddelim), line)
+        print_error("Found character variable {}, but no closing {}.".format(wary, enddelim), line)
         return None, None
     # fi
     dimensions = []
@@ -10421,9 +10384,9 @@ def getnote(note_to_decode, voice, line, update_defaults, do_errors):
 
         if xpose_new_key[voice] == 'cn':            # Special case "cn" to mean use sharps. 'c' uses flats.
             lkj = midi_value_to_note_sharp[lkj]
-        elif nksxnk <= 0:                            # If flat's on stave for key.
+        elif nksxnk <= 0:                            # If flat's on staff for key.
             lkj = midi_value_to_note_flat[lkj]
-        else:                                       # If sharps's on stave for key.
+        else:                                       # If sharps's on staff for key.
             lkj = midi_value_to_note_sharp[lkj]
         # fi
 
@@ -11025,7 +10988,6 @@ def process_notes(line, original_line):
     global cresc_direction
     global cresc_time
     global cresc_volume
-    global lmp_executing_number         # How many nested depths macros are being executed.
     global macro_name                   # Possible unique macro names -- they may be duplicated.
     global macro_name_terminator        # Terminator after macro name.
     global macro_arguments              # Array of arguments for macro.
@@ -11201,23 +11163,18 @@ def process_notes(line, original_line):
             onenotevolume = None
 # NOTDONEYET - MACRO with right terminators -- order of match - longest argument list first. process_notes()
             for c in range(0, macro_number):
-#DEBUG                print_debug("process_notes - #m c={} macro_name[]={} temp1={}".format(c, macro_name[c], temp1))
                 if len(macro_name[c]) > len(temp1):
-#DEBUG                    print_debug("process_notes - #n")
                     continue
                 # fi
                 if temp1[0:len(macro_name[c])] != macro_name[c]:
                     continue
                 # fi
-#DEBUG                print_debug("process_notes - #o c={} macro_name[]={} temp1={}".format(c, macro_name[c], temp1))
                 if macro_name_terminator[c] is None:
-#DEBUG                    print_debug("process_notes - #p")
                     if temp1 != macro_name[c]:
                         continue
                     # fi
                     md = ''
                 else:
-#DEBUG                    print_debug("process_notes - #q")
                     if temp1[0:len(macro_name[c])] != macro_name[c]:
                         continue
                     # fi
@@ -11228,7 +11185,6 @@ def process_notes(line, original_line):
                     # fi
                 # fi
                 therest = temp1[len(macro_name[c])+1:]
-#DEBUG                print_debug("process_notes - #r temp1='{}' therest='{}'".format(temp1, therest))
                 if len(therest) > 0 and w and w+1 < len(wargs):
                     if re.match(r'\w', therest[-1]):          # last character in therest is NOT terminator.
                         if len(wargs[w+1]) > 0 and re.match(r'\w', wargs[w+1][0]):
@@ -11244,24 +11200,20 @@ def process_notes(line, original_line):
                 else:
                     f = therest.find(macro_arg_terminator[c][q-1])
                     if f < 0:
-                        print_error("m:{} macro {} does not have a closing delimiter '{}'".format(measure_on, c, macro_arg_terminator[c][q-1]), original_line)
+                        print_warning("m:{} macro {} does not have a closing delimiter '{}'".format(measure_on, c, macro_arg_terminator[c][q-1]), original_line)
                         continue        # Try another macro
                     # fi
                     f = f + 1
                 # fi
                 if replace_macro(c, md + therest, line):
-#DEBUG                    print_debug("process_notes - #w True=replace_macro('{}','{}')".format(c, md+therest))
                     return                                      # Go out and read line for macro.
                 # fi
-#DEBUG                print_debug("process_notes - #x NOT RIGHT MACRO")
                 # NOT THE RIGHT MACRO IF HERE.
             # rof
             temp1 = temp2
-#DEBUG            print_debug("process_notes - #t temp1='{}'".format(temp1))
 
             temp1, onenotevolume, prenote, postnote = find_vol_cresc(temp1, onvoice, original_line, prenote, postnote, onenotevolume)
             therest, thenote, typenote = getnote(temp1, onvoice, original_line, True, True) # get next note
-#DEBUG            print_debug("process_notes - #u thenote='{}' therest='{}'".format(thenote, therest))
 
             if thenote is None:
                 print_error("m:{} no note? therest='{}' thenote='{}' typenote='{}'".format(measure_on, therest, thenote, typenote), original_line)
@@ -11918,7 +11870,7 @@ def parens_match(enddelim, aftertoken, w, original_line):
     e.append(enddelim)
     w = w + 1
     if w >= len(aftertoken):
-        print_warning("Found character variable, but no closing '{}'.".format(enddelim), original_line)
+        print_error("Found character variable, but no closing '{}'.".format(enddelim), original_line)
         return None
     # fi
     while True:
@@ -11929,7 +11881,7 @@ def parens_match(enddelim, aftertoken, w, original_line):
                 break
             # fi
             if w >= len(aftertoken):
-                print_warning("Found character variable, but not closing '{}'.".format(enddelim), original_line)
+                print_error("Found character variable, but not closing '{}'.".format(enddelim), original_line)
                 return None
             elif c == '(':
                 enddelim = ')'
@@ -11962,7 +11914,6 @@ def parens_match(enddelim, aftertoken, w, original_line):
 #   aftertoken - The rest of the line, after the {...} is processed.
 
 def fix_if_limiting_tokens(strng, aftertoken, original_line):
-#DEBUG    print_debug("fix_if_limiting_tokens - Entering(strng='{}' aftertoken='{}'".format(strng, aftertoken))
     prew = 0
     w = 0
     while w < len(aftertoken) and aftertoken[w] in [ ' ', "\t"]:
@@ -11971,7 +11922,6 @@ def fix_if_limiting_tokens(strng, aftertoken, original_line):
     if w < len(aftertoken):
         if aftertoken[w] == '{':                # partial token selection ...
             prew = parens_match('}', aftertoken, w, original_line)
-#DEBUG            print_debug("fix_if_limiting_tokens - after parens_match prew='{}' aftertoken='{}' w='{}'".format(prew, aftertoken, w))
             if prew is None:
                 return strng, aftertoken
             # fi
@@ -11981,13 +11931,12 @@ def fix_if_limiting_tokens(strng, aftertoken, original_line):
     # f will be the thing to pass to is_float. s = rest of string.
     #-- f = strng + aftertoken[prew:w]
     f = strng + aftertoken[w:prew]
-#DEBUG    print_debug("fix_if_limiting_tokens - f='{}'".format(f))
 
     f1, type_error = is_float(f, is_float_string)         # Want a string.
     if type_error is not None or f1 is None:
         return strng, aftertoken
     elif type(f1) is not str:                   # Must have a string.
-        print_warning("m:{} variable '{}' ".format(measure_on, f) + "return is not a string", original_line)
+        print_error("m:{} variable '{}' ".format(measure_on, f) + "return is not a string", original_line)
         return strng, aftertoken
     # fi
     aftertoken = aftertoken[prew:]
@@ -12008,14 +11957,13 @@ def fix_if_limiting_tokens(strng, aftertoken, original_line):
 def replace_array_char(wary, thetoken, aftertoken, original_line):
     global measure_on
 
-#DEBUG    print_debug("replace_array_char - Entering(wary='{}' thetoken='{}' aftertoken='{}'".format(wary, thetoken, aftertoken))
     # Find end of array. Need add/match ()[]{}.
     w = 0
     while w < len(aftertoken) and aftertoken[w] in [ "\t", ' ' ]:
         w = w + 1
     # elihw
     if w >= len(aftertoken):
-        print_warning("Found character variable '{}', but no dimensions.".format(thetoken), original_line)
+        print_error("Found character variable '{}', but no dimensions.".format(thetoken), original_line)
         return thetoken, aftertoken
     # fi
     c = aftertoken[w]
@@ -12024,7 +11972,7 @@ def replace_array_char(wary, thetoken, aftertoken, original_line):
     elif c == '[':
         enddelim = ']'
     else:
-        print_warning("Found character variable '{}', but no parenthesis for dimension.".format(wary), original_line)
+        print_error("Found character variable '{}', but no parenthesis for dimension.".format(wary), original_line)
         return thetoken, aftertoken
     # fi
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
@@ -12049,9 +11997,7 @@ def replace_array_char(wary, thetoken, aftertoken, original_line):
     f = thetoken + aftertoken[0:w]
 
     f1, type_error = is_float(f, is_float_string)     # Want a string.
-#DEBUG    print_debug("replace_array_char - is_float gives: f1='{} type_error='{}'".format(f1, type_error))
     if type_error is not None or f1 is None:
-#DEBUG        print_warning("m:{} #b ".format(measure_on) + type_error, original_line)
         return thetoken, aftertoken
     elif type(f1) is not str:               # Must have a string.
         return thetoken, aftertoken
@@ -12064,14 +12010,11 @@ def replace_array_char(wary, thetoken, aftertoken, original_line):
 def replace_char_var(strng, linestarts, lineends, original_line, not_this_one):
     global whichlocalchars
 
-#DEBUG    print_debug("replace_char_var - strg='{}'".format(strng))
     cnt = 0
     beforetokenline = strng[0:linestarts]
     token = ntoken = strng[linestarts:lineends]
     aftertokenline = strng[lineends:]
 
-#DEBUG    print_debug("replace_char_var - strng='{}'".format(strng))
-#DEBUG    print_debug("replace_char_var - beforetokenline='{}' token='{}' aftertokenline='{}'".format(beforetokenline, token, aftertokenline))
     for w in whichlocalchars:
         if whichlocalcharswary[w][numarry_maclevel] == not_this_one:    # Don't do this level.
             continue
@@ -12090,7 +12033,7 @@ def replace_char_var(strng, linestarts, lineends, original_line, not_this_one):
 #?     break
 #? # fi
         if lw + a != lt and len(whichlocalcharswary[w][numarry_indexes]) != 0:
-            print_warning("Found character variable '{}', but not at end of token, and it needs dimensions.".format(w), original_line)
+            print_error("Found character variable '{}', but not at end of token, and it needs dimensions.".format(w), original_line)
             continue
         # fi
         if a > 0:
@@ -12123,11 +12066,9 @@ def replace_char_var(strng, linestarts, lineends, original_line, not_this_one):
             if bb:          # It is a variable.
                 break
             # fi
-#DEBUG            print_debug("replace_char_var - calling fix_if_limiting_tokens")
             ntoken, aftertoken = fix_if_limiting_tokens(w, aftertoken, original_line)
         else:
             ntoken = ntoken[a:lt]
-#DEBUG            print_debug("replace_char_var - calling replace_array_char")
             ntoken, aftertoken = replace_array_char(whichlocalcharswary[w], ntoken, aftertoken, original_line)
         # fi
         ntoken = beforetokenline + beforetoken + ntoken + aftertoken
@@ -12175,9 +12116,7 @@ def char_var_subst_whole_string(strg, line, not_this_one):
     global whichlocalchars
     global i_line
 
-#DEBUG    print_debug("char_var_subst_whole_string - strg='{}'".format(strg))
     if whichlocalchars == []:
-#DEBUG        print_debug("char_var_subst_whole_string - #A")
         return strg
     # fi
     o_strg = strg
@@ -12186,12 +12125,9 @@ def char_var_subst_whole_string(strg, line, not_this_one):
     while w < len(strg) and cnt < 35:
         linestarts, lineends = next_token(w, strg)
         if linestarts is None:
-#DEBUG            print_debug("char_var_subst_whole_string - #B")
             return strg
          # fi
-#DEBUG        print_debug("char_var_subst_whole_string - #C linestarts='{}' lineends='{}' w='{}' strg='{}'".format(linestarts, lineends, w, strg))
         strg = replace_char_var(strg, linestarts, lineends, line, not_this_one)
-#DEBUG        print_debug("char_var_subst_whole_string - #D, strg='{}' o_strg='{}'".format(strg, o_strg))
         if strg != o_strg:
             o_strg = strg
             w = 0
@@ -12201,7 +12137,6 @@ def char_var_subst_whole_string(strg, line, not_this_one):
             w = lineends
         # fi
     # elihw
-#DEBUG    print_debug("char_var_subst_whole_string - #E")
     return strg
 # End of char_var_subst_whole_string
 
@@ -12247,7 +12182,7 @@ def replace_process(last_voice_staff, token, next_tokens, line):        # NOTDON
 # process[last_voice_staff]
 # Do like replace_macro.
 # Set argument-name to process to token.                                # NOTDONEYET
-    pass
+    print_error("NOTDONEYET - replace_process '{}' '{}' '{}'".format(last_voice_staff, token, next_tokens), line)
 # End of process_notes_for_staff
 
 # ============================================================================
@@ -12299,6 +12234,7 @@ def keyword_position(token, delimiter, next_tokens, line):
 # Get the value following the p() or the pos() or v() or vol().
 
 def pv(token, delimiter, next_tokens, line):
+    print_error("NOTDONEYET - pv '{}' '{}' '{}'".format(token, delimiter, next_tokens), line)
     if delimiter == '(':
         pass
     # fi
@@ -12345,26 +12281,26 @@ def keyword_key(token, delimiter, next_tokens, line):
 
 # ============================================================================
 def keyword_tremolo(token, delimiter, next_tokens, line):
-    print_warning("NOTDONEYET - keyword '{}'".format(token), line)
+    print_error("NOTDONEYET - tremolo '{}' '{}' '{}'".format(token, delimiter, next_tokens), line)
     return next_tokens
 # End of keyword_tremolo
 
 # ============================================================================
 def keyword_note_modifier(token, delimiter, next_tokens, line):
-    print_warning("NOTDONEYET - keyword '{}'".format(token), line)
+    print_error("NOTDONEYET - keyword_note_modifier '{}' '{}' '{}'".format(token, delimiter, next_tokens), line)
     return next_tokens
 # End of keyword_modifiers
 
 # ============================================================================
 def keyword_note_show(token, delimiter, next_tokens, line):
-    print_warning("NOTDONEYET - keyword '{}'".format(token), line)
+    print_error("NOTDONEYET - keyword_note_show '{}' '{}' '{}'".format(token, delimiter, next_tokens), line)
     return next_tokens
 # End of keyword_note_show
 
 # ============================================================================
 def keyword_note_show1(token, delimiter, next_tokens, line):
-    command, t_args, delimiter = compute_command_args(next_tokens)
-    print_warning("NOTDONEYET - keyword '{}' '{}'".format(token, command), line)
+    print_error("NOTDONEYET - keyword_note_show1 '{}' '{}' '{}'".format(token, delimiter, next_tokens), line)
+    command, t_args, newdelimiter = compute_command_args(next_tokens)
     return t_args
 # End of keyword_note_show
 
@@ -12453,6 +12389,7 @@ def process_keyword(token, delimiter, next_tokens, line):
 #   next_tokens = process_notes_for_staff(token, delimiter, next_tokens, line)
 
 def process_notes_for_staff(token, delimiter, next_tokens, line):       # NOTDONDYET
+    print_error("NOTDONEYET - process_notes_for_staff '{}' '{}' '{}'".format(token, delimiter, next_tokens), line)
     command, t_args, delimiter = compute_command_args(next_tokens)
     print_debug("NOTDONEYET - process_notes_for_staff - token='{}' '{}' t_args='{}'".format(token, delimiter, t_args))
     return t_args
@@ -12562,7 +12499,7 @@ def process_staff_notes(command, delimiter, t_args, line):
 #--                    next_tokens = (tdelim + next_tokens).strip()
 #--                # fi
 #--                replace_process(last_voice_staff, token, nexttokens, line)                    # NOTDONEYET
-#--                return                                          # Henceforth get lines from macro/loop/process buffer.
+#--                return                                      # Henceforth get lines from macro/loop/process buffer.
 #--            # fi
             # Might take multiple tokens.
             next_tokens = process_notes_for_staff(token, tdelim, next_tokens, line).strip()
