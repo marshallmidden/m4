@@ -2,28 +2,7 @@
 # ----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 # ----------------------------------------------------------------------------
-# Processes:
-#   To start a process, type "begin", followed by the process name on the staff
-#   line. The process then devours each item of information on the staff one at
-#   a time, performs the functions described in the process on it, then goes on
-#   to the next item, continuing until the end of the piece, or a new process is
-#   begun on that staff, or the word "quit" is reached.
-#   Only one process running. If staff change internally, put notes onto new one.
-#   Does not revert back to original staff/staves, process moves to new staff.
-#?????????????????????????????????????????????????????????????????????????????
-#   What replaces/starts macro?
-#   Need start process after 'begin'?
-#       Need to terminate/exit current one.
-#       a) with new 'begin'.
-#       b) end of file.
-#       c) with 'quit'.
-#   Error if process used without 'begin'.
-#?????????????????????????????????????????????????????????????????????????????
-# Staves:
-#   Allow multiple ones to do all notes -- and process started for staff/staves
-#   ... .
-# ----------------------------------------------------------------------------
-# Variables to do:
+# Variables to do - NOTDONEYET:
 #       accent, aaccent, arp, fermata, ferma, stac, marc
 # ----------------------------------------------------------------------------
 # TO DO:
@@ -702,6 +681,16 @@ def chkvarlevel(arg, maclev):
     # rof
     return True
 # End of chkvar
+
+# ----------------------------------------------------------------------------
+def print_some_variable_values(s):
+#--    for wary in calculate.arrays + calculate.local_arrays:
+    for wary in calculate.local_arrays:
+        if wary[numarry_name] in [ 'A', 'ARG', 'DEF', 'NEW', 'octv', 'notenum', 'dur', 'secs' ]:
+            print_debug("{}: wary[numarry_name]={} @ {} [{}] values={}".format(s, wary[numarry_name], wary[numarry_maclevel], wary[numarry_indexes], wary[numarry_values]))
+        # fi
+    # rof
+# End of print_some_variable_values
 
 # ----------------------------------------------------------------------------
 def createlocalvar(arg, val, maclev, typ):
@@ -1597,8 +1586,10 @@ global process_defining             # If currently defining a process.
 process_defining = None
 global process_defining_count       # Nested process defining count.
 process_defining_count = 0
-global process_running              # If not None, the process number run till quit or another begin or end of file.
-process_running = None
+global in_process_already           # If not None, the process number run till quit or another begin or end of file.
+in_process_already = False
+global running_process_already      # If in a process -- so notes get processed as notes, not passed to process.
+running_process_already = False
 # loop -> endloop.  Count nested.
 global loop_defining                # If currently defining a loop.
 loop_defining = None
@@ -3833,7 +3824,12 @@ def pass2():
     global errors_happened
     global goto_table
     global staves
+    global in_process_already
 
+    if in_process_already:
+        # Delete process from stack.
+        set_process_quit()
+    # fi
     # Check that song finishes 'reasonably'.
     if ifdepth > 0:
         print_warning_no_line("Inside an if block (depth={}) when end of file or cstop* reached".format(ifdepth))
@@ -3964,26 +3960,37 @@ def get_next_process_line(l):
     global lmp_executing_args
     global lmp_executing_rest_of_line
     global i_line
+    global running_process_already
+    global in_process_already
 
+#---    print_debug("get_next_process_line - l={} lmp_executing_number={} lmp_executing_which='{}'".format(l,lmp_executing_number,lmp_executing_which[l]))
+#---    print_debug("get_next_process_line - lmp_executing_type='{}' lmp_executing_line='{}'".format(lmp_executing_type[l],lmp_executing_line[l]))
+#--     print_debug("get_next_process_line - lmp_executing_i_line='{}'".format(lmp_executing_i_line[l]))
+#---    print_debug("get_next_process_line - lmp_executing_args='{}'".format(lmp_executing_args[l]))
+#---    print_debug("get_next_process_line - lmp_executing_rest_of_line='{}'".format(lmp_executing_rest_of_line[l]))
+#---    print_debug("get_next_process_line - in_process_already={} running_process_already={}".format(in_process_already,running_process_already))
+
+    if lmp_executing_type[l] != 'process' or not running_process_already:
+        print_error("get_next_process_line - lmp_executing_type[l]={} != 'process' or running_process_already={}".format(lmp_executing_type[l], running_process_already), 'in process')
+        in_process_already = False
+        running_process_already = False
+        return ''
+    # fi
     the_process = lmp_executing_which[l]
     linenumber = lmp_executing_line[l]
     lines = process_buffer[the_process]
+#--    print_debug("get_next_process_line - lines='{}'".format(lines))
     if linenumber >= len(lines):
         delete_executing_variables(l)
-        # Delete rest of process variables.
-        del lmp_executing_which[l]
-        del lmp_executing_type[l]
-        del lmp_executing_args[l]
-        del lmp_executing_line[l]
-        del lmp_executing_i_line[l]
         retline = lmp_executing_rest_of_line[l]                   # Stuff after this process (if not EOLN)
-        del lmp_executing_rest_of_line[l]
-        lmp_executing_number = lmp_executing_number - 1
-        return retline
+        running_process_already = False
+#---        print_debug("get_next_process_line - no more lines for this process for argument")
+        return ''
     # fi
     line = lines[linenumber]
     i_line = [ 'process:      {:4d}:'.format(linenumber+1) + line ] # Line as given from process text buffer
     lmp_executing_line[l] = linenumber + 1
+#---    print_debug("get_next_process_line - return line='{}'".format(line))
     return line
 # End of get_next_process_line
 
@@ -4178,20 +4185,22 @@ def read_next_line():
     global lmp_executing_type
     global macro_buffer                 # Array of lines for macro.
     global errors_happened
+    global running_process_already
 
     if lmp_executing_number > 0:
         l = lmp_executing_number
         if lmp_executing_type[l] == 'macro':
-            line = get_next_macro_line(l)
+            return get_next_macro_line(l), ''
         elif lmp_executing_type[l] == 'loop':
-            line = get_next_loop_line(l)
+            return get_next_loop_line(l), ''
         elif lmp_executing_type[l] == 'process':
-            line = get_next_process_line(l)
+            if running_process_already:
+                return get_next_process_line(l), ''
+            # fi
         else:
             print_debug("read_next_line - lmp_executing_type[{}] ('{}') unknown - internal error".format(l, lmp_executing_type[l]))
-            line = ''
+            return '', ''
         # fi
-        return line, ''
     # fi
 
     full_line = ''
@@ -5361,10 +5370,11 @@ def decode_ims(t_args, line):
     note_notelength = -1
     note_dot = number_dots
     note_duration = -1                  # Set far below.
-    if thenote is str:
+#---    print_debug("do_decode - type(thenote)={} thenote='{}'".format(type(thenote), thenote))
+    if type(thenote) is str:
         note_octave = thenote[0]
         note_notename = thenote[1]
-        if len(thenote) >= 2:
+        if len(thenote) > 2:
             sfn = thenote[2:]
             if sfn == '+':
                 note_sharp = 1
@@ -5593,7 +5603,8 @@ def do_bars(t_args, line):
 def substitute_non_macro_local(t_args, line):
     global lmp_executing_number
 
-    if lmp_executing_type[lmp_executing_number] in ['macro', 'process']:
+#--    if lmp_executing_type[lmp_executing_number] in ['macro', 'process']:
+    if lmp_executing_type[lmp_executing_number] in ['macro']:
         not_this_one = lmp_executing_number
     else:
         not_this_one =  -1                      # Do everything.
@@ -5616,11 +5627,13 @@ def substitute_non_macro_local(t_args, line):
         # fi
         variable = t_args[0:assign].strip()     # Toss spaces before and after.    The Variable.
         strng = t_args[assign+1:].strip()       # Toss spaces before and after.    After Assignment.
+#---        print_debug("substitute_non_macro_local - #1 variable='{}' strng='{}'".format(variable, strng))
         wary = chkvar(variable)
         if wary is not None and wary[numarry_indexes] == []:    # If not an array variable
             break
         # fi
         nline = char_var_subst_whole_string(variable, line, not_this_one).strip()
+#---        print_debug("substitute_non_macro_local - #1 nline='{}'".format(nline))
         if nline == variable:
             break
         # fi
@@ -5643,7 +5656,9 @@ def substitute_non_macro_local(t_args, line):
         # fi
         variable = t_args[0:assign].strip()     # Toss spaces before and after.    The Variable.
         strng = t_args[assign+1:].strip()       # Toss spaces before and after.    After Assignment.
+#---        print_debug("substitute_non_macro_local - #2 variable='{}' strng='{}'".format(variable, strng))
         nline = char_var_subst_whole_string(strng, line, not_this_one).strip()
+#---        print_debug("substitute_non_macro_local - #2 nline='{}'".format(nline))
         if nline == strng:
             break
         # fi
@@ -6445,7 +6460,9 @@ def do_encode(t_args, line):
     global measure_on
     global last_voice_staff
 
+#---    print_debug("do_encode - b4 t_args='{}'".format(t_args))
     t_args = substitute_non_macro_local(t_args, line)
+#---    print_debug("do_encode - af t_args='{}'".format(t_args))
     if t_args is None or t_args == '':
         print_error("encode does not have a variable, nor string to assign to it.", line)
         return
@@ -8574,26 +8591,26 @@ def do_staff(t_args, line):
         return
     # fi
     targs = re.sub(r'\s+', '', t_args)          # Toss spaces.
-#DEBUG    print_debug("do_staff - #a t_args='{}'".format(t_args))
-    if t_args is None or t_args == '':
+#DEBUG    print_debug("do_staff - #a targs='{}'".format(targs))
+    if targs is None or targs == '':
         print_error("staff does not have a name argument.", line)
         return
     # fi
     # Returns where in strng termination is. -1 if not found. 0=first character.
-    x = find_terminator_in_string(t_args, [':'], line)
+    x = find_terminator_in_string(targs, [':'], line)
 #DEBUG    print_debug("do_staff - #b x='{}'".format(x))
     if x < 0:
-        sn = t_args                             # Staff name.
+        sn = targs                              # Staff name.
         v = None                                # No voices.
     elif x == 0:
         print_error("staff does not have a name argument before the colon(:)", line)
         return
     else:
-        sn = t_args[0:x]
-        if x+1 >= len(t_args):
+        sn = targs[0:x]
+        if x+1 >= len(targs):
             v = None
         else:
-            v = t_args[x+1:]
+            v = targs[x+1:]
         # fi
     # fi
 #DEBUG    print_debug("do_staff - #c sn='{}' v='{}'".format(sn, v))
@@ -9785,10 +9802,10 @@ commands = {
              'xpose'   : (do_xpose,     True),
              '%%'      : (do_percents,  True),
 
-             'endprocess':(do_endprocess, False),       # NOTDONEYET - saved code, but doesn't execute yet.
-             'process' : (do_process,   False),         # NOTDONEYET - saved code, but doesn't execute yet.
+             'endprocess':(do_endprocess, False),
+             'process' : (do_process,   False),
 
-             'staff'   : (do_staff,     False),         # NOTDONEYET - must do, then chords... .
+             'staff'   : (do_staff,     False),
 
              'flat'    : (do_flat,      False),         # NOTDONEYET
              'format'  : (do_format,    False),         # IMS - will not do     NOTDONEYET
@@ -12175,15 +12192,102 @@ def compute_command_args(expand_line):
 # End of compute_command_args
 
 # ============================================================================
-# replace_process(last_voice_staff, token, nexttokens, line)
-# Henceforth get lines from macro/loop/process buffer.
+# return True if going to be in a process upon exit. False for error.
 
-def replace_process(last_voice_staff, token, next_tokens, line):        # NOTDONEYET
-# process[last_voice_staff]
-# Do like replace_macro.
-# Set argument-name to process to token.                                # NOTDONEYET
-    print_error("NOTDONEYET - replace_process '{}' '{}' '{}'".format(last_voice_staff, token, next_tokens), line)
-# End of process_notes_for_staff
+def set_process_begin(token, next_tokens, line):
+    global process_name
+    global lmp_executing_number         # If processing process ... reading from process buffer.
+    global lmp_executing_which          # Which process being executed. Means cannot reorder. *drats*
+    global lmp_executing_args           # Argument given to process.
+    global lmp_executing_line           # Line number in process array.
+    global lmp_executing_i_line
+    global i_line
+
+#---    print_debug("set_process_begin '{}' '{}'".format(token, next_tokens))
+    found_pn = None
+    for pnumber in range(0, len(process_name)):
+        if token == process_name[pnumber]:
+            process = process_name[pnumber]
+            found_pn = pnumber
+            break
+        # fi
+    # fi
+    if found_pn is None:
+        print_error("process named '{}' not pre-defined.".format(token), line)
+        return False
+    # fi
+
+    level = lmp_executing_number + 1                    # Create variables at next level.
+    if not createlocalvar(process_argument[pnumber], None, level, 1):
+        print_error("process {} unable to create variable {}".format(command, process_argument[pnumber][0]), line)
+        return False
+    # fi
+    lmp_executing_which.append(pnumber)
+    lmp_executing_type.append('process')                # Going into a new process.
+    lmp_executing_args.append(None)                     # Save them, although no longer need them. :)
+    lmp_executing_line.append(0)                        # First line in buffer.
+    lmp_executing_rest_of_line.append(None)             # Rest of this line - set in run_process.
+
+    t_line = i_line
+    for i in range(0, len(t_line)):                      # Save current depth of line.
+       t_line[i] = 'rmacr: ' + t_line[i]
+    # rof
+    lmp_executing_i_line.append(t_line)                 # Save current depth of line.
+    lmp_executing_number = lmp_executing_number + 1
+    return True
+# End of set_process_begin
+
+# ============================================================================
+def set_process_quit():
+    global in_process_already
+    global running_process_already
+    global lmp_executing_number
+    global lmp_executing_which
+    global lmp_executing_type
+    global lmp_executing_args
+    global lmp_executing_line
+    global lmp_executing_i_line
+    global lmp_executing_rest_of_line
+
+    l = lmp_executing_number
+    # Delete rest of process variables.
+    del lmp_executing_which[l]
+    del lmp_executing_type[l]
+    del lmp_executing_args[l]
+    del lmp_executing_line[l]
+    del lmp_executing_i_line[l]
+    del lmp_executing_rest_of_line[l]
+    lmp_executing_number = lmp_executing_number - 1
+
+    in_process_already = False
+    running_process_already = False
+# End of set_process_quit
+
+# ============================================================================
+def run_process(token, next_tokens, line):
+    print_debug("run_process '{}' '{}' '{}'".format(last_voice_staff, token, next_tokens))
+
+    global process_argument                         # Array of the argument for process.
+    global lmp_executing_number                     # If processing process ... reading from process buffer.
+    global lmp_executing_which                      # Which process being executed. Means cannot reorder. *drats*
+    global lmp_executing_args                       # Argument given to process.
+    global lmp_executing_line                       # Line number in process array.
+    global lmp_executing_i_line
+    global i_line
+    # set to say that token is now the variable and we'll get next items from process.
+    global running_process_already
+
+    if lmp_executing_type[-1] != 'process':
+        print_error("run_process -ERROR, not in a process", line)
+        return
+    # fi
+#--    lmp_executing_args[-1] = [ token ]
+    lmp_executing_line[-1] = 0                      # First line in buffer.
+    lmp_executing_rest_of_line[-1] = next_tokens    # Rest of this line.
+    setvar(process_argument[-1], token, 1)
+    running_process_already = True
+    return
+# End of run_process
 
 # ============================================================================
 def keyword_midi(token, delimiter, next_tokens, line):
@@ -12433,16 +12537,18 @@ def process_staff_notes(command, delimiter, t_args, line):
     global measure_on
     global process
     global last_voice_staff
+    global in_process_already
+    global running_process_already
 
-#DEBUG    print_debug("process_staff_notes - Entering command='{}' delimiter='{}' t_args='{}'".format(command, delimiter, t_args))
+    print_debug("process_staff_notes - Entering command='{}' delimiter='{}' t_args='{}'".format(command, delimiter, t_args))
     token = command
     tdelim = delimiter
     next_tokens = t_args.strip()
-#DEBUG    print_debug("process_staff_notes - next_tokens='{}'".format(next_tokens))
+    print_debug("process_staff_notes - token='{}' tdelim='{}' next_tokens='{}'".format(token,tdelim,next_tokens))
     while token is not None and token != '':
-#DEBUG        print_debug("process_staff_notes - #1 token='{}'".format(token))
+        print_debug("process_staff_notes - #1 token='{}' staff_name='{}'".format(token,staff_name))
         if token in all_unique_macro_names:
-#DEBUG            print_debug("process_staff_notes - #2 token='{}' in all_unique_macro_names".format(token))
+            print_debug("process_staff_notes - #2 token='{}' in all_unique_macro_names".format(token))
             if tdelim in [' ', '\s']:
                 next_tokens = (tdelim + next_tokens).strip()
             # fi
@@ -12460,15 +12566,38 @@ def process_staff_notes(command, delimiter, t_args, line):
             print_warning("m:{} macro {} did not match terminators correctly...".format(measure_on, token), line)
         # fi
         if token == 'begin':
-            print_error("NOTDONEYET - process_staff_notes, begin", line)
+            if in_process_already:
+                # Delete process from stack.
+                set_process_quit()
+            # fi
+            token, next_tokens, tdelim = compute_command_args(next_tokens)
+            print_debug("process_staff_notes, begin - token='{}' next_tokens='{}' tdelim='{}'".format(token,next_tokens,tdelim))
+            in_process_already = set_process_begin(token, next_tokens, line)
+            running_process_already = False
+            print_debug("process_staff_notes, after begin")
+#---            print_some_variable_values('afterbegin')
         elif token == 'quit':
-            print_error("NOTDONEYET - process_staff_notes, quit", line)
+#---            print_some_variable_values('beforequit')
+            if in_process_already:
+                # Delete process from stack.
+                set_process_quit()
+#---                print_some_variable_values('afterquit')
+                in_process_already = False
+            else:
+                print_error("quit without being in a process.", line)
+            # fi
+        elif in_process_already and not running_process_already:
+            print_debug("process_staff_notes, run_process with token '{}'".format(token))
+#---            print_some_variable_values('beforerunprocess')
+            run_process(token, next_tokens, line)            # NOTDONEYET
+#---            print_some_variable_values('afterrunprocess')
+            return
         elif token in staff_keywords:
-#DEBUG            print_debug("process_staff_notes - #3 token='{}' tdelim='{}' next_tokens='{}'".format(token, tdelim, next_tokens))
+            print_debug("process_staff_notes - #3 token='{}' tdelim='{}' next_tokens='{}'".format(token, tdelim, next_tokens))
             # process keyword - Might take multiple tokens.
             next_tokens = process_keyword(token, tdelim, next_tokens, line).strip()
         elif token in staff_name and tdelim in [':', ',', ' ', "\t", '']:
-#DEBUG            print_debug("process_staff_notes - #4 token='{}' tdelim='{}'".format(token,tdelim))
+            print_debug("process_staff_notes - #4 token='{}' tdelim='{}'".format(token,tdelim))
             next_staff = []
             while tdelim in [',', ' ', "\t", '']:
                 next_staff.append(token)
@@ -12476,7 +12605,7 @@ def process_staff_notes(command, delimiter, t_args, line):
                     next_tokens = next_tokens[1:].strip()
                 # fi
                 token, next_tokens, tdelim = compute_command_args(next_tokens)
-#DEBUG                print_debug("process_staff_notes - #4a token='{}' next_tokens='{}' tdelim='{}'".format(token, next_tokens, tdelim))
+                print_debug("process_staff_notes - #4a token='{}' next_tokens='{}' tdelim='{}'".format(token, next_tokens, tdelim))
                 if token not in staff_name:
                     print_error("process_staff_notes - staff names must be followed by a colon (':')", line)
                     return
@@ -12487,24 +12616,14 @@ def process_staff_notes(command, delimiter, t_args, line):
                 next_tokens = next_tokens[1:].strip()
             # fi
             last_voice_staff = next_staff                   # Switch to staff_name.
-#DEBUG            print_debug("process_staff_notes - #4b last_voice_staff='{}'".format(last_voice_staff))
+            print_debug("process_staff_notes - #4b last_voice_staff='{}'".format(last_voice_staff))
         else:
             print_debug("process_staff_notes - #5 token='{}' tdelim='{}' next_tokens='{}' must be a note?".format(token, tdelim, next_tokens))
-# NOTDONEYET - processes and notes for all last_voice_staff.
-#--            # Use of tokens in new voice - process if it exists?
-#--            if last_voice_staff in process and process[last_voice_staff] is not None:
-#--                print_debug("process_staff_notes - #5 token='{}' in process'".format(token))
-#--                # Set argument-name to process to token.
-#--                if tdelim not in [ "\t", " " ]:
-#--                    next_tokens = (tdelim + next_tokens).strip()
-#--                # fi
-#--                replace_process(last_voice_staff, token, nexttokens, line)                    # NOTDONEYET
-#--                return                                      # Henceforth get lines from macro/loop/process buffer.
-#--            # fi
             # Might take multiple tokens.
             next_tokens = process_notes_for_staff(token, tdelim, next_tokens, line).strip()
             print_debug("process_staff_notes - #7 next_tokens='{}'".format(next_tokens))
         # fi
+#---        print_some_variable_values('when-getting-next-token')
         print_debug("process_staff_notes - #8 next_tokens='{}'".format(next_tokens))
         # Get next token and tdelim.
         token, next_tokens, tdelim = compute_command_args(next_tokens)
@@ -12667,6 +12786,7 @@ def readthefile():
         line, commentonline = read_next_line()
         if args.lines:
             print("line='{}'".format(line), file=sys.stderr, flush=True)
+            print_some_variable_values('')
         # fi
         if line is None and commentonline is None:  # If end of file.
             return
