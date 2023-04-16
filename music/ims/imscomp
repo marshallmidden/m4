@@ -521,7 +521,7 @@ def Log2(x):
 #   End of Log2
 
 # ----------------------------------------------------------------------------
-def print_i_line(line):
+def print_i_line(original_line):
     global i_line
     global lmp_executing_i_line
     global lmp_executing_number
@@ -544,9 +544,9 @@ def print_i_line(line):
             k = j
         # rof
     # fi
-    line = line.rstrip()
-    if k is None or line != k:
-        print("                  - 'line:  {}'".format(line), file=sys.stderr, flush=True)
+    original_line = original_line.rstrip()
+    if k is None or original_line != k:
+        print("                  - 'line:  {}'".format(original_line), file=sys.stderr, flush=True)
     # fi
     return
 # End of print_i_line
@@ -4719,7 +4719,7 @@ def int_range_to_array(strng, original_line):
         return [str(strng)]
     # fi
     array_args = []
-    while first < last + 1:
+    while first < second + 1:
         array_args.append(str(first))
         first = first + 1
     # rof
@@ -4734,31 +4734,42 @@ def int_range_to_array(strng, original_line):
 def separate_args(wline, original_line, integers):
     global args
 
-    array_args = []
     splitter = [ ',', ";" ]
     if args.spaces:
         splitter = splitter + [ ' ', "\t" ]
     # fi
     strng = wline.strip()
-    while len(strng) > 0:
-        a = find_terminator_in_string(strng, splitter, original_line)
-        if a < 0:
-            arg = strng
-            strng = ''
-        elif a == 0:
-            arg = ''
-            strng = strng[a+1:].strip()
-        else:
-            arg = strng[0:a].strip()
-            strng = strng[a+1:].strip()
+    if len(strng) == 0:
+        return []
+    # fi
+
+    array_args = []
+    w = 0
+    b4 = ''
+    while w < len(strng):
+        s = strng[w:]
+        x = find_terminator_in_string(s, splitter, original_line)
+        # x == -1   end of strng.
+        if x < 0:                           # End of strng reached before splitter character found.
+            b4 = s
+            break
         # fi
-        if integers and arg != '':
-            nums = int_range_to_array(arg, original_line)
+        b4 = s[0:x]
+        if integers and b4 != '':
+            nums = int_range_to_array(b4, original_line)
             array_args = array_args + nums
         else:
-            array_args.append(arg)
+            array_args.append(b4)
         # fi
+        b4 = ''
+        w = w + x + 1
     # elihw
+    if integers and b4 != '':
+        nums = int_range_to_array(b4, original_line)
+        array_args = array_args + nums
+    else:
+        array_args.append(b4)
+    # fi
     return array_args
 # End of separate_args
 
@@ -5372,7 +5383,6 @@ def decode_ims(t_args, original_line):
     note_notelength = -1
     note_dot = number_dots
     note_duration = -1                  # Set far below.
-#---    print_debug("do_decode - type(thenote)={} thenote='{}'".format(type(thenote), thenote))
     if type(thenote) is str:
         note_octave = thenote[0]
         note_notename = thenote[1]
@@ -5605,7 +5615,6 @@ def do_bars(t_args, original_line):
 def substitute_non_macro_local(t_args, original_line):
     global lmp_executing_number
 
-#--    if lmp_executing_type[lmp_executing_number] in ['macro', 'process']:
     if lmp_executing_type[lmp_executing_number] in ['macro']:
         not_this_one = lmp_executing_number
     else:
@@ -5629,13 +5638,11 @@ def substitute_non_macro_local(t_args, original_line):
         # fi
         variable = t_args[0:assign].strip()     # Toss spaces before and after.    The Variable.
         strng = t_args[assign+1:].strip()       # Toss spaces before and after.    After Assignment.
-#---        print_debug("substitute_non_macro_local - #1 variable='{}' strng='{}'".format(variable, strng))
         wary = chkvar(variable)
         if wary is not None and wary[numarry_indexes] == []:    # If not an array variable
             break
         # fi
         nline = char_var_subst_whole_string(variable, original_line, not_this_one).strip()
-#---        print_debug("substitute_non_macro_local - #1 nline='{}'".format(nline))
         if nline == variable:
             break
         # fi
@@ -5658,9 +5665,7 @@ def substitute_non_macro_local(t_args, original_line):
         # fi
         variable = t_args[0:assign].strip()     # Toss spaces before and after.    The Variable.
         strng = t_args[assign+1:].strip()       # Toss spaces before and after.    After Assignment.
-#---        print_debug("substitute_non_macro_local - #2 variable='{}' strng='{}'".format(variable, strng))
         nline = char_var_subst_whole_string(strng, original_line, not_this_one).strip()
-#---        print_debug("substitute_non_macro_local - #2 nline='{}'".format(nline))
         if nline == strng:
             break
         # fi
@@ -5881,6 +5886,7 @@ def do_change(t_args, original_line):
     elif new in staff_name:
         print_error("change new name already exists as staff name.", original_line)
         return
+    # fi
     if old not in commands:
         print_error("change old name does not exist.", original_line)
         return
@@ -6462,9 +6468,7 @@ def do_encode(t_args, original_line):
     global measure_on
     global last_voice_staff
 
-#---    print_debug("do_encode - b4 t_args='{}'".format(t_args))
     t_args = substitute_non_macro_local(t_args, original_line)
-#---    print_debug("do_encode - af t_args='{}'".format(t_args))
     if t_args is None or t_args == '':
         print_error("encode does not have a variable, nor string to assign to it.", original_line)
         return
@@ -7719,13 +7723,13 @@ def do_marker(t_args, original_line):
         if sys.stdin.isatty():
             if sys.platform == 'darwin':
                 input('marker ' + str(value) + ' > ')
-                original_line = readline.get_line_buffer()
+                line = readline.get_line_buffer()
             else:
-                original_line = input('marker ' + str(value) + ' > ')
+                line = input('marker ' + str(value) + ' > ')
             # fi
         else:
             print('marker ' + str(value) + ' > ', file=outf, flush=True)
-            original_line = sys.stdin.readline()
+            line = sys.stdin.readline()
         # fi
     # fi
     return
@@ -8587,20 +8591,17 @@ def do_spaces(t_args, original_line):
 def do_staff(t_args, original_line):
     global staff_name
 
-#DEBUG    print_debug("do_staff - Entering t_args='{}'".format(t_args))
     if t_args is None or t_args == '':
         print_error("staff does not have a name argument.", original_line)
         return
     # fi
     targs = re.sub(r'\s+', '', t_args)          # Toss spaces.
-#DEBUG    print_debug("do_staff - #a targs='{}'".format(targs))
     if targs is None or targs == '':
         print_error("staff does not have a name argument.", original_line)
         return
     # fi
     # Returns where in strng termination is. -1 if not found. 0=first character.
     x = find_terminator_in_string(targs, [':'], original_line)
-#DEBUG    print_debug("do_staff - #b x='{}'".format(x))
     if x < 0:
         sn = targs                              # Staff name.
         v = None                                # No voices.
@@ -8615,7 +8616,6 @@ def do_staff(t_args, original_line):
             v = targs[x+1:]
         # fi
     # fi
-#DEBUG    print_debug("do_staff - #c sn='{}' v='{}'".format(sn, v))
     if v is not None:
         vs = separate_args(v, original_line, True)
         v = []
@@ -8647,14 +8647,12 @@ def do_staff(t_args, original_line):
             v.append(f1)
         # fi
     # fi
-#DEBUG    print_debug("do_staff - #d sn='{}' v='{}'".format(sn, v))
 
     staff_name[sn] = v                          # Create or change it.
-#DEBUG    print_debug("do_staff - #e staff_name='{}'".format(staff_name))
     staves.append(v)                            # For order checking for ABC printing -- indirectly.
     last_voice_staff = sn
     cis = sn                                    # No longer doing just one voice.   NOTDONEYET - set voice to staff.
-    do_spaces('on', original_line)                       # Process spaces or commas -- no spaces in middle of notes.
+    do_spaces('on', original_line)              # Process spaces or commas -- no spaces in middle of notes.
     return
 # End of do_staff
 
@@ -9401,7 +9399,11 @@ def initialize_set_voices(f1, original_line):
     global measure_on
 
     if type(f1) is int:
-        num = f1
+        for i in range(1, f1 + 1):
+            new_voice_initialize(i, measure_on)
+        # rof
+        voices = f1
+        return
     elif type(f1) is str:
         if f1 not in staff_name:
             print_error("initialize_set_voices string '{}' is not a staff_name".format(f1), original_line)
@@ -9429,15 +9431,15 @@ def initialize_set_voices(f1, original_line):
     for i in range(1, num+1):
         new_voice_initialize(i, measure_on)
     # rof
-    voices = max(voices, num + 1)
+    voices = max(voices, num)
     return
 # End of initialize_set_voices
 
 # ----------------------------------------------------------------------------
-# arg       - string with variable name with parens in it.
-# a         - where the first parenthesis is located.
-# original_line      - for error messages, original line.
-# create_it - True if should create variable. False means it must exist correctly.
+# arg           - string with variable name with parens in it.
+# a             - where the first parenthesis is located.
+# original_line - for error messages, original line.
+# create_it     - True if should create variable. False means it must exist correctly.
 
 def handle_vars_parens(arg, a, original_line, create_it):
     global lmp_executing_number
@@ -11168,7 +11170,7 @@ def process_notes(line, original_line):
 # ...........................................................................
     # Decode and stack the notes.
     loopstart = 1 if cis == 0 else cis
-    print_debug("process_notes - #j type(loopstart)={} loopstart={} type(voices)={} voices={} wargs={}".format(type(loopstart),loopstart, type(voices),voices, wargs))
+#DEBUG    print_debug("process_notes - #j type(loopstart)={} loopstart={} type(voices)={} voices={} wargs={}".format(type(loopstart),loopstart, type(voices),voices, wargs))
     for onvoice in range(loopstart, voices + 1):
         setvar('voice', onvoice, 0)
         while True:
@@ -12205,8 +12207,8 @@ def compute_command_args(expand_line):
     if not expand_line:
         return '', '', ''
     # fi
-    t0 = re.sub(r'^([a-zA-Z0-9%_*]*).*$', r'\1', expand_line, count=1)   # First token on expand_line.
-    t1 = re.sub(r'^[a-zA-Z0-9%_*]*(.*)$', r'\1', expand_line, count=1)   # Rest of expand_line.
+    t0 = re.sub(r'^([a-zA-Z0-9%_*]*).*$', r'\1', expand_line, count=1)   # First token on line.
+    t1 = re.sub(r'^[a-zA-Z0-9%_*]*(.*)$', r'\1', expand_line, count=1)   # Rest of line.
 
     command = t0.lstrip()
     t_args = t1.strip()
@@ -12216,7 +12218,7 @@ def compute_command_args(expand_line):
     else:
         delimiter = ''
     # fi
-    # Note: t0 + t1 = expand_line. :) [Thus know how to do things in character variable substitution.]
+    # Note: t0 + t1 = line. :) [Thus know how to do things in character variable substitution.]
     return command, t_args, delimiter
 # End of compute_command_args
 
