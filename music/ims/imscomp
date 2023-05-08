@@ -1802,6 +1802,59 @@ def default_note_text_fraction(m):
 # End of default_note_text_fraction
 
 # ----------------------------------------------------------------------------
+# Save octave for all staves and voices.
+def set_staff_oct(voice, oct_voice, original_line):
+    print("set_staff_oct - type(voice)={} ({}) oct_voice={}".format(type(voice),voice, oct_voice))
+    if type(voice) is int:
+        oct[voice] = oct_voice          # save octave
+        return
+    # fi
+    if type(voice) is not list:
+        print_error("set_staff_oct - voice is not an integer nor a list ({},{})".format(type(voice),voice), original_line)
+        print_die(here)
+        return
+    # fi
+    # Go through all staves and set all voices for all to this octave.
+    for s in voice:
+        for v in staff_name[s]:
+            oct[v] = oct_voice
+        # rof
+    # rof
+    return
+# End of set_staff_oct
+
+# ----------------------------------------------------------------------------
+# Get octave from one of the voices (check all the same).
+
+def get_staff_oct(voice, original_line):
+    print("get_staff_oct - type(voice)={} ({})".format(type(voice),voice))
+    if type(voice) is int:
+        return oct[voice]
+    # fi
+    if type(voice) is not list:
+        print_error("get_staff_oct - voice is not an integer nor a list ({}.{})".format(type(voice),voice), original_line)
+        print_die(here)
+        return 0
+    # fi
+    # Go through all staves and check if all voices are the same.
+    value = None
+    for s in voice:
+        print("get_staff_oct - type(s)={} ({})".format(type(s),s))
+        for v in staff_name[s]:
+            print("get_staff_oct - type(v)={} ({})".format(type(v),v))
+            if value is not None:
+                if value != oct[v]:
+                    print_error("get_staff_oct - staff {}, voice {} is not the same as previous {}.".format(s,v,value), original_line)
+                # fi
+            else:
+                value = oct[v]
+            # fi
+        # rof
+    # rof
+    return value
+# End of get_staff_oct
+
+# ----------------------------------------------------------------------------
 def new_voice_initialize(voice, m):
     global vl                           # volume levels
     global vinstrument
@@ -1834,7 +1887,7 @@ def new_voice_initialize(voice, m):
         vl[voice] = { }                 # Dictionary
         running_vl[voice] = { }
     if voice not in oct:
-        oct[voice] = 0                  # last octave starts at zero
+        set_staff_oct(voice, 0, 'new_voice_initialize')
     if voice not in time:
         time[voice] = 0                 # last time starts at zero
     if voice not in mlth:
@@ -8688,8 +8741,8 @@ def do_staff(t_args, original_line):
 
     staff_name[sn] = v                          # Create or change it.
     staves.append(v)                            # For order checking for ABC printing -- indirectly.
-    last_voice_staff = sn
-    setvar('voice', ','.join(last_voice_staff), 1)
+    last_voice_staff = [sn]
+    setvar('voice', ','.join(last_voice_staff), 1)  # Doesn't need join, but do it for consistency.
     cis = sn                                    # No longer doing just one voice.   NOTDONEYET - set voice to staff.
     do_spaces('on', original_line)              # Process spaces or commas -- no spaces in middle of notes.
     return
@@ -10008,7 +10061,7 @@ def compute_middle_c(f):
     return
 #   End of compute_middle_c
 
-compute_middle_c(middle_c)          # Default to 3c
+compute_middle_c(middle_c)                      # Default to 3c
 
 # ----------------------------------------------------------------------------
 # Input:
@@ -10055,7 +10108,7 @@ def getnote(note_to_decode, voice, original_line, update_defaults, do_errors):
         return '', '', normal_note
     # fi
     elif note_to_decode[0] == '(':
-        typenote = normal_note              # return normal note
+        typenote = normal_note                  # return normal note
         work3 = 1
         #  must balance parens since note is followed by time
         for temp2 in range(temp3 + 1, len(note_to_decode)):
@@ -10124,7 +10177,7 @@ def getnote(note_to_decode, voice, original_line, update_defaults, do_errors):
                                 thenote = thenote + xpose[voice]
                             # fi
                         # fi
-                    # fi                    # string is 'r'
+                    # fi                                            # string is 'r'
                     # get ready for time computation
                     return therest, thenote, typenote
                 # fi
@@ -10137,13 +10190,13 @@ def getnote(note_to_decode, voice, original_line, update_defaults, do_errors):
     elif note_to_decode[0] in [ '0', '1', '2', '3', '4', '5', '6', '7', '8' ]:    # check octave
         oct_voice = int(note_to_decode[0])
         if not update_defaults:
-            oct[voice] = oct_voice                                              # save octave
+            set_staff_oct(voice, oct_voice, original_line)          # save octave
         # fi
         temp3 = temp3 + 1
     else:
-        oct_voice = oct[voice]
+        oct_voice = get_staff_oct(voice, original_line)
     # fi
-    oct[voice] = oct_voice
+    set_staff_oct(voice, oct_voice, original_line)
     if len(note_to_decode) <= temp3 or note_to_decode[temp3] is None:
         if do_errors:
             print_error("m:{} v{} no note_to_decode '{}' temp3={} len(note_to_decode)={}".format(measure_on, voice, note_to_decode, temp3, len(note_to_decode)), original_line)
@@ -10152,7 +10205,7 @@ def getnote(note_to_decode, voice, original_line, update_defaults, do_errors):
     # fi
     thenote = note_to_decode[temp3]
 #DEBUG    print_debug("thenote={} note_to_decode[{}]={} note_to_decode={}".format(thenote, temp3, note_to_decode[temp3], note_to_decode))
-    if thenote not in [ 'a', 'b', 'c', 'd', 'e', 'f', 'g' ]:      # if not note -- reset, etc.
+    if thenote not in [ 'a', 'b', 'c', 'd', 'e', 'f', 'g' ]:        # if not note -- reset, etc.
         if temp3 != 0:
             return '', None, "m:{} v{} Not a note (sequence/trill?) has an octave before it".format(measure_on, voice)
         # fi
@@ -10284,7 +10337,7 @@ def getnote(note_to_decode, voice, original_line, update_defaults, do_errors):
     n = thenote[0].lower()
     if args.horizontal or args.vertical or args.midi1csv or args.fluidsynth:
         N = n.lower()
-    else:               # ABC format
+    else:                                       # ABC format
         N = n.upper()
     # fi
     if len(thenote) > 1:
@@ -10299,7 +10352,7 @@ def getnote(note_to_decode, voice, original_line, update_defaults, do_errors):
             A = a
         elif args.midi1csv or args.fluidsynth:
             A = a
-        else:       # ABC
+        else:                                   # ABC
             A = accidentals[a]
         # fi
     else:
@@ -10331,8 +10384,8 @@ def getnote(note_to_decode, voice, original_line, update_defaults, do_errors):
                 A = a
             elif args.midi1csv or args.fluidsynth:
                 A = a
-            else:       # ABC
-                A = accidentals[a]          # Convert to abc format.
+            else:                               # ABC
+                A = accidentals[a]              # Convert to abc format.
             # fi
         # fi
         if args.warn_octave_accidental and a != '':
