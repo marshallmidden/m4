@@ -1,9 +1,7 @@
 V1 = v2-1
 #-----------------------------------------------------------------------------
-# MCOMP        = ~/src/abc/mcomp/mcomp
-# SEPARATE     = ./A.separate
-#-----------------------------------------------------------------------------
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
+IMSCOMP      = ~/ims/imscomp
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------
@@ -49,20 +47,36 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 MC_ARGS = ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 #-- MC_ARGS = --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.abc %.E %.csv %_m.ps
-.SUFFIXES: .abc _m.ps .E .fs .csv .mid .pdf
+.PRECIOUS: %.E
+.PRECIOUS: %.abc %.csv %_m.ps
+.PRECIOUS: %_2.abc %_2.csv %_m2.ps
+.SUFFIXES: .E
+.SUFFIXES: .abc _m.ps .fs .csv .mid .pdf
+.SUFFIXES: _2.abc _m2.ps _2.fs _2.csv _2.mid _2.pdf
 # output $@   -- input $<
-%.fs:	%.E ${MUSICOMP2ABC}
+%.fs:	%.E
 	${MUSICOMP2ABC} ${MC_ARGS} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
-%.csv:	%.E ${MUSICOMP2ABC}
+%_2.fs:	%.E
+	${IMSCOMP} ${MC_ARGS} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
+%.csv:	%.E
 	${MUSICOMP2ABC} ${MC_ARGS} --two --midi1csv $< $@ || (rm -f $@ ; exit 1)
+%_2.csv:	%.E
+	${IMSCOMP} ${MC_ARGS} --two --midi1csv $< $@ || (rm -f $@ ; exit 1)
 %.mid:	%.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
-%.abc:	%.E ${MUSICOMP2ABC}
+%_2.mid:	%_2.csv
+	csvmidi $< $@ || (rm -f $@ ; exit 1)
+%.abc:	%.E
 	${MUSICOMP2ABC} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
+%_2.abc:	%.E
+	${IMSCOMP} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
 %_m.ps:	%.abc
 	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) || (rm -f $@ ; exit 1)
+%_m2.ps:	%_2.abc
+	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) || (rm -f $@ ; exit 1)
 %.pdf:	%_m.ps
+	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
+%_2.pdf:	%_m2.ps
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E: %.gcs ../../instruments.include Makefile
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
@@ -71,6 +85,7 @@ MC_ARGS = ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 help::
 	@echo "Example:"
 	@echo "  Use '${MUSICOMP2ABC} ${MC_ARGS} --midi1csv ${V1} to get ${V1}.abc."
+	@echo "  Use '${IMSCOMP} ${MC_ARGS} --midi1csv ${V1} to get ${V1}.abc."
 	@echo "  Use '${ABCM2PS} ${V1}.abc > ${V1}_m.ps'."
 	@echo "  Use '${PS2PDF} ${V1}_m.ps > ${V1}.pdf'."
 	@echo "  Use '${MUSICOMP2ABC} ${MC_ARGS} --fluidsynth ${V1} to get ${V1}.fs."
@@ -80,6 +95,7 @@ help::
 	@echo "  clean  - Remove postscript (ps), pdf, csv, and fs files."
 	@echo ""
 	@echo "  s1     - create ${V1}.abc, ${V1}_m.ps, and ${V1}.fs from ${V1}."
+	@echo "         - create ${V1}_2.abc, ${V1}_m2.ps, and ${V1}_2.fs from ${V1}."
 #-----------------------------------------------------------------------------
 .PHONY: check
 check:
@@ -98,17 +114,19 @@ check:
 #-- .PHONY: all		#-- There is a bug in gmake. I don't understand.
 all: s1
 #-----------------------------------------------------------------------------
-fs: ${V1}.fs
+fs: ${V1}.fs ${V1}_2.fs
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
 	rm -f ${V1}.{csv,mid,fs,pdf,abc,wav,E}
+	rm -f ${V1}_2.{csv,mid,fs,pdf,abc,wav}
 	rm -f A.[012]* B.[012]*
 #-----------------------------------------------------------------------------
-#-- .PHONY: s1
-s1: ${V1}.fs ${V1}.pdf
+.PHONY: s1
+s1: ${V1}.fs ${V1}.pdf      Makefile ${MUSICOMP2ABC}
+s1: ${V1}_2.fs ${V1}_2.pdf  Makefile ${IMSCOMP}
 #-----------------------------------------------------------------------------
 # End of Makefile
 #-----------------------------------------------------------------------------

@@ -2,7 +2,7 @@ V            = b-6
 #-----------------------------------------------------------------------------
 SEPARATE     = ./A.separate
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
-#- YAPS         = yaps
+IMSCOMP = ~/ims/imscomp
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------
@@ -23,51 +23,39 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 MC_ARGS = ${PAGES} ${MEASURES} ${VOICES}
 #++ MC_ARGS = --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES}
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.abc %.E %.csv %.mid %.fs %_m.ps
-.SUFFIXES: .abc _m.ps .E .fs .csv .mid .pdf
+.PRECIOUS: %.E
+.PRECIOUS: %.abc %.csv %_m.ps
+.PRECIOUS: %_2.abc %_2.csv %_m2.ps
+.SUFFIXES: .E
+.SUFFIXES: .abc _m.ps .fs .csv .mid .pdf
+.SUFFIXES: _2.abc _m2.ps _2.fs _2.csv _2.mid _2.pdf
 # output $@   -- input $<
 %.fs:	%.E
-	${MUSICOMP2ABC} ${MC_ARGS} --two --fluidsynth $< $@ || ( rm -f $@ ; exit 1)
-%.csv:  %.E
-	${MUSICOMP2ABC} ${MC_ARGS} --midi1csv $< $@ || rm -f $@
-%.mid:  %.csv
+	${MUSICOMP2ABC} ${MC_ARGS} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
+%_2.fs:	%.E
+	${IMSCOMP} ${MC_ARGS} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
+%.csv:	%.E
+	${MUSICOMP2ABC} ${MC_ARGS} --two --midi1csv $< $@ || (rm -f $@ ; exit 1)
+%_2.csv:	%.E
+	${IMSCOMP} ${MC_ARGS} --two --midi1csv $< $@ || (rm -f $@ ; exit 1)
+%.mid:	%.csv
+	csvmidi $< $@ || (rm -f $@ ; exit 1)
+%_2.mid:	%._2csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.abc:	%.E
 	${MUSICOMP2ABC} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
+%_2.abc:	%.E
+	${IMSCOMP} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
 %_m.ps:	%.abc
+	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) || (rm -f $@ ; exit 1)
+%_m2.ps:	%_2.abc
 	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) || (rm -f $@ ; exit 1)
 %.pdf:	%_m.ps
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
-%.E: %.gcs ../instruments.include
+%_2.pdf:	%_m2.ps
+	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
+%.E:	%.gcs ../instruments.include
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
-#-----------------------------------------------------------------------------
-.PRECIOUS: %.A_abc
-.SUFFIXES: _A.ps .A_abc _m_A.ps
-# output $@   -- input $<
-%.A_abc:  %
-	${MUSICOMP2ABC} --abc $< $@
-#-- %_A.ps:   %.A_abc
-#-- 	${YAPS} $< -o $@ -k
-%_m_A.ps: %.A_abc
-	${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@
-#-----------------------------------------------------------------------------
-As = 01 02 03 04 05 06 07 08 09 10
-w_A := ${words $(As)}
-s := $(shell seq 1 $(w_A))
-#-----------------------------------------------------------------------------
-define many_targets
-    help::
-	@echo "  a${word $1,${As}}    - Use '${SEPARATE} to create A.${word $1,${As}}, and yaps&abcm2ps for staff $1"
-    A.${word $1,${As}}: ${V} ${SEPARATE}
-	${SEPARATE}
-    .PHONY: a.${word $1,${As}}
-    a${word $1,${As}}: A.${word $1,${As}} a.${word $1,${As}}_A.ps a.${word $1,${As}}_m_A.ps
-	open a.${word $1,${As}}_A.ps a.${word $1,${As}}_m_A.ps
-    a.${word $1,${As}}: A.${word $1,${As}}
-	ln -sf A.${word $1,${As}} a.${word $1,${As}}
-    clean::
-	rm -f a.${word $1,${As}}
-endef
 #-----------------------------------------------------------------------------
 .PHONY: help
 help::
@@ -75,8 +63,11 @@ help::
 	@echo "  clean  - Remove postscript (ps), csv, fs, and mid files."
 	@echo ""
 	@echo "  all    - create ${V}.abc from ${V} (via 'musicomp2abc')"
+	@echo "         - and ${V}_2.abc from ${V} (via 'imscomp')"
 	@echo "         - and ${V}_m.ps from ${V}.abc (via 'abcm2ps')"
+	@echo "         - and ${V}_m2.ps from ${V}_.abc (via 'abcm2ps')"
 	@echo "         - and ${V}.fs from ${V} (via 'musicomp2abc --fluidsynth')"
+	@echo "         - and ${V}_2.fs from ${V} (via 'imscomp --fluidsynth')"
 	@echo ""
 #-----------------------------------------------------------------------------
 .PHONY: check
@@ -84,15 +75,17 @@ check:
 	@echo "V=${V}"
 	@echo "SEPARATE=${SEPARATE}"
 	@echo "MUSICOMP2ABC=${MUSICOMP2ABC}"
+	@echo "IMSCOMP=${IMSCOMP}"
 	@echo "MC_ARGS=${MC_ARGS}"
-#-- 	@echo "YAPS=${YAPS}"
 	@echo "ABCM2PS=${ABCM2PS}"
 	@echo "ABCM2PS_ARGS=${ABCM2PS_ARGS}"
 	@echo "PS2PDF=${PS2PDF}"
 #=============================================================================
 all: ${V}_m.ps ${V}.fs ${V}.mid ${V}.pdf
+all: ${V}_m2.ps ${V}_2.fs ${V}_2.mid ${V}_2.pdf
 #-----------------------------------------------------------------------------
 fs: ${V}.fs
+fs2: ${V}_2.fs
 #=============================================================================
 .PHONY: clean
 clean::
@@ -103,7 +96,7 @@ clean::
 	rm -f *.wav
 	rm -f *.E
 	rm -f A.[012]* B.[012]*
-	rm -f ${V}.pdf
+	rm -f ${V}.pdf ${V}_2.pdf
 #-----------------------------------------------------------------------------
 $(foreach e,$(s),$(eval $(call many_targets,$(e))))
 #-----------------------------------------------------------------------------

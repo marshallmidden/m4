@@ -4,7 +4,7 @@
 # ----------------------------------------------------------------------------
 # These are interesting. If last_voice_staff being used with getting notes ... all oct/time set.
 # When selecting them, what to do with ones that differ ... . Warn, and take first?
-#   oct[voice]
+# * oct[voice]
 #   time[voice]
 #   inst[voice]
 #
@@ -1730,14 +1730,17 @@ fluidsynth_done = False             # Set True if done with midi1csv printing in
 # Returns: lengthl - value given, like 4 for quarter note.
 #          lengthf - value in floating, 0.25 for a quarter note.
 #          ifokay  - True if everything is okay.
-def get_time_stak(timeofnote, original_line, onvoice):
+def get_time_stak(timeofnote, original_line, voiceon):
     global default_note_length          # length of a beat (note)
     global legal_floating_times
     global measure_on
     global args
 
+    if type(voiceon) is not int:
+        print_error("get_time_stak - voiceon type is not int ({})".format(type(voiceon), 'get_time_stak'))
+    # fi
     if timeofnote <= 0.0:
-        print_error("measure={} onvoice={} timeofnote '{}' negative or zero -- cannot play a note backwards.".format(measure_on, onvoice, timeofnote), original_line)
+        print_error("measure={} voiceon={} timeofnote '{}' negative or zero -- cannot play a note backwards.".format(measure_on, voiceon, timeofnote), original_line)
         return timeofnote, 0, -1    # False
     # fi
     lengthl = []
@@ -1779,7 +1782,7 @@ def get_time_stak(timeofnote, original_line, onvoice):
         # elihw
     # rof
     if t > 0:
-        print_warning("measure={} voice={} timeofnote={} -> {} has left-over of t={}".format(measure_on, onvoice, timeofnote, lengthl, t), original_line)
+        print_warning("measure={} voice={} timeofnote={} -> {} has left-over of t={}".format(measure_on, voiceon, timeofnote, lengthl, t), original_line)
         return lengthl, lengthf, 1      # Problems
     # fi
     if not lengthl or len(lengthl) == 0:
@@ -1803,45 +1806,39 @@ def default_note_text_fraction(m):
 
 # ----------------------------------------------------------------------------
 # Save octave for all staves and voices.
-def set_staff_oct(voice, oct_voice, original_line):
-    print("set_staff_oct - type(voice)={} ({}) oct_voice={}".format(type(voice),voice, oct_voice))
+def set_staff_arr(voice, arr_voice, arr, original_line):
     if type(voice) is int:
-        oct[voice] = oct_voice          # save octave
+        arr[voice] = arr_voice          # save octave
         return
     # fi
     if type(voice) is not list:
-        print_error("set_staff_oct - voice is not an integer nor a list ({},{})".format(type(voice),voice), original_line)
+        print_error("set_staff_arr - voice is not an integer nor a list ({},{})".format(type(voice),voice), original_line)
         print_die(here)
-        return
     # fi
     # Go through all staves and set all voices for all to this octave.
     for s in voice:
         for v in staff_name[s]:
-            oct[v] = oct_voice
+            arr[v] = arr_voice
         # rof
     # rof
     return
-# End of set_staff_oct
+# End of set_staff_arr
 
 # ----------------------------------------------------------------------------
 # Get octave from one of the voices (check all the same).
 
 def get_staff_oct(voice, original_line):
-    print("get_staff_oct - type(voice)={} ({})".format(type(voice),voice))
     if type(voice) is int:
         return oct[voice]
     # fi
     if type(voice) is not list:
         print_error("get_staff_oct - voice is not an integer nor a list ({}.{})".format(type(voice),voice), original_line)
         print_die(here)
-        return 0
     # fi
     # Go through all staves and check if all voices are the same.
     value = None
     for s in voice:
-        print("get_staff_oct - type(s)={} ({})".format(type(s),s))
         for v in staff_name[s]:
-            print("get_staff_oct - type(v)={} ({})".format(type(v),v))
             if value is not None:
                 if value != oct[v]:
                     print_error("get_staff_oct - staff {}, voice {} is not the same as previous {}.".format(s,v,value), original_line)
@@ -1853,6 +1850,26 @@ def get_staff_oct(voice, original_line):
     # rof
     return value
 # End of get_staff_oct
+
+# ----------------------------------------------------------------------------
+def check_voice_staff_in(voice, arr):
+    if type(voice) is int:
+        return voice in arr
+    # fi
+    if type(voice) is not list:
+        print_error("check_voice_staff_in - voice is not an integer nor a list ({}.{})".format(type(voice),voice), '')
+        print_die(here)
+    # fi
+    # Go through all staves and check if all staffname's voices are in array.
+    for s in voice:
+        for v in staff_name[s]:
+            if v not in arr:
+                return False
+            # fi
+        # rof
+    # rof
+    return True
+# End of check_voice_staff_in
 
 # ----------------------------------------------------------------------------
 def new_voice_initialize(voice, m):
@@ -1883,37 +1900,45 @@ def new_voice_initialize(voice, m):
     global key_voice
     global clef
 
-    if voice not in vl:
-        vl[voice] = { }                 # Dictionary
-        running_vl[voice] = { }
-    if voice not in oct:
-        set_staff_oct(voice, 0, 'new_voice_initialize')
-    if voice not in time:
-        time[voice] = 0                 # last time starts at zero
-    if voice not in mlth:
-        mlth[voice] = {}
-    if voice not in tlth:
-        tlth[voice] = 0                 # #or 60ths/voice
-    if voice not in bufs:
-        bufs[voice] = {}
-        bufs_length[voice] = {}
-        bufs_velocity[voice] = {}
-        bufs_suffixes[voice] = {}
-        bufs_tie_next[voice] = ''
-        bufs_legato_next[voice] = ''
-        bufs_vol[voice] = {}
-        bufs_intensity[voice] = {}
+    if type(voice) is not int:
+        print_error("new_voice_initialize - voice type is not int ({})".format(type(voice), 'new_voice_initialize'))
+    # fi
+    if not check_voice_staff_in(voice, vl):
+        set_staff_arr(voice, {}, vl, 'new_voice_initialize')
+        set_staff_arr(voice, {}, running_vl, 'new_voice_initialize')
+    # fi
+    if not check_voice_staff_in(voice, oct):
+        set_staff_arr(voice, 0, oct, 'new_voice_initialize')
+    # fi
+    if not check_voice_staff_in(voice,time):
+        set_staff_arr(voice, 0, time, 'new_voice_initialize')
+    # fi
+    if not check_voice_staff_in(voice, mlth):
+        set_staff_arr(voice, {}, mlth, 'new_voice_initialize')
+    # fi
+    if not check_voice_staff_in(voice, tlth):
+        set_staff_arr(voice, 0, tlth, 'new_voice_initialize')   # #or 60ths/voice
+    # fi
+    if not check_voice_staff_in(voice, bufs):
+        set_staff_arr(voice, {}, bufs, 'new_voice_initialize')
+        set_staff_arr(voice, {}, bufs_length, 'new_voice_initialize')
+        set_staff_arr(voice, {}, bufs_velocity, 'new_voice_initialize')
+        set_staff_arr(voice, {}, bufs_suffixes, 'new_voice_initialize')
+        set_staff_arr(voice, '', bufs_tie_next, 'new_voice_initialize')
+        set_staff_arr(voice, '', bufs_legato_next, 'new_voice_initialize')
+        set_staff_arr(voice, {}, bufs_vol, 'new_voice_initialize')
+        set_staff_arr(voice, {}, bufs_intensity, 'new_voice_initialize')
     # fi
 
     if m not in vl[voice]:
         vl[voice][m] = getvar('vfff')              # start volume out at maximum
         running_vl[voice][m] = getvar('vfff')
     # fi
-    if voice not in vinstrument:
-        vinstrument[voice] = {}
-        reverb[voice] = {}
-        pan[voice] = {}
-        intensity[voice] = {}
+    if not check_voice_staff_in(voice, vinstrument):
+        set_staff_arr(voice, {}, vinstrument, 'new_voice_initialize')
+        set_staff_arr(voice, {}, reverb, 'new_voice_initialize')
+        set_staff_arr(voice, {}, pan, 'new_voice_initialize')
+        set_staff_arr(voice, {}, intensity, 'new_voice_initialize')
     # fi
     if m not in vinstrument[voice]:
         vinstrument[voice][m] = 'Acoustic Grand Piano'.lower()
@@ -1921,8 +1946,8 @@ def new_voice_initialize(voice, m):
         pan[voice][m] = getvar('default_pan')
         intensity[voice][m] = getvar('default_intensity')
     # fi
-    if voice not in key_voice:
-        key_voice[voice] = {}
+    if not check_voice_staff_in(voice, key_voice):
+        set_staff_arr(voice, {}, key_voice, 'new_voice_initialize')
     # fi
     if m not in key_voice[voice]:
         key_voice[voice][m] = key_default
@@ -1931,7 +1956,8 @@ def new_voice_initialize(voice, m):
     if m not in mlth[voice]:
         mlth[voice][m] = 0              # measure length dictionary
     # fi
-    if voice not in acc_m:
+    if not check_voice_staff_in(voice, acc_m):
+# NOTDONEYET - set staff array
         if args.horizontal or args.vertical:
             acc_m[voice] =  {k: v for k, v in acc_v_init_v_or_h.items()}
             acc_m_xpose[voice] =  {k: v for k, v in acc_v_init_v_or_h.items()}
@@ -1948,7 +1974,7 @@ def new_voice_initialize(voice, m):
         if j not in clef:
             clef[j] = {}
         # fi
-        if j not in clef or m not in clef[j]:
+        if m not in clef[j]:
             for k in reversed(range(0, len(meas)-1)):
                 mmm = meas[k]
                 if mmm in clef and j in clef[mmm]:
@@ -1972,6 +1998,9 @@ def get_volume_level(m, voice):
     global args
     global DECORATIONS
 
+    if type(voice) is not int:
+        print_error("get_volume_level - voice type is not int ({})".format(type(voice), 'get_volume_level'))
+    # fi
     new_voice_initialize(voice, m)
     j = vl[voice][m]                    # volume level for this voice/measure
     if args.horizontal or args.vertical:
@@ -2001,6 +2030,9 @@ def rests_in_empty_measure_voices(m, voice):
     global args
     global running_vl
 
+    if type(voice) is not int:
+        print_error("rests_in_empty_measure_voices - voice type is not int ({})".format(type(voice), 'rests_in_empty_measure_voices'))
+    # fi
     if m in bufs[voice]:                    # Already present, then of right length.
         return
     # fi
@@ -2088,7 +2120,10 @@ def print_measure_abc(m, print_V, voice, l_meter, l_tempo, l_dl, l_clef, l_instr
     global tempo_speed_now
     global pitch
 
-    if voice not in bufs:
+    if type(voice) is not int:
+        print_error("print_measure_abc - voice type is not int ({})".format(type(voice), 'print_measure_abc'))
+    # fi
+    if not check_voice_staff_in(voice, bufs):
         return "ERROR - bufs voice dictionary is hosed.", '', '', '', '', '', '', '', ''
     # fi
     pr = l_txt
@@ -2674,6 +2709,9 @@ def print_out_v_or_h():
 
 # ----------------------------------------------------------------------------
 def print_out_midi1csv_start(voiceon):
+    if type(voiceon) is not int:
+        print_error("print_out_midi1csv_start - voiceon type is not int ({})".format(type(voiceon), 'print_out_midi1csv_start'))
+    # fi
     print_output('{}, 0, Start_track'.format(voiceon+1))
         # 121   Reset all Controllers.
     print_output('{}, 0, Control_c, 0, 121, 0'.format(voiceon+1))
@@ -2682,6 +2720,9 @@ def print_out_midi1csv_start(voiceon):
 
 # ----------------------------------------------------------------------------
 def print_out_midi1csv_end(voiceon, lthworkingmeasures):
+    if type(voiceon) is not int:
+        print_error("print_out_midi1csv_end - voiceon type is not int ({})".format(type(voiceon), 'print_out_midi1csv_end'))
+    # fi
     print_output('{}, {}, End_track'.format(voiceon+1, lthworkingmeasures + int(clicks_at_end_of_piece)))
     return
 #   End of print_out_midi1csv_end
@@ -2762,8 +2803,8 @@ def print_out_midi1csv_instrument(m, voiceon, lthworkingmeasure, last_instrument
             print_error_no_line("Instrument {} not found.".format(last_instrument_on))
             return
         # fi
-        if voiceon not in inst:
-            inst[voiceon] = {}
+        if not check_voice_staff_in(voiceon, inst):
+            set_staff_arr(voiceon, {}, inst, 'print_out_midi1csv_instrument')
         # fi
         if last_instrument_on not in inst[voiceon]:
             if this_drum_on:
@@ -3095,7 +3136,7 @@ def print_out_midi1csv_notes():
                 continue
             # fi
         # fi
-        if voice not in bufs:
+        if not check_voice_staff_in(voice, bufs):
             print_error_no_line("bufs voice dictionary is hosed (m={}, voice={}, lthworkingmeasures={})".format(m, voice, lthworkingmeasures))
             sys.exit(1)
         # fi
@@ -3778,7 +3819,6 @@ def check_staves_notes_order():
     global bufs_length
     global bufs
     global bufs_suffixes
-    global key_sig
     global args
 
     # The idea is to go through the voices in array staves, checking that the
@@ -4437,7 +4477,7 @@ def is_anything(strg):
 # End of is_anything
 
 # ----------------------------------------------------------------------------
-def put_on_bufs(onvoice, p_meas, prenote, abc_note, timeofnote, append_tie, onetimevolume, postnote, original_line):
+def put_on_bufs(voiceon, p_meas, prenote, abc_note, timeofnote, append_tie, onetimevolume, postnote, original_line):
     global tlth
     global mlth
     global bufs
@@ -4460,130 +4500,130 @@ def put_on_bufs(onvoice, p_meas, prenote, abc_note, timeofnote, append_tie, onet
         abc_note = str(abc_note)
     # fi
     if abc_note == 'r' and append_tie != '':
-        print_warning("put_on_bufs - voice {} measure {} rest and suffixes={}".format(onvoice, p_meas, append_tie), original_line)
+        print_warning("put_on_bufs - voice {} measure {} rest and suffixes={}".format(voiceon, p_meas, append_tie), original_line)
         append_tie = ''
     # fi
-    tlth[onvoice] = tlth[onvoice] + timeofnote
-    if p_meas not in mlth[onvoice]:
-        mlth[onvoice][p_meas] = 0
+    tlth[voiceon] = tlth[voiceon] + timeofnote
+    if p_meas not in mlth[voiceon]:
+        mlth[voiceon][p_meas] = 0
     # fi
-    mlth[onvoice][p_meas] = mlth[onvoice][p_meas] + timeofnote
+    mlth[voiceon][p_meas] = mlth[voiceon][p_meas] + timeofnote
     if args.midi1csv or args.fluidsynth:
-        setvar('time', mlth[onvoice][p_meas] / (MIDICLICKSPERQUARTER * 4), 0)
+        setvar('time', mlth[voiceon][p_meas] / (MIDICLICKSPERQUARTER * 4), 0)
     else:
-        setvar('time', mlth[onvoice][p_meas], 0)
+        setvar('time', mlth[voiceon][p_meas], 0)
     # fi
 
-    if onvoice not in bufs:
-        bufs[onvoice] = {}
-        bufs_length[onvoice] = {}
-        bufs_velocity[onvoice] = {}
-        bufs_suffixes[onvoice] = {}
-        bufs_tie_next[onvoice] = ''
-        bufs_legato_next[onvoice] = ''
-        bufs_vol[onvoice] = {}
-        bufs_intensity[onvoice] = {}
+    if not check_voice_staff_in(voiceon, bufs):
+        set_staff_arr(voiceon, {}, bufs, original_line)
+        set_staff_arr(voiceon, {}, bufs_length, original_line)
+        set_staff_arr(voiceon, {}, bufs_velocity, original_line)
+        set_staff_arr(voiceon, {}, bufs_suffixes, original_line)
+        set_staff_arr(voiceon, '', bufs_tie_next, original_line)
+        set_staff_arr(voiceon, '', bufs_legato_next, original_line)
+        set_staff_arr(voiceon, {}, bufs_vol, original_line)
+        set_staff_arr(voiceon, {}, bufs_intensity, original_line)
     # fi
     if onetimevolume is None:
-        if onvoice in running_vl and p_meas in running_vl[onvoice]:
-            onetimevolume = running_vl[onvoice][p_meas]
+        if voiceon in running_vl and p_meas in running_vl[voiceon]:
+            onetimevolume = running_vl[voiceon][p_meas]
         else:
             onetimevolume = 127                 # Probably a rest, put as full volume.
         # fi
     # fi
-    if p_meas not in bufs[onvoice]:
-        bufs_vol[onvoice][p_meas] = [ onetimevolume ]
-        if p_meas in intensity[onvoice]:
-            bufs_intensity[onvoice][p_meas] = [ intensity[onvoice][p_meas] ]
+    if p_meas not in bufs[voiceon]:
+        bufs_vol[voiceon][p_meas] = [ onetimevolume ]
+        if p_meas in intensity[voiceon]:
+            bufs_intensity[voiceon][p_meas] = [ intensity[voiceon][p_meas] ]
         else:
-            bufs_intensity[onvoice][p_meas] = [ getvar_checkokay('default_intensity', original_line)]
+            bufs_intensity[voiceon][p_meas] = [ getvar_checkokay('default_intensity', original_line)]
         # fi
         if args.horizontal or args.vertical:
-            bufs[onvoice][p_meas] = [prenote + abc_note]
-            bufs_length[onvoice][p_meas] = [timeofnote]
-            bufs_velocity[onvoice][p_meas] = [ getvar_checkokay('default_velocity', original_line) ]
-            bufs_suffixes[onvoice][p_meas] = [append_tie]
+            bufs[voiceon][p_meas] = [prenote + abc_note]
+            bufs_length[voiceon][p_meas] = [timeofnote]
+            bufs_velocity[voiceon][p_meas] = [ getvar_checkokay('default_velocity', original_line) ]
+            bufs_suffixes[voiceon][p_meas] = [append_tie]
         elif args.midi1csv or args.fluidsynth:
-            bufs[onvoice][p_meas] = [abc_note]
-            bufs_length[onvoice][p_meas] = [timeofnote]
-            bufs_velocity[onvoice][p_meas] = [ getvar_checkokay('default_velocity', original_line) ]
-            if cresc_time[onvoice] != 0:
+            bufs[voiceon][p_meas] = [abc_note]
+            bufs_length[voiceon][p_meas] = [timeofnote]
+            bufs_velocity[voiceon][p_meas] = [ getvar_checkokay('default_velocity', original_line) ]
+            if cresc_time[voiceon] != 0:
                 append_tie = append_tie + 'c'
             # fi
-            bufs_suffixes[onvoice][p_meas] = [append_tie]
+            bufs_suffixes[voiceon][p_meas] = [append_tie]
         else:           # ABC
-            bufs[onvoice][p_meas] = prenote + abc_note + postnote
+            bufs[voiceon][p_meas] = prenote + abc_note + postnote
         # fi
     else:
-        bufs_vol[onvoice][p_meas].append(onetimevolume)
-        bufs_intensity[onvoice][p_meas].append(intensity[onvoice][p_meas])
+        bufs_vol[voiceon][p_meas].append(onetimevolume)
+        bufs_intensity[voiceon][p_meas].append(intensity[voiceon][p_meas])
         if args.vertical or args.horizontal:
-            bufs[onvoice][p_meas].append(prenote + abc_note)
-            bufs_length[onvoice][p_meas].append(timeofnote)
-            bufs_velocity[onvoice][p_meas].append(getvar_checkokay('default_velocity', original_line))
-            bufs_suffixes[onvoice][p_meas].append(append_tie)
+            bufs[voiceon][p_meas].append(prenote + abc_note)
+            bufs_length[voiceon][p_meas].append(timeofnote)
+            bufs_velocity[voiceon][p_meas].append(getvar_checkokay('default_velocity', original_line))
+            bufs_suffixes[voiceon][p_meas].append(append_tie)
         elif args.midi1csv or args.fluidsynth:
-            bufs[onvoice][p_meas].append(abc_note)
-            bufs_length[onvoice][p_meas].append(timeofnote)
-            bufs_velocity[onvoice][p_meas].append(getvar_checkokay('default_velocity', original_line))
-            if cresc_time[onvoice] != 0:
+            bufs[voiceon][p_meas].append(abc_note)
+            bufs_length[voiceon][p_meas].append(timeofnote)
+            bufs_velocity[voiceon][p_meas].append(getvar_checkokay('default_velocity', original_line))
+            if cresc_time[voiceon] != 0:
                 append_tie = append_tie + 'c'
             # fi
-            bufs_suffixes[onvoice][p_meas].append(append_tie)
+            bufs_suffixes[voiceon][p_meas].append(append_tie)
         else:           # ABC
-            bufs[onvoice][p_meas] = bufs[onvoice][p_meas] + prenote + abc_note + postnote
+            bufs[voiceon][p_meas] = bufs[voiceon][p_meas] + prenote + abc_note + postnote
 # NOTDONEYET - bufs_velocity
         # fi
     # fi
 
     # If crescendo happening, do it.
-    if cresc_time[onvoice] == 0:
+    if cresc_time[voiceon] == 0:
         return
     # fi
 
-    if cresc_time[onvoice] <= timeofnote:
-        running_vl[onvoice][p_meas] = cresc_volume[onvoice]
-        cresc_time[onvoice] = 0
+    if cresc_time[voiceon] <= timeofnote:
+        running_vl[voiceon][p_meas] = cresc_volume[voiceon]
+        cresc_time[voiceon] = 0
         if args.vertical or args.horizontal or args.midi1csv or args.fluidsynth:
             pass
         else:
-            j = vol_to_vlprint_round(cresc_volume[onvoice])
-            if cresc_direction[onvoice]:
+            j = vol_to_vlprint_round(cresc_volume[voiceon])
+            if cresc_direction[voiceon]:
                 k = 'crescendo)'
             else:
                 k = 'diminuendo)'
             # fi
-            bufs[onvoice][p_meas] = bufs[onvoice][p_meas] + \
+            bufs[voiceon][p_meas] = bufs[voiceon][p_meas] + \
                                     DECORATIONS + vlprint[j] + DECORATIONS + \
                                     DECORATIONS + k + DECORATIONS
         # fi
         return
     # fi
 
-    dt = cresc_time[onvoice] + 0.0
+    dt = cresc_time[voiceon] + 0.0
     if not args.vertical and not args.horizontal:
-        v =  cresc_volume[onvoice] - running_vl[onvoice][p_meas] + 0.0
+        v =  cresc_volume[voiceon] - running_vl[voiceon][p_meas] + 0.0
         x1 = v / dt                         # total  1920/48 = 4
         x2 = x1 * timeofnote                # x2 = x1 * timeofnote
-        running_vl[onvoice][p_meas] = running_vl[onvoice][p_meas] + int(x2)
+        running_vl[voiceon][p_meas] = running_vl[voiceon][p_meas] + int(x2)
     # fi
-    cresc_time[onvoice] = cresc_time[onvoice] - timeofnote
+    cresc_time[voiceon] = cresc_time[voiceon] - timeofnote
 
     return
 # End of put_on_bufs
 
 # ----------------------------------------------------------------------------
-def instak(onvoice, p_meas, prenote, thenote, timeofnote, append_tie, original_line, onenotevolume, postnote):
+def instak(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, original_line, onenotevolume, postnote):
     global args
 
     if args.midi1csv or args.fluidsynth:
-        put_on_bufs(onvoice, p_meas, prenote, thenote,
+        put_on_bufs(voiceon, p_meas, prenote, thenote,
                     int(round(timeofnote * MIDICLICKSPERQUARTER * 4)), append_tie, onenotevolume,
                     postnote, original_line)
         return
     # fi
 
-    lengthl, lengthf, ifokay = get_time_stak(timeofnote, original_line, onvoice)
+    lengthl, lengthf, ifokay = get_time_stak(timeofnote, original_line, voiceon)
     if ifokay == -1:                    # if time is error
         return
     # fi
@@ -4596,7 +4636,7 @@ def instak(onvoice, p_meas, prenote, thenote, timeofnote, append_tie, original_l
         # fi
         if ifokay == 1:                 # Did not fit properly.
             q = timeofnote
-            put_on_bufs(onvoice, p_meas, prenote, thenote, q, append_tie, onenotevolume, postnote, original_line)
+            put_on_bufs(voiceon, p_meas, prenote, thenote, q, append_tie, onenotevolume, postnote, original_line)
             return
         # fi
     # fi
@@ -4608,7 +4648,7 @@ def instak(onvoice, p_meas, prenote, thenote, timeofnote, append_tie, original_l
             if thenote == 'r':
                 append_tie = ''
             # fi
-            put_on_bufs(onvoice, p_meas, prenote, thenote, q, append_tie, onenotevolume, postnote, original_line)
+            put_on_bufs(voiceon, p_meas, prenote, thenote, q, append_tie, onenotevolume, postnote, original_line)
             if thenote == 'r':
                 append_tie = ''
             else:
@@ -4619,14 +4659,14 @@ def instak(onvoice, p_meas, prenote, thenote, timeofnote, append_tie, original_l
             q = lengthf[j-1]
             # tie goes on one before
             if j == len(lengthl):           # last one gets passed in append_tie note.
-                put_on_bufs(onvoice, p_meas, prenote, thenote, q, append_tie, onenotevolume, postnote, original_line)
+                put_on_bufs(voiceon, p_meas, prenote, thenote, q, append_tie, onenotevolume, postnote, original_line)
             elif j < len(lengthl):
                 if thenote == 'r':
                     append_tie = ''
                 else:
                     append_tie = 't'
                 # fi
-                put_on_bufs(onvoice, p_meas, prenote, thenote, q, append_tie, onenotevolume, postnote, original_line)
+                put_on_bufs(voiceon, p_meas, prenote, thenote, q, append_tie, onenotevolume, postnote, original_line)
             # fi
             if thenote == 'r':
                 append_tie = ''
@@ -4641,7 +4681,7 @@ def instak(onvoice, p_meas, prenote, thenote, timeofnote, append_tie, original_l
                 abc_note = thenote + l + append_tie
             # fi
             q = lengthf[j-1]
-            put_on_bufs(onvoice, p_meas, prenote, abc_note, q, append_tie, onenotevolume, postnote, original_line)
+            put_on_bufs(voiceon, p_meas, prenote, abc_note, q, append_tie, onenotevolume, postnote, original_line)
             j = j + 1
         # fi
         prenote = ''
@@ -7965,16 +8005,16 @@ def do_measure(t_args, original_line):
     measure_on = str(f1)
     meas.append(measure_on)
     for i in range(1, len(vl)+1):
-        if i not in vinstrument:
-            vinstrument[i] = {}
-            reverb[i] = {}
-            pan[i] = {}
-            intensity[i] = {}
-            key_voice[i] = {}
+        if not check_voice_staff_in(i, vinstrument):
+            set_staff_arr(i, {}, vinstrument, original_line)
+            set_staff_arr(i, {}, reverb, original_line)
+            set_staff_arr(i, {}, pan, original_line)
+            set_staff_arr(i, {}, intensity, original_line)
+            set_staff_arr(i, {}, key_voice, original_line)
         # fi
-        if i not in vl:
-            vl[i] = {}
-            running_vl[i] = {}
+        if not check_voice_staff_in(i, vl):
+            set_staff_arr(i, {}, vl, original_line)
+            set_staff_arr(i, {}, running_vl, original_line)
         # fi
         for j in vl:
             if j not in clef:
@@ -10190,13 +10230,13 @@ def getnote(note_to_decode, voice, original_line, update_defaults, do_errors):
     elif note_to_decode[0] in [ '0', '1', '2', '3', '4', '5', '6', '7', '8' ]:    # check octave
         oct_voice = int(note_to_decode[0])
         if not update_defaults:
-            set_staff_oct(voice, oct_voice, original_line)          # save octave
+            set_staff_arr(voice, oct_voice, oct, 'getnote1 ' + original_line)          # save octave
         # fi
         temp3 = temp3 + 1
     else:
-        oct_voice = get_staff_oct(voice, original_line)
+        oct_voice = get_staff_oct(voice, 'getnote2 ' + original_line)
     # fi
-    set_staff_oct(voice, oct_voice, original_line)
+    set_staff_arr(voice, oct_voice, oct, 'getnote3 ' + original_line)
     if len(note_to_decode) <= temp3 or note_to_decode[temp3] is None:
         if do_errors:
             print_error("m:{} v{} no note_to_decode '{}' temp3={} len(note_to_decode)={}".format(measure_on, voice, note_to_decode, temp3, len(note_to_decode)), original_line)
@@ -10739,66 +10779,66 @@ def get_time(therest, original_line):
 # End of get_time
 
 # ----------------------------------------------------------------------------
-def set_tie_on_previous_note(onvoice, original_line, what):
+def set_tie_on_previous_note(voiceon, original_line, what):
     global measure_on                   # The measure we are on.
     global meas                         # volume levels
     global bufs
     global bufs_suffixes
 
     m = measure_on
-    if m not in bufs[onvoice] or bufs[onvoice][m] == '':
+    if m not in bufs[voiceon] or bufs[voiceon][m] == '':
         # Do measure before.
         w = len(meas) - 1               # current measure number in array.
         if w == 0:
-            print_error("m:{} v{} no previous measure to tie note to.".format(measure_on, onvoice), original_line)
+            print_error("m:{} v{} no previous measure to tie note to.".format(measure_on, voiceon), original_line)
             return ''
         else:
             m = meas[w-1]
         # fi
     # fi
     if args.horizontal or args.vertical:
-        bufs_suffixes[onvoice][m][-1] += what
+        bufs_suffixes[voiceon][m][-1] += what
     elif args.midi1csv or args.fluidsynth:
-        bufs_suffixes[onvoice][m].append(what)
+        bufs_suffixes[voiceon][m].append(what)
     else:                   # abc format
-        bufs[onvoice][m] = bufs[onvoice][m] + '-'
+        bufs[voiceon][m] = bufs[voiceon][m] + '-'
     # fi
     return
 # End of set_tie_on_previous_note
 
 # ----------------------------------------------------------------------------
-def set_tie_abc(onvoice, voicenumber, original_line):
+def set_tie_abc(voiceon, voicenumber, original_line):
     if voicenumber is not None:             # If vertical input format.
         return '-'
     # fi
-    set_tie_on_previous_note(onvoice, original_line, '-')
+    set_tie_on_previous_note(voiceon, original_line, '-')
     return ''
 # End of set_tie_abc
 
 # ----------------------------------------------------------------------------
-def determine_s_vol(f1, onvoice, original_line):
+def determine_s_vol(f1, voiceon, original_line):
     global running_vl
     global measure_on
 
     if f1 == -1:                        # -1 for getvar('vffff')
         return getvar('vffff')                    # Cannot get any louder.
     elif f1 == -2:                      # -2 for getvar('vff')
-        if running_vl[onvoice][measure_on] >= getvar('vfff') :
+        if running_vl[voiceon][measure_on] >= getvar('vfff') :
             return getvar('vffff')
         # fi
         return getvar('vfff')
     elif f1 == -3:                      # -3 for getvar('vff')
-        if running_vl[onvoice][measure_on] >= getvar('vff') :
-            if running_vl[onvoice][measure_on] >= getvar('vfff') :
+        if running_vl[voiceon][measure_on] >= getvar('vff') :
+            if running_vl[voiceon][measure_on] >= getvar('vfff') :
                 return getvar('vffff')
             # fi
             return getvar('vfff')
         # fi
         return getvar('vff')
     elif f1 == -4:                      # -4 for getvar('vf')
-        if running_vl[onvoice][measure_on] >= getvar('vf') :
-            if running_vl[onvoice][measure_on] >= getvar('vff') :
-                if running_vl[onvoice][measure_on] >= getvar('vfff') :
+        if running_vl[voiceon][measure_on] >= getvar('vf') :
+            if running_vl[voiceon][measure_on] >= getvar('vff') :
+                if running_vl[voiceon][measure_on] >= getvar('vfff') :
                     return getvar('vffff')
                 # fi
                 return getvar('vfff')
@@ -10807,10 +10847,10 @@ def determine_s_vol(f1, onvoice, original_line):
         # fi
         return getvar('vf')
     elif f1 == -5:                      # -5 for mf
-        if running_vl[onvoice][measure_on] >= getvar('vmf') :
-            if running_vl[onvoice][measure_on] >= getvar('vf') :
-                if running_vl[onvoice][measure_on] >= getvar('vff') :
-                    if running_vl[onvoice][measure_on] >= getvar('vfff') :
+        if running_vl[voiceon][measure_on] >= getvar('vmf') :
+            if running_vl[voiceon][measure_on] >= getvar('vf') :
+                if running_vl[voiceon][measure_on] >= getvar('vff') :
+                    if running_vl[voiceon][measure_on] >= getvar('vfff') :
                         return getvar('vffff')
                     # fi
                     return getvar('vfff')
@@ -10821,11 +10861,11 @@ def determine_s_vol(f1, onvoice, original_line):
         # fi
         return getvar('vmf')
     elif f1 == -6:                      # -6 for mp
-        if running_vl[onvoice][measure_on] >= getvar('vmp') :
-            if running_vl[onvoice][measure_on] >= getvar('vmf') :
-                if running_vl[onvoice][measure_on] >= getvar('vf') :
-                    if running_vl[onvoice][measure_on] >= getvar('vff') :
-                        if running_vl[onvoice][measure_on] >= getvar('vfff') :
+        if running_vl[voiceon][measure_on] >= getvar('vmp') :
+            if running_vl[voiceon][measure_on] >= getvar('vmf') :
+                if running_vl[voiceon][measure_on] >= getvar('vf') :
+                    if running_vl[voiceon][measure_on] >= getvar('vff') :
+                        if running_vl[voiceon][measure_on] >= getvar('vfff') :
                             return getvar('vffff')
                         # fi
                         return getvar('vfff')
@@ -10838,12 +10878,12 @@ def determine_s_vol(f1, onvoice, original_line):
         # fi
         return getvar('vmp')
     elif f1 == -7:                      # -7 for getvar('vp')
-        if running_vl[onvoice][measure_on] >= getvar('vp') :
-            if running_vl[onvoice][measure_on] >= getvar('vmp') :
-                if running_vl[onvoice][measure_on] >= getvar('vmf') :
-                    if running_vl[onvoice][measure_on] >= getvar('vf') :
-                        if running_vl[onvoice][measure_on] >= getvar('vff') :
-                            if running_vl[onvoice][measure_on] >= getvar('vfff') :
+        if running_vl[voiceon][measure_on] >= getvar('vp') :
+            if running_vl[voiceon][measure_on] >= getvar('vmp') :
+                if running_vl[voiceon][measure_on] >= getvar('vmf') :
+                    if running_vl[voiceon][measure_on] >= getvar('vf') :
+                        if running_vl[voiceon][measure_on] >= getvar('vff') :
+                            if running_vl[voiceon][measure_on] >= getvar('vfff') :
                                 return getvar('vffff')
                             # fi
                             return getvar('vfff')
@@ -10864,7 +10904,7 @@ def determine_s_vol(f1, onvoice, original_line):
     elif f1 == -10:                     # -10 for getvar('vpppp')
         return getvar('vpppp')                     # Cannot 'really' get any quieter.
     else:
-        print_error("m:{} v{} determine_s_vol - volume with 's' out of range. ({})".format(measure_on, onvoice, f1), original_line)
+        print_error("m:{} v{} determine_s_vol - volume with 's' out of range. ({})".format(measure_on, voiceon, f1), original_line)
         return getvar('vffff')
     # fi
 # End of determine_s_vol
@@ -10877,7 +10917,7 @@ def determine_s_vol(f1, onvoice, original_line):
 # See volumes command for more volumes. And "s" for this note only,
 # and like "sfp" after it to go to "f" for this note, and "p" for following notes.
 
-def get_vol_note(temp1, onvoice, original_line):
+def get_vol_note(temp1, voiceon, original_line):
     global S_vlprint
     global vlprint
     global measure_on
@@ -10888,7 +10928,7 @@ def get_vol_note(temp1, onvoice, original_line):
     therest = temp1[4:]         # get rid of vol()
     sc = therest.find(')')
     if sc < 0 or sc == 0:
-        print_error("m:{} v{} A 'vol(' needs a number followed by a ')' -- ')' or number is missing".format(measure_on, onvoice), original_line)
+        print_error("m:{} v{} A 'vol(' needs a number followed by a ')' -- ')' or number is missing".format(measure_on, voiceon), original_line)
         return '', None, None, None
     # fi
     f2 = -1                         # No volume setting after the "vol"
@@ -10911,13 +10951,13 @@ def get_vol_note(temp1, onvoice, original_line):
                     f2 = S_vlprint[j][1]
                     type_error = None
                     if f1 < 0 and not args.horizontal and not args.vertical:
-                        f1 = determine_s_vol(f1, onvoice, original_line)
+                        f1 = determine_s_vol(f1, voiceon, original_line)
                     # fi
                     break
                 # fi
             # rof
             if type_error is not None:
-                print_error("m:{} v{} vol(xxx) did not get have a number or volume name.  {}".format(measure_on, onvoice, type_error), original_line)
+                print_error("m:{} v{} vol(xxx) did not get have a number or volume name.  {}".format(measure_on, voiceon, type_error), original_line)
                 return '', None, None, None
             # fi
         # fi
@@ -10925,13 +10965,13 @@ def get_vol_note(temp1, onvoice, original_line):
         f2 = int(round(f1))         # flag same after setting it.
     # fi
     if f1 is None:
-        print_error("m:{} v{} volume is not a number.".format(measure_on, onvoice), original_line)
+        print_error("m:{} v{} volume is not a number.".format(measure_on, voiceon), original_line)
         return '', None, None, None
     # fi
     if not args.horizontal and not args.vertical:
         f1 = int(round(f1))
         if f1 < 0  or f1 > 127:       # If out of range.
-            print_error("m:{} v{} volume number must be between 0 and 127 inclusive. Not ({})".format(measure_on, onvoice, f1), original_line)
+            print_error("m:{} v{} volume number must be between 0 and 127 inclusive. Not ({})".format(measure_on, voiceon, f1), original_line)
             return '', None, None, None
         # fi
     # fi
@@ -11013,7 +11053,7 @@ def get_cresc(temp1, original_line):
 # Returns:
 #   prenote - things to put in front of a note.
 #   postnote - things to put after the note
-def find_vol_cresc(temp1, onvoice, original_line, prenote, postnote):
+def find_vol_cresc(temp1, voiceon, original_line, prenote, postnote):
     global running_vl
     global args
     global measure_on
@@ -11022,13 +11062,13 @@ def find_vol_cresc(temp1, onvoice, original_line, prenote, postnote):
     onenotevolume = None
     while True:
         if re.match(r'^[ \t]*vol[(]', temp1):
-            therest, onenotevolume, f2, s1 = get_vol_note(temp1, onvoice, original_line)
+            therest, onenotevolume, f2, s1 = get_vol_note(temp1, voiceon, original_line)
             # onenotevolume for midi1csv format.
             if onenotevolume is None:
                 return temp1, None, prenote, postnote
             # fi
             if f2 != -1:
-                running_vl[onvoice][measure_on] = f2
+                running_vl[voiceon][measure_on] = f2
             # fi
             if args.vertical or args.horizontal or args.midi1csv or args.fluidsynth:
                 prenote = prenote + 'vol(' + str(s1) + ') '
@@ -11038,7 +11078,7 @@ def find_vol_cresc(temp1, onvoice, original_line, prenote, postnote):
                 j = vol_to_vlprint_round(onenotevolume)
                 prenote = prenote + DECORATIONS + vlprint[j] + DECORATIONS
                 if f2 == -1:
-                    j = vol_to_vlprint_round(running_vl[onvoice][measure_on])
+                    j = vol_to_vlprint_round(running_vl[voiceon][measure_on])
                     postnote = postnote + DECORATIONS + vlprint[j] + DECORATIONS
                 elif f2 != onenotevolume:
                     j = vol_to_vlprint_round(f2)
@@ -11052,7 +11092,7 @@ def find_vol_cresc(temp1, onvoice, original_line, prenote, postnote):
             re.match(r'^[ \t]*cr[(]', temp1) or
             re.match(r'^[ \t]*dimi[(]', temp1) or re.match(r'^[ \t]*dim[(]', temp1) or
             re.match(r'^[ \t]*di[(]', temp1)):
-            print_error("m:{} v{} cresc() and dimin() are incorrectly written.".format(measure_on, onvoice), original_line)
+            print_error("m:{} v{} cresc() and dimin() are incorrectly written.".format(measure_on, voiceon), original_line)
             return temp1, None, prenote, postnote
         # fi
 
@@ -11070,30 +11110,30 @@ def find_vol_cresc(temp1, onvoice, original_line, prenote, postnote):
             # fi
             if not (args.vertical or args.horizontal):
                 if crd:
-                    if newvolume <= running_vl[onvoice][measure_on]:
-                        print_error("m:{} v{}: cresc({},{}) going down or already at {}".format(measure_on, onvoice, newvolume, newtime, running_vl[onvoice][measure_on]), original_line)
+                    if newvolume <= running_vl[voiceon][measure_on]:
+                        print_error("m:{} v{}: cresc({},{}) going down or already at {}".format(measure_on, voiceon, newvolume, newtime, running_vl[voiceon][measure_on]), original_line)
                     # fi
                 else:
-                    if newvolume >= running_vl[onvoice][measure_on]:
-                        print_error("m:{} v{}: dimin({},{}) going up or already at {}".format(measure_on, onvoice, newvolume, newtime, running_vl[onvoice][measure_on]), original_line)
+                    if newvolume >= running_vl[voiceon][measure_on]:
+                        print_error("m:{} v{}: dimin({},{}) going up or already at {}".format(measure_on, voiceon, newvolume, newtime, running_vl[voiceon][measure_on]), original_line)
                     # fi
                 # fi
             # fi
-            cresc_volume[onvoice] = newvolume
+            cresc_volume[voiceon] = newvolume
             if args.vertical or args.horizontal:
                 prenote = prenote + 'cresc(' + str(newvolume) + ',' + str(newtime) + ')'
-                cresc_time[onvoice] = newtime + 0.0
+                cresc_time[voiceon] = newtime + 0.0
             elif args.midi1csv or args.fluidsynth:
-                cresc_time[onvoice] = int(round(newtime * MIDICLICKSPERQUARTER * 4))
+                cresc_time[voiceon] = int(round(newtime * MIDICLICKSPERQUARTER * 4))
             else:           # ABC
-                if newvolume > running_vl[onvoice][measure_on]:
-                    cresc_direction[onvoice] = True
+                if newvolume > running_vl[voiceon][measure_on]:
+                    cresc_direction[voiceon] = True
                     prenote = prenote + DECORATIONS + 'crescendo(' + DECORATIONS
                 else:
-                    cresc_direction[onvoice] = False
+                    cresc_direction[voiceon] = False
                     prenote = prenote + DECORATIONS + 'diminuendo(' + DECORATIONS
                 # fi
-                cresc_time[onvoice] = newtime + 0.0
+                cresc_time[voiceon] = newtime + 0.0
             # fi
             temp1 = therest
             continue
@@ -11108,7 +11148,7 @@ def find_vol_cresc(temp1, onvoice, original_line, prenote, postnote):
 # Return: False, w      = do a continue
 # Return: -1, w         = do a return
 
-def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
+def do_a_note(temp1, voiceon, original_line, prenote, postnote, w):
     global args
     global measure_on
     global sequence_note
@@ -11125,9 +11165,9 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
     global bufs_tie_next
     global bufs_suffixes
 
-    temp1, onenotevolume, prenote, postnote = find_vol_cresc(temp1, onvoice, original_line, prenote, postnote)
+    temp1, onenotevolume, prenote, postnote = find_vol_cresc(temp1, voiceon, original_line, prenote, postnote)
     #.............................................................................
-    therest, thenote, typenote = getnote(temp1, onvoice, original_line, True, True) # get next note
+    therest, thenote, typenote = getnote(temp1, voiceon, original_line, True, True) # get next note
     if thenote is None:
         print_error("m:{} no note? therest='{}' thenote='{}' typenote='{}'".format(measure_on, therest, thenote, typenote), original_line)
         return True, w
@@ -11158,7 +11198,7 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
     # fi
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     if typenote == trill_note:
-        therest, thenote, typenote = getnote(therest, onvoice, original_line, True, True)
+        therest, thenote, typenote = getnote(therest, voiceon, original_line, True, True)
         leading_space = False
         if thenote and type(thenote) is str and len(thenote) > 0 and (thenote[0] == ' ' or thenote == "\t"):
             thenote = thenote[1:]
@@ -11187,7 +11227,7 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
             return -1, w
         # fi
         therest = therest[1:]                                       # comma removed
-        therest, thenote, typenote = getnote(therest, onvoice, original_line, True, True) # get second note
+        therest, thenote, typenote = getnote(therest, voiceon, original_line, True, True) # get second note
         if thenote is None or thenote == 0 or thenote == '':
             print_error("m:{} trill is not legal, second note missing".format(measure_on), original_line)
             return -1, w
@@ -11241,7 +11281,7 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
             return -1, w
         # fi
         if timeofnote == 0:
-            timeofnote = time[onvoice]
+            timeofnote = time[voiceon]
         # fi
         if number_dots != 0:
             p = timeofnote / 2.0
@@ -11250,7 +11290,7 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
                 p = p / 2.0
             # rof
         # fi
-        time[onvoice] = timeofnote
+        time[voiceon] = timeofnote
 
 #   t(3a,3g,7)4 =>  '(7:4:2 3a3g'
 
@@ -11260,7 +11300,7 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
         if args.horizontal or args.vertical or args.midi1csv or args.fluidsynth:
             lengthf = [ timeofnote ]
         else:           # ABC
-            lengthl, lengthf, ifokay = get_time_stak(timeofnote, original_line, onvoice)
+            lengthl, lengthf, ifokay = get_time_stak(timeofnote, original_line, voiceon)
             if ifokay != 0 or len(lengthl) != 1:         # if time is error
                 print_warning("m:{} trill time must be a printable note length, not '{}'".format(measure_on, lengthl), original_line)
                 t = 0
@@ -11288,8 +11328,8 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
             # fi
         # fi
 # NOTDONEYET - check --vertical and not --wrongties. (But that is not the use for this argument.)
-        append_tie = bufs_tie_next[onvoice]
-        bufs_tie_next[onvoice] == ''
+        append_tie = bufs_tie_next[voiceon]
+        bufs_tie_next[voiceon] == ''
         if args.horizontal or args.vertical:
             np = int(round(np))
             abc_note = "t({}{}{},{}{}{},{})".format(quotes, staccato, legato, quotes1, staccato1, legato1, np)
@@ -11300,7 +11340,7 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
                 append_tie = append_tie + 'l'
             # fi
 
-            put_on_bufs(onvoice, measure_on, prenote, abc_note, lengthf[0], append_tie, onenotevolume, '', original_line)
+            put_on_bufs(voiceon, measure_on, prenote, abc_note, lengthf[0], append_tie, onenotevolume, '', original_line)
             if w is None:
                 return True, w
             # fi
@@ -11340,7 +11380,7 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
                     # fi
                 # fi
 
-                put_on_bufs(onvoice, measure_on, prenote, abc_note, put_on_lth, sn, onenotevolume, '', original_line)
+                put_on_bufs(voiceon, measure_on, prenote, abc_note, put_on_lth, sn, onenotevolume, '', original_line)
                 append_tie = ''
             # rof
             if w is None:
@@ -11382,19 +11422,19 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
                 # fi
 
                 if leg != '':
-                    if bufs_legato_next[onvoice] != 'l':
+                    if bufs_legato_next[voiceon] != 'l':
                         abc_note = abc_note + '('             # ( before the note for glide/legato
                     # fi
-                    bufs_legato_next[onvoice] = 'l'
+                    bufs_legato_next[voiceon] = 'l'
                 # fi
                 if sta == 's':
                     abc_note = abc_note + '.' + quo
                 else:
                     abc_note = abc_note + quo
                 # fi
-                if leg == '' and bufs_legato_next[onvoice] == 'l':
+                if leg == '' and bufs_legato_next[voiceon] == 'l':
                     abc_note = abc_note + ')'
-                    bufs_legato_next[onvoice] = ''
+                    bufs_legato_next[voiceon] = ''
                 # fi
             # rof
             l_dl = default_note_text_fraction(measure_on)
@@ -11403,7 +11443,7 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
             # fi
             abc_note = abc_note + "[L:{}]".format(l_dl)
 
-            put_on_bufs(onvoice, measure_on, prenote, abc_note, lengthf[0], '', onenotevolume, postnote, original_line)
+            put_on_bufs(voiceon, measure_on, prenote, abc_note, lengthf[0], '', onenotevolume, postnote, original_line)
             if w is None:
                 return True, w                      # normal old way.
             # fi
@@ -11433,13 +11473,13 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
             s_postnote = ''
             s_prenote = ''
             if re.match(r'^[ \t]*vol[(]', therest):
-                therest, onenotevolume, f2, s1 = get_vol_note(therest, onvoice, original_line)
+                therest, onenotevolume, f2, s1 = get_vol_note(therest, voiceon, original_line)
                 # onenotevolume for midi1csv format.
                 if onenotevolume is None:
                     return -1, w
                 # fi
                 if f2 != -1:
-                    running_vl[onvoice][measure_on] = f2
+                    running_vl[voiceon][measure_on] = f2
                 # fi
                 if args.vertical or args.horizontal or args.midi1csv or args.fluidsynth:
                     s_prenote = s_prenote + 'vol(' + str(s1) + ') '
@@ -11449,7 +11489,7 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
                     j = vol_to_vlprint_round(onenotevolume)
                     s_prenote = s_prenote + DECORATIONS + vlprint[j] + DECORATIONS
                     if f2 == -1:
-                        j = vol_to_vlprint_round(running_vl[onvoice][measure_on])
+                        j = vol_to_vlprint_round(running_vl[voiceon][measure_on])
                         s_postnote = s_postnote + DECORATIONS + vlprint[j] + DECORATIONS
                     elif f2 != onenotevolume:
                         j = vol_to_vlprint_round(f2)
@@ -11458,7 +11498,7 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
                 # fi
             # fi
 
-            therest, thenote, typenote = getnote(therest, onvoice, original_line, True, True)
+            therest, thenote, typenote = getnote(therest, voiceon, original_line, True, True)
             if thenote is None or thenote == '':
                 print_error("m:{} sequence is not legal, no note".format(measure_on), original_line)
                 return -1, w
@@ -11500,7 +11540,7 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
             return -1, w
         # fi
         if timeofnote == 0:
-            timeofnote = time[onvoice]
+            timeofnote = time[voiceon]
         # fi
         if number_dots != 0:
             p = timeofnote / 2.0
@@ -11509,7 +11549,7 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
                 p = p / 2.0
             # rof
         # fi
-        time[onvoice] = timeofnote
+        time[voiceon] = timeofnote
 
         if args.horizontal or args.vertical:
             lengthf = [ timeofnote ]
@@ -11526,7 +11566,7 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
                 abc_note = ' ' + abc_note
             # fi
 
-            put_on_bufs(onvoice, measure_on, prenote, abc_note, lengthf[0], '', onenotevolume, '', original_line)
+            put_on_bufs(voiceon, measure_on, prenote, abc_note, lengthf[0], '', onenotevolume, '', original_line)
             if w is None:
                 return True, w                      # normal old way.
             # fi
@@ -11548,11 +11588,11 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
                 numerator = numerator - put_on_lth
 
 # NOTDONEYET - check --vertical and not --wrongties. (But that is not the use of this argument.)
-                extra_t = 't' if bufs_tie_next[onvoice] == 't' else ''
-                bufs_tie_next[onvoice] = ''
+                extra_t = 't' if bufs_tie_next[voiceon] == 't' else ''
+                bufs_tie_next[voiceon] = ''
                 # Tie from previous needs to go on first one, else blank it out.
 
-                put_on_bufs(onvoice, measure_on, prn, notes[i], put_on_lth, stacs[i] + glides[i] + extra_t, vols_onenote[i], '', original_line)
+                put_on_bufs(voiceon, measure_on, prn, notes[i], put_on_lth, stacs[i] + glides[i] + extra_t, vols_onenote[i], '', original_line)
             # rof
             if w is None:
                 return True, w                      # normal old way.
@@ -11580,7 +11620,7 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
             # fi
             dnl_str = str(Fraction(dnl).limit_denominator(256))
 
-            lengthl, lengthf, ifokay = get_time_stak(timeofnote, original_line, onvoice)
+            lengthl, lengthf, ifokay = get_time_stak(timeofnote, original_line, voiceon)
             if ifokay != 0 or len(lengthl) != 1:         # if time is error
                 print_warning("m:{} sequence time must be a printable note length, not '{}'".format(measure_on, lengthl), original_line)
                 t = 0
@@ -11610,18 +11650,18 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
                 # fi
                 abc_note = abc_note + prn
                 if glides[l] != '':
-                    if bufs_legato_next[onvoice] != 'l':
+                    if bufs_legato_next[voiceon] != 'l':
                         abc_note = abc_note + '('             # ( before the note for glide/legato
                     # fi
-                    bufs_legato_next[onvoice] = 'l'
+                    bufs_legato_next[voiceon] = 'l'
                 # fi
                 if stacs[l] == 's':
                     abc_note = abc_note + '.'
                 # fi
                 abc_note = abc_note + notes[l] + psn
-                if glides[l] == '' and bufs_legato_next[onvoice] == 'l':
+                if glides[l] == '' and bufs_legato_next[voiceon] == 'l':
                     abc_note = abc_note + ')'
-                    bufs_legato_next[onvoice] = ''
+                    bufs_legato_next[voiceon] = ''
                 # fi
             # rof
             l_dl = default_note_text_fraction(measure_on)
@@ -11630,7 +11670,7 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
             # fi
             abc_note = abc_note + "[L:{}]".format(l_dl)
 
-            put_on_bufs(onvoice, measure_on, '', abc_note, lengthf[0], '', onenotevolume, '', original_line)
+            put_on_bufs(voiceon, measure_on, '', abc_note, lengthf[0], '', onenotevolume, '', original_line)
             if w is None:
                 return True, w                      # normal old way.
             # fi
@@ -11657,7 +11697,7 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
             print_error("m:{} cannot have dotted syntax on a default note length.".format(measure_on), original_line)
             return -1, w
         # fi
-        timeofnote = time[onvoice]
+        timeofnote = time[voiceon]
     # fi
     if number_dots != 0:
         p = timeofnote / 2.0
@@ -11666,23 +11706,23 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
             p = p / 2.0
         # rof
     # fi
-    time[onvoice] = timeofnote
+    time[voiceon] = timeofnote
 
-    append_tie = bufs_tie_next[onvoice]
-    bufs_tie_next[onvoice] = ''
+    append_tie = bufs_tie_next[voiceon]
+    bufs_tie_next[voiceon] = ''
     # Tied note
     if (r_suffixes & suffix_tied) != 0:
         if w is not None:         # vertical input format
             if args.horizontal:                     # horizontal output
                 if not args.wrongties:
                     # put tie on following note.
-                    bufs_tie_next[onvoice] = 't'
+                    bufs_tie_next[voiceon] = 't'
                 else:
                     append_tie = 't'
                 # fi
             elif args.midi1csv or args.fluidsynth:                     # midi1csv output
                 if not args.wrongties:
-                    bufs_tie_next[onvoice] = 't'
+                    bufs_tie_next[voiceon] = 't'
                 else:
                     append_tie = 't'
                 # fi
@@ -11690,19 +11730,19 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
                 if not args.wrongties:
                     append_tie = 't'
                 else:
-                    set_tie_on_previous_note(onvoice, original_line, 't')
+                    set_tie_on_previous_note(voiceon, original_line, 't')
                 # fi
             else:           # ABC
                 if not args.wrongties:
-                    append_tie = set_tie_abc(onvoice, w, original_line)
+                    append_tie = set_tie_abc(voiceon, w, original_line)
                 else:
-                    set_tie_on_previous_note(onvoice, original_line, '-')
+                    set_tie_on_previous_note(voiceon, original_line, '-')
                 # fi
             # fi
         else:                           # horizontal input format
             if args.vertical:                       # vertical output
                 # put tie on previous note.
-                if measure_on not in bufs[onvoice] or bufs[onvoice][measure_on] == '':
+                if measure_on not in bufs[voiceon] or bufs[voiceon][measure_on] == '':
                     # Do measure before.
                     w1 = len(meas) - 1               # current measure number in array.
                     if w1 == 0:
@@ -11714,13 +11754,13 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
                 else:
                     m = measure_on
                 # fi
-                i = len(bufs_suffixes[onvoice][m]) - 1
-                bufs_suffixes[onvoice][m][i] = bufs_suffixes[onvoice][m][i] + 't'
+                i = len(bufs_suffixes[voiceon][m]) - 1
+                bufs_suffixes[voiceon][m][i] = bufs_suffixes[voiceon][m][i] + 't'
                 append_tie = ''                     # Nothing on this note, on previous.
             elif args.horizontal or args.midi1csv or args.fluidsynth:  # horizontal output
                 append_tie = 't'
             else:           # ABC
-                append_tie = set_tie_abc(onvoice, w, original_line)
+                append_tie = set_tie_abc(voiceon, w, original_line)
             # fi
         # fi
     # fi
@@ -11743,23 +11783,23 @@ def do_a_note(temp1, onvoice, original_line, prenote, postnote, w):
         if args.horizontal or args.vertical or args.midi1csv or args.fluidsynth:
             append_tie = append_tie + 'l'
         else:           # ABC
-            if bufs_legato_next[onvoice] != 'l':
+            if bufs_legato_next[voiceon] != 'l':
                 thenote = '(' + thenote             # ( before the note for glide/legato
             # fi
         # fi
-        bufs_legato_next[onvoice] = 'l'
+        bufs_legato_next[voiceon] = 'l'
     else:
-        if bufs_legato_next[onvoice] == 'l':
+        if bufs_legato_next[voiceon] == 'l':
             if args.horizontal or args.vertical or args.midi1csv or args.fluidsynth:
                 pass
             else:           # ABC
                 append_tie = ')' + append_tie
             # fi
         # fi
-        bufs_legato_next[onvoice] = ''
+        bufs_legato_next[voiceon] = ''
     # fi
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-    instak(onvoice, measure_on, prenote, thenote, timeofnote, append_tie, original_line, onenotevolume, postnote)
+    instak(voiceon, measure_on, prenote, thenote, timeofnote, append_tie, original_line, onenotevolume, postnote)
     return 0, w                                     # Normal return.
 # End of do_a_note
 
@@ -11924,16 +11964,16 @@ def process_notes(line, original_line):
     # Decode and stack the notes.
     loopstart = 1 if cis == 0 else cis
 #DEBUG    print_debug("process_notes - #j type(loopstart)={} loopstart={} type(voices)={} voices={} wargs={}".format(type(loopstart),loopstart, type(voices),voices, wargs))
-    for onvoice in range(loopstart, voices + 1):
-        setvar('voice', onvoice, 0)
+    for voiceon in range(loopstart, voices + 1):
+        setvar('voice', voiceon, 0)
         while True:
-            if cis == 0 and len(wargs) < onvoice:
-                print_error("m:{} Not enough arguments on note line - want {}, have {}".format(measure_on, onvoice, wargs), original_line)
+            if cis == 0 and len(wargs) < voiceon:
+                print_error("m:{} Not enough arguments on note line - want {}, have {}".format(measure_on, voiceon, wargs), original_line)
                 return
             # fi
             if w is None:
-                temp1 = wargs[onvoice - loopstart]          # loopstart fixes "cis" being used.
-                rest_wargs_on_line = wargs[onvoice - loopstart:]
+                temp1 = wargs[voiceon - loopstart]          # loopstart fixes "cis" being used.
+                rest_wargs_on_line = wargs[voiceon - loopstart:]
             else:
                 # Does not work if tokenizing.
                 if w >= len(wargs):
@@ -11942,7 +11982,7 @@ def process_notes(line, original_line):
                 temp1 = wargs[w]
                 rest_wargs_on_line = wargs[w + 1:]
             # fi
-#DEBUG            print_debug("process_notes - #k onvoice={} temp1={} rest_wargs_on_line={}".format(onvoice, temp1, rest_wargs_on_line))
+#DEBUG            print_debug("process_notes - #k voiceon={} temp1={} rest_wargs_on_line={}".format(voiceon, temp1, rest_wargs_on_line))
             prenote = ''
             while temp1 and (temp1[0] == ' ' or temp1[0] == "\t"):
                 prenote = ' '
@@ -11959,7 +11999,7 @@ def process_notes(line, original_line):
                     temp1 = temp1 + a
                 # fi
             # rof
-#DEBUG            print_debug("process_notes - #l onvoice={} temp1={} rest_wargs_on_line={}".format(onvoice, temp1, rest_wargs_on_line))
+#DEBUG            print_debug("process_notes - #l voiceon={} temp1={} rest_wargs_on_line={}".format(voiceon, temp1, rest_wargs_on_line))
             postnote = ''
 # NOTDONEYET - MACRO with right terminators -- order of match - longest argument list first. process_notes()
             for c in range(0, macro_number):
@@ -12014,7 +12054,7 @@ def process_notes(line, original_line):
             #.............................................................................
             onenotevolume = None
 # NOTDONEYET - consider here onward for a new routine - do_a_note(). vvvvvvvvvvvv
-            do_break, w = do_a_note(temp1, onvoice, original_line, prenote, postnote, w)
+            do_break, w = do_a_note(temp1, voiceon, original_line, prenote, postnote, w)
             if type(do_break) is int:
                 if do_break == -1:
                     return
@@ -12683,7 +12723,7 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):      
     setvar('voice', ','.join(last_voice_staff), 1)
 
 # NOTDONEYET - process note, but not the same as the old way.
-# onvoice is a bunch - yuck.
+# voiceon is a bunch - yuck.
     w = None
     do_break, w = do_a_note(nt, last_voice_staff, original_line, '', '', w)
 

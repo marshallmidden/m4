@@ -157,73 +157,73 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 # SONGS_GCS = ${SONGS:=.gcs}
 SONGS_E = ${SONGS:=.E} ${SONGS_NO_PS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
-SONGS_2ABC = ${SONGS:=-2.abc}
+SONGS_2ABC = ${SONGS:=_2.abc}
 SONGS_CSV = ${SONGS:=.csv} ${SONGS_NO_PS:=.csv}
-SONGS_2CSV = ${SONGS:=-2.csv} ${SONGS_NO_PS:=-2.csv}
+SONGS_2CSV = ${SONGS:=_2.csv} ${SONGS_NO_PS:=_2.csv}
 SONGS_MID = ${SONGS:=.mid} ${SONGS_NO_PS:=.mid}
-SONGS_2MID = ${SONGS:=-2.mid} ${SONGS_NO_PS:=-2.mid}
+SONGS_2MID = ${SONGS:=_2.mid} ${SONGS_NO_PS:=_2.mid}
 SONGS_FS = ${SONGS:=.fs} ${SONGS_NO_PS:=.fs}
-SONGS_2FS = ${SONGS:=-2.fs} ${SONGS_NO_PS:=-2.fs}
+SONGS_2FS = ${SONGS:=_2.fs} ${SONGS_NO_PS:=_2.fs}
 SONGS_M_PS = ${SONGS:=_m.ps}
 SONGS_M2_PS = ${SONGS:=_m2.ps}
 #-- SONGS_PS = ${SONGS:=.ps}
-#-- SONGS_2PS = ${SONGS:=-2.ps}
+#-- SONGS_2PS = ${SONGS:=_2.ps}
 SONGS_PDF= ${SONGS:=.pdf}
-SONGS_2PDF= ${SONGS:=-2.pdf}
+SONGS_2PDF= ${SONGS:=_2.pdf}
 SONGS_WAV = ${SONGS:=.wav} ${SONGS_NO_PS:=.wav}
-SONGS_2WAV = ${SONGS:=-2.wav} ${SONGS_NO_PS:=-2.wav}
+SONGS_2WAV = ${SONGS:=_2.wav} ${SONGS_NO_PS:=_2.wav}
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 BROKEN_MID = ${BROKEN:=.mid}
-BROKEN_2MID = ${BROKEN:=-2.mid}
+BROKEN_2MID = ${BROKEN:=_2.mid}
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.E
 .SUFFIXES: .E
 .PRECIOUS: %.csv %.abc %.mid %_m.ps
 .SUFFIXES: .csv .abc .mid _m.ps .fs .wav .pdf .ps
-.PRECIOUS: %-2.csv %-2.abc %-2.mid %_m2.ps
-.SUFFIXES: -2.csv -2.abc -2.mid _m2.ps -2.fs -2.wav -2.pdf -2.ps
+.PRECIOUS: %_2.csv %_2.abc %_2.mid %_m2.ps
+.SUFFIXES: _2.csv _2.abc _2.mid _m2.ps _2.fs _2.wav _2.pdf _2.ps
 # output $@   -- input $<
 %.fs:  %.E
 	${MUSICOMP2ABC} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
-%-2.fs:  %.E
+%_2.fs:  %.E
 	${IMSCOMP} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
 %.csv:  %.E
 	${MUSICOMP2ABC} --midi1csv $< $@ || (rm -f $@ ; exit 1)
-%-2.csv:  %.E
+%_2.csv:  %.E
 	${IMSCOMP} --midi1csv $< $@ || (rm -f $@ ; exit 1)
 %.mid:  %.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
-%-2.mid:  %-2.csv
+%_2.mid:  %_2.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.wav:  %.mid
 	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser/GeneralUser.sf2 -K 128 $< \
 		|| (rm -f $@ ; exit 1)
-%-2.wav:  %-2.mid
+%_2.wav:  %_2.mid
 	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser/GeneralUser.sf2 -K 128 $< \
 		|| (rm -f $@ ; exit 1)
 %.abc:  %.E
 	${MUSICOMP2ABC} --abc $< $@ || (rm -f $@ ; exit 1)
-%-2.abc:  %.E
+%_2.abc:  %.E
 	${IMSCOMP} --abc $< $@ || (rm -f $@ ; exit 1)
 #-- %.ps:   %.abc
 #-- 	${YAPS} $< -o $@ -k || (rm -f $@ ; exit 1)
 %_m.ps: %.abc
 	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) || (rm -f $@ ; exit 1)
-%_m2.ps: %-2.abc
+%_m2.ps: %_2.abc
 	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) || (rm -f $@ ; exit 1)
 %.pdf:	%_m.ps
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
-%-2.pdf:	%_m2.ps
+%_2.pdf:	%_m2.ps
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E: %.gcs
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
 %.v:    %.E ${MUSICOMP2ABC}
 	${MUSICOMP2ABC} --vert $< $@ || (rm -f $@ ; exit 1)
-%-2.v:    %.E ${IMSCOMP}
+%_2.v:    %.E ${IMSCOMP}
 	${IMSCOMP} --vert $< $@ || (rm -f $@ ; exit 1)
 %.h:    %.E ${MUSICOMP2ABC}
 	${MUSICOMP2ABC} --hori $< $@ || (rm -f $@ ; exit 1)
-%-2.h:    %.E ${IMSCOMP}
+%_2.h:    %.E ${IMSCOMP}
 	${IMSCOMP} --hori $< $@ || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help

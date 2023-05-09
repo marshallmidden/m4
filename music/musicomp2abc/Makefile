@@ -41,13 +41,13 @@ TESTS += CSTOP
 #-----------------------------------------------------------------------------
 SONGS_E = ${SONGS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
-SONGS_2ABC = ${SONGS:=-2.abc}
+SONGS_2ABC = ${SONGS:=_2.abc}
 SONGS_FS = ${SONGS:=.fs}
-SONGS_2FS = ${SONGS:=-2.fs}
+SONGS_2FS = ${SONGS:=_2.fs}
 SONGS_M_PS = ${SONGS:=_m.ps}
 SONGS_M2_PS = ${SONGS:=_m2.ps}
 SONGS_PDF= ${SONGS:=.pdf}
-SONGS_2PDF= ${SONGS:=-2.pdf}
+SONGS_2PDF= ${SONGS:=_2.pdf}
 #-----------------------------------------------------------------------------
 TESTS_E = ${TESTS:=.E}
 TESTS_ABC = ${TESTS:=.abc}
@@ -59,7 +59,7 @@ TESTS_PDF= ${TESTS:=.pdf}
 #+ TESTS_PS = ${TESTS:=.ps}
 #+ TESTS_WAV = ${TESTS:=.wav}
 #-----------------------------------------------------------------------------
-MUSICOMP = ~/musicomp2abc/musicomp2abc
+MUSICOMP = ./musicomp2abc
 IMSCOMP = ~/ims/imscomp
 MC_ARGS =
 #++ MC_ARGS = --warn_octave_accidental
@@ -84,42 +84,42 @@ CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.E %.csv %_m.ps
 .SUFFIXES: .abc _m.ps .E .fs .csv .mid .pdf
-.PRECIOUS: %-2.abc %-2.csv %_m2.ps
-.SUFFIXES: -2.abc _m2.ps -2.fs -2.csv -2.mid -2.pdf
+.PRECIOUS: %_2.abc %_2.csv %_m2.ps
+.SUFFIXES: _2.abc _m2.ps _2.fs _2.csv _2.mid _2.pdf
 # output $@   -- input $<
 %.fs:   %.E
 	${MUSICOMP} ${MC_ARGS} --two --fluidsynth $< $@ || rm -f $@
-%-2.fs: %.E
+%_2.fs: %.E
 	${IMSCOMP} ${MC_ARGS} --two --fluidsynth $< $@ || rm -f $@
 %.csv:  %.E
 	${MUSICOMP} ${MC_ARGS} --midi1csv $< $@ || rm -f $@
-%-2.csv: %.E
+%_2.csv: %.E
 	${IMSCOMP} ${MC_ARGS} --midi1csv $< $@ || rm -f $@
 %.mid:  %.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
-%-2.mid: %-2.csv
+%_2.mid: %_2.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.abc:  %.E
 	${MUSICOMP} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
-%-2.abc: %.E
+%_2.abc: %.E
 	${IMSCOMP} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
 %_m.ps: %.abc
 	(${ABCM2PS} -l -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@)
-%_m2.ps: %-2.abc
+%_m2.ps: %_2.abc
 	(${ABCM2PS} -l -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@)
 %.pdf:	%_m.ps
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
-%-2.pdf: %_m2.ps
+%_2.pdf: %_m2.ps
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E: %.gcs
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
 %.v:    %.E ${MUSICOMP}
 	${MUSICOMP} ${MC_ARGS} --vert $< $@ || (rm -f $@ ; exit 1)
-%-2.v:  %.E ${IMSCOMP}
+%_2.v:  %.E ${IMSCOMP}
 	${IMSCOMP} ${MC_ARGS} --vert $< $@ || (rm -f $@ ; exit 1)
 %.h:    %.E ${MUSICOMP}
 	${MUSICOMP} ${MC_ARGS} --hori $< $@ || (rm -f $@ ; exit 1)
-%-2.h:  %.E ${IMSCOMP}
+%_2.h:  %.E ${IMSCOMP}
 	${IMSCOMP} ${MC_ARGS} --hori $< $@ || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 #+ %.ps:   %.abc
@@ -160,7 +160,7 @@ clean:
 	rm -f ${SONGS_E} ${TESTS_E}
 	rm -f *.stderr *.stdout
 	rm -f *.h *.v *.csv *.mid *.E
-	rm -f *-2.h *-2.v *-2.csv *-2.mid
+	rm -f *_2.h *_2.v *_2.csv *_2.mid
 #-----------------------------------------------------------------------------
 #+	rm -f ${SONGS_CSV} ${TESTS_CSV}
 #+	rm -f ${SONGS_MID} ${TESTS_MID}
