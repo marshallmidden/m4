@@ -1,7 +1,7 @@
 #-----------------------------------------------------------------------------
 SONGS  =
 #-----------------------------------------------------------------------------
-TESTS  = A
+TESTS  = A0
 TESTS += A1
 TESTS += A2
 TESTS += A4
@@ -30,7 +30,7 @@ TESTS_FS = ${TESTS:=.fs}
 TESTS_M_PS = ${TESTS:=_m.ps}
 TESTS_PDF= ${TESTS:=.pdf}
 #-----------------------------------------------------------------------------
-IMSCOMP = ~/ims/imscomp
+IMSCOMP = ./imscomp
 MC_ARGS =
 ABCM2PS	     = abcm2ps
 PS2PDF       = ps2pdf
