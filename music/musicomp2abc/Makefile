@@ -8,7 +8,7 @@ SONGS += inv15-example.working
 SONGS += loudness.mcomp
 SONGS += promenade
 SONGS += promenade-musicomp2abc
-SONGS += tc
+#?? SONGS += tc
 SONGS += Aflatmajor
 #-----------------------------------------------------------------------------
 TESTS  =
