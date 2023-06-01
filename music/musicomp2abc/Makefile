@@ -34,10 +34,6 @@ TESTS += VARIABLES
 TESTS += CSTOP
 #-----------------------------------------------------------------------------
 # SONGS_GCS = ${SONGS:=.gcs}
-#+ SONGS_CSV = ${SONGS:=.csv}
-#+ SONGS_MID = ${SONGS:=.mid}
-#+ SONGS_PS = ${SONGS:=.ps}
-#+ SONGS_WAV = ${SONGS:=.wav}
 #-----------------------------------------------------------------------------
 SONGS_E = ${SONGS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
@@ -46,6 +42,7 @@ SONGS_M_PS = ${SONGS:=_m.ps}
 SONGS_PDF= ${SONGS:=.pdf}
 SONGS_H= ${SONGS:=.h}
 SONGS_V= ${SONGS:=.v}
+
 SONGS_2ABC = ${SONGS:=_2.abc}
 SONGS_2FS = ${SONGS:=_2.fs}
 SONGS_M2_PS = ${SONGS:=_m2.ps}
@@ -142,8 +139,6 @@ help:
 	@echo "TESTS: ${TESTS}"
 #-----------------------------------------------------------------------------
 .PHONY: all songs ${SONGS}
-#- all songs ${SONGS}: ${SONGS_MID} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV} ${SONGS_FS}
-#- all songs ${SONGS}: ${SONGS_M_PS} ${SONGS_FS} ${SONGS_PDF}
 all songs ${SONGS}: ${SONGS_M_PS} ${SONGS_M2_PS} ${SONGS_FS} ${SONGS_2FS} ${SONGS_PDF} ${SONGS_2PDF}
 #-----------------------------------------------------------------------------
 .PHONY: v h
@@ -151,29 +146,26 @@ v: ${SONGS_2V} ${SONGS_V}
 h: ${SONGS_2H} ${SONGS_H}
 #-----------------------------------------------------------------------------
 .PHONY: tests ${TESTS}
-#- tests ${TESTS}: ${TESTS_MID} ${TESTS_PS} ${TESTS_M_PS} ${TESTS_WAV} ${TESTS_FS}
-#- tests ${TESTS}: ${TESTS_M_PS} ${TESTS_FS} ${TESTS_PDF}
 tests ${TESTS}: ${TESTS_M_PS} ${TESTS_M2_PS} ${TESTS_FS} ${TESTS_2FS} ${TESTS_PDF} ${TESTS_2PDF}
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -f ${SONGS_FS} ${TESTS_FS}
-	rm -f ${SONGS_2FS} ${TESTS_2FS}
-	rm -f ${SONGS_ABC} ${TESTS_ABC}
-	rm -f ${SONGS_2ABC} ${TESTS_2ABC}
-	rm -f ${SONGS_M_PS} ${TESTS_M_PS}
-	rm -f ${SONGS_M2_PS} ${TESTS_M2_PS}
-	rm -f ${SONGS_PDF} ${TESTS_PDF}
-	rm -f ${SONGS_2PDF} ${TESTS_2PDF}
 	rm -f ${SONGS_E} ${TESTS_E}
+	rm -f ${SONGS_FS} ${TESTS_FS}
+	rm -f ${SONGS_ABC} ${TESTS_ABC}
+	rm -f ${SONGS_M_PS} ${TESTS_M_PS}
+	rm -f ${SONGS_PDF} ${TESTS_PDF}
+
+	rm -f ${SONGS_2FS} ${TESTS_2FS}
+	rm -f ${SONGS_2ABC} ${TESTS_2ABC}
+	rm -f ${SONGS_M2_PS} ${TESTS_M2_PS}
+	rm -f ${SONGS_2PDF} ${TESTS_2PDF}
+
 	rm -f *.stderr *.stdout
 	rm -f *.h *.v *.csv *.mid *.E
 	rm -f *_2.h *_2.v *_2.csv *_2.mid
-#-----------------------------------------------------------------------------
-#+	rm -f ${SONGS_CSV} ${TESTS_CSV}
-#+	rm -f ${SONGS_MID} ${TESTS_MID}
-#+	rm -f ${SONGS_PS} ${TESTS_PS}
-#+	rm -f ${SONGS_WAV} ${TESTS_WAV}
+
+	rm -f ZZZ.*
 #-----------------------------------------------------------------------------
 .PHONY: check
 check:

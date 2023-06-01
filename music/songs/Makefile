@@ -156,24 +156,31 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 #-----------------------------------------------------------------------------
 # SONGS_GCS = ${SONGS:=.gcs}
 SONGS_E = ${SONGS:=.E} ${SONGS_NO_PS:=.E}
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 SONGS_ABC = ${SONGS:=.abc}
-SONGS_2ABC = ${SONGS:=_2.abc}
 SONGS_CSV = ${SONGS:=.csv} ${SONGS_NO_PS:=.csv}
-SONGS_2CSV = ${SONGS:=_2.csv} ${SONGS_NO_PS:=_2.csv}
 SONGS_MID = ${SONGS:=.mid} ${SONGS_NO_PS:=.mid}
-SONGS_2MID = ${SONGS:=_2.mid} ${SONGS_NO_PS:=_2.mid}
 SONGS_FS = ${SONGS:=.fs} ${SONGS_NO_PS:=.fs}
-SONGS_2FS = ${SONGS:=_2.fs} ${SONGS_NO_PS:=_2.fs}
 SONGS_M_PS = ${SONGS:=_m.ps}
-SONGS_M2_PS = ${SONGS:=_m2.ps}
 #-- SONGS_PS = ${SONGS:=.ps}
-#-- SONGS_2PS = ${SONGS:=_2.ps}
 SONGS_PDF= ${SONGS:=.pdf}
-SONGS_2PDF= ${SONGS:=_2.pdf}
 SONGS_WAV = ${SONGS:=.wav} ${SONGS_NO_PS:=.wav}
-SONGS_2WAV = ${SONGS:=_2.wav} ${SONGS_NO_PS:=_2.wav}
+SONGS_V= ${SONGS:=.v}
+SONGS_H= ${SONGS:=.h}
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 BROKEN_MID = ${BROKEN:=.mid}
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+SONGS_2ABC = ${SONGS:=_2.abc}
+SONGS_2CSV = ${SONGS:=_2.csv} ${SONGS_NO_PS:=_2.csv}
+SONGS_2MID = ${SONGS:=_2.mid} ${SONGS_NO_PS:=_2.mid}
+SONGS_2FS = ${SONGS:=_2.fs} ${SONGS_NO_PS:=_2.fs}
+SONGS_M2_PS = ${SONGS:=_m2.ps}
+#-- SONGS_2PS = ${SONGS:=_2.ps}
+SONGS_2PDF= ${SONGS:=_2.pdf}
+SONGS_2WAV = ${SONGS:=_2.wav} ${SONGS_NO_PS:=_2.wav}
+SONGS_2V= ${SONGS:=_2.v}
+SONGS_2H= ${SONGS:=_2.h}
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 BROKEN_2MID = ${BROKEN:=_2.mid}
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.E
@@ -258,6 +265,12 @@ all_wav: ${SONGS_WAV} ${SONGS_2WAV}
 .PHONY: fs all_fs
 fs all_fs: ${SONGS_FS} ${SONGS_2FS}
 #-----------------------------------------------------------------------------
+.PHONY: v all_v
+v all_v: ${SONGS_V} ${SONGS_2V}
+#-----------------------------------------------------------------------------
+.PHONY: h all_h
+h all_h: ${SONGS_H} ${SONGS_2H}
+#-----------------------------------------------------------------------------
 .PHONY: test
 test:
 	@echo SONGS_MID=${SONGS_MID}
@@ -277,13 +290,17 @@ test:
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -f ${SONGS_E}
-	rm -f ${SONGS_CSV} ${SONGS_MID} ${SONGS_WAV} ${SONGS_FS}
-	rm -f ${SONGS_ABC} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_PDF}
+#--	rm -f ${SONGS_E}
+#--	rm -f ${SONGS_CSV} ${SONGS_MID} ${SONGS_WAV} ${SONGS_FS}
+#--	rm -f ${SONGS_ABC} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_PDF}
+#--	rm -f ${SONGS_V} ${SONGS_H}
 
-	rm -f ${SONGS_2CSV} ${SONGS_2MID} ${SONGS_2WAV} ${SONGS_2FS}
-	rm -f ${SONGS_2ABC} ${SONGS_2PS} ${SONGS_M2_PS} ${SONGS_2PDF}
+#--	rm -f ${SONGS_2CSV} ${SONGS_2MID} ${SONGS_2WAV} ${SONGS_2FS}
+#--	rm -f ${SONGS_2ABC} ${SONGS_2PS} ${SONGS_M2_PS} ${SONGS_2PDF}
+#--	rm -f ${SONGS_2V} ${SONGS_2H}
 
+	rm -f ${SONGS_2PDF} ${SONGS_PDF}
+	rm -f *.v *.h *.abc *.ps *.mid *.wav *.fs *.E *.csv
 	rm -f *.stderr
 #-----------------------------------------------------------------------------
 # End of Makefile
