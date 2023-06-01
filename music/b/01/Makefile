@@ -103,14 +103,14 @@ fs2: ${V1}_2.fs ${V2}_2.fs ${V3}_2.fs ${V4}_2.fs
 clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
-	rm -f ${V1}.{csv,mid,fs,pdf,abc,wav,E}
-	rm -f ${V2}.{csv,mid,fs,pdf,abc,wav,E}
-	rm -f ${V3}.{csv,mid,fs,pdf,abc,wav,E}
-	rm -f ${V4}.{csv,mid,fs,pdf,abc,wav,E}
-	rm -f ${V1}_2.{csv,mid,fs,pdf,abc,wav,E}
-	rm -f ${V2}_2.{csv,mid,fs,pdf,abc,wav,E}
-	rm -f ${V3}_2.{csv,mid,fs,pdf,abc,wav,E}
-	rm -f ${V4}_2.{csv,mid,fs,pdf,abc,wav,E}
+	rm -f ${V1}.{csv,mid,fs,pdf,abc,wav,E,h,v}
+	rm -f ${V2}.{csv,mid,fs,pdf,abc,wav,E,h,v}
+	rm -f ${V3}.{csv,mid,fs,pdf,abc,wav,E,h,v}
+	rm -f ${V4}.{csv,mid,fs,pdf,abc,wav,E,h,v}
+	rm -f ${V1}_2.{csv,mid,fs,pdf,abc,wav,E,h,v}
+	rm -f ${V2}_2.{csv,mid,fs,pdf,abc,wav,E,h,v}
+	rm -f ${V3}_2.{csv,mid,fs,pdf,abc,wav,E,h,v}
+	rm -f ${V4}_2.{csv,mid,fs,pdf,abc,wav,E,h,v}
 	rm -f A.[012]* B.[012]*
 #-----------------------------------------------------------------------------
 .PHONY: s1
