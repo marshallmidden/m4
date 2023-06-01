@@ -41,13 +41,17 @@ TESTS += CSTOP
 #-----------------------------------------------------------------------------
 SONGS_E = ${SONGS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
-SONGS_2ABC = ${SONGS:=_2.abc}
 SONGS_FS = ${SONGS:=.fs}
-SONGS_2FS = ${SONGS:=_2.fs}
 SONGS_M_PS = ${SONGS:=_m.ps}
-SONGS_M2_PS = ${SONGS:=_m2.ps}
 SONGS_PDF= ${SONGS:=.pdf}
+SONGS_H= ${SONGS:=.h}
+SONGS_V= ${SONGS:=.v}
+SONGS_2ABC = ${SONGS:=_2.abc}
+SONGS_2FS = ${SONGS:=_2.fs}
+SONGS_M2_PS = ${SONGS:=_m2.ps}
 SONGS_2PDF= ${SONGS:=_2.pdf}
+SONGS_2H= ${SONGS:=_2.h}
+SONGS_2V= ${SONGS:=_2.v}
 #-----------------------------------------------------------------------------
 TESTS_E = ${TESTS:=.E}
 TESTS_ABC = ${TESTS:=.abc}
@@ -141,6 +145,10 @@ help:
 #- all songs ${SONGS}: ${SONGS_MID} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV} ${SONGS_FS}
 #- all songs ${SONGS}: ${SONGS_M_PS} ${SONGS_FS} ${SONGS_PDF}
 all songs ${SONGS}: ${SONGS_M_PS} ${SONGS_M2_PS} ${SONGS_FS} ${SONGS_2FS} ${SONGS_PDF} ${SONGS_2PDF}
+#-----------------------------------------------------------------------------
+.PHONY: v h
+v: ${SONGS_2V} ${SONGS_V}
+h: ${SONGS_2H} ${SONGS_H}
 #-----------------------------------------------------------------------------
 .PHONY: tests ${TESTS}
 #- tests ${TESTS}: ${TESTS_MID} ${TESTS_PS} ${TESTS_M_PS} ${TESTS_WAV} ${TESTS_FS}
