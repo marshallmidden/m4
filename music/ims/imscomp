@@ -548,6 +548,7 @@ import readline
 import shlex
 import sys
 import random
+import copy
 #-- import pprint
 #-- # Usage:   pprint.pprint(v_t_lines, width=110, sort_dicts=False)
 
@@ -2400,6 +2401,7 @@ def print_out_abc():
 #   voice   6   30,40,50,60,70,80           $$ needed if volume changes.
 #   v1: 3c4, ...
 #   vX: 3e4, ...
+# NOTDONEYET - pan, intensity, reverb
 
 def print_measure_vh_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l_ky, l_tempo, l_t_n_l, l_pitch):
     global vl
@@ -4170,12 +4172,12 @@ def get_next_process_line(l):
     global running_process_already
     global in_process_already
 
-#---    print_debug("get_next_process_line - l={} lmp_executing_number={} lmp_executing_which='{}'".format(l,lmp_executing_number,lmp_executing_which[l]))
-#---    print_debug("get_next_process_line - lmp_executing_type='{}' lmp_executing_line='{}'".format(lmp_executing_type[l],lmp_executing_line[l]))
-#--     print_debug("get_next_process_line - lmp_executing_i_line='{}'".format(lmp_executing_i_line[l]))
-#---    print_debug("get_next_process_line - lmp_executing_args='{}'".format(lmp_executing_args[l]))
-#---    print_debug("get_next_process_line - lmp_executing_rest_of_line='{}'".format(lmp_executing_rest_of_line[l]))
-#---    print_debug("get_next_process_line - in_process_already={} running_process_already={}".format(in_process_already,running_process_already))
+    print_debug("get_next_process_line - l={} lmp_executing_number={} lmp_executing_which='{}'".format(l,lmp_executing_number,lmp_executing_which[l]))
+    print_debug("get_next_process_line - lmp_executing_type='{}' lmp_executing_line='{}'".format(lmp_executing_type[l],lmp_executing_line[l]))
+#--    print_debug("get_next_process_line - lmp_executing_i_line='{}'".format(lmp_executing_i_line[l]))
+#--    print_debug("get_next_process_line - lmp_executing_args='{}'".format(lmp_executing_args[l]))
+#--    print_debug("get_next_process_line - lmp_executing_rest_of_line='{}'".format(lmp_executing_rest_of_line[l]))
+#--    print_debug("get_next_process_line - in_process_already={} running_process_already={}".format(in_process_already,running_process_already))
 
     if lmp_executing_type[l] != 'process' or not running_process_already:
         print_error("get_next_process_line - lmp_executing_type[l]={} != 'process' or running_process_already={}".format(lmp_executing_type[l], running_process_already), 'in process')
@@ -4963,12 +4965,35 @@ def int_range_to_array(strng, original_line):
 # End of int_range_to_array
 
 # ----------------------------------------------------------------------------
-#   wline    - string to split
-#   line     - Line for error messages.
-#   integers - True if expect numbers as arguments.
-#   nospaces - True if do not split on spaces.
+#   wline         - string to split
+#   integers      - True if expect numbers as arguments.
+#                 - False if alphanumberic.
+#                 - None if voice numbers - staff_name -> voice numbers.
+#   nospaces      - True if do not split on spaces.
+#   original_line - Line for error messages.
 
 def separate_args(wline, integers, nospaces, original_line):
+    def b4it(array_args, b4, original_line):
+        if b4 == '':
+            array_args.append(b4)
+        elif integers is None:
+            if b4 in staff_name:
+                for v in staff_name[b4]:
+                    array_args.append(str(v))   # Do staff_name to voice numbers conversions.
+                # rof
+            else:
+                nums = int_range_to_array(b4, original_line)
+                array_args = array_args + nums
+            # fi
+        elif integers:
+            nums = int_range_to_array(b4, original_line)
+            array_args = array_args + nums
+        else:
+            array_args.append(b4)
+        # fi
+        return array_args
+    # End of b4it
+
     global args
 
     splitter = [ ',', ";" ]
@@ -4997,21 +5022,12 @@ def separate_args(wline, integers, nospaces, original_line):
             break
         # fi
         b4 = s[0:x]
-        if integers and b4 != '':
-            nums = int_range_to_array(b4, original_line)
-            array_args = array_args + nums
-        else:
-            array_args.append(b4)
-        # fi
+        array_args = b4it(array_args, b4, original_line)
         b4 = ''
         w = w + x + 1
     # elihw
-    if integers and b4 != '':
-        nums = int_range_to_array(b4, original_line)
-        array_args = array_args + nums
-    else:
-        array_args.append(b4)
-    # fi
+
+    array_args = b4it(array_args, b4, original_line)
     return array_args
 # End of separate_args
 
@@ -5172,9 +5188,11 @@ def process_define(command, t_args, original_line):
     if command in commands and commands[command][0] == do_process:
         process_defining_count = process_defining_count + 1
     elif command in commands and commands[command][0] == do_endprocess:
+        print_debug("process_define - command='{}' t_args-'{}' do_endprocess".format(command, t_args))
         process_defining_count = process_defining_count - 1
         if process_defining_count <= 0:
             commands[command][0](t_args, original_line)              # Process command endprocess.
+            print_debug("process_define - return after running command='{}'".format(command))
             return
         # fi
     # fi
@@ -5276,8 +5294,10 @@ def set_default_ims(t_args, original_line):
         return
     # fi
     voice = getvar_checkokay('voice', original_line)     # Interesting - get last time used. :)
-    if voice < 1:
+    if type(voice) is int and voice < 1:
         voice = 1
+    elif type(voice) is str:
+        voice = voice.split(',')
     # fi
     # Save what type of processing we are doing.
     save_current_type = [args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc]
@@ -5341,9 +5361,11 @@ def set_default_ims(t_args, original_line):
             print_error("cannot have dotted syntax on a default note length.", original_line)
             return
         # fi
-        v = getvar_checkokay('voice', original_line)         # Interesting - get last time used. :)
-        if v < 1:
+        v = getvar_checkokay('voice', original_line)     # Interesting - get last time used. :)
+        if type(v) is int and v < 1:
             v = 1
+        elif type(v) is str:
+            v = v.split(',')
         # fi
         timeofnote = get_staff_arr(v, time, 'set_default_ims ' + original_line)
     # fi
@@ -5380,8 +5402,10 @@ def decode_gsw(t_args, original_line):
         return
     # fi
     voice = getvar_checkokay('voice', original_line)     # Interesting - get last time used. :)
-    if voice < 1:
+    if type(voice) is int and voice < 1:
         voice = 1
+    elif type(voice) is str:
+        voice = voice.split(',')
     # fi
     # Save what type of processing we are doing.
     save_current_type = [args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc]
@@ -5468,9 +5492,11 @@ def decode_gsw(t_args, original_line):
             print_error("cannot have dotted syntax on a default note length.", original_line)
             return
         # fi
-        v = getvar_checkokay('voice', original_line)         # Interesting - get last time used. :)
-        if v < 1:
+        v = getvar_checkokay('voice', original_line)     # Interesting - get last time used. :)
+        if type(v) is int and v < 1:
             v = 1
+        elif type(v) is str:
+            v = v.split(',')
         # fi
         timeofnote = get_staff_arr(v, time, 'decode_gsw ' + original_line)
     # fi
@@ -5535,6 +5561,9 @@ def decode_ims(t_args, original_line):
     voice = getvar_checkokay('voice', original_line)     # Interesting - get last time used. :)
     if type(voice) is int and voice < 1:
         voice = 1
+    elif type(voice) is str:
+        print_debug("decode_ims - voice='{}'".format(voice))
+        voice = [voice]
     # fi
 
     sg = t_args
@@ -5570,7 +5599,8 @@ def decode_ims(t_args, original_line):
     # Save what type of processing we are doing.
     save_current_type = [args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc]
 # NOTDONEYET - voice is a staff name (or names).
-    savekeyvoice = key_voice[voice][measure_on]
+#--    savekeyvoice = key_voice[voice][measure_on]
+    savekeyvoice = get_staff_arr_double(voice, measure_on, key_voice, original_line)
     # ------------------------------------------------------------------------------
     if args.vertical or args.horizontal:
         k = key_sig[savekeyvoice]           # Convert to number.
@@ -5593,7 +5623,8 @@ def decode_ims(t_args, original_line):
     args.midi1csv = True
     args.fluidsynth = False
     args.abc = False
-    key_voice[voice][measure_on] = k
+#--    key_voice[voice][measure_on] = k
+    set_staff_arr_double(voice, k, measure_on, key_voice, original_line)
 
     w_note = x[0]
     therest, midinote, typenote = getnote(w_note, voice, False, True, original_line)
@@ -5601,12 +5632,14 @@ def decode_ims(t_args, original_line):
     # What does key_voice have to me?
     args.horizontal = True
     args.midi1csv = False
-    key_voice[voice][measure_on] = key_sig_int[k]
+#--    key_voice[voice][measure_on] = key_sig_int[k]
+    set_staff_arr_double(voice, key_sig_int[k], measure_on, key_voice, original_line)
     a, thenote, b = getnote(w_note, voice, False, True, original_line)
 
     # Restore type of processing we are doing.
     args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc = save_current_type
-    key_voice[voice][measure_on] = savekeyvoice
+#--    key_voice[voice][measure_on] = savekeyvoice
+    set_staff_arr_double(voice, savekeyvoice,  measure_on, key_voice, original_line)
 
     if therest is None or thenote is None:
         print_error("decode note had error with note {}".format(w_note), original_line)
@@ -5691,12 +5724,14 @@ def decode_ims(t_args, original_line):
     note_chord_start = 0            # NOTDONEYET
     note_chord_end = 0              # NOTDONEYET [ ] : start/end of chord (1, 0 if not)
     note_glissando = 0              # NOTDONEYET    : Starting pitch of glissando = 1
-    note_volumenumber = vl[voice][measure_on]     # : 0 to 100% (probably here do 0 to 127.)
+#--    note_volumenumber = vl[voice][measure_on]     # : 0 to 100% (probably here do 0 to 127.)
+    note_volumenumber = get_staff_arr_double(voice, measure_on, vl, original_line)
     note_volumename = -1            # Do not do this. : 1 = vfff, 2 = vff ... 8 = vppp. -1 not volume, 0 if numerical.
     note_crescendo = 0              # NOTDONEYET    : crescendo 1 = start of crescendo, 0 if not.
     note_diminuendo = 0             # NOTDONEYET    : 1 = start of diminuendo, 0 if not.
     note_position = 0               # NOTDONEYET    : 0 to 100% (probably 0 to 127) for numerical position (pan value).
-    note_pan = pan[voice][measure_on]
+#--    note_pan = pan[voice][measure_on]
+    note_pan = get_staff_arr_double(voice, measure_on, pan, original_line)
 
     note_type = -1                  # Set this later.
     note_treble = 0                 # NOTDONEYET ??
@@ -5821,8 +5856,10 @@ def decode_ims(t_args, original_line):
             return
         # fi
     # rof
-    vl[voice][measure_on] = note_volumenumber
-    pan[voice][measure_on] = note_pan           # Index by measure then voice.
+#--    vl[voice][measure_on] = note_volumenumber
+    set_staff_arr_double(voice, note_volumenumber, measure_on, vl, original_line)
+#--    pan[voice][measure_on] = note_pan           # Index by measure then voice.
+    set_staff_arr_double(voice, note_pan, measure_on, pan, original_line)
     return
 # End of decode_ims
 
@@ -6286,7 +6323,7 @@ def do_clef(t_args, original_line):
     clf = vargs[1]
 
     jkl = "".join(vargs[0])
-    wargs = separate_args(jkl, True, True, original_line)
+    wargs = separate_args(jkl, None, True, original_line)   # Allow staff_name and voice numbers.
     if not wargs or len(wargs) < 1:
         print_error("no voice arguments on clef line", original_line)
         return
@@ -6580,14 +6617,15 @@ def get_defaults_for_note(t_args, voiceon, original_line):
     global key_sig
     global key_voice
 
-    if type(voiceon) is not int:
-        print_error("get_defaults_for_note - voiceon type is not int ({})".format(type(voiceon)), 'get_defaults_for_note')
-        print_die("voiceon must be a voice.")
-    # fi
+#--    if type(voiceon) is not int:
+#--        print_error("get_defaults_for_note - voiceon type is not int ({})".format(type(voiceon)), 'get_defaults_for_note')
+#--        print_die("voiceon must be a voice.")
+#--    # fi
 
     # Save what type of processing we are doing.
     save_current_type = [args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc]
-    savekeyvoice = key_voice[voiceon][measure_on]
+#--    savekeyvoice = key_voice[voiceon][measure_on]
+    savekeyvoice = get_staff_arr_double(voiceon, measure_on, key_voice, original_line)
     # ------------------------------------------------------------------------------
     if args.vertical or args.horizontal:
         k = key_sig[savekeyvoice]           # Convert to number.
@@ -6610,7 +6648,8 @@ def get_defaults_for_note(t_args, voiceon, original_line):
     args.midi1csv = True
     args.fluidsynth = False
     args.abc = False
-    key_voice[voiceon][measure_on] = k
+#--    key_voice[voiceon][measure_on] = k
+    set_staff_arr_double(voiceon, k, measure_on, key_voice, original_line)
 
     w_note = t_args
     therest, midinote, typenote = getnote(w_note, voiceon, False, True, original_line)
@@ -6618,12 +6657,14 @@ def get_defaults_for_note(t_args, voiceon, original_line):
     # Now do text form of note.
     args.horizontal = True
     args.midi1csv = False
-    key_voice[voiceon][measure_on] = key_sig_int[k]
+#--    key_voice[voiceon][measure_on] = key_sig_int[k]
+    set_staff_arr_double(voiceon, key_sig_int[k], measure_on, key_voice, original_line)
     a, thenote, b = getnote(w_note, voiceon, False, True, original_line)
 
     # Restore type of processing we are doing.
     args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc = save_current_type
-    key_voice[voiceon][measure_on] = savekeyvoice
+#--    key_voice[voiceon][measure_on] = savekeyvoice
+    set_staff_arr_double(voiceon, savekeyvoice, measure_on, key_voice, original_line)
     if therest is None or thenote is None:
         print_error("note had error with note {}".format(w_note), original_line)
         return None, 0, 0, 0, 0, 0, 0, 0
@@ -6663,9 +6704,11 @@ def get_defaults_for_note(t_args, voiceon, original_line):
         # fi
     # fi
     if timeofnote is None or timeofnote == 0:
-        v= getvar_checkokay('voice', original_line)      # Interesting - get last time used. :)
-        if v < 1:
+        v = getvar_checkokay('voice', original_line)     # Interesting - get last time used. :)
+        if type(v) is int and v < 1:
             v = 1
+        elif type(v) is str:
+            v = v.split(',')
         # fi
         timeofnote = get_staff_arr(v, time, 'get_defaults_for_note ' + original_line)
     # fi
@@ -6785,6 +6828,8 @@ def do_encode(t_args, original_line):
     voiceon = getvar_checkokay('voice', original_line)     # Interesting - get last time used. :)
     if type(voiceon) is int and voiceon < 1:
         voiceon = 1
+    elif type(voiceon) is str:
+        voiceon = voiceon.split(',')
     # fi
 
     # semi-colons with comma pairs -- except for explict. ... pairs starts here.
@@ -7511,7 +7556,7 @@ def do_key(t_args, original_line):
         return
     # fi                # multiple arguments, voices first.
 
-    wargs = separate_args(vs, True, True, original_line)
+    wargs = separate_args(vs, None, True, original_line)    # Allow staff_name and voice numbers.
     if not wargs or len(wargs) < 1:
         print_error("no voice arguments on key line", original_line)
         return
@@ -7648,7 +7693,7 @@ def do_instrument(t_args, original_line):
     # fi
 
     jkl = "".join(vargs[0])
-    wargs = separate_args(jkl, True, True, original_line)
+    wargs = separate_args(jkl, None, True, original_line)   # Allow staff_name and voice numbers.
     if not wargs or len(wargs) < 1:
         print_error("no voice arguments on instrument line", original_line)
         return
@@ -7720,7 +7765,7 @@ def do_intensity(t_args, original_line):
     # fi
 
     jkl = "".join(vargs[0])
-    wargs = separate_args(jkl, True, True, original_line)
+    wargs = separate_args(jkl, None, True, original_line)   # Allow staff_name and voice numbers.
     if not wargs or len(wargs) < 1:
         print_error("no voice arguments on intensity line", original_line)
         return
@@ -8465,7 +8510,7 @@ def do_pan(t_args, original_line):
         # fi
     # fi
     jkl = "".join(vargs[0])
-    wargs = separate_args(jkl, True, True, original_line)
+    wargs = separate_args(jkl, None, True, original_line)   # Allow staff_name and voice numbers.
     if not wargs or len(wargs) < 1:
         print_error("no voice arguments on pan line", original_line)
         return
@@ -8766,7 +8811,7 @@ def do_reverb(t_args, original_line):
     # fi
 
     jkl = "".join(vargs[0])
-    wargs = separate_args(jkl, True, True, original_line)
+    wargs = separate_args(jkl, None, True, original_line)   # Allow staff_name and voice numbers.
 
     if not wargs or len(wargs) < 1:
         print_error("no voice arguments on reverb line", original_line)
@@ -9403,7 +9448,7 @@ def do_xpose(t_args, original_line):
     # kl is None means to use current key for voice.
 
     jkl = "".join(vs)
-    wargs = separate_args(jkl, True, True, original_line)
+    wargs = separate_args(jkl, None, True, original_line)   # Allow staff_name and voice numbers.
     if not wargs or len(wargs) < 1:
         print_error("no voice arguments on xpose", original_line)
         return
@@ -11063,6 +11108,8 @@ def determine_s_vol(f1, voiceon, original_line):
 #       vol(sf)
 # See volumes command for more volumes. And "s" for this note only,
 # and like "sfp" after it to go to "f" for this note, and "p" for following notes.
+#
+# NOTDONEYET - The value should be allowed to have parenthesis.
 
 def get_vol_note(temp1, voiceon, original_line):
     global S_vlprint
@@ -11129,6 +11176,8 @@ def get_vol_note(temp1, voiceon, original_line):
 # therest,newvolume,newtime = get_cresc(temp1, original_line)
 #       v22: cresc(ff,0.5)                          $$ Go from here to ff over 1/2 note time length.
 #       v1: dimin(p,2.0) s3(1f,1f,1f)4, 1f4t, 1f1d  $$ Go to p over time of two whole notes.
+#
+# NOTDONEYET - The value should be allowed to have parenthesis.
 
 def get_cresc(temp1, original_line):
     global measure_on
@@ -12849,20 +12898,30 @@ def set_process_quit():
 
 # ============================================================================
 def run_process(token, next_tokens, original_line):
-    print_debug("run_process '{}' '{}' '{}'".format(last_voice_staff, token, next_tokens))
+    print_debug("run_process - last_voice_staff='{}' token='{}' next_tokens='{}'".format(last_voice_staff, token, next_tokens))
 
     global process_argument                         # Array of the argument for process.
+    global running_process_type
     global lmp_executing_number                     # If processing process ... reading from process buffer.
     global lmp_executing_which                      # Which process being executed. Means cannot reorder. *drats*
     global lmp_executing_args                       # Argument given to process.
     global lmp_executing_line                       # Line number in process array.
     global lmp_executing_i_line
+    global lmp_executing_rest_of_line
     global i_line
     # set to say that token is now the variable and we'll get next items from process.
     global running_process_already
 
     if lmp_executing_type[-1] != 'process':
         print_error("run_process -ERROR, not in a process", original_line)
+        print_debug("            - lmp_executing_type={}".format(lmp_executing_type))
+        print_debug("            - lmp_executing_number={}".format(lmp_executing_number))
+        print_debug("            - lmp_executing_which={}".format(lmp_executing_which))
+        print_debug("            - lmp_executing_args={}".format(lmp_executing_args))
+        print_debug("            - lmp_executing_line={}".format(lmp_executing_line))
+#--        print_debug("            - lmp_executing_i_line={}".format(lmp_executing_i_line))
+        print_debug("            - lmp_executing_rest_of_line={}".format(lmp_executing_rest_of_line))
+        print_debug("            - running_process_already={}".format(running_process_already))
         return
     # fi
 #--    lmp_executing_args[-1] = [ token ]
@@ -12918,26 +12977,20 @@ def keyword_position(token, delimiter, next_tokens, original_line):
 
 # ============================================================================
 # p(pos) or pan(pos)
-# p pos or pan pos
-# Get the value following the p() or the pos() or v() or vol().
 
-def pv(token, delimiter, next_tokens, original_line):
-    print_error("NOTDONEYET - pv '{}' '{}' '{}'".format(token, delimiter, next_tokens), original_line)
-    if delimiter == '(':
-        pass
-    # fi
-    return None, None, None
-# End of pv
-
-# ============================================================================
 def keyword_pan(token, delimiter, next_tokens, original_line):
-    print_debug("keyword_pan - ENTERING token='{}' delimiter='{}' next_tokens='{}'".format(token, delimiter, next_tokens))
-    token, delimiter, next_tokens = pv(token, delimiter, next_tokens, original_line)
+#--    print_debug("keyword_pan - ENTERING token='{}' delimiter='{}' next_tokens='{}'".format(token, delimiter, next_tokens))
+    if delimiter != '(':
+        print_error("pan delimiter='{}' is not '('".format(delimiter), original_line)
+        return None
+    # fi
     command, t_args, delimiter = compute_command_args(next_tokens)
-    print_debug("keyword_pan - #1 command='{}' t_args='{}' delimiter='{}'".format(command, t_args, delimiter))
-    strng = str(last_voice_staff) + ': ' + command
-    print_debug("keyword_pan - #2 token='{}' delimiter='{}' next_tokens='{}' strng='{}'".format(token, delimiter, next_tokens, strng))
-    do_pan(strng, original_line)
+#--    print_debug("keyword_pan - #1 command='{}' t_args='{}' delimiter='{}'".format(command, t_args, delimiter))
+    w = parens_match(')', next_tokens, 0, original_line)
+    t_args = next_tokens[w:].strip()
+#--    print_debug("keyword_pan - #2 w='{}' next_tokens='{}' t_args='{}'".format(w, next_tokens, t_args))
+    strng = ",".join(last_voice_staff)
+    do_pan(strng + ' ' + next_tokens[0:w], original_line)
     return t_args
 # End of keyword_pan
 
@@ -13066,9 +13119,9 @@ staff_keywords = {
 # Might take multiple tokens.
 
 def process_keyword(token, delimiter, next_tokens, original_line):
-    print_debug("process_keyword - token='{}' delimiter='{}' next_tokens='{}'".format(token, delimiter, next_tokens))
+#--    print_debug("process_keyword - token='{}' delimiter='{}' next_tokens='{}'".format(token, delimiter, next_tokens))
     next_tokens = staff_keywords[token](token, delimiter, next_tokens, original_line)
-    print_debug("process_keyword - next_tokens='{}'".format(next_tokens))
+#--    print_debug("process_keyword - next_tokens='{}'".format(next_tokens))
     return next_tokens
 # End of process_keyword
 
@@ -13290,12 +13343,23 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):      
     elif middle:
         for st in last_voice_staff:                 # Go through staves
             for na in note_add:
-                na[1] = [st]                        # Put onto staff_chord for this staff only.
-                staff_chord[st].append(na)
+                q = copy.deepcopy(na)
+                q[1] = [st]                         # Put onto staff_chord for this staff only.
+                staff_chord[st].append(q)
             # rof
         # rof
     else:
-        handle_staff_note([note_add], original_line)    # Only one note/voice in chord. (can be trill/sequence).
+        new_sc = []
+        for st in last_voice_staff:
+            q = copy.deepcopy(note_add)
+            n = len(q)
+            for i in range(0,n):
+                q[i][1] = [st]
+            # rof
+            new_sc.append(q)
+            # fi
+        # rof
+        handle_staff_note(new_sc, original_line)    # Only one note/voice in chord. (can be trill/sequence).
     # fi
     return rest
 # End of process_notes_for_staff
@@ -13376,13 +13440,17 @@ def process_staff_notes(command, delimiter, t_args, original_line):
             print_warning("m:{} macro {} did not match terminators correctly...".format(measure_on, token), original_line)
         # fi
         if token == 'begin':
+            print_debug("token is begin")
             if in_process_already:
+                print_debug("in_process_already is true")
                 # Delete process from stack.
                 set_process_quit()
             # fi
             token, next_tokens, tdelim = compute_command_args(next_tokens)
+            print_debug("token is begin - token={} next_tokens={} tdelim={}".format(token, next_tokens, tdelim))
             in_process_already = set_process_begin(token, next_tokens, original_line)
             running_process_already = False
+            print_debug("begin - in_process_already={} running_process_already={}".format(in_process_already,running_process_already))
         elif token == 'quit':
             if in_process_already:
                 # Delete process from stack.
@@ -13392,6 +13460,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                 print_error("quit without being in a process.", original_line)
             # fi
         elif in_process_already and not running_process_already:
+            print_debug("in_process_already={} and not running_process_already={} token={} next_tokens={}".format(in_process_already,running_process_already,token,next_tokens))
             run_process(token, next_tokens, original_line)
             return
         elif token in staff_keywords:
@@ -13440,9 +13509,13 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                     print_error("Ending chord for staff {} but not in the middle of a chord".format(st), original_line)
                     err = True
                 else:
-                    q = staff_chord[st]
+                    q = copy.deepcopy(staff_chord[st])
+                    n = len(q)
+                    for i in range(0,n):
+                        q[i][1] = [st]
+                    # rof
+
                     if args.midi1csv or args.fluidsynth:    # Sort high to low.
-                        n = len(q)
                         swapped = False
                         # Traverse through all array elements
                         for i in range(n-1):
@@ -13645,8 +13718,16 @@ def readthefile():
     while not ifdone:                       # Read the file loop.
         line, commentonline = read_next_line()
         if args.lines:
-            print("line='{}'".format(line), file=sys.stderr, flush=True)
-            print_some_variable_values('readthefile', [ 'A', 'ARG', 'DEF', 'NEW', 'octv', 'notenum', 'dur', 'secs' ] )
+            l = 0
+            lt = -1
+            ln = -1
+            if lmp_executing_number > 0:
+                l = lmp_executing_number
+                lt = lmp_executing_type[l]
+                ln = lmp_executing_line[l]
+            # fi
+            print("linecount={} l={} lt={} ln={} line='{}'".format(linecount,l,lt,ln,line), file=sys.stderr, flush=True)
+#-            print_some_variable_values('readthefile', [ 'A', 'ARG', 'DEF', 'NEW', 'octv', 'notenum', 'dur', 'secs' ] )
         # fi
         if line is None and commentonline is None:  # If end of file.
             return

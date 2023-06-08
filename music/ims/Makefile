@@ -8,6 +8,7 @@ TESTS += A4
 TESTS += A5
 TESTS += A6
 TESTS += A7
+TESTS += B5
 TESTS += B6
 TESTS += B.err
 TESTS += DECODE
