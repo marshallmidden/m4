@@ -114,6 +114,10 @@ SONGS += gnome
 SONGS += nachtmusik
 #				# Missing rests, voice in the middle of a measure, goto 5 -- no 5??
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# A few bits that I wanted to know what they were...
+SONGS += amadeus-cafe
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Following will not create postscript files correctly - printable note length problems.
 SONGS_NO_PS += inv1
 SONGS_NO_PS += vinci
