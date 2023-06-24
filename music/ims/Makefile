@@ -119,6 +119,7 @@ clean:
 	rm -f ${SONGS_E} ${TESTS_E}
 	rm -f *.stderr
 	rm -f *.h *.v *.csv *.mid *.E *.fs *.pdf *.ps *.abc
+	rm -f Y.0*
 #-----------------------------------------------------------------------------
 .PHONY: check
 check:
