@@ -81,7 +81,7 @@ PS2PDF       = ps2pdf
 # -CC			Include comments from within macros in preprocessed output.
 # -traditional-cpp	Enable some traditional CPP emulation.
 #
-CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp
+CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp -Wno-invalid-pp-token
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.E %.csv %_m.ps
 .SUFFIXES: .abc _m.ps .E .fs .csv .mid .pdf
