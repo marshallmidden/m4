@@ -1074,6 +1074,19 @@ vlprint = {  0: 'ppppp',        # Below anything to expect.
             110: 'ffff',
             127: 'fffff',       # Above anything to expect.
           }
+global volume_level
+volume_level = { 'ppppp': 0,
+                 'pppp': 0,
+                 'ppp': 0,
+                 'pp': 1,
+                 'p': 2,
+                 'mp': 3,
+                 'mf': 4,
+                 'f': 5,
+                 'ff': 6,
+                 'fff': 7,
+                 'ffff': 7,
+                 'fffff': 7 }
 global v_name_print
 v_name_print = {}
 for i in vlprint:
@@ -1118,7 +1131,15 @@ for i in vss:
 def vol_to_vlprint_round(j):
     global vlprint
 
+    if type(j) is str:
+        j = float(j)
+        if j.is_integer():
+            j = int(j)
+        # fi
+    # fi
+#--     print_debug("vol_to_vlprint_round - type(j)={} j='{}' vlprint='{}'".format(type(j),j,vlprint))
     for i in vlprint:
+#--         print_debug("vol_to_vlprint_round - type(i)={} i='{}' vlprint='{}'".format(type(i),i,vlprint))
         if i >= j:
             return i
             break
@@ -5092,14 +5113,16 @@ def find_terminator_in_string(strng, terminators, doparens, original_line):
 # strng = int_range_to_array(strng, original_line)
 
 def int_range_to_array(strng, original_line):
+#--     print_debug("int_range_to_array - strng='{}'".format(strng))
     a = strng.find('..')
     if a == 0:
         print_error("Range does not start with number.", original_line)
         return [str(strng)]
     elif a < 0:                                 # Not a range
+#-- NOTDONEYET # volume names as numbers here.
         strng, msg = is_float(strng, is_float_number, False)
         if msg is not None or strng is None:
-            print_error("First number in range bad. {} '{}'".format(msg, strng), original_line)
+#--             print_error("First number in range bad. {} '{}'".format(msg, strng), original_line)
             return [str(strng)]
         # fi
         if type(strng) is float and strng.is_integer():
@@ -5107,13 +5130,16 @@ def int_range_to_array(strng, original_line):
         # fi
         return [str(strng)]
     # fi
+#--    print_die("strng={}".format(strng))
     first = strng[0:a]
     second = strng[a+2:]
+#--     print_debug("int_range_to_array - first='{}' second='{}'".format(first,second))
     if second is None or second == '':
         print_error("Second number in range bad.", original_line)
         return [str(strng)]
     # fi
     n, msg = is_float(first, is_float_number, False)
+#--     print_debug("int_range_to_array - n='{}' msg='{}'".format(n,msg))
     if msg is not None or n is None or n == '':
         print_error("Range first number bad. {} '{}'".format(msg, first), original_line)
         return [str(strng)]
@@ -5123,22 +5149,28 @@ def int_range_to_array(strng, original_line):
         print_error("Range second number bad. {}".format(msg), original_line)
         return [str(strng)]
     # fi
+    if type(n) is str:
+        n = float(n)
+    # fi
     if type(n) is float and n.is_integer():
         first = int(n)
-    else:
+    elif type(n) is not int:
         print_error("Range first number not an integer.", original_line)
         return [str(strng)]
     # fi
+    if type(o) is str:
+        o = float(o)
+    # fi
     if type(o) is float and o.is_integer():
         second = int(o)
-    else:
+    elif type(o) is not int:
         print_error("Range second number not an integer.", original_line)
         return [str(strng)]
     # fi
     array_args = []
-    while first < second + 1:
-        array_args.append(str(first))
-        first = first + 1
+    while n < o + 1:
+        array_args.append(str(n))
+        n = n + 1
     # rof
     return array_args
 # End of int_range_to_array
@@ -5148,28 +5180,45 @@ def int_range_to_array(strng, original_line):
 #   integers      - True if expect numbers as arguments.
 #                 - False if alphanumberic.
 #                 - None if voice numbers - staff_name -> voice numbers.
+#                 - "volume" or "volumes" for 'f', etc.
 #   nospaces      - True if do not split on spaces.
 #   original_line - Line for error messages.
 
 def separate_args(wline, integers, nospaces, original_line):
-    def b4it(array_args, b4, original_line):
+    def b4it(array_args, b4, integers, original_line):
+#--         print_debug("b4it - #1 array_args='{}'".format(array_args))
         if b4 == '':
             array_args.append(b4)
+#--             print_debug("b4it - #2 array_args='{}'".format(array_args))
         elif integers is None:
             if b4 in staff_name:
                 for v in staff_name[b4]:
                     array_args.append(str(v))   # Do staff_name to voice numbers conversions.
+#--                     print_debug("b4it - #3 array_args='{}'".format(array_args))
                 # rof
-            else:
+            else:                               # maybe voice numbers. :)
                 nums = int_range_to_array(b4, original_line)
                 array_args = array_args + nums
+#--                 print_debug("b4it - #4 array_args='{}'".format(array_args))
             # fi
+        elif type(integers) is str:             # volume/volumes command.
+            nums = int_range_to_array(b4, original_line)
+#--             print_debug("b4it - type(nums)={} nums='{}'".format(type(nums),nums))
+            if nums == [ b4 ]:
+                v = get_volume_number(b4, integers, original_line)
+#--                 print_debug("b4it - type(v)={} v='{}' b4='{}' type(integers)={} integers='{}'".format(type(v),v,b4,type(integers),integers))
+                nums = [ v ]
+            # fi
+            array_args = array_args + nums
         elif integers:
             nums = int_range_to_array(b4, original_line)
             array_args = array_args + nums
+#--             print_debug("b4it - #5 array_args='{}'".format(array_args))
         else:
             array_args.append(b4)
+#--             print_debug("b4it - #6 array_args='{}'".format(array_args))
         # fi
+#--         print_debug("b4it - #7 array_args='{}'".format(array_args))
         return array_args
     # End of b4it
 
@@ -5193,6 +5242,7 @@ def separate_args(wline, integers, nospaces, original_line):
     array_args = []
     w = 0
     b4 = ''
+#--     print_debug("separate_args - #1 array_args='{}'".format(array_args))
     while w < len(strng):
         s = strng[w:]
         x = find_terminator_in_string(s, splitter, True, original_line)
@@ -5202,12 +5252,14 @@ def separate_args(wline, integers, nospaces, original_line):
             break
         # fi
         b4 = s[0:x]
-        array_args = b4it(array_args, b4, original_line)
+        array_args = b4it(array_args, b4, integers, original_line)
+#--         print_debug("separate_args - #2 array_args='{}'".format(array_args))
         b4 = ''
         w = w + x + 1
     # elihw
 
-    array_args = b4it(array_args, b4, original_line)
+    array_args = b4it(array_args, b4, integers, original_line)
+#--     print_debug("separate_args - #3 array_args='{}'".format(array_args))
     return array_args
 # End of separate_args
 
@@ -5466,7 +5518,6 @@ def set_default_ims(t_args, original_line):
 #--     print_debug("set_default_ims - Entering t_args='{}'".format(t_args))
     nline = replace_character_variables(t_args, original_line).strip()
 #--     print_debug("set_default_ims - nline='{}'".format(nline))
-#--    wargs = separate_args(t_args, False, True, original_line)
     wargs = separate_args(nline, False, True, original_line)
 
     if not wargs or len(wargs) < 1:
@@ -9768,16 +9819,30 @@ minor_key_to_major = {
 # ----------------------------------------------------------------------------
 def get_volume_number(name, command_name, original_line):
     global vlprint
+    global volume_level
 
     v, type_error = is_float(name, is_float_number, False)
+#--     print_debug("get_volume_number - name='{}' command_name='{}' v='{}' type_error='{}'".format(name,command_name,v,type_error))
     if type_error is not None:
-        for j in vlprint:
-            if name == vlprint[j]:
-                v = j
-                type_error = None
-                break
-            # fi
-        # rof
+        if command_name == 'volume':
+            for j in volume_level:
+                if name == j:
+                    v = volume_level[j]
+                    type_error = None
+#--                     print_debug("get_volume_number - A - v={}".format(v))
+                    break
+                # fi
+            # rof
+        else:
+            for j in vlprint:
+                if name == vlprint[j]:
+                    v = j
+                    type_error = None
+#--                     print_debug("get_volume_number - B - v={}".format(v))
+                    break
+                # fi
+            # rof
+        # fi
         if type_error is not None:
             print_error(command_name + " did not get have a number or volume name. {}".format(type_error), original_line)
             return None
@@ -9854,18 +9919,21 @@ def handle_volume_both(t_args, command_name, original_line):
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     if len(vargs) == 1:
         # 1 or 1,2,3 ... .
-        wargs = separate_args(vargs[0], None, True, original_line)
+#--         print_debug("handle_volume_both - #A")
+        wargs = separate_args(vargs[0], command_name, True, original_line)
 #--         print_debug("handle_volume_both #1 - wargs='{}'".format(wargs))
         if len(wargs) == 0 or len(wargs) > MAXVOICES:
             print_error(command_name + " needs from one to {} arguments".format(MAXVOICES), original_line)
             return
         # fi
+#--         print_debug("handle_volume_both - wargs='{}'".format(wargs))
         for i in range(1, len(wargs)+1):
-            v = get_volume_number(wargs[i - 1], command_name, original_line)
-#--             print_debug("handle_volume_both #1 - i='{}' v={} wargs[i-1]='{}'".format(i,v,wargs[i-1]))
-            if v is None:
-                return
-            # fi
+            v = str(wargs[i - 1])
+#--             v = get_volume_number(nbr, command_name, original_line)
+#--             print_debug("handle_volume_both #1 - i='{}' v={} nbr='{}'".format(i,v,nbr))
+#--             if v is None:
+#--                 return
+#--             # fi
             if not i in vl:
                 new_voice_initialize(i, measure_on)
             # fi
@@ -9877,22 +9945,26 @@ def handle_volume_both(t_args, command_name, original_line):
         # rof
     else:
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-        wargs = separate_args(vargs[0], None, True, original_line)
+#--         print_debug("handle_volume_both - #B")
+        wargs = separate_args(vargs[0], command_name, True, original_line)
 #--         print_debug("handle_volume_both #2 - vargs='{}' wargs='{}'".format(vargs,wargs))
         v = get_volume_number(vargs[1], command_name, original_line)
+#--         print_debug("handle_volume_both #3 - v='{}' vargs[1]='{}'".format(v,vargs[1]))
         for i in range(1, len(wargs)+1):
-            f1, type_error = is_float(wargs[i-1], is_float_number, False)
-#--             print_debug("handle_volume_both #1 - i='{}' v='{}' f1='{}'".format(i,v,f1))
+            nbr = str(wargs[i - 1])
+#--             print_debug("handle_volume_both #A - i={} nbr='{}' wargs[i-1]='{}'".format(i,nbr,wargs[i-1]))
+            f1, type_error = is_float(nbr, is_float_number, False)
+#--             print_debug("handle_volume_both #a - i='{}' v='{}' f1='{}' type_error='{}'".format(i,v,f1,type_error))
             if type_error is not None:
                 print_error("volume error - {}".format(type_error), original_line)
                 return
             # fi
             if f1 is None:
-                print_error("voice {} is not a number.".format(wargs[i-1]), original_line)
+                print_error("voice {} is not a number.".format(nbr), original_line)
                 return
             # fi
             f1 = int(round(f1))
-#--             print_debug("handle_volume_both #2 - i='{}' f1={} v={}".format(i,f1,v))
+#--             print_debug("handle_volume_both #b - i='{}' f1={} v={}".format(i,f1,v))
 
             vl[f1][measure_on] = v           # Change volume for voice.
             running_vl[f1][measure_on] = v   # Force running change - also stop crescendo.

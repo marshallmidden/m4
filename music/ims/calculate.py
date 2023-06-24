@@ -120,7 +120,7 @@ class SymbolDesc:
 #   kind    - 'NUMBER' if a number
 
 def next_token(string):
-#PRINT    print("next_token - Entering string='{}'".format(string), file=sys.stderr,flush=True)   # PRINT
+#PRINT    print("next_token - Entering type(string)='{}' string='{}'".format(type(string),string), file=sys.stderr,flush=True)   # PRINT
     # Make sure string exists. next_token useable by other than tokenize.
     string = string.strip()
     if len(string) <= 0:
