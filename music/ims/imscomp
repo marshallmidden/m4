@@ -708,15 +708,17 @@ def recompute_whichchars():
         if wary[numarry_macro_arg]:                 # A macro argument
             if nam not in n_args:
                 n_args[nam] = wary                  # New argument name.
-            elif n_args[nam][numarry_macro_arg] < wary[numarry_macro_arg]:
-                n_args[nam] = wary                  # Newer argument name.
+            else:
+                print_debug("recompute_whichchars - n_args[nam][numarry_maclevel]={} wary[numarry_maclevel]={}".format(n_args[nam][numarry_maclevel], wary[numarry_maclevel]))
+                if n_args[nam][numarry_maclevel] < wary[numarry_maclevel]:
+                    n_args[nam] = wary              # Newer argument name.
+                # fi
             # fi
         else:                                       # Try for character string without array.
             if len(wary[numarry_indexes]) == 0:     # No array.
                 k = wary[numarry_value_type][0]
                 # None means not set, so could be a character variable.
-#--                if k is None or k == 1:             # Is character variable
-                if k is not None and k == 1:             # Is character variable
+                if k is not None and k == 1:        # Is character variable
                     n_chars[nam] = wary
                 # fi
             else:
@@ -765,6 +767,20 @@ def chkvarlevel(arg, maclev):
 # ----------------------------------------------------------------------------
 def print_some_variable_values(s, varnams):
 #--    printed = []
+    global whichmacrochars                          # Unique Macro arguments         - 1
+    global whichlocalchars                          # Unique local character strings - 2
+    global whicharraychars                          # Unique local arrays w/ strings - 2
+    
+    if whichmacrochars != {}:
+        print_debug("{}: whichmacrochars={}".format(s, whichmacrochars))
+    # fi
+    if whichlocalchars != {}:
+        print_debug("{}: whichlocalchars={}".format(s, whichlocalchars))
+    # fi
+    if whicharraychars != {}:
+        print_debug("{}: whicharraychars={}".format(s, whicharraychars))
+    # fi
+
     for wary in calculate.local_arrays:
         name = wary[numarry_name]
         if name in varnams:
@@ -933,7 +949,8 @@ is_float_string = 1
 MAX_LOOP_VARIABLES = 10
 #-- MAX_LOOP_VARIABLES = 25
 #-- MAX_LOOP_VARIABLES = 50
-MAX_NESTING = 50                                # Maximum number of loops + macros + processes.
+#-- MAX_NESTING = 50                                # Maximum number of loops + macros + processes.
+MAX_NESTING = 10                                # Maximum number of loops + macros + processes.
 MAX_PUTDS = 25                                  # Maximum number of putd substitutions.
 # ----------------------------------------------------------------------------
 MAXMIDICHANNELS = 16
@@ -6108,16 +6125,12 @@ def do_calc(t_args, original_line):
         return
     # fi
     variable = t_args[0:assign].strip()         # Toss spaces before and after.    The Variable.
+    nvariable = replace_macro_arguments(variable, original_line).strip()
+    variable = nvariable
     strng = t_args[assign+1:].strip()           # Toss spaces before and after.    After Assignment.
-    cnt = 0
-    while True:
-        nstrng = replace_all_variables(strng, original_line).strip()
-        if strng == nstrng:
-            break
-        # fi
-        strng = nstrng
-        i_line.append('2calc: calc ' + variable + '=' + strng)    # Line as fixed or whatever.
-    # elihw
+    nstrng = replace_all_variables(strng, original_line).strip()
+    strng = nstrng
+    i_line.append('2calc: calc ' + variable + '=' + strng)    # Line as fixed or whatever.
 #--    print_debug("do_calc - variable='{}' strng='{}'".format(variable,strng))
     t_args = variable + '=' + strng
 #--    print_debug("do_calc - t_args='{}'".format(t_args))
@@ -7462,7 +7475,7 @@ def do_endloop(t_args, original_line):
     # fi
 
     if lmp_executing_number > MAX_NESTING:
-        print_error("m:{} macro {} nesting to depth of more than {}".format(measure_on, command, MAX_NESTING), original_line)
+        print_error("m:{} endloop->loop {} nesting to depth of more than {}".format(measure_on, command, MAX_NESTING), original_line)
         return                                      # Error ... ouch, many errors will follow. *sigh*
     # fi
     t_line = i_line
@@ -12748,6 +12761,7 @@ def process_notes_oldway(line, original_line):
 #   one past character where enddelim was found in aftertoken.
 
 def parens_match(enddelim, aftertoken, w, original_line):
+#--     print_debug("parens_match - enddelim='{}' aftertoken='{}' w={}".format(enddelim, aftertoken, w))
     e = []
     e.append(enddelim)
     w = w + 1
@@ -12758,6 +12772,7 @@ def parens_match(enddelim, aftertoken, w, original_line):
     while True:
         while w < len(aftertoken):
             c = aftertoken[w]
+#--             print_debug("parens_match - c='{}' w={} enddelim='{}' e={}".format(c,w,enddelim,e))
             w = w + 1
             if c == enddelim:
                 break
@@ -12775,11 +12790,14 @@ def parens_match(enddelim, aftertoken, w, original_line):
                 enddelim = '}'
                 e.append(enddelim)
             # fi
+#--             print_debug("parens_match - end of while c='{}' w={} enddelim='{}' e={}".format(c,w,enddelim,e))
         # elihw
-        enddelim = e.pop()
+        e.pop()
         if e == []:
             break
         # fi
+        enddelim = e[-1]
+#--         print_debug("parens_match - after while enddelim='{}' e={}".format(enddelim,e))
     # elihw
     # w = the character after the ending delimiter.
     return w
@@ -12796,7 +12814,7 @@ def parens_match(enddelim, aftertoken, w, original_line):
 #   aftertoken - The rest of the line, after the {...} is processed.
 
 def fix_limiting_char_variables(wary, aftertoken, original_line):
-    print_debug("fix_limiting_char_variables #1 - wary[numarry_name]={} aftertoken={}".format(wary[numarry_name],aftertoken))
+#--     print_debug("fix_limiting_char_variables #1 - wary[numarry_name]={} aftertoken={}".format(wary[numarry_name],aftertoken))
     prew = 0
     name = wary[numarry_name]
     w = 0
@@ -12809,19 +12827,19 @@ def fix_limiting_char_variables(wary, aftertoken, original_line):
     # ............................................................................
     if len(wary[numarry_values]) > 1:                  # array token ...
         if aftertoken[w] != '(':                        # Must have parens.
-            print_debug("fix_limiting_char_variables #a - '{}'".format(name + aftertoken))
+#--             print_debug("fix_limiting_char_variables #a - '{}'".format(name + aftertoken))
             return name + aftertoken
         # fi
         prew = parens_match(')', aftertoken, w, original_line)
-        print_debug("fix_limiting_char_variables #b - w={} prew={}".format(w,prew))
+#--         print_debug("fix_limiting_char_variables #b - w={} prew={}".format(w,prew))
         if prew is None or prew-w <= 2:                 # No array or part of a character string.
             return name + aftertoken
         # fi
         if prew+2 <= len(aftertoken):
-            print_debug("fix_limiting_char_variables #c")
+#--             print_debug("fix_limiting_char_variables #c")
             if aftertoken[prew] == '{':                 # partial token selection ...
                 prex = parens_match('}', aftertoken, prew, original_line)
-                print_debug("fix_limiting_char_variables #d - prex={}".format(prex))
+#--                 print_debug("fix_limiting_char_variables #d - prex={}".format(prex))
                 if prex is None or prex - prew <= 2:    # Cannot have {}
                     f = name + aftertoken[w:prew]
                 else:
@@ -12829,46 +12847,46 @@ def fix_limiting_char_variables(wary, aftertoken, original_line):
                     prew = prex
                 # fi
             else:
-                print_debug("fix_limiting_char_variables #e")
+#--                 print_debug("fix_limiting_char_variables #e")
                 f = name + aftertoken[w:prew]
             # fi
         else:
-            print_debug("fix_limiting_char_variables #f")
+#--             print_debug("fix_limiting_char_variables #f")
             f = name + aftertoken[w:prew]
         # fi
     else:
-        print_debug("fix_limiting_char_variables #g")
+#--         print_debug("fix_limiting_char_variables #g")
         if aftertoken[w] != '{':                        # partial token selection ...
-            print_debug("fix_limiting_char_variables #h")
+#--             print_debug("fix_limiting_char_variables #h")
             return name + aftertoken
         # fi
-        print_debug("fix_limiting_char_variables #i")
+#--         print_debug("fix_limiting_char_variables #i")
         prew = parens_match('}', aftertoken, w, original_line)
-        print_debug("fix_limiting_char_variables #j - prew={}".format(prew))
+#--         print_debug("fix_limiting_char_variables #j - prew={}".format(prew))
         if prew is None or prew-w <= 2:                 # No array or part of a character string.
-            print_debug("fix_limiting_char_variables #k - name={} aftertoken={}".format(name,aftertoken))
+#--             print_debug("fix_limiting_char_variables #k - name={} aftertoken={}".format(name,aftertoken))
             return name + aftertoken
         # fi
-        print_debug("fix_limiting_char_variables #l")
+#--         print_debug("fix_limiting_char_variables #l")
         # f will be the thing to pass to is_float. s = rest of string.
         f = name + aftertoken[w:prew]
     # fi
     # ............................................................................
-    print_debug("fix_limiting_char_variables #m - f='{}' name='{}' aftertoken[{}:{}]='{}'".format(f,name,w,prew,aftertoken[w:prew]))
+#--     print_debug("fix_limiting_char_variables #m - f='{}' name='{}' aftertoken[{}:{}]='{}'".format(f,name,w,prew,aftertoken[w:prew]))
 
     f1, type_error = is_float(f, is_float_string, True)       # Want a string.
 #NOTANYTHING!    f1, type_error = is_anything(f, True)               # Want a string.
-    print_debug("fix_limiting_char_variables #n - type(f1)={} f1='{}' type_error='{}' f='{}'".format(type(f1),f1,type_error,f))
+#--     print_debug("fix_limiting_char_variables #n - type(f1)={} f1='{}' type_error='{}' f='{}'".format(type(f1),f1,type_error,f))
     if type_error is not None or f1 is None:
-        print_debug("fix_limiting_char_variables #o - aftertoken={}".format(aftertoken))
+#--         print_debug("fix_limiting_char_variables #o - aftertoken={}".format(aftertoken))
         return name + aftertoken
     elif type(f1) is str:                               # Must have a string.
         aftertoken = aftertoken[prew:]
-        print_debug("fix_limiting_char_variables #p")
+#--         print_debug("fix_limiting_char_variables #p")
         return f1 + aftertoken
     elif type(f1) is int or type(f1) is float:          # Must have a string.
         aftertoken = aftertoken[prew:]
-        print_debug("fix_limiting_char_variables #q")
+#--         print_debug("fix_limiting_char_variables #q")
         return str(f1) + aftertoken
     else:                                               # Must have a string.
         print_error("m:{} variable '{}' ".format(measure_on, f) + "return is not a string", original_line)
@@ -12898,15 +12916,19 @@ def replace_char_var_type(strng, linestarts, lineends, wary, original_line):
         fixed_after = fix_limiting_char_variables(wary, aftertokenline, original_line)
         nline = beforetokenline + fixed_after
         if nline == strng and len(wary[numarry_values]) == 1:
-            print_debug("replace_char_var_type Q - wary={}, wary[numarry_values]={} wary[numarry_values][0]='{}'".format(wary, wary[numarry_values], wary[numarry_values][0]))
-            print_debug("replace_char_var_type Q - beforetokenline={}, token={} aftertokenline='{}'".format(beforetokenline, token, aftertokenline))
+#--             print_debug("replace_char_var_type Q - wary={}, wary[numarry_values]={} wary[numarry_values][0]='{}'".format(wary, wary[numarry_values], wary[numarry_values][0]))
+#--             print_debug("replace_char_var_type Q - beforetokenline={}, token={} aftertokenline='{}'".format(beforetokenline, token, aftertokenline))
             nline = beforetokenline + w0(wary) + aftertokenline
         # fi
     else:
-        print_debug("replace_char_var_type R - wary={}, wary[numarry_values]={} wary[numarry_values][0]='{}'".format(wary, wary[numarry_values], wary[numarry_values][0]))
-        nline = beforetokenline + w0(wary) + aftertokenline
+        if len(wary[numarry_values]) == 1:
+#--         print_debug("replace_char_var_type R - wary={}, wary[numarry_values]={} wary[numarry_values][0]='{}'".format(wary, wary[numarry_values], wary[numarry_values][0]))
+            nline = beforetokenline + w0(wary) + aftertokenline
+        else:
+            nline = strng
+        # fi
     # fi
-    print_debug("replace_char_var_type - beforetokenline='{}', token='{}' aftertokenline='{}' nline='{}'".format(beforetokenline, token, aftertokenline, nline))
+#--     print_debug("replace_char_var_type - beforetokenline='{}', token='{}' aftertokenline='{}' nline='{}'".format(beforetokenline, token, aftertokenline, nline))
     return nline
 # End of replace_char_var_type
 
@@ -12919,15 +12941,19 @@ def alpha_token(startat, strg, original_line):
     nstrg = strg[looking:]
     # Token must start with alpha.
     if nstrg is None or nstrg == '':
-        print_debug("alpha_token - #A looking='{}'".format(looking))
+        print_debug("alpha_token - #A looking='{}' nstrg='{}'".format(looking,nstrg))
         return looking, len(strg)
     # fi
     print_debug("alpha_token - strg='{}' startat='{}' c='{}' checking='{}'".format(strg,startat,strg[startat],strg[startat:]))
     while True:
         # NOTE: skip all non-alphanumeric at start of string.
-        while looking < len(strg) and not strg[looking].isalnum():
+        print_debug("alpha_token - looking='{}' strg='{}' len(strg)={}".format(looking,strg,len(strg)))
+        while looking < len(strg) and not strg[looking].isalpha():
             looking = looking + 1
         # elihw
+#--        while looking < len(strg) and not strg[looking].isalnum():
+#--            looking = looking + 1
+#--        # elihw
         print_debug("alpha_token - #B looking='{}'".format(looking))
         if looking >= len(strg):
             return looking, len(strg)
@@ -12948,12 +12974,14 @@ def alpha_token(startat, strg, original_line):
             # fi
         # elihw
         # Token must start with alpha.
-#--        print_debug("alpha_token - startat={} p_s_t={} looking={}".format(startat,p_s_t,looking))
+        print_debug("alpha_token - startat={} p_s_t={} looking={}".format(startat,p_s_t,looking))
         if not strg[p_s_t].isalpha():
+            print_debug("alpha_token - #G p_s_t={} looking='{}'".format(p_s_t,looking))
             continue
         # fi
         break
     # elihw
+    print_debug("alpha_token - p_s_t={} looking={}".format(p_s_t,looking))
     return p_s_t, looking
 # End of alpha_token
 
@@ -12962,7 +12990,7 @@ def replace_macro_arguments(line, original_line):
     if whichmacrochars == {}:
         return line
     # fi
-    print_debug("replace_macro_arguments - line='{}' whichmacrochars={}".format(line,whichmacrochars))
+#--     print_debug("replace_macro_arguments - line='{}' whichmacrochars={}".format(line,whichmacrochars))
     w = 0
     cnt = 0
     while w < len(line) and cnt < 35:
@@ -12975,17 +13003,17 @@ def replace_macro_arguments(line, original_line):
         if ntoken is None or ntoken == '':
             break
         # fi
-        print_debug("replace_macro_arguments - macrochars - linestarts={} lineends={} ntoken={}".format(linestarts,lineends,ntoken))
+#--         print_debug("replace_macro_arguments - macrochars - linestarts={} lineends={} ntoken={}".format(linestarts,lineends,ntoken))
         # ----------------------------------------------------------------------------
         for wh in whichmacrochars:
             a = ntoken.find(wh)
-            print_debug("OOO - ntoken='{}' a={} wh='{}'".format(ntoken,a,wh))
+#--             print_debug("OOO - ntoken='{}' a={} wh='{}'".format(ntoken,a,wh))
             if a == -1 or a > 0:                            # Token must start at beginning of token.
                 continue
             # fi
             lw = len(wh)
             lt = len(ntoken)
-            print_debug("OOO - lw={} lt={}".format(lw,lt))
+#--             print_debug("OOO - lw={} lt={}".format(lw,lt))
             aftertoken = ''
             if lw != lt:
                 if ntoken[lw] in ( '{', '(' ):
@@ -12994,7 +13022,7 @@ def replace_macro_arguments(line, original_line):
                     aftertoken = ntoken[lw:]
                 # fi
             # fi
-            print_debug("OOO - aftertoken={} st={} end={}".format(aftertoken,linestarts,linestarts + lw))
+#--             print_debug("OOO - aftertoken={} st={} end={}".format(aftertoken,linestarts,linestarts + lw))
             nline = replace_char_var_type(line, linestarts, linestarts + lw, whichmacrochars[wh], original_line)
             if line != nline:
                 line = nline
@@ -13005,24 +13033,24 @@ def replace_macro_arguments(line, original_line):
             # fi
         # rof
         w = linestarts
-        print_debug("OOO - line={} w={}".format(line,w))
+#--         print_debug("OOO - line={} w={}".format(line,w))
         if flag:
             continue
         # fi
         # ----------------------------------------------------------------------------
         if w < len(line):
-            if line[w].isalnum():
+            if line[w].isalpha():
                 w = w + 1
-                while w < len(line) and line[w].isalnum():
-                    w = w + 1
-                # elihw
+#--                 while w < len(line) and line[w].isalnum():
+#--                     w = w + 1
+#--                 # elihw
             else:
                 w = w + 1
-                while w < len(line) and not line[w].isalnum():
+                while w < len(line) and not line[w].isalpha():
                     w = w + 1
                 # elihw
         # elihw
-        print_debug("OOO - line={} w={}".format(line,w))
+#--         print_debug("OOO - line={} w={}".format(line,w))
     # elihw
     return line
 # End of replace_macro_arguments
@@ -13037,33 +13065,36 @@ def replace_character_variables(line, original_line):
     w = 0
     cnt = 0
     while w < len(line) and cnt < 35:
-        print_debug("replace_character_variables - calling alpha_token({},'{}')".format(w,line))
+#--         print_debug("replace_character_variables - calling alpha_token({},'{}')".format(w,line))
         linestarts, lineends = alpha_token(w, line, original_line)
-        print_debug("replace_character_variables - linestarts={} lineends={} checking='{}'".format(linestarts,lineends,line[linestarts:lineends]))
+#--         print_debug("replace_character_variables - linestarts={} lineends={} checking='{}'".format(linestarts,lineends,line[linestarts:lineends]))
         if linestarts is None:
             return line
         # fi
         ntoken = line[linestarts:lineends]
-        print_debug("replace_character_variables - ntoken='{}'".format(ntoken))
+#--         print_debug("replace_character_variables - ntoken='{}'".format(ntoken))
         # ----------------------------------------------------------------------------
         flag = False
         for wh in whichlocalchars:
             a = ntoken.find(wh)
-            print_debug("MMM - ntoken='{}' a={} wh='{}'".format(ntoken,a,wh))
+#--             print_debug("MMM - ntoken='{}' a={} wh='{}'".format(ntoken,a,wh))
             if a == -1 or a > 0:                            # Token must start at beginning of token.
                 continue
             # fi
             lw = len(wh)
             lt = len(ntoken)
-            print_debug("MMM - lw={} lt={}".format(lw,lt))
+#--             print_debug("MMM - lw={} lt={}".format(lw,lt))
+            aftertoken = ''
             if lw != lt:
-                aftertoken = ntoken[lw:]
-            else:
-                aftertoken = ''
+                if ntoken[lw] in ( '{', '(' ):
+                    lw = lt
+                else:
+                    aftertoken = ntoken[lw:]
+                # fi
             # fi
-            print_debug("MMM - aftertoken={} st={} end={}".format(aftertoken,linestarts,linestarts + lw))
+#--             print_debug("MMM - aftertoken={} st={} end={}".format(aftertoken,linestarts,linestarts + lw))
             nline = replace_char_var_type(line, linestarts, linestarts + lw, whichlocalchars[wh], original_line)
-            print_debug("MMM - nline='{}'".format(nline))
+#--             print_debug("MMM - nline='{}'".format(nline))
             if line != nline:
                 line = nline
                 i_line.append('1chvs: ' + line)             # Line as fixed or whatever.
@@ -13078,21 +13109,24 @@ def replace_character_variables(line, original_line):
         # ----------------------------------------------------------------------------
         for wh in whicharraychars:
             a = ntoken.find(wh)
-            print_debug("NNN - ntoken='{}' a={} wh='{}'".format(ntoken,a,wh))
+#--             print_debug("NNN - ntoken='{}' a={} wh='{}'".format(ntoken,a,wh))
             if a == -1 or a > 0:
                 continue
             # fi
             lw = len(wh)
             lt = len(ntoken)
-            print_debug("NNN - lw={} lt={}".format(lw,lt))
+#--             print_debug("NNN - lw={} lt={}".format(lw,lt))
+            aftertoken = ''
             if lw != lt:
-                aftertoken = ntoken[lw:]
-            else:
-                aftertoken = ''
+                if ntoken[lw] in ( '{', '(' ):
+                    lw = lt
+                else:
+                    aftertoken = ntoken[lw:]
+                # fi
             # fi
-            print_debug("NNN - aftertoken={} st={} end={}".format(aftertoken,linestarts,linestarts + lw))
+#--             print_debug("NNN - aftertoken={} st={} end={}".format(aftertoken,linestarts,linestarts + lw))
             nline = replace_char_var_type(line, linestarts, linestarts + lw, whicharraychars[wh], original_line)
-            print_debug("NNN - nline='{}'".format(nline))
+#--             print_debug("NNN - nline='{}'".format(nline))
             if line != nline:
                 line = nline
                 i_line.append('1arvs: ' + line)             # Line as fixed or whatever.
@@ -13107,20 +13141,20 @@ def replace_character_variables(line, original_line):
         # ----------------------------------------------------------------------------
         # Need to move forward either past current by only those limited characters... .
         w = linestarts
-        print_debug("PPP - w={} line={}".format(w,line))
+#--         print_debug("PPP - w={} line={}".format(w,line))
         if w < len(line):
-            if line[w].isalnum():
+            if line[w].isalpha():
                 w = w + 1
-                while w < len(line) and line[w].isalnum():
-                    w = w + 1
-                # elihw
+#--                 while w < len(line) and line[w].isalnum():
+#--                     w = w + 1
+#--                 # elihw
             else:
                 w = w + 1
-                while w < len(line) and not line[w].isalnum():
+                while w < len(line) and not line[w].isalpha():
                     w = w + 1
                 # elihw
         # elihw
-        print_debug("PPP - line={} w={}".format(line,w))
+#--         print_debug("PPP - line={} w={}".format(line,w))
     # elihw
     return line
 # End of replace_character_variables
@@ -13132,16 +13166,16 @@ def replace_all_variables(line, original_line):
     while True:
         nline = replace_macro_arguments(line, original_line).rstrip()
         if nline == line:
-            print_debug("char_var_subst_first_token #1Ba - calling replace_character_variables, line={}".format(line))
+#--             print_debug("char_var_subst_first_token #1Ba - calling replace_character_variables, line={}".format(line))
             nline = replace_character_variables(line, original_line).rstrip()
-            print_debug("char_var_subst_first_token #1Ba - after replace_character_variables, nline={}".format(nline))
+#--             print_debug("char_var_subst_first_token #1Ba - after replace_character_variables, nline={}".format(nline))
             if nline == line:
                 break
             # fi
         # fi
         line = nline
         cnt = cnt + 1
-        print_debug("replace_all_variables - cnt={} nline={}".format(cnt,nline))
+#--         print_debug("replace_all_variables - cnt={} nline={}".format(cnt,nline))
         if cnt > MAX_LOOP_VARIABLES:
             print_error("Over {} variable substitutions done - loop?".format(MAX_LOOP_VARIABLES), line)
             return line
@@ -13171,7 +13205,7 @@ def first_token(strg, original_line):
 
 # ----------------------------------------------------------------------------
 def char_var_subst_first_token(original_line):
-    print_debug("char_var_subst_first_token - original_line={}".format(original_line))
+#--     print_debug("char_var_subst_first_token - original_line={}".format(original_line))
     if whichmacrochars == {} and whichlocalchars == {}:
         return original_line
     # fi
@@ -13194,9 +13228,9 @@ def char_var_subst_first_token(original_line):
         # fi
         if ntoken == start:
             if whichlocalchars != {}:
-                print_debug("char_var_subst_first_token #1Ba - calling replace_character_variables")
+#--                 print_debug("char_var_subst_first_token #1Ba - calling replace_character_variables")
                 ntoken = replace_character_variables(start, original_line).rstrip()
-                print_debug("char_var_subst_first_token B- ntoken='{}' replace_macro_arguments(start='{}')".format(ntoken,start))
+#--                 print_debug("char_var_subst_first_token B- ntoken='{}' replace_macro_arguments(start='{}')".format(ntoken,start))
             # fi
             if ntoken == start:
                 break
@@ -13913,7 +13947,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                 next_tokens = (tdelim + next_tokens).strip()
             # fi
             if lmp_executing_number > MAX_NESTING:
-                print_error("m:{} macro {} nesting to depth of more than {}".format(measure_on, token, MAX_NESTING), original_line)
+                print_error("m:{} all_unique_macro_names#1 {} nesting to depth of more than {}".format(measure_on, token, MAX_NESTING), original_line)
                 return                                      # Error ... ouch, many errors will follow. *sigh*
             # fi
             for cnumber in all_unique_macro_names[token]:
@@ -14250,7 +14284,7 @@ def process_line(original_line):
             t_args = delimiter + t_args
         # fi
         if lmp_executing_number > MAX_NESTING:
-            print_error("m:{} macro {} nesting to depth of more than {}".format(measure_on, command, MAX_NESTING), original_line)
+            print_error("m:{} all_unique_macro_names#2 {} nesting to depth of more than {}".format(measure_on, command, MAX_NESTING), original_line)
             return False                                    # Error ... ouch, many errors will follow. *sigh*
         # fi
         for cnumber in all_unique_macro_names[command]:
@@ -14345,7 +14379,9 @@ def readthefile():
 #--             print_some_variable_values('   readthefile#1', [ 'A', 'ARG', 'DEF', 'NEW', 'octv', 'notenum', 'dur', 'secs' ] )
 #--             print_some_variable_values('   readthefile#1', [ 'EVENT', 'U', 'beat', 'index' ] )
 #--             print_some_variable_values('   readthefile#1', [ 'i', 'STFNAME', 'staffno', 'Voices', 'delay', 'pch' ] )
-            print_some_variable_values('   readthefile#1', [ 'Voices', 'dur', 'STFNAME', 'k', 'STEPS', 'PCH', 'length', 'STEPS', 'pch', 'i', 'delay' ] )
+#--             print_some_variable_values('readthefile#1', [ 'temp', 'ARRAY', 'j', 'length', 'MULT', 'i', 'k', 'DUR', 'PCH', 'STEPS', 'REST', 'STFNAME', 'staffno', 'pch' ] )
+#--             print_some_variable_values('readthefile#1', [ 'INSNO', 'PCH', 'DUR', 'SP', 'inv', 'vf', 'STFNAME' ] )
+            print_some_variable_values('readthefile#1', [ 'ARG', 'a', 'i', 'TIMES', 'x', 'y' ] )
         # fi
         if line is None and commentonline is None:  # If end of file.
             return
