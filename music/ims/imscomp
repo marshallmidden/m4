@@ -1973,11 +1973,13 @@ def get_staff_arr(voiceon, arr, original_line):
     # Go through all staves and check if all voices are the same.
     value = None
     for s in voiceon:
-#--        print_debug("get_staff_arr - s={}".format(s))
+        print_debug("get_staff_arr - s={}".format(s))
         for v in staff_name[s]:
+            print_debug("get_staff_arr - v={} value={} arr='{}'".format(v, value, arr))
             if value is not None:
                 if value != arr[v]:
                     print_warning("get_staff_arr - staff {}, voice {} is not the same as previous {}.".format(s,v,value), original_line)
+                    print_die("aha")
                 # fi
             else:
                 value = arr[v]
@@ -5176,6 +5178,19 @@ def int_range_to_array(strng, original_line):
 # End of int_range_to_array
 
 # ----------------------------------------------------------------------------
+def assign_another_voice(b4, original_line):
+    maxv = len(vl) + 1
+    initialize_set_voices(maxv, original_line)
+    fill_voice_mlth(False, original_line)               # Need to make measure for other voices up to here "mlth".
+    if staff_name[b4] is None:
+        staff_name[b4] = [ maxv ]
+    else:
+        staff_name[b4].append(maxv)
+    # fi
+        
+# End of assign_another_voice
+
+# ----------------------------------------------------------------------------
 #   wline         - string to split
 #   integers      - True if expect numbers as arguments.
 #                 - False if alphanumberic.
@@ -5192,6 +5207,12 @@ def separate_args(wline, integers, nospaces, original_line):
 #--             print_debug("b4it - #2 array_args='{}'".format(array_args))
         elif integers is None:
             if b4 in staff_name:
+#--                 print_debug("b4it - staff_name={}".format(staff_name))
+                if staff_name[b4] is None:
+                    assign_another_voice(b4, original_line)
+                # fi
+#--                 print_debug("b4it - staff_name={}".format(staff_name))
+#--                 print_debug("b4it - type(staff_name[{}])={} staff_name[{}]={}".format(b4, type(staff_name[b4]), b4, staff_name[b4]))
                 for v in staff_name[b4]:
                     array_args.append(str(v))   # Do staff_name to voice numbers conversions.
 #--                     print_debug("b4it - #3 array_args='{}'".format(array_args))
@@ -6512,38 +6533,48 @@ def do_clef(t_args, original_line):
     global clef
     global measure_on
 
+#--     print_debug("do_clef - Entering t_args='{}'".format(t_args))
     if t_args is None or t_args == '':
         print_error("clef does not have arguments.", original_line)
         return
     # fi
 
     targs = re.sub(r'\s*,\s*', ',', t_args)
+#--     print_debug("do_clef - #A - t_args='{}'".format(t_args))
 
     vargs = targs.split()
+#--     print_debug("do_clef - #B - vargs='{}'".format(vargs))
     if len(vargs) <= 0 or len(vargs) > 2:
         print_error("clef does not have correct number of arguments.", original_line)
         return
     # fi
     if len(vargs) == 1:
+#--         print_debug("do_clef - #C - vargs='{}'".format(vargs))
         wargs = separate_args(targs, False, True, original_line)
+#--         print_debug("do_clef - #D - wargs='{}'".format(wargs))
         if not wargs or len(wargs) < 1:
             print_error("no clef selection arguments", original_line)
             return
         # fi
         for i in range(1, len(wargs)+1):
+#--             print_debug("do_clef - #E - i='{}'".format(i))
             clef[i][measure_on] = wargs[i-1].strip()   # No checking.
         # rof
+#--         print_debug("do_clef - #F")
         return
     # fi
     clf = vargs[1]
+#--     print_debug("do_clef - #G - type(clf)={} clf='{}'".format(type(clf),clf))
 
     jkl = "".join(vargs[0])
     wargs = separate_args(jkl, None, True, original_line)   # Allow staff_name and voice numbers.
+#--     print_debug("do_clef - #H - type(wargs)={} wargs='{}'".format(type(wargs),wargs))
     if not wargs or len(wargs) < 1:
         print_error("no voice arguments on clef line", original_line)
         return
     # fi
     for w in wargs:
+#--         print_debug("do_clef - #I - type(w)={} w='{}'".format(type(w),w))
         f1, type_error = is_float(w, is_float_number, False)
         if type_error is not None:
             print_error("clef error - {}".format(type_error), original_line)
@@ -6556,6 +6587,7 @@ def do_clef(t_args, original_line):
         f1 = int(round(f1))
         clef[f1][measure_on] = clf
     # rof
+#--     print_debug("do_clef - #J")
     return
 # End of do_clef
 
@@ -13607,10 +13639,13 @@ def keyword_fermata(token, delimiter, next_tokens, original_line):
 
 # ----------------------------------------------------------------------------
 def keyword_key(token, delimiter, next_tokens, original_line):
-    command, t_args, delimiter = compute_command_args(next_tokens)
-    strng = str(last_voice_staff) + ': ' + command
+    if next_tokens is None:
+        strng = ','.join(last_voice_staff)
+    else:
+        strng = ','.join(last_voice_staff) + ' ' + next_tokens
+    # fi
     do_key(strng, original_line)
-    return t_args
+    return ''
 # End of keyword_key
 
 # ----------------------------------------------------------------------------
@@ -13643,10 +13678,9 @@ def keyword_note_show1(token, delimiter, next_tokens, original_line):
 # treble, bass, soproano, alto, tenor
 
 def keyword_clefs(token, delimiter, next_tokens, original_line):
-    command, t_args, delimiter = compute_command_args(next_tokens)
-    strng = str(last_voice_staff) + ': ' + command
+    strng = ','.join(last_voice_staff) + ' ' + token
     do_clef(strng, original_line)
-    return t_args
+    return next_tokens
 # End of keyword_clefs
 
 # ----------------------------------------------------------------------------
@@ -13822,13 +13856,18 @@ def handle_staff_note(add_these_staff_chords, original_line):
 #--         print_debug("handle_staff_note - numstaff={}".format(numstaff))
 #--         print_debug("handle_staff_note - add_these_staff_chords={}".format(add_these_staff_chords))
 #--         print_debug("handle_staff_note - staff_name={}".format(staff_name))
-#--         print_debug("handle_staff_note - stfs={}".format(stfs))
-        nummins = find_mlth_values(stfs, m, find_mlth_values)
-#--         print_debug("handle_staff_note - nummins={}".format(nummins))
-        if number_notes_in_chord > len(nummins):
-            print_error("handle_staff_note - number_notes_in_chord='{}' > number_voices_available='{}'".format(number_notes_in_chord,len(nummins)), original_line)
-#??             return
-        # fi
+        print_debug("handle_staff_note - stfs={} m={} ".format(stfs,m))
+        nummins = find_mlth_values(stfs, m, original_line)
+        print_debug("handle_staff_note - A - nummins={}".format(nummins))
+        while len(nummins) < number_notes_in_chord:
+            assign_another_voice(stfs, original_line)
+            nummins = find_mlth_values(stfs, m, original_line)
+            print_debug("handle_staff_note - B - nummins={}".format(nummins))
+        # elihw
+#--         if number_notes_in_chord > len(nummins):
+#--             print_error("handle_staff_note - number_notes_in_chord='{}' > number_voices_available='{}'".format(number_notes_in_chord,len(nummins)), original_line)
+#-- #??             return
+#--         # fi
         newly_added = None;
         for numchords in range(0,number_notes_in_chord):
             n = add_these_staff_chords[numstaff][numchords]
@@ -13913,10 +13952,10 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):      
     global last_voice_staff
     global measure_on
 
-    if not measure_on or measure_on == '':          # no measure yet
-        print_error("no measure processed yet - must have one before notes.", original_line)
-        return ''
-    # fi
+#--     if not measure_on or measure_on == '':          # no measure yet
+#--         print_error("no measure processed yet - must have one before notes.", original_line)
+#--         return ''
+#--     # fi
 
     if delimiter == '':                             # End of line.
         send_these_notes = token + ' '+ next_tokens
