@@ -195,13 +195,13 @@ BROKEN_2MID = ${BROKEN:=_2.mid}
 .SUFFIXES: _2.csv _2.abc _2.mid _m2.ps _2.fs _2.wav _2.pdf _2.ps
 # output $@   -- input $<
 %.fs:  %.E
-	${MUSICOMP2ABC} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
 %_2.fs:  %.E
-	${IMSCOMP} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
+	${IMSCOMP} ${MC_ARGS} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
 %.csv:  %.E
-	${MUSICOMP2ABC} --midi1csv $< $@ || (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --midi1csv $< $@ || (rm -f $@ ; exit 1)
 %_2.csv:  %.E
-	${IMSCOMP} --midi1csv $< $@ || (rm -f $@ ; exit 1)
+	${IMSCOMP} ${MC_ARGS} --midi1csv $< $@ || (rm -f $@ ; exit 1)
 %.mid:  %.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %_2.mid:  %_2.csv
@@ -213,9 +213,9 @@ BROKEN_2MID = ${BROKEN:=_2.mid}
 	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser/GeneralUser.sf2 -K 128 $< \
 		|| (rm -f $@ ; exit 1)
 %.abc:  %.E
-	${MUSICOMP2ABC} --abc $< $@ || (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
 %_2.abc:  %.E
-	${IMSCOMP} --abc $< $@ || (rm -f $@ ; exit 1)
+	${IMSCOMP} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
 #-- %.ps:   %.abc
 #-- 	${YAPS} $< -o $@ -k || (rm -f $@ ; exit 1)
 %_m.ps: %.abc
@@ -229,13 +229,13 @@ BROKEN_2MID = ${BROKEN:=_2.mid}
 %.E: %.gcs
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
 %.v:    %.E ${MUSICOMP2ABC}
-	${MUSICOMP2ABC} --vert $< $@ || (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --vert $< $@ || (rm -f $@ ; exit 1)
 %_2.v:    %.E ${IMSCOMP}
-	${IMSCOMP} --vert $< $@ || (rm -f $@ ; exit 1)
+	${IMSCOMP} ${MC_ARGS} --vert $< $@ || (rm -f $@ ; exit 1)
 %.h:    %.E ${MUSICOMP2ABC}
-	${MUSICOMP2ABC} --hori $< $@ || (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --hori $< $@ || (rm -f $@ ; exit 1)
 %_2.h:    %.E ${IMSCOMP}
-	${IMSCOMP} --hori $< $@ || (rm -f $@ ; exit 1)
+	${IMSCOMP} ${MC_ARGS} --hori $< $@ || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help
 help:
