@@ -40,6 +40,11 @@ TESTS += U3
 TESTS += U4
 TESTS += V1
 TESTS += W1
+TESTS += W2
+TESTS += W3
+TESTS += vc1-test
+TESTS += vc2-test
+TESTS += vc3-test
 #-----------------------------------------------------------------------------
 SONGS_E = ${SONGS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
