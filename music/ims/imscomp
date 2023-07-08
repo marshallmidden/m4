@@ -740,9 +740,9 @@ def chkvarlevel(arg, maclev):
 # ----------------------------------------------------------------------------
 def print_some_variable_values(s, varnams):
 #--    printed = []
-    global whichmacrochars                          # Unique Macro arguments         - 1
-    global whichlocalchars                          # Unique local character strings - 2
-    global whicharraychars                          # Unique local arrays w/ strings - 2
+#--     global whichmacrochars                          # Unique Macro arguments         - 1
+#--     global whichlocalchars                          # Unique local character strings - 2
+#--     global whicharraychars                          # Unique local arrays w/ strings - 2
     
 #--     if whichmacrochars != {}:
 #--         print_debug("{}: whichmacrochars={}".format(s, whichmacrochars))
@@ -811,11 +811,6 @@ def chkvar(arg):
 
 # ----------------------------------------------------------------------------
 def setvar(arg, val, typ):
-#?    global commands
-#?
-#?    if arg in commands and typ != 0:
-#?        return None                 # Must not set character variable to a command name.
-#?    # fi
     wary = chkvar(arg)
 #--     print_debug("setvar arg={} val={} typ={} wary={}".format(arg,val,typ,wary))
     if wary is None or (len(wary[numarry_indexes]) > 1 and wary[numarry_indexes][0] > 1):
@@ -932,6 +927,7 @@ MAXABCVOICES = 256
 MAXVOICES = 256
 NUMBER_BARS_PER_STAFF = 4
 # NUMBER_BARS_PER_STAFF = 1
+global MIDICLICKSPERQUARTER
 MIDICLICKSPERQUARTER = 480.0
 
 # Let the notes 'release' after piece finishes.
@@ -942,8 +938,11 @@ global array_of_random_numbers
 array_of_random_numbers = [ ]
 
 # When getting note, various things found:
+global sequence_note
 sequence_note = 2
+global trill_note
 trill_note = 1
+global normal_note
 normal_note = 0
 
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
@@ -1022,8 +1021,8 @@ legal_mc_notes = {
              1.5 : '1d',
 }
 
-global legal_floating
-legal_floating = dict((y, x) for x, y in legal_notes.items())
+#-- global legal_floating
+#-- legal_floating = dict((y, x) for x, y in legal_notes.items())
 global legal_floating_times
 legal_floating_times = sorted(legal_notes.values())
 
@@ -1569,16 +1568,13 @@ global cis                          # If cis active, non-zero. (CIS measure one 
 cis = 0
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global vl                           # volume levels
-global running_vl                   # volume levels changing thru measures. (set vl to running_vl at measure.)
 vl = { }
-running_vl = { }
 vl[1] = { }
-running_vl[1] = { }
 vl[1][''] = getvar('vfff')          # vl[voice][m] = volumelevel           - usage
+global running_vl                   # volume levels changing thru measures. (set vl to running_vl at measure.)
+running_vl = { }
+running_vl[1] = { }
 running_vl[1][''] = getvar('vfff')  # running_vl[voice][m] = volumelevel   - usage
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-global pan
-pan = { }                           # Pan (balance 0=left, 126=right, 64=center) for voice, measure
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global cresc_volume                 # Volume to go to.
 cresc_volume = [ ]
@@ -1586,6 +1582,13 @@ global cresc_time                   # Time for crescendo.  (0.25 = 1/4 note)
 cresc_time = []
 global cresc_direction              # True if upwards crescendo, False if downwards..
 cresc_direction = []
+# cresc_volume    - None means nothing happening. Set vf for cresc(vf,0.5).
+# cresc_time      - None means nothing happening. Set 0.5 for cresc(vf,0.5).
+# cresc_direction - None means nothing happening. True means up, False means down.
+#                   If only direction is [measure,note#] - then vp< and upon new volume, do cresc.
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+global pan
+pan = { }                           # Pan (balance 0=left, 126=right, 64=center) for voice, measure
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global xpose                        # The number of semitones to move up/down (positive=up), index by voice.
 xpose = {}
@@ -1644,9 +1647,10 @@ for i in range(1, MAXVOICES+1):     # This is used as [1] .. [MAXVOICES]
     clef[i][''] = 'treble'          # No clef.       (voice, measure)
     xpose[i] = 0
     xpose_new_key[i] = ''           # No new key.   Text!  C for ABC, 0 for fluidsynth.
-    cresc_volume.append(0)
-    cresc_time.append(0)
-    cresc_direction.append(True)
+    cresc_volume.append(None)       # None means nothing happening. Set vf for cresc(vf,0.5).
+    cresc_time.append(None)         # None means nothing happening. Set 0.5 for cresc(vf,0.5).
+    cresc_direction.append(None)    # None means nothing happening. True means up, False means down.
+    # If only direction is [measure,note#] - then vp< and upon new volume, do cresc.
 # rof
 
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
@@ -1850,6 +1854,7 @@ def get_time_stak(timeofnote, voiceon, original_line):
     global legal_floating_times
     global measure_on
     global args
+    global MIDICLICKSPERQUARTER
 
     if type(voiceon) is not int:
         print_error("get_time_stak - voiceon type is not int ({})={}".format(type(voiceon),voiceon), original_line)
@@ -1923,6 +1928,8 @@ def default_note_text_fraction(m):
 # ----------------------------------------------------------------------------
 # Set all voices in all staves in voiceon array (or if int, only one voice).
 def set_all_staff_arr(voiceon, value, arr, strg, original_line):
+    global staff_name
+
     if type(voiceon) is int:
         arr[voiceon] = value
         return
@@ -1946,6 +1953,8 @@ def set_all_staff_arr(voiceon, value, arr, strg, original_line):
 # Set value to one of the voices within measure.
 
 def set_staff_arr_double(voiceon, value, m, arr, strg, original_line):
+    global staff_name
+
     if type(voiceon) is int:
         arr[voiceon][m] = value
         return value
@@ -1969,6 +1978,8 @@ def set_staff_arr_double(voiceon, value, m, arr, strg, original_line):
 # Get value from one of the voices (check all staves have the same).
 
 def get_staff_arr(voiceon, arr, strg, original_line):
+    global staff_name
+
     if type(voiceon) is int:
         return arr[voiceon]
     # fi
@@ -2002,6 +2013,8 @@ def get_staff_arr(voiceon, arr, strg, original_line):
 # Get value from one of the voices (check all staves have the same).
 
 def get_staff_arr_double(voiceon, m, arr, strg, original_line):
+    global staff_name
+
     if type(voiceon) is int:
         return arr[voiceon][m]
     # fi
@@ -2037,6 +2050,8 @@ def get_staff_arr_double(voiceon, m, arr, strg, original_line):
 # True or False check if all voiceon is in array.
 
 def check_voice_staff_in(voiceon, arr, strg):
+    global staff_name
+
     if type(voiceon) is int:
         return voiceon in arr
     # fi
@@ -2085,6 +2100,7 @@ def new_voice_initialize(voiceon, m):
     global key_default
     global key_voice
     global clef
+    global meas
 
 #--     print_debug("new_voice_initialize - voiceon={} m='{}'".format(voiceon,m))
     if type(voiceon) is not int:
@@ -2211,7 +2227,6 @@ def get_volume_level(m, voiceon):
 # ----------------------------------------------------------------------------
 def rests_in_empty_measure_voices(m, voiceon):
     global vl                               # volume levels
-    global meas
     global mlth
     global bufs
     global bufs_length
@@ -2223,6 +2238,8 @@ def rests_in_empty_measure_voices(m, voiceon):
     global bufs_intensity
     global args
     global running_vl
+    global intensity
+    global sequence_note
 
     if type(voiceon) is not int:
         print_error("rests_in_empty_measure_voices - voice type is not int ({})".format(type(voiceon), 'rests_in_empty_measure_voices'))
@@ -2328,6 +2345,9 @@ def print_measure_abc(m, print_V, voiceon, l_meter, l_tempo, l_dl, l_clef, l_ins
     global key_voice                        # Running key by voice.
     global tempo_speed_now
     global pitch
+    global drum_sounds
+    global instruments
+    global goto_table
 
     if type(voiceon) is not int:
         print_error("print_measure_abc - voice type is not int ({})".format(type(voiceon), 'print_measure_abc'))
@@ -2454,6 +2474,8 @@ def print_out_abc():
     global key_default
     global voices_to_do
     global args
+    global goto_table
+    global percents
 
     printed_V = 0
 
@@ -2563,6 +2585,7 @@ def print_out_abc():
 def print_measure_vh_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l_ky, l_tempo, l_t_n_l, l_pitch):
     global vl
     global measure_meter
+    global measurelinecomment
     global clef
     global vinstrument
     global key_voice
@@ -2572,6 +2595,9 @@ def print_measure_vh_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l_ky,
     global args
     global voices_to_do
     global vlprint
+    global drum_sounds
+    global instruments
+    global premeasurecomment
 
     pr = ''
     n_meter = ''
@@ -2739,6 +2765,7 @@ def print_out_notes_v_or_h(m, print_line):
     global bufs_suffixes
     global args
     global voices_to_do
+    global mlth
 
     if args.vertical:
         txt = ''
@@ -2870,6 +2897,8 @@ def print_out_v_or_h():
     global tempo_speed_default
     global default_note_length
     global pitch
+    global goto_table
+    global percents
 
     print_output('voice   {}'.format(len(vl)))
 
@@ -2952,7 +2981,6 @@ def print_out_midi1csv_end(voiceon, lthworkingmeasures):
 # Time Signature / meter.
 # returns lastmeter printed (which this routine may update).
 def print_out_midi1csv_ts(m, voiceon, lthworkingmeasure, last_bar_meter):
-    global meas
     global measure_meter
 
     if last_bar_meter != measure_meter[m]:
@@ -2982,13 +3010,13 @@ def print_out_midi1csv_instrument(m, voiceon, lthworkingmeasure, last_instrument
     global reverb
     global pan
     global intensity
-    global meas
     global inst
     global mlth
     global args
     global MIDI_port
     global drums_MIDI_port
     global drum_sounds
+    global instruments
 
     if voiceon not in vinstrument:
         vinstrument[voiceon] = {}
@@ -3099,8 +3127,6 @@ def print_out_midi1csv_instrument(m, voiceon, lthworkingmeasure, last_instrument
 
 # ----------------------------------------------------------------------------
 def print_out_midi1csv_tempo(m, voiceon, lthworkingmeasure, t, l):
-    global tempo_speed_default
-    global default_note_length
     global tempo_speed_now
     global tempo_now_note_length
 
@@ -3152,11 +3178,15 @@ def print_header():
     global bars
     global key_voice
     global key_default
-    global measure_meter
+    global meas
     global mlth
+    global tlth
+    global percents
     global percentcombinevoices
     global percentpageheight
     global percentpagewidth
+    global MIDICLICKSPERQUARTER
+    global goto_table
 
     if args.vertical or args.horizontal:
         l = str(Fraction(1.0 / default_note_length['']).limit_denominator(256))
@@ -3351,11 +3381,6 @@ def print_header():
 def print_out_midi1csv_notes():
     global vl                                   # volume levels
     global meas                                 # measures
-    global inst
-    global tempo_speed_default
-    global default_note_length                  # Default note length.
-    global tempo_speed_now                      # Beats per minute for each measure.
-    global tempo_now_note_length                # Note length for a beat.
 
     global bufs                                 # Notes.
     global bufs_length                          # Lengths for notes.
@@ -3371,6 +3396,10 @@ def print_out_midi1csv_notes():
     global args
     global voices_to_do
     global voices_having_notes
+    global drum_sounds
+    global instruments
+    global intensity
+    global midi_value_to_note_sharp
 
     channel = 0                                 # Next midi instrument channel to use.
     chan = 0                                    # The midi channel using now (allows for repeated use).
@@ -3447,6 +3476,7 @@ def print_out_midi1csv_notes():
                 v_intens = bufs_intensity[voice][m][i]       # "channel" volume for the next note.
                 if note_length > 0:             # If there is a previous note to update length, or ...
                     # Crescendo needs current volume and next notes starting volume.
+# NOTDONEYET - crescendo/diminuendo - changes?
                     if 'c' in last_suffixes:
                         # Do crescendo between lthworkingmeasures and lthworkingmeasures+note_playing.
                         fvol = float(v_vl)      # Previous volume
@@ -3689,8 +3719,9 @@ default_little_time = 0.1
 global this_time
 this_time = []
 # ----------------------------------------------------------------------------
-global measure_1st_only, fs_other_echo
+global measure_1st_only
 measure_1st_only = []
+global fs_other_echo
 fs_other_echo = ''
 # ----------------------------------------------------------------------------
 def process_fs_check(what, lth, min_next, vtlines, tempo_s, tempo_l):
@@ -3907,6 +3938,7 @@ def pre_move_note_before(prev_m, m, voiceon, l, vel, intens, n, a, v):
     global bufs_suffixes
     global mlth                         # measure length dictionary
     global tlth
+    global MIDICLICKSPERQUARTER
 
     bufs[voiceon][prev_m].append(n)
     bufs_length[voiceon][prev_m].append(l)
@@ -3942,6 +3974,7 @@ def pre_shift_measure(prev_m, m):
     global bufs_suffixes
     global mlth                         # measure length dictionary
     global tlth
+    global MIDICLICKSPERQUARTER
 
     for voice in range(1, len(vl)+1):
         s = args.shift
@@ -4038,10 +4071,8 @@ def pre_shift():
     This routine will shift measures forward (add rest at beginning of song),
     or remove notes/rests from beginning of song -- by args.shift value (float).
     '''
-    global vl                               # volume levels
     global meas                             # measures
     global args
-    global pitch
 
     if not args.vertical and not args.horizontal:
         return
@@ -4070,6 +4101,8 @@ def check_staves_notes_order():
     global bufs
     global bufs_suffixes
     global args
+    global midi_value_to_note_sharp
+    global xpose
 
     # The idea is to go through the voices in array staves, checking that the
     # first listed one(s) are higher notes than the latter listed ones.
@@ -4245,14 +4278,19 @@ def pass2():
     global vl
     global ifdepth
     global macro_defining
-    global process_defining
+    global macro_name
     global loop_defining
-    global lmp_executing_number
+    global loop_location
     global errors_happened
     global goto_table
     global staves
+    global staff_name
     global percentstaves
+    global process_defining
     global in_process_already
+    global process_name
+    global lmp_executing_type
+    global lmp_executing_number
 
     if in_process_already:
         # Delete process from stack.
@@ -4415,16 +4453,17 @@ def delete_executing_variables(l):
 
 # ----------------------------------------------------------------------------
 def get_next_process_line(l):
-    global lmp_executing_number
+#--     global lmp_executing_number
     global lmp_executing_which
     global lmp_executing_type
     global lmp_executing_line
-    global lmp_executing_i_line
-    global lmp_executing_args
+#--     global lmp_executing_i_line
+#--     global lmp_executing_args
     global lmp_executing_rest_of_line
     global i_line
     global running_process_already
     global in_process_already
+    global process_buffer
 
 #--     print_debug("get_next_process_line - l='{}' lmp_executing_number='{}' lmp_executing_which='{}'".format(l,lmp_executing_number,lmp_executing_which[l]))
 #--     print_debug("get_next_process_line - lmp_executing_type='{}' lmp_executing_line='{}'".format(lmp_executing_type[l],lmp_executing_line[l]))
@@ -4465,6 +4504,7 @@ def get_next_macro_line(l):
     global lmp_executing_args
     global lmp_executing_rest_of_line
     global i_line
+    global macro_buffer
 
     the_macro = lmp_executing_which[l]
     linenumber = lmp_executing_line[l]
@@ -4644,7 +4684,6 @@ def read_next_line():
     global file_name
     global lmp_executing_number
     global lmp_executing_type
-    global macro_buffer                 # Array of lines for macro.
     global errors_happened
     global running_process_already
 
@@ -4842,6 +4881,8 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, oneti
     global cresc_time
     global cresc_volume
     global vlprint
+    global MIDICLICKSPERQUARTER
+    global intensity
 
     if type(voiceon) is not int:
         print_error("put_on_bufs - voiceon type is not int ({})".format(type(voiceon)), 'put_on_bufs')
@@ -4929,6 +4970,7 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, oneti
             bufs[voiceon][p_meas] = [thenote]
             bufs_length[voiceon][p_meas] = [timeofnote]
             bufs_velocity[voiceon][p_meas] = [ getvar_checkokay('default_velocity', original_line) ]
+# NOTDONEYET - crescendo/diminuendo - changes?
             if cresc_time[voiceon] is None:
                 print_debug("put_on_bufs #A - cresc_time[{}]={}".format(voiceon,cresc_time[voiceon]))
             elif cresc_time[voiceon] != 0:
@@ -4974,6 +5016,7 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, oneti
             bufs[voiceon][p_meas].append(thenote)
             bufs_length[voiceon][p_meas].append(timeofnote)
             bufs_velocity[voiceon][p_meas].append(getvar_checkokay('default_velocity', original_line))
+# NOTDONEYET - crescendo/diminuendo - changes?
             if cresc_time[voiceon] is None:
                 print_debug("put_on_bufs #B - cresc_time[{}]={}".format(voiceon,cresc_time[voiceon]))
             elif cresc_time[voiceon] != 0:
@@ -4997,6 +5040,7 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, oneti
 #--     print_debug("#2 cresc_time[voiceon]='{}'".format(cresc_time[voiceon]))
 
     # If crescendo happening, do it.
+# NOTDONEYET - crescendo/diminuendo - changes?
     if cresc_time[voiceon] is None:
         print_debug("put_on_bufs #C - cresc_time[{}]={}".format(voiceon,cresc_time[voiceon]))
         return
@@ -5004,6 +5048,7 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, oneti
         return
     # fi
 
+# NOTDONEYET - crescendo/diminuendo - changes?
     if cresc_time[voiceon] <= timeofnote:
         try:
             running_vl[voiceon][p_meas] = cresc_volume[voiceon]
@@ -5026,6 +5071,7 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, oneti
         return
     # fi
 
+# NOTDONEYET - crescendo/diminuendo - changes?
     dt = cresc_time[voiceon] + 0.0
     if not args.vertical and not args.horizontal:
         try:
@@ -5037,6 +5083,7 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, oneti
             print_debug("put_on_bufs - NOTDONEYET - voiceon not integer ({})".format(voiceon))
     # fi
     cresc_time[voiceon] = cresc_time[voiceon] - timeofnote
+# NOTDONEYET - crescendo/diminuendo - changes?
 
     return
 # End of put_on_bufs
@@ -5044,6 +5091,7 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, oneti
 # ----------------------------------------------------------------------------
 def instak(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, onenotevolume, postnote, original_line):
     global args
+    global MIDICLICKSPERQUARTER
 
 #--     print_debug("instak - v#{} m#{} prenote='{}' thenote='{}' timeofnote='{}' append_tie='{}' onenotevolume='{}' postnote='{}'".format(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, onenotevolume, postnote))
 
@@ -5135,7 +5183,8 @@ def fill_voice_mlth(meter_check, original_line):
     global args
     global meas
     global cis
-#--     global last_voice_staff
+    global MIDICLICKSPERQUARTER
+    global last_voice_staff
 
 #--     print_debug("fill_voice_mlth - Entering - vl={}".format(vl))
     maxvoice = len(vl) + 1
@@ -5200,8 +5249,6 @@ def fill_voice_mlth(meter_check, original_line):
 nest_terminator = { '(':')', '{':'}', "'":"'", '"':'"' }
 
 def find_terminator_in_string(strng, terminators, doparens, original_line):
-    global measure_on
-
 #--     print_debug("find_terminator_in_string - strng='{}' terminators='{}' doparens='{}'".format(strng,terminators,doparens))
     w = 0
     e = []
@@ -5325,6 +5372,7 @@ def fill_1_voice_mlth(v, lth, original_line):
     global measure_on
     global mlth
     global args
+    global MIDICLICKSPERQUARTER
 
     m = measure_on
     if type(v) is not int:
@@ -5363,6 +5411,7 @@ def assign_another_voice(b4, where, original_line):
     global measure_on
     global voices
     global staff_name
+    global staff_chord_voices
     global bufs
     global bufs_intensity
     global bufs_legato_next
@@ -5379,6 +5428,7 @@ def assign_another_voice(b4, where, original_line):
     global time
     global vinstrument
     global vl
+    global mlth
 
     # If not any staves, nor notes on any voices, and #voices == 1, use 1 for first, else one more than used.
 #--     print_debug("assign_another_voice - staff_name[{}]={}".format(b4,staff_name[b4]))
@@ -5460,6 +5510,7 @@ def assign_another_voice(b4, where, original_line):
 
 def separate_args(wline, integers, nospaces, original_line):
     def b4it(array_args, b4, integers, original_line):
+        global staff_name
 #--         print_debug("b4it - #1 array_args='{}'".format(array_args))
         if b4 == '':
             array_args.append(b4)
@@ -5557,6 +5608,7 @@ def separate_args(wline, integers, nospaces, original_line):
 #   original_line - For error messages.
 
 def replace_macro(cnumber, t_args, original_line):
+    global macro_name
     global macro_name_terminator
     global macro_arguments              # Array of arguments for macro.
     global macro_arg_terminator
@@ -5565,6 +5617,8 @@ def replace_macro(cnumber, t_args, original_line):
     global lmp_executing_args           # Array of arguments given to macro.
     global lmp_executing_line           # Line number in macro array.
     global lmp_executing_i_line
+    global lmp_executing_rest_of_line
+    global lmp_executing_type
     global i_line
 
     command = macro_name[cnumber]
@@ -5676,6 +5730,7 @@ def macro_define(command, t_args, original_line):
     global macro_defining               # If defining macro.
     global macro_defining_count
     global macro_buffer                 # Name of macro, array of lines for macro.
+    global commands
 
     if command in commands and commands[command][0] == do_macro:
         macro_defining_count = macro_defining_count + 1
@@ -5703,6 +5758,7 @@ def process_define(command, t_args, original_line):
     global process_defining               # If defining process.
     global process_defining_count         # If defining process.
     global process_buffer                 # Name of process, array of lines for process.
+    global commands
 
     if command in commands and commands[command][0] == do_process:
         process_defining_count = process_defining_count + 1
@@ -5732,6 +5788,7 @@ def loop_define(command, t_args, original_line):
     global loop_defining               # If defining loop.
     global loop_defining_count         # If defining loop.
     global loop_buffer                 # Name of loop, array of lines for loop.
+    global commands
 
     if command in commands and commands[command][0] == do_loop:
         loop_defining_count = loop_defining_count + 1
@@ -6078,7 +6135,13 @@ def decode_ims(t_args, original_line):
     global args
     global measure_on
     global key_sig
+    global key_sig_int
     global key_voice
+    global pan
+    global suffix_emphasis
+    global suffix_legato
+    global suffix_staccato
+    global suffix_tied
 
 #--     print_debug("decode_ims - Entering t_args='{}'".format(t_args))
     if not t_args:
@@ -6459,8 +6522,6 @@ def do_bars(t_args, original_line):
 #           (,[,{, },],)                            $$ Parenthesis
 
 def do_calc(t_args, original_line):
-    global lmp_executing_number
-    global lmp_executing_which
     global i_line
 
     if t_args is None or t_args == '':
@@ -6692,6 +6753,7 @@ def do_cis(t_args, original_line):
     global intensity
     global measure_on
     global instruments
+    global drum_sounds
 
     if t_args is None or t_args == '':
         print_error("cis does not have one or two arguments.", original_line)
@@ -6795,6 +6857,7 @@ def do_cis(t_args, original_line):
 def do_clef(t_args, original_line):
     global clef
     global measure_on
+    global staff_name
 
 #--     print_debug("do_clef - Entering t_args='{}'".format(t_args))
     if t_args is None or t_args == '':
@@ -7126,6 +7189,7 @@ def get_defaults_for_note(t_args, voiceon, original_line):
     global args
     global measure_on
     global key_sig
+    global key_sig_int
     global key_voice
 
 #--    print_debug("get_defaults_for_note #0 t_args='{}' h='{}' v='{}' csv='{}' fs='{}'".format(t_args,args.horizontal,args.vertical,args.midi1csv,args.fluidsynth))
@@ -7289,8 +7353,9 @@ def set_var_string(variable, strng, original_line):
 # defaults to be used for any note items missing.
 
 def do_encode(t_args, original_line):
-    global measure_on
     global last_voice_staff
+    global i_line
+    global midi_value_to_note_flat
 
 #--    print_debug("do_encode - #1 t_args='{}'".format(t_args))
     if t_args is None or t_args == '':
@@ -7809,9 +7874,9 @@ def do_endif(t_args, original_line):
 #   endloop m1 == 0
 
 def do_endloop(t_args, original_line):
+    global measure_on
     global loop_defining
     global loop_number
-    global loop_location
     global i_line
     global lmp_executing_number
     global lmp_executing_which
@@ -7906,7 +7971,6 @@ def do_global(t_args, original_line):
 def do_goto(t_args, original_line):
     global measure_on
     global goto_table
-    global goto_variables
 
     if args.nogoto:
         print_warning("Ignoring goto parsing.", original_line)
@@ -7987,6 +8051,7 @@ def do_key(t_args, original_line):
     global mlth
     global vl
     global minor_key_to_major
+    global staff_name
 
     if t_args is None or t_args == '':
         print_error("key command does not have arguments", original_line)
@@ -8171,6 +8236,7 @@ def do_instrument(t_args, original_line):
     global instruments
     global drum_sound
     global mlth
+    global staff_name
 
     if t_args is None or t_args == '':
         print_error("instrument does not have arguments.", original_line)
@@ -8263,6 +8329,7 @@ def do_instrument(t_args, original_line):
 def do_intensity(t_args, original_line):
     global intensity
     global measure_on
+    global staff_name
 
     if t_args is None or t_args == '':
         print_error("intensity does not have arguments.", original_line)
@@ -8851,6 +8918,7 @@ def do_meter(t_args, original_line):
 def do_middle_c(t_args, original_line):
     global middle_c
     global measure_on
+    global note_to_midi_value
 
     if t_args is None:
         print_error("middlec does not have a note to process", original_line)
@@ -9021,6 +9089,7 @@ def do_page(t_args, original_line):
 def do_pan(t_args, original_line):
     global pan
     global measure_on
+    global staff_name
 
     if t_args is None or t_args == '':
         print_error("pan does not have arguments.", original_line)
@@ -9157,6 +9226,8 @@ def do_process(t_args, original_line):
     global process_argument
     global process_buffer
     global staff_keywords
+    global commands
+    global staff_name
 
     if t_args is None or t_args == '':
         print_error("process command does not have any arguments.", original_line)
@@ -9215,6 +9286,8 @@ def do_process(t_args, original_line):
 # Stop when no change occurs, or 25 tries. (Catches A -> B -> A loops.)
 
 def do_putd(t_args, original_line):
+    global putds
+
     if t_args is None or t_args == '':
         print_error("putd does not have an argument.", original_line)
         return
@@ -9296,18 +9369,9 @@ def do_reloop(t_args, original_line):
     global measure_on
     global lmp_executing_which
     global lmp_executing_type
-    global lmp_executing_args
     global lmp_executing_line
-    global lmp_executing_i_line
-    global lmp_executing_rest_of_line
     global lmp_executing_number
-    global loop_location
-    global loop_increment
-    global loop_value_variable
-    global loop_final_value
-    global loop_endloop_exp
     global loop_buffer
-    global loop_number
 
     l = lmp_executing_number
     if lmp_executing_type[l] != 'loop':
@@ -9345,6 +9409,7 @@ def do_reloop(t_args, original_line):
 def do_reverb(t_args, original_line):
     global reverb
     global measure_on
+    global staff_name
 
     if t_args is None or t_args == '':
         print_error("reverb does not have arguments.", original_line)
@@ -9775,6 +9840,7 @@ def do_voice(t_args, original_line):
     global measure_on
     global instruments
     global drum_sounds
+    global mlth
 
     if t_args is None or t_args == '':
         print_error("voice does not have one argument.", original_line)
@@ -9915,6 +9981,8 @@ def do_xpose(t_args, original_line):
     global key_default
     global args
     global key_voice
+    global minor_key_to_major
+    global staff_name
 
     if args.noxpose:
         print_warning("Ignoring xpose parsing due to --noxpose argument.", original_line)
@@ -10253,45 +10321,31 @@ def handle_volume_both(t_args, command_name, original_line):
         return
     # fi
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    wargs = separate_args(vargs[0], command_name, True, original_line)
     if len(vargs) == 1:
         # 1 or 1,2,3 ... .
-#--         print_debug("handle_volume_both - #A")
-        wargs = separate_args(vargs[0], command_name, True, original_line)
-#--         print_debug("handle_volume_both #1 - wargs='{}'".format(wargs))
         if len(wargs) == 0 or len(wargs) > MAXVOICES:
             print_error(command_name + " needs from one to {} arguments".format(MAXVOICES), original_line)
             return
         # fi
-#--         print_debug("handle_volume_both - wargs='{}'".format(wargs))
         for i in range(1, len(wargs)+1):
             v = str(wargs[i - 1])
-#--             v = get_volume_number(nbr, command_name, original_line)
-#--             print_debug("handle_volume_both #1 - i='{}' v={} nbr='{}'".format(i,v,nbr))
-#--             if v is None:
-#--                 return
-#--             # fi
             if not i in vl:
-#--                 print_debug("handle_volume_both - calling new_voice_initialize")
                 new_voice_initialize(i, measure_on)
             # fi
             vl[i][measure_on] = v           # Change volume for voice.
             running_vl[i][measure_on] = v   # Force running change - also stop crescendo.
-            cresc_volume[i] = 0
-            cresc_time[i] = 0
-            cresc_direction[i] = True
+# NOTDONEYET - crescendo/diminuendo - changes?
+            cresc_volume[i] = None
+            cresc_time[i] = None
+            cresc_direction[i] = None
         # rof
     else:
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-#--         print_debug("handle_volume_both - #B")
-        wargs = separate_args(vargs[0], command_name, True, original_line)
-#--         print_debug("handle_volume_both #2 - vargs='{}' wargs='{}'".format(vargs,wargs))
         v = get_volume_number(vargs[1], command_name, original_line)
-#--         print_debug("handle_volume_both #3 - v='{}' vargs[1]='{}'".format(v,vargs[1]))
         for i in range(1, len(wargs)+1):
             nbr = str(wargs[i - 1])
-#--             print_debug("handle_volume_both #A - i={} nbr='{}' wargs[i-1]='{}'".format(i,nbr,wargs[i-1]))
             f1, type_error = is_float(nbr, is_float_number, False)
-#--             print_debug("handle_volume_both #a - i='{}' v='{}' f1='{}' type_error='{}'".format(i,v,f1,type_error))
             if type_error is not None:
                 print_error("volume error - {}".format(type_error), original_line)
                 return
@@ -10301,13 +10355,13 @@ def handle_volume_both(t_args, command_name, original_line):
                 return
             # fi
             f1 = int(round(f1))
-#--             print_debug("handle_volume_both #b - i='{}' f1={} v={}".format(i,f1,v))
 
             vl[f1][measure_on] = v           # Change volume for voice.
             running_vl[f1][measure_on] = v   # Force running change - also stop crescendo.
-            cresc_volume[f1] = 0
-            cresc_time[f1] = 0
-            cresc_direction[f1] = True
+# NOTDONEYET - crescendo/diminuendo - changes?
+            cresc_volume[f1] = None
+            cresc_time[f1] = None
+            cresc_direction[f1] = None
         # rof
     # fi
 
@@ -10319,6 +10373,7 @@ def handle_volume_both(t_args, command_name, original_line):
 def initialize_set_voices(f1, original_line):
     global voices                       # number of voices
     global measure_on
+    global staff_name
 
 #--     print_debug("initialize_set_voices - Entering - f1='{}'".format(f1))
     if type(f1) is int:
@@ -10841,6 +10896,7 @@ commands = {
 #  b/c-     35     47     59     71     83      95     107     119
 
 # For octave 3c = 60.
+global note_in_octave_value
 note_in_octave_value = {
    'c--':58, 'c-':59, 'c':60, 'cn':60, 'c+':61, 'c++':62,
    'd--':60, 'd-':61, 'd':62, 'dn':62, 'd+':63, 'd++':64,
@@ -10864,9 +10920,6 @@ middle_c = 39                   # Default to 60, as per cyber1 (1978 era) musico
 def compute_middle_c(f):
     global note_in_octave_value
     global note_to_midi_value
-    global midi_value_to_note_sharp
-    global midi_value_to_note_flat
-    global midi_value_to_note_flat
     global midi_value_to_note_sharp
     global midi_value_to_note_flat
     global middle_c
@@ -10933,6 +10986,8 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, original_line):
     global xpose
     global xpose_new_key
     global acc_m_xpose
+    global middle_c
+    global trill_note
 
 #--     print_debug("getnote('{}', voiceon='{}', update_defaults='{}', do_errors='{}')".format(note_to_decode, voiceon, update_defaults, do_errors))
 #--    print_debug("getnote #1 h='{}' v='{}' csv='{}' fs='{}'".format(args.horizontal,args.vertical,args.midi1csv,args.fluidsynth))
@@ -11528,6 +11583,8 @@ def get_time(therest, original_line):
     whqe = { 'w':1, 'h':2, 'q':4, 'e':8 }
     global bit_from_character
     global measure_on
+    global suffix_staccato
+    global suffix_tied
 
     vwork = 0
     work = 0
@@ -11756,6 +11813,13 @@ def determine_s_vol(f1, voiceon, original_line):
 # and like "sfp" after it to go to "f" for this note, and "p" for following notes.
 #
 # NOTDONEYET - The value should be allowed to have parenthesis.
+#
+# returns:
+#   therest - everything after the closing ).
+#   f1      - integer/float[if not --vert/--hori] for volume level.
+#             None = no volume present or error.
+#   f2      - if sfp or similar, volume to have after this note. -1=back to what it was.
+#   s1      - String that was inside vol().
 
 def get_vol_note(temp1, voiceon, original_line):
     global S_vlprint
@@ -11907,12 +11971,9 @@ def find_vol_cresc(temp1, voiceon, prenote, postnote, original_line):
     global vlprint
     global DECORATIONS
     global cresc_direction
+    global cresc_volume
     global cresc_time
-
-# NOTDONEYET-    if type(voiceon) is not int:
-# NOTDONEYET-        print_error("find_vol_cresc - voiceon type is not int ({})".format(type(voiceon)), 'find_vol_cresc')
-# NOTDONEYET-    # fi
-# NOTDONEYET - voiceon -- running_vl[voiceon][measure_on] = f2 -- Uh, does next voice. Cannot do previous ones.
+    global MIDICLICKSPERQUARTER
 
     onenotevolume = None
 #--     print_debug("find_vol_cresc - temp1={} voiceon={} prenote={} postnote={}".format(temp1,voiceon,prenote,postnote))
@@ -11932,6 +11993,7 @@ def find_vol_cresc(temp1, voiceon, prenote, postnote, original_line):
             # fi
             # Note: therest is after the closing parenthesis. (i.e. >/< )
             trailing = ''
+# NOTDONEYET - crescendo/diminuendo - changes?
             if len(therest) > 0 and therest[0] in [ '<', '>' ]:  # crescendo/decrescendo.
                 if onenotevolume != f2:
                     print_error("find_vol_cresc - cannot have a double volume change with cresc/dimin", original_line)
@@ -11941,13 +12003,14 @@ def find_vol_cresc(temp1, voiceon, prenote, postnote, original_line):
                 trailing = therest[0]
                 therest = therest[1:]
                 f2 = -1
+# NOTDONEYET - crescendo/diminuendo - changes?
                 if trailing == '>':
                     crd = True
                 else:
                     crd = False
                 # fi
-# NOTDONEYET - set variables for crescendo/diminuendo starting.
 # ------------------------------------------------------------------------------
+# NOTDONEYET - crescendo/diminuendo - changes?
                 cresc_volume[voiceon] = None
                 cresc_time[voiceon] = None
 #--                 print_debug("find_vol_cresc - None!")
@@ -11999,6 +12062,7 @@ def find_vol_cresc(temp1, voiceon, prenote, postnote, original_line):
             crd = False
         # fi
         if crd is not None:
+# NOTDONEYET - crescendo/diminuendo - changes?
             # cresc(ff,5.25)    # volume to go to, 5.25 = time in floating.
             therest, newvolume, newtime = get_cresc(temp1, original_line)
             if newvolume is None:
@@ -12022,6 +12086,7 @@ def find_vol_cresc(temp1, voiceon, prenote, postnote, original_line):
                         print_debug("find_vol_cresc - NOTDONEYET - voiceon not integer ({})".format(voiceon))
                 # fi
             # fi
+# NOTDONEYET - crescendo/diminuendo - changes?
             cresc_volume[voiceon] = newvolume
             if args.vertical or args.horizontal:
                 prenote = prenote + 'cresc(' + str(newvolume) + ',' + str(newtime) + ')'
@@ -12040,6 +12105,7 @@ def find_vol_cresc(temp1, voiceon, prenote, postnote, original_line):
                 except:
                     print_debug("find_vol_cresc - NOTDONEYET - voiceon not integer ({})".format(voiceon))
                 cresc_time[voiceon] = newtime + 0.0
+# NOTDONEYET - crescendo/diminuendo - changes?
             # fi
             temp1 = therest
             continue
@@ -12085,6 +12151,7 @@ def get_trill_note(therest, voiceon, prenote, onenotevolume, w, thenote, postnot
     global time
     global legal_notes
     global MIDICLICKSPERQUARTER
+    global suffix_legato
 
     note_add = []
 #--    print_debug("get_trill_note #1 h='{}' v='{}' csv='{}' fs='{}'".format(args.horizontal,args.vertical,args.midi1csv,args.fluidsynth))
@@ -13004,20 +13071,19 @@ def process_notes_oldway(line, original_line):
     global last_voice_staff
     global voices                       # number of voices
     global cis                          # if cis active, non-zero.
-    global time                         # set default note length (time) dictionary
     global measure_on                   # The measure we are on.
     global mlth                         # measure length dictionary
     global args
     global bufs
     global macro_name                   # Possible unique macro names -- they may be duplicated.
     global macro_name_terminator        # Terminator after macro name.
-    global macro_arguments              # Array of arguments for macro.
     global macro_arg_terminator         # Terminators after arguments.
     global macro_buffer                 # Array of lines for macro.
-    global meas
+    global macro_number
     global bufs_legato_next
     global bufs_tie_next
     global voice_prenote
+    global MIDICLICKSPERQUARTER
 
 #DEBUG    print_debug("process_notes_oldway - Entering - line='{}'".format(line))
     if not measure_on or measure_on == '':  # no measure yet
@@ -13316,6 +13382,8 @@ def parens_match(enddelim, aftertoken, w, original_line):
 #   aftertoken - The rest of the line, after the {...} is processed.
 
 def fix_limiting_char_variables(wary, aftertoken, original_line):
+    global measure_on
+
 #--     print_debug("fix_limiting_char_variables #1 - wary[numarry_name]={} aftertoken={}".format(wary[numarry_name],aftertoken))
     prew = 0
     name = wary[numarry_name]
@@ -13489,6 +13557,9 @@ def alpha_token(startat, strg, original_line):
 
 # ----------------------------------------------------------------------------
 def replace_macro_arguments(line, original_line):
+    global i_line
+    global whichmacrochars                          # Unique Macro arguments         - 1
+
     if whichmacrochars == {}:
         return line
     # fi
@@ -13559,6 +13630,10 @@ def replace_macro_arguments(line, original_line):
 
 # ----------------------------------------------------------------------------
 def replace_character_variables(line, original_line):
+    global i_line
+    global whichlocalchars
+    global whicharraychars
+
     line = replace_macro_arguments(line, original_line)
     if whichlocalchars == {} and whicharraychars == {}:
         return line
@@ -13707,6 +13782,10 @@ def first_token(strg, original_line):
 
 # ----------------------------------------------------------------------------
 def char_var_subst_first_token(original_line):
+    global i_line
+    global whichmacrochars
+    global whichlocalchars
+
 #--     print_debug("char_var_subst_first_token - original_line={}".format(original_line))
     if whichmacrochars == {} and whichlocalchars == {}:
         return original_line
@@ -13784,7 +13863,10 @@ def set_process_begin(token, next_tokens, original_line):
     global lmp_executing_args           # Argument given to process.
     global lmp_executing_line           # Line number in process array.
     global lmp_executing_i_line
+    global lmp_executing_rest_of_line
+    global lmp_executing_type
     global i_line
+    global process_argument
 
 #---    print_debug("set_process_begin '{}' '{}'".format(token, next_tokens))
     found_pn = None
@@ -13852,17 +13934,17 @@ def run_process(token, next_tokens, original_line):
 #--     print_debug("run_process - last_voice_staff='{}' token='{}' next_tokens='{}'".format(last_voice_staff, token, next_tokens))
 
     global process_argument                         # Array of the argument for process.
-    global running_process_type
     global lmp_executing_number                     # If processing process ... reading from process buffer.
     global lmp_executing_which                      # Which process being executed. Means cannot reorder. *drats*
     global lmp_executing_args                       # Argument given to process.
     global lmp_executing_line                       # Line number in process array.
-    global lmp_executing_i_line
+#--     global lmp_executing_i_line
     global lmp_executing_rest_of_line
     global lmp_executing_number
-    global i_line
+    global lmp_executing_type
     # set to say that token is now the variable and we'll get next items from process.
     global running_process_already
+    global pan
 
 #--     print_debug("run_process - in_process_already='{}' running_process_already='{}'".format(in_process_already, running_process_already))
     if lmp_executing_type[-1] != 'process':
@@ -13932,19 +14014,13 @@ def keyword_xpose(token, delimiter, next_tokens, original_line):
 
 # ----------------------------------------------------------------------------
 def keyword_volumename(token, delimiter, next_tokens, original_line):
-    global measure_on
-
 #--     print_debug("keyword_volumename - Entering - token='{}' delimiter='{}' next_tokens='{}'".format(token, delimiter, next_tokens))
     if len(token) > 0 and token[0] == 'v':  # See if 'v' can be deleted.
         token = token[1:]
     # fi
     # See if name follows.
-#--     if delimiter in [ '<', '>' ]:           # crescendo/decrescendo.
-#--         print_warning("m:{} keyword_volumename - delimiter='{}' NOTDONEYET-crescendo/decrescendo.".format(measure_on, delimiter), original_line)
-#--        delimiter = ' '
-#--        next_tokens = next_tokens[1:]
-#--     # fi
     if next_tokens is not None and next_tokens != '':
+# NOTDONEYET - crescendo/diminuendo - changes?
         if delimiter in [ '<', '>' ]:           # crescendo/decrescendo.
             next_tokens = 'vol(' + token + ')' + next_tokens
         else:
@@ -14005,6 +14081,8 @@ def keyword_fermata(token, delimiter, next_tokens, original_line):
 
 # ----------------------------------------------------------------------------
 def keyword_key(token, delimiter, next_tokens, original_line):
+    global last_voice_staff
+
     if next_tokens is None:
         strng = ','.join(last_voice_staff)
     else:
@@ -14044,6 +14122,8 @@ def keyword_note_show1(token, delimiter, next_tokens, original_line):
 # treble, bass, soproano, alto, tenor
 
 def keyword_clefs(token, delimiter, next_tokens, original_line):
+    global last_voice_staff
+
     strng = ','.join(last_voice_staff) + ' ' + token
     do_clef(strng, original_line)
     return next_tokens
@@ -14064,6 +14144,7 @@ def keyword_tie(token, delimiter, next_tokens, original_line):
 # End of keyword_tie
 
 # ----------------------------------------------------------------------------
+global staff_keywords
 staff_keywords = {
     'midi': keyword_midi,
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
@@ -14129,6 +14210,8 @@ staff_keywords = {
 # Might take multiple tokens.
 
 def process_keyword(token, delimiter, next_tokens, original_line):
+    global staff_keywords
+
 #--     print_debug("process_keyword - token='{}' delimiter='{}' next_tokens='{}'".format(token, delimiter, next_tokens))
     next_tokens = staff_keywords[token](token, delimiter, next_tokens, original_line)
 #--     print_debug("process_keyword - next_tokens='{}'".format(next_tokens))
@@ -14213,11 +14296,11 @@ def find_mlth_values(stfs, m, original_line):
 #   p_i = True for put_on_bufs(), False for instak()
 
 def handle_staff_note(add_these_staff_chords, original_line):
-    global last_voice_staff
     global measure_on
     global staff_chord_voices
     global bufs_tie_next
     global bufs_legato_next
+    global MIDICLICKSPERQUARTER
 
 #--     print_debug("handle_staff_note - adding: add_these_staff_chords={}".format(add_these_staff_chords))
     # C) Find number of notes in chord.
@@ -14329,10 +14412,14 @@ def handle_staff_note(add_these_staff_chords, original_line):
 def process_notes_for_staff(token, delimiter, next_tokens, original_line):       # NOTDONDYET
     global last_voice_staff
     global measure_on
+    global staff_chord
     global staff_chord_voices
     global bufs_legato_next
     global bufs_tie_next
     global voice_prenote
+    global oct
+    global staff_name
+    global time
 
 #--     if not measure_on or measure_on == '':          # no measure yet
 #--         print_error("no measure processed yet - must have one before notes.", original_line)
@@ -14475,6 +14562,10 @@ def process_staff_notes(command, delimiter, t_args, original_line):
     global last_voice_staff
     global in_process_already
     global running_process_already
+    global lmp_executing_number
+    global staff_chord
+    global staff_keywords
+    global staff_name
 
     token = command
     tdelim = delimiter
@@ -14774,7 +14865,9 @@ def process_line(original_line):
     global process_defining             # If defining process.
     global loop_defining                # If defining loop.
     global measure_on
-    global i_line
+    global goto_table
+    global lmp_executing_number
+    global staff_name
 
     qline = original_line
 #--     print_debug("        process_line-line='{}'".format(original_line))
