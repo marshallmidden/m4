@@ -32,6 +32,7 @@ TESTS += SHARPFLAT
 TESTS += MiddleC
 TESTS += VARIABLES
 TESTS += CSTOP
+TESTS += VOLUMES
 #-----------------------------------------------------------------------------
 # SONGS_GCS = ${SONGS:=.gcs}
 #-----------------------------------------------------------------------------
@@ -59,6 +60,13 @@ TESTS_M_PS = ${TESTS:=_m.ps}
 TESTS_PDF= ${TESTS:=.pdf}
 #+ TESTS_PS = ${TESTS:=.ps}
 #+ TESTS_WAV = ${TESTS:=.wav}
+
+TESTS_2ABC = ${TESTS:=_2.abc}
+TESTS_2FS = ${TESTS:=_2.fs}
+TESTS_M2_PS = ${TESTS:=_m2.ps}
+TESTS_2PDF= ${TESTS:=_2.pdf}
+TESTS_2H = ${TESTS:=_2.h}
+TESTS_2V = ${TESTS:=_2.v}
 #-----------------------------------------------------------------------------
 MUSICOMP = ./musicomp2abc
 IMSCOMP = ~/ims/imscomp
