@@ -1587,11 +1587,11 @@ running_vl = { }
 running_vl[1] = getvar('vfff')      # volume level usage - for note.
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global cresc_volume                 # Volume to go to.
-cresc_volume = [ None ]
+cresc_volume = [ ]
 global cresc_time                   # Time for crescendo.  (0.25 = 1/4 note)
-cresc_time = [ None ]
+cresc_time = [ ]
 global cresc_direction              # True if upwards crescendo, False if downwards..
-cresc_direction = [ None ]
+cresc_direction = [ ]
 # cresc_volume    - None means nothing happening. Set vf for cresc(vf,0.5).
 # cresc_time      - None means nothing happening. Set 0.5 for cresc(vf,0.5).
 # cresc_direction - None means nothing happening. True means up, False means down.
@@ -1599,6 +1599,10 @@ cresc_direction = [ None ]
 #   If cresc_direction is [measure,note#] - then vp< and upon new volume, do cresc.
 #   When hit volume/volumes/vol() - then go back and fix notes crom cresc_direction to current note.
 #   Current note gets volume of cresc_volume[voice].
+global future_cresc_dimin           # [voice] = [ meas.index(measure_on), len(bufs_vol[voiceon][measure_on]) ]
+future_cresc_dimin = [ ]
+global future_cresc_time            # Length of time for future cresc_dimin ... updated as notes put on voice.
+future_cresc_time = [ ]
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global pan
 pan = { }                           # Pan (balance 0=left, 126=right, 64=center) for voice, measure
@@ -1663,6 +1667,8 @@ for i in range(1, MAXVOICES+1):     # This is used as [1] .. [MAXVOICES]
     cresc_volume.append(None)       # None means nothing happening. Set vf for cresc(vf,0.5).
     cresc_time.append(None)         # None means nothing happening. Set 0.5 for cresc(vf,0.5).
     cresc_direction.append(None)    # None means nothing happening. True means up, False means down.
+    future_cresc_dimin.append([None,None]) # None means nothing happening. No [m,i].
+    future_cresc_time.append(0.0)   # No time to start with.
 # rof
 
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
@@ -3437,7 +3443,7 @@ def print_out_midi1csv_notes():
             while i < len(bufs[voice][m]):      # while there are notes in measure
                 n = bufs[voice][m][i]           # note number
                 v = bufs_vol[voice][m][i]       # volume for the next note.
-                print_debug("print_out_midi1csv_notes #1 - v - bufs_vol[{}][{}][{}]={}".format(voice,m,i,v))
+#--                 print_debug("print_out_midi1csv_notes #1 - v - bufs_vol[{}][{}][{}]={}".format(voice,m,i,v))
 # NOTDONEYET - set_all_staff_arr bufs_intensity
                 v_intens = bufs_intensity[voice][m][i]       # "channel" volume for the next note.
                 if note_length > 0:             # If there is a previous note to update length, or ...
@@ -4831,17 +4837,61 @@ def is_anything(strg, none_means_none):
 # End of is_anything
 
 # ----------------------------------------------------------------------------
-#      cresc_volume[voice]      - volume heading towards.
-#      cresc_time[voice]        - Time to take for this volume to reach cresc_volume[voice].  0.5 is 1/2 note.
-#      cresc_direction[voice]   - Future cresc/dimin, True for up, False for down.
-# + 3) Something else for backwards cresc/dimin as flag. Probably need vl[] by note? So flag is by voice - [m,i].
+# ev is volume after the cresendo (ending volume).
 
-def fill_future_cresc_dimin(v, voiceon):
+def fill_future_cresc_dimin(ev, voiceon):
+#--     print_debug("fill_future_cresc_dimin - Entering, ev={} voiceon={}".format(ev,voiceon))
+    if not args.midi1csv and not args.fluidsynth:
+        return
+    # fi
+    [start_m, start_n] = future_cresc_dimin[voiceon]
+#--     print_debug("fill_future_cresc_dimin - future_cresc_dimin[{}]={}".format(voiceon, future_cresc_dimin[voiceon]))
+    e_m = meas.index(measure_on)
+    m = start_m
+    n = start_n
+    ms = meas[m]
+    v = bufs_vol[voiceon][ms][n]            # first note starting volume
+    l = bufs_length[voiceon][ms][n]         # first note length
+    if ev is None:                          # Must be ending volume.
+        print_error("v:{} m:{} No ending crescendo volume, note#{}".format(voiceon,ms,n));
+        cresc_direction[voiceon] = None
+        return
+    # fi
 
-    # Must set future_cresc_dimin to [voice][m][i] - and go from that volume to 'v'.
-
-    print_debug("fill_future_cresc_dimin - NOTDONEYET - from 'somewhere' to here, do cresc/dimin.")
-    cresc_direction[voiceon] = None             # no more future cresc/dimin.
+    tt = future_cresc_time[voiceon]         # time between cresc/dimin start and end. (NOTDONEYET - off by one?)
+    bufs_suffixes[voiceon][ms][n] = bufs_suffixes[voiceon][ms][n] + 'c'
+    n = n + 1                               # Go to next volume
+#--     print_debug("fill_future_cresc_dimin - e_m={} m={} n={} ms={} v={} l={} tt={}".format(e_m,m,n,ms,v,l,tt))
+    while m <= e_m:
+        ms = meas[start_m]
+        e_n = len(bufs_vol[voiceon][ms])
+        while n < e_n and tt > 0.0:
+            # Need to calculate volume of next note bufs_vol[voiceon][ms][n] based on previous v.
+            # % time between this and tt.
+            dv = ev - v                     # Total difference between volumes
+            x1 = dv / tt
+            x2 = x1 * l
+            x3 = x2 + v
+            bufs_vol[voiceon][ms][n] = round(x3)
+            b = bufs_suffixes[voiceon][ms][n]
+            if 'c' in b:
+                print_error("v:{} m:{} crescendo upon another crescendo, note#{}".format(voiceon,ms,n));
+            else:
+                bufs_suffixes[voiceon][ms][n] = b + 'c'
+            # fi
+            tt = tt -l
+            v = bufs_vol[voiceon][ms][n]
+            l = bufs_length[voiceon][ms][n]
+#--             print_debug("fill_future_cresc_dimin - new: l={} v={} tt={} ms={} n={} b={} x3={}".format(l,v,tt,ms,n,b,x3))
+            n = n + 1
+        # elihw
+        m = m + 1
+    # elihw
+    cresc_volume[voiceon] = None
+    cresc_time[voiceon] = None
+    cresc_direction[voiceon] = None
+    future_cresc_dimin[voiceon] = [None,None]
+    future_cresc_time[voiceon] = 0.0
 # End of fill_future_cresc_dimin
 
 # ----------------------------------------------------------------------------
@@ -4850,6 +4900,8 @@ def put_volume(voiceon, onetimevolume):
     global cresc_volume
     global cresc_time
     global cresc_direction
+    global bufs_length
+    global measure_on
 
     if onetimevolume is None or onetimevolume == [None, None, None, None]: 
         if voiceon in running_vl:
@@ -4857,16 +4909,21 @@ def put_volume(voiceon, onetimevolume):
         else:
             otv = 127                           # Probably a rest, put as full volume.
         # fi
-#--        cresc_volume[voiceon] = None                                   # This may be wrong.
-#--        cresc_time[voiceon] = None                                     # This may be wrong.
-#--        cresc_direction[voiceon] = None                                # This may be wrong.
-        print_debug("put_volume - #a otv={}".format(otv))
+#--         cresc_volume[voiceon] = None                                  # Can't change.
+#--         cresc_time[voiceon] = None                                    # Can't change.
+#--         cresc_direction[voiceon] = None                               # Can't change.
+#--         print_debug("put_volume - #a otv={}".format(otv))
     else:
+        otv = onetimevolume[0]                  # vol(xx) - one time volume.
         cresc_volume[voiceon] = onetimevolume[1]                          # Crescendo ending Volume
         cresc_time[voiceon] = onetimevolume[2]                            # Crescendo ending time (subtract as used).
         cresc_direction[voiceon] = onetimevolume[3]                       # Crescendo ending Direction
-        otv = onetimevolume[0]                  # vol(xx) - one time volume.
-        print_debug("put_on_bufs - #A otv={}".format(otv))
+        if cresc_direction[voiceon] is not None:
+            i = meas.index(measure_on)
+            future_cresc_dimin[voiceon] = [ i, len(bufs_length[voiceon][measure_on])]  # Where this starts.
+            future_cresc_time[voiceon] = 0.0                              # NOTDONEYET - Possible off by one?
+        # fi
+#--         print_debug("put_on_bufs - #A otv={}".format(otv))
         if otv is None:
             if voiceon in running_vl:
                 otv = running_vl[voiceon]
@@ -4874,11 +4931,11 @@ def put_volume(voiceon, onetimevolume):
                 otv = 127                       # Probably a rest, put as full volume.
             # fi
         # fi
-        print_debug("put_volume - #B otv={}".format(otv))
+#--         print_debug("put_volume - #B otv={}".format(otv))
     # fi
 # NOTDONEYET - cresc_direction[voiceon] is not None - future cresc/dimin.
     running_vl[voiceon] = otv
-    print_debug("put_volume - cresc_volume={} cresc_time={} cresc_direction={} otv='{}'".format(cresc_volume[voiceon],cresc_time[voiceon],cresc_direction[voiceon],otv))
+#--     print_debug("put_volume - cresc_volume={} cresc_time={} cresc_direction={} otv='{}'".format(cresc_volume[voiceon],cresc_time[voiceon],cresc_direction[voiceon],otv))
     return otv
 # End of put_volume
 
@@ -4904,7 +4961,7 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, oneti
     global MIDICLICKSPERQUARTER
     global intensity
 
-    print_debug("put_on_bufs - voiceon={} p_meas={} prenote={} thenote={} timeofnote={} append_tie={} onetimevolume={} postnote={}".format(voiceon,p_meas,prenote,thenote,timeofnote,append_tie,onetimevolume,postnote))
+#--     print_debug("put_on_bufs - voiceon={} p_meas={} prenote={} thenote={} timeofnote={} append_tie={} onetimevolume={} postnote={}".format(voiceon,p_meas,prenote,thenote,timeofnote,append_tie,onetimevolume,postnote))
     if type(voiceon) is not int:
         print_error("put_on_bufs - voiceon type is not int ({})".format(type(voiceon)), 'put_on_bufs')
         print_die("voiceon must be a voice.")
@@ -4966,7 +5023,7 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, oneti
     # fi
 #-----------------------------------------------------------------------------
     bufs_vol[voiceon][p_meas].append(otv)     # Add volume stuff for this note.
-    print_debug("put_on_bufs - #B bufs_vol[{}][{}][{}]={} running_vl[{}]={}".format(voiceon,p_meas,len(bufs_vol[voiceon][p_meas])-1,otv,voiceon,running_vl[voiceon]))
+#--     print_debug("put_on_bufs - #B bufs_vol[{}][{}][{}]={} running_vl[{}]={}".format(voiceon,p_meas,len(bufs_vol[voiceon][p_meas])-1,otv,voiceon,running_vl[voiceon]))
     bufs_intensity[voiceon][p_meas].append(intensity[voiceon][p_meas])
     if args.vertical or args.horizontal:
         bufs[voiceon][p_meas].append(prenote + thenote)
@@ -4978,7 +5035,7 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, oneti
         bufs_length[voiceon][p_meas].append(timeofnote)
         bufs_velocity[voiceon][p_meas].append(getvar_checkokay('default_velocity', original_line))
         if cresc_time[voiceon] is None or cresc_time[voiceon] == 0:
-            print_debug("put_on_bufs #B - cresc_time[{}]={}".format(voiceon,cresc_time[voiceon]))
+#--             print_debug("put_on_bufs #B - cresc_time[{}]={}".format(voiceon,cresc_time[voiceon]))
             pass
         else:
             append_tie = append_tie + 'c'
@@ -4990,9 +5047,12 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, oneti
 # NOTDONEYET - bufs_velocity
     # fi
 
+    if future_cresc_dimin[voiceon] is not None or future_cresc_dimin[voiceon] != [ None, None ]:
+        future_cresc_time[voiceon] = future_cresc_time[voiceon] + timeofnote
+    # fi
     # If no crescendo happening, exit.
     if cresc_time[voiceon] is None or cresc_time[voiceon] == 0: # if IMS crescendo, nothing to do here.
-        print_debug("put_on_bufs #C - cresc_time[{}]={}".format(voiceon,cresc_time[voiceon]))
+#--         print_debug("put_on_bufs #C - cresc_time[{}]={}".format(voiceon,cresc_time[voiceon]))
         return
     # fi
 
@@ -5000,9 +5060,9 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, oneti
         try:
             running_vl[voiceon] = cresc_volume[voiceon]
         except:
-            print_debug("put_on_bufs #a - type(voiceon)={} voiceon={}".format(type(voiceon), voiceon))
-            print_debug("put_on_bufs #a - running_vl={}".format(running_vl))
-            print_debug("put_on_bufs #a - cresc_volume={}".format(cresc_volume))
+#--             print_debug("put_on_bufs #a - type(voiceon)={} voiceon={}".format(type(voiceon), voiceon))
+#--             print_debug("put_on_bufs #a - running_vl={}".format(running_vl))
+#--             print_debug("put_on_bufs #a - cresc_volume={}".format(cresc_volume))
             print_die("put_on_bufs #a")
         cresc_time[voiceon] = None                  # Or zero.
         if args.vertical or args.horizontal or args.midi1csv or args.fluidsynth:
@@ -5018,7 +5078,7 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, oneti
                                     DECORATIONS + vlprint[j] + DECORATIONS + \
                                     DECORATIONS + k + DECORATIONS
         # fi
-        print_debug("put_on_bufs - running_vl[{}]={} c_v={} c_t={} c_d={}".format(voiceon,running_vl[voiceon],cresc_volume[voiceon],cresc_time[voiceon],cresc_direction[voiceon]))
+#--         print_debug("put_on_bufs - running_vl[{}]={} c_v={} c_t={} c_d={}".format(voiceon,running_vl[voiceon],cresc_volume[voiceon],cresc_time[voiceon],cresc_direction[voiceon]))
         return
     # fi
 
@@ -5036,7 +5096,7 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, oneti
             print_die("put_on_bufs #b")
     # fi
     cresc_time[voiceon] = cresc_time[voiceon] - timeofnote
-    print_debug("put_on_bufs - v={} dt={} x1={} timeofnote={} x2={} running_vl[{}]={} c_t={}".  format(v,dt,x1,timeofnote,x2,voiceon,running_vl[voiceon],cresc_time[voiceon]))
+#--     print_debug("put_on_bufs - v={} dt={} x1={} timeofnote={} x2={} running_vl[{}]={} c_t={}".  format(v,dt,x1,timeofnote,x2,voiceon,running_vl[voiceon],cresc_time[voiceon]))
     return
 # End of put_on_bufs
 
@@ -10144,9 +10204,9 @@ def handle_volume_both(t_args, command_name, original_line):
             if cresc_direction[i] is not None:
                 fill_future_cresc_dimin(v, i)
             # fi
-            print_debug("handle_volume_both - {} vl[{}]={}".format(command_name,i,v))
+#--             print_debug("handle_volume_both - {} vl[{}]={}".format(command_name,i,v))
             vl[i][measure_on] = v           # Change volume for voice.
-            print_debug("handle_volume_both - vl[i][measure_on]='{}'".format(vl[i][measure_on]))
+#--             print_debug("handle_volume_both - vl[i][measure_on]='{}'".format(vl[i][measure_on]))
             running_vl[i] = v               # Force running change - also stop crescendo.
             cresc_volume[i] = None
             cresc_time[i] = None
@@ -12544,13 +12604,17 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
         temp1 = temp1 + ' ' + rest
     # fi
 
-    print_debug("do_a_note - voiceon={} temp1={} rest={} prenote={} postnote={} w={}".format(voiceon,temp1,rest,prenote,postnote,w))
+#--     print_debug("do_a_note - voiceon={} temp1={} rest={} prenote={} postnote={} w={}".format(voiceon,temp1,rest,prenote,postnote,w))
+#--     print_debug("do_a_note - bufs[voiceon]={}".format(bufs[voiceon]))
+#--     print_debug("do_a_note - bufs_length[voiceon]={}".format(bufs_length[voiceon]))
+#--     print_debug("do_a_note - bufs_suffixes[voiceon]={}".format(bufs_suffixes[voiceon]))
+#--     print_debug("do_a_note - bufs_vol[voiceon]={}".format(bufs_vol[voiceon]))
     temp1, onenotevolume, prenote, postnote = find_vol_cresc(temp1, voiceon, prenote, postnote, original_line)
     # Back back and fill future cresc/dimin.
     if onenotevolume is not None and onenotevolume[0] is not None and cresc_direction[voiceon] is not None:
         fill_future_cresc_dimin(onenotevolume[0], voiceon)
     # fi
-    print_debug("do_a_note - onenotevolume={} temp1={} prenote={} postnote={}".format(onenotevolume,temp1,prenote,postnote))
+#--     print_debug("do_a_note - onenotevolume={} temp1={} prenote={} postnote={}".format(onenotevolume,temp1,prenote,postnote))
     if len(rest) > 1:
         a = separate_args(temp1, False, False, original_line)
         temp1 = a[0]
@@ -12560,7 +12624,7 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
     therest, thenote, typenote = getnote(temp1, voiceon, True, True, original_line) # get next note
     if thenote is None:
         print_error("m:{} no note? therest='{}' thenote='{}' typenote='{}'".format(measure_on, therest, thenote, typenote), original_line)
-        print_debug("do_a_note - onenotevolume='{}'".format(onenotevolume))
+#--         print_debug("do_a_note - onenotevolume='{}'".format(onenotevolume))
         otv = put_volume(voiceon, onenotevolume)
         return True, [], rest, prenote, postnote                       # get next note for this voice (old way)
     # fi
