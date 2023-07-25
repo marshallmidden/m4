@@ -57,17 +57,26 @@ TESTS += vc3-test
 #-----------------------------------------------------------------------------
 SONGS_E = ${SONGS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
+SONGS_M_ABC = ${SONGS:=.abc}
 SONGS_FS = ${SONGS:=.fs}
+SONGS_M_FS = ${SONGS:=.fs}
+SONGS_PS = ${SONGS:=.ps}
 SONGS_M_PS = ${SONGS:=_m.ps}
 SONGS_PDF= ${SONGS:=.pdf}
+SONGS_M_PDF= ${SONGS:=.pdf}
 #-----------------------------------------------------------------------------
 TESTS_E = ${TESTS:=.E}
 TESTS_ABC = ${TESTS:=.abc}
+TESTS_M_ABC = ${TESTS:=_m.abc}
 TESTS_FS = ${TESTS:=.fs}
-TESTS_M_PS = ${TESTS:=_m.ps}
+TESTS_M_FS = ${TESTS:=_m.fs}
+TESTS_PS = ${TESTS:=.ps}
+TESTS_M__PS = ${TESTS:=_m.ps}
 TESTS_PDF= ${TESTS:=.pdf}
+TESTS_M_PDF= ${TESTS:=_m.pdf}
 #-----------------------------------------------------------------------------
 IMSCOMP = ./imscomp
+MUSICOMP = ~/musicomp2abc/musicomp2abc
 MC_ARGS ?=
 ABCM2PS	     = abcm2ps
 PS2PDF       = ps2pdf
@@ -91,22 +100,38 @@ CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp -Wno-inv
 # output $@   -- input $<
 %.fs:  %.E
 	${IMSCOMP} ${MC_ARGS} --two --fluidsynth $< $@
+%_m.fs:  %.E
+	${MUSICOMP} ${MC_ARGS} --two --fluidsynth $< $@
 %.csv:  %.E
 	${IMSCOMP} ${MC_ARGS} --midi1csv $< $@
+%_m.csv:  %.E
+	${MUSICOMP} ${MC_ARGS} --midi1csv $< $@
 %.mid:  %.csv
+	csvmidi $< $@
+%_m.mid:  %_m.csv
 	csvmidi $< $@
 %.abc:  %.E
 	${IMSCOMP} ${MC_ARGS} --abc $< $@
-%_m.ps: %.abc
+%_m.abc:  %.E
+	${MUSICOMP} ${MC_ARGS} --abc $< $@
+%.ps: %.abc
 	(${ABCM2PS} -l -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@)
-%.pdf:	%_m.ps
+%_m.ps: %_m.abc
+	(${ABCM2PS} -l -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@)
+%.pdf:	%.ps
+	${PS2PDF} $< $@
+%_m.pdf:	%_m.ps
 	${PS2PDF} $< $@
 %.E: %.gcs
 	${CPP} $< -o $@
 %.v:    %.E ${IMSCOMP}
 	${IMSCOMP} ${MC_ARGS} --vert $< $@
+%_m.v:    %.E ${MUSICOMP}
+	${MUSICOMP} ${MC_ARGS} --vert $< $@
 %.h:    %.E ${IMSCOMP}
 	${IMSCOMP} ${MC_ARGS} --hori $< $@
+%_m.h:    %.E ${MUSICOMP}
+	${MUSICOMP} ${MC_ARGS} --hori $< $@
 #-----------------------------------------------------------------------------
 .PHONY: help
 help:
@@ -119,17 +144,17 @@ help:
 	@echo "TESTS: ${TESTS}"
 #-----------------------------------------------------------------------------
 .PHONY: all songs ${SONGS}
-all songs ${SONGS}: ${SONGS_M_PS} ${SONGS_FS} ${SONGS_PDF}
+all songs ${SONGS}: ${SONGS_PS} ${SONGS_M_PS} ${SONGS_FS} ${SONGS_M_FS} ${SONGS_PDF} ${SONGS_M_PDF}
 #-----------------------------------------------------------------------------
 .PHONY: tests ${TESTS}
-tests ${TESTS}: ${TESTS_M_PS} ${TESTS_FS} ${TESTS_PDF}
+tests ${TESTS}: ${TESTS_PS} ${TESTS_FS} ${TESTS_PDF}
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -f ${SONGS_FS} ${TESTS_FS}
-	rm -f ${SONGS_ABC} ${TESTS_ABC}
-	rm -f ${SONGS_M_PS} ${TESTS_M_PS}
-	rm -f ${SONGS_PDF} ${TESTS_PDF}
+	rm -f ${SONGS_FS} ${TESTS_FS} ${SONGS_M_FS} ${TESTS_M_FS}
+	rm -f ${SONGS_ABC} ${TESTS_ABC} ${SONGS_M_ABC} ${TESTS_M_ABC}
+	rm -f ${SONGS_PS} ${TESTS_PS} ${SONGS_M_PS} ${TESTS_M_PS}
+	rm -f ${SONGS_PDF} ${TESTS_PDF} ${SONGS_M_PDF} ${TESTS_M_PDF}
 	rm -f ${SONGS_E} ${TESTS_E}
 	rm -f *.stderr
 	rm -f *.h *.v *.csv *.mid *.E *.fs *.pdf *.ps *.abc
@@ -141,13 +166,20 @@ check:
 	echo "SONGS_E=${SONGS_E}"
 	echo "SONGS_ABC=${SONGS_ABC}"
 	echo "SONGS_FS=${SONGS_FS}"
-	echo "SONGS__M_PS=${SONGS__M_PS}"
+	echo "SONGS_PS=${SONGS_PS}"
+	echo "SONGS_M_ABC=${SONGS_M_ABC}"
+	echo "SONGS_M_FS=${SONGS_M_FS}"
+	echo "SONGS_M_PS=${SONGS_M_PS}"
 	echo "TESTS=${TESTS}"
 	echo "TESTS_E=${TESTS_E}"
 	echo "TESTS_ABC=${TESTS_ABC}"
 	echo "TESTS_FS=${TESTS_FS}"
+	echo "TESTS_PS=${TESTS_PS}"
+	echo "TESTS_M_ABC=${TESTS_M_ABC}"
+	echo "TESTS_M_FS=${TESTS_M_FS}"
 	echo "TESTS_M_PS=${TESTS_M_PS}"
 	echo "IMSCOMP=${IMSCOMP}"
+	echo "MUSICOMP=${MUSICOMP}"
 	echo "MC_ARGS=${MC_ARGS}"
 	echo "ABCM2PS=${ABCM2PS}"
 	echo "PS2PDF=${PS2PDF}"
