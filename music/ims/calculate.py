@@ -897,7 +897,7 @@ def parse_to(prio):
 def parse(s):
     global cur_token
 
-#PRINT    print("reset - Entering s='{}'".format(s), file=sys.stderr, flush=True) # PRINT
+#PRINT    print("parse - Entering s='{}'".format(s), file=sys.stderr, flush=True) # PRINT
     reset(s)
     try:                                # NOTDONEYET - move to only around specific OOR plaes.
         res = parse_to(0)
@@ -1148,6 +1148,7 @@ def common_grouping_eval(args, txt, open_char, close_char):
             and type(s) == SymbolDesc and s.symbol == open_char
             and type(t) != SymbolDesc
             and type(u) == SymbolDesc and u.symbol == close_char):
+#PRINT            print("common_grouping_eval - #4 - r='{}' t='{}'".format(r,t), file=sys.stderr, flush=True)  # PRINT
             a = result_functions(r, t)
             return [ a ]
         #fi
@@ -1231,6 +1232,7 @@ def common_grouping_eval(args, txt, open_char, close_char):
             and type(w) != SymbolDesc                       # NUMBER def
 # NOTDONEYET = {}
             and type(x) == SymbolDesc and (x.symbol in [')',']','}'])):
+#PRINT            print("common_grouping_eval - #7 - r='{}' t='{}'".format(r,t), file=sys.stderr, flush=True)  # PRINT
             a1 = result_functions(r, t)
             if type(a1) == list and len(a1) > 0:
                 a1 = a1[0]
