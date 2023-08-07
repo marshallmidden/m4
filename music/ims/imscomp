@@ -1564,6 +1564,8 @@ global staff_chord                  # If in the middle of a chord for staff_name
 staff_chord = {}                    # Not collected any chords for any staff/staves yet.
 global staff_chord_voices
 staff_chord_voices = {}             # number of voices (max) for current chord -- else assign more voices.
+global save_pvi                     # Save pan/volume/intensity for next use.
+save_pvi = {}
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global args
 global errors_happened
@@ -2217,6 +2219,7 @@ def new_voice_initialize(voiceon, m):
         set_all_staff_arr(voiceon, {}, bufs_pan, 'bufs_pan', 'new_voice_initialize')
         set_all_staff_arr(voiceon, {}, bufs_intensity, 'bufs_intensity', 'new_voice_initialize')
     # fi
+    save_pvi[voiceon] = [[None, None, None, None, None], [None, None, None, None], [None, None, None, None]]
 
     if m not in volume[voiceon]:
         volume[voiceon][m] = getvar('default_volume')
@@ -9758,6 +9761,7 @@ def do_staff(t_args, original_line):
     # fi
 
     staff_name[sn] = v                                  # Create or change it.
+    save_pvi[sn] = [[None, None, None, None, None], [None, None, None, None], [None, None, None, None]]
     staves.append(v)                                    # For order checking for ABC printing -- indirectly.
     last_voice_staff = [sn]
     setvar('voice', ','.join(last_voice_staff), 1)      # Doesn't need join, but do it for consistency.
@@ -12498,8 +12502,9 @@ def get_trill_note(therest, voiceon, prenote, w, thenote, postnote, tie_next, le
 
     note_add = []
     # Get first note.
-    pvi = [[None, None, None, None, None],[None,None,None,None],[None,None,None,None]]
+    pvi = save_pvi[voiceon]
     therest, pvi0, prenote0, postnote0 = find_vol_cresc_pan_intensity(therest, voiceon, '', '', pvi, original_line)
+    save_pvi[voiceon] = pvi0
     therest, thenote, typenote = getnote(therest, voiceon, True, True, True, original_line)
     leading_space = False
     if thenote and type(thenote) is str and len(thenote) > 0 and (thenote[0] == ' ' or thenote == "\t"):
@@ -12533,6 +12538,7 @@ def get_trill_note(therest, voiceon, prenote, w, thenote, postnote, tie_next, le
     # Get second note.
     pvi = [[None, None, None, None, None],[None,None,None,None],[None,None,None,None]]
     therest, pvi1, prenote1, postnote1 = find_vol_cresc_pan_intensity(therest, voiceon, '', '', pvi, original_line)
+    save_pvi[voiceon] = pvi1
     therest, thenote, typenote = getnote(therest, voiceon, True, True, True, original_line)
     if thenote is None or thenote == 0 or thenote == '':
         print_error("m:{} trill is not legal, second note missing".format(measure_on), original_line)
@@ -12858,8 +12864,9 @@ def get_sequence_note(temp1, voiceon, number_in_sequence, prenote, w, postnote, 
     stacs = []
     glides = []
     for sn in range(0, number_in_sequence):
-        pvi = [[None, None, None, None, None],[None,None,None,None],[None,None,None,None]]
+        pvi = save_pvi[voiceon]
         temp1, pvi, s_prenote, s_postnote = find_vol_cresc_pan_intensity(temp1, voiceon, '', '', pvi, original_line)
+        save_pvi[voiceon] = pvi
         temp1, thenote, typenote = getnote(temp1, voiceon, True, True, True, original_line)
         if thenote is None or thenote == '':
             print_error("m:{} sequence is not legal, no note".format(measure_on), original_line)
@@ -13637,8 +13644,9 @@ def process_notes_oldway(line, original_line):
             temp1 = temp2
             #.............................................................................
 # find_vol_cresc_pan_intensity() here? Pass in array of the volume/pan/intensity.
-            pvi = [[None, None, None, None, None],[None,None,None,None],[None,None,None,None]]
+            pvi = save_pvi[voiceon]
             temp1, pvi, prenote, postnote = find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, pvi, original_line)
+            save_pvi[voiceon] = pvi
             #.............................................................................
             next_tie = get_staff_arr(voiceon, bufs_tie_next, 'bufs_tie_next', 'process_notes_oldway ' + original_line)
             next_legato = get_staff_arr(voiceon, bufs_legato_next, 'bufs_legato_next', 'process_notes_oldway ' + original_line)
@@ -13651,6 +13659,8 @@ def process_notes_oldway(line, original_line):
             if w is None:
                 break
             # fi
+            # The last one(s) have been used.
+            save_pvi[voiceon] = [[None, None, None, None, None], [None, None, None, None], [None, None, None, None]]
             w = w + 1
         # elihw
     # rof
@@ -14726,7 +14736,40 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):      
     # fi
     initialize_set_voices(last_voice_staff, original_line)
     setvar('voice', ','.join(last_voice_staff), 1)
+    #.............................................................................
+    for st in last_voice_staff:                     # Go through staves
+        # Is there a note in chord already?
+        if st in staff_chord:
+            if staff_chord[st] is not None and staff_chord[st] != []:   
+                voice_num = len(staff_chord[st])
+            else:
+                voice_num = 0
+            # fi
+        else:
+            voice_num = 0
+        # fi
+        # If need to get another voice into staff...
+        if voice_num == len(staff_chord_voices[st]):
+            assign_another_voice(st, 'process_notes_for_staff', original_line)
+            staff_chord_voices[st] = find_mlth_values(st, measure_on, original_line)
+        # fi
+        break
+    # fi
+    voiceon = staff_chord_voices[st][voice_num]
+    pvi = save_pvi[st]
+    prenote = voice_prenote[voiceon]
+    postnote = ''
 
+    # find_vol_cresc_pan_intensity() here? Pass in array of the volume/pan/intensity.
+    #-- pvi = [[None, None, None, None, None], [None, None, None, None], [None, None, None, None]]
+    temp1, pvi, prenote, postnote = find_vol_cresc_pan_intensity(send_these_notes, voiceon, prenote, postnote, pvi, original_line)
+    for st in last_voice_staff:
+        save_pvi[st] = pvi
+    # rof
+    if temp1 is None or temp1 == '':
+        return ''
+    # fi
+    #.............................................................................
     # Need to go through all staves, getting the voice to put note on,
     # bufs_{legato,tie}_next, and afterwards processing too.
     for st in last_voice_staff:                     # Go through staves
@@ -14749,10 +14792,6 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):      
         prenote = voice_prenote[voiceon]
         postnote = ''
         #.............................................................................
-# find_vol_cresc_pan_intensity() here? Pass in array of the volume/pan/intensity.
-        pvi = [[None, None, None, None, None],[None,None,None,None],[None,None,None,None]]
-        temp1, pvi, prenote, postnote = find_vol_cresc_pan_intensity(send_these_notes, voiceon, prenote, postnote, pvi, original_line)
-        #.............................................................................
         a = separate_args(temp1, False, False, original_line)
         nt = a[0]
         rest = " ".join(a[1:])
@@ -14761,7 +14800,7 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):      
         next_legato = get_staff_arr(voiceon, bufs_legato_next, 'bufs_legato_next', 'process_notes_for_staff ' + original_line)
         do_break, note_add, rest, prenote, postnote = do_a_note(nt, rest, voiceon, prenote, postnote, None, next_tie, next_legato, pvi, original_line)
         voice_prenote[voiceon] = prenote
-        if not do_break:                                # Error occurred.
+        if not do_break:                            # Error occurred.
             return rest
         # fi
         if note_add is None or note_add == []:
@@ -14770,6 +14809,9 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):      
 
         t_2_set = get_staff_arr(voiceon, time, 'time', 'process_notes_for_staff ' + original_line)
         o_2_set = get_staff_arr(voiceon, oct, 'oct', 'process_notes_for_staff ' + original_line)
+
+        # The last one(s) have been used.
+        save_pvi[st] = [[None, None, None, None, None], [None, None, None, None], [None, None, None, None]]
 
         for v in staff_name[st]:
             set_all_staff_arr(v, t_2_set, time, 'time', 'process_notes_for_staff ' + original_line)
@@ -14787,7 +14829,7 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):      
         tmp = []
         for na in note_add:
             q = copy.deepcopy(na)
-            q[1] = [st]                         # Put onto staff_chord for this staff only.
+            q[1] = [st]                             # Put onto staff_chord for this staff only.
             tmp.append(q)
         # rof
         if st not in staff_chord or staff_chord[st] is None:
