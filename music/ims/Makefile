@@ -51,9 +51,13 @@ TESTS += W7
 TESTS += W8
 TESTS += W8.i.no.10
 TESTS += W9
+TESTS += sequence
+TESTS += test-cresc
+TESTS += trills
 TESTS += vc1-test
 TESTS += vc2-test
 TESTS += vc3-test
+TESTS += vc4-test
 #-----------------------------------------------------------------------------
 SONGS_E = ${SONGS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
