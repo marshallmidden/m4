@@ -2,9 +2,6 @@
 # ----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 # ----------------------------------------------------------------------------
-# I think staff printing in abc format is off if a "key" exists.
-# The note -> midi -> unkey -> note ... the unkey isn't done.
-# ----------------------------------------------------------------------------
 # Variables to do - NOTDONEYET:
 #       accent, aaccent, arp, fermata, ferma, stac, marc
 # ----------------------------------------------------------------------------
@@ -13,6 +10,7 @@
 # 2) --fluidsynth input of a .csv file -- MIDI_port commands -- WTF?
 # 3) vol(sfp) -- how long for s and then switching to p? Example tied whole note over 3 measures.
 # 4) lilypond output for printing.
+# 5) If middle_c is not 39 for --vert/--horiformat, nor 39+12 for staff, it --abc is broken. And --vert/--hori.
 # ----------------------------------------------------------------------------
 # TO DO:
 # 1) Select clef=treble or clef=bass by notes min and max notes on staff/staves.
@@ -1091,8 +1089,8 @@ allkeys = [ 'c', 'd', 'e', 'f', 'g', 'a', 'b',
             'c--', 'd--', 'e--', 'f--', 'g--', 'a--', 'b--',
             'c+', 'd+', 'e+', 'f+', 'g+', 'a+', 'b+',
             'c++', 'd++', 'e++', 'f++', 'g++', 'a++', 'b++' ]
-global accidentals
-accidentals = { '':'', 'n':'=', '-':'_', '+':'^', '--':'__', '++':'^^' }
+global accidentals_abc
+accidentals_abc = { '':'', 'n':'=', '-':'_', '+':'^', '--':'__', '++':'^^' }
 
 global legal_notes
 legal_notes =   {
@@ -1881,10 +1879,10 @@ acc_v_init_v_or_h = { '0c':'', '0d':'', '0e':'', '0f':'', '0g':'', '0a':'', '0b'
                       '6c':'', '6d':'', '6e':'', '6f':'', '6g':'', '6a':'', '6b':'',
                       '7c':'', '7d':'', '7e':'', '7f':'', '7g':'', '7a':'', '7b':'',
                       '8c':'', '8d':'', '8e':'', '8f':'', '8g':'', '8a':'', '8b':''}
-global acc_m
-acc_m = { '': {''}}                 # voice: {notes:'+'/-/n}    For this measure, index is voice.
-global acc_m_xpose
-acc_m_xpose = { '': {''}}           # After xpose, the new key ... voice: {notes:'+'/-/n} previous accidental
+global acc_m                        # voice: {notes:'+'/-/n}    For this measure, index is voice.
+acc_m = { '': {''}}
+global acc_m_xpose                  # After xpose, the new key ... voice: {notes:'+'/-/n} previous accidental
+acc_m_xpose = { '': {''}}
 
 global time                         # set default note length - last time)
 time = { 1 : 0 }
@@ -11250,7 +11248,7 @@ compute_middle_c(middle_c)                      # Default to 3c
 
 def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, original_line):
     global oct                                  # default octave
-    global accidentals
+    global accidentals_abc
     global allkeys
     global measure_on
     global args
@@ -11515,13 +11513,13 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
     #   thenote             Convert to abc format for note, octave.
     n = thenote[0].lower()
     if args.horizontal or args.vertical or args.midi1csv or args.fluidsynth:
-        N = n.lower()
+        N = n                                   # Already lowercase.
     else:                                       # ABC format
         N = n.upper()
     # fi
     if len(thenote) > 1:
         a = thenote[1:]
-        if a not in accidentals:
+        if a not in accidentals_abc:
             if do_errors:
                 print_error("m:{} v{} sharp/flat/natural is not legal '{}'".format(measure_on, voiceon, a), original_line)
             # fi
@@ -11532,7 +11530,7 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
         elif args.midi1csv or args.fluidsynth:
             A = a
         else:                                   # ABC
-            A = accidentals[a]
+            A = accidentals_abc[a]
         # fi
     else:
         A = a = ''
@@ -11546,7 +11544,7 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
         # fi
         return '', None, normal_note
     # fi
-    if a not in accidentals:
+    if a not in accidentals_abc:
         if do_errors:
             print_error("m:{} v{} Note is not legal '{}' accidentals strange {}".format(measure_on, voiceon, note_to_decode, a), original_line)
         # fi
@@ -11568,7 +11566,7 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
                 elif args.midi1csv or args.fluidsynth:
                     A = am
                 else:                               # ABC
-                    A = accidentals[am]             # Convert to abc format.
+                    A = accidentals_abc[am]         # Convert to abc format.
                 # fi
             # fi
         # fi
@@ -11695,7 +11693,6 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
             A = a = ''
         # fi
     elif (args.horizontal or args.vertical) and (xv != 0 or xnk != ''):
-
         jkl = str(o) + str(n) + a
         if jkl not in note_to_midi_value:
             if do_errors:
@@ -11787,6 +11784,12 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
     # .............................................................................
     # Convert to right format.
     if args.horizontal or args.vertical:
+        if middle_c == (39 + 12) and sub_mid_c:
+            o = int(o) - 1                       # Move down one octave
+            o = str(o)
+        # else:
+        # Complicated, need to use KEY and acc_m and middle_c subtraction ... COMPLICATED!
+        # fi
         n = n.lower()
         thenote = "{}".format(o) + n + a
         if leading_space:
@@ -11799,21 +11802,10 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
         thenote = abc
     else:           # ABC
         # Do not convert it in ABC format for many calls to getnote.
-        if middle_c != 39 and sub_mid_c:
-            n = n.lower()
-            thenote = "{}".format(o) + n + a
-            abc = note_to_midi_value[thenote]
-            if A != '' and A[0] == '^':
-                if abc not in midi_value_to_note_sharp_39:
-                    thenote = midi_value_to_note_sharp_39[abc]
-                else:
-                    thenote = midi_value_to_note_sharp_39[abc]
-                # fi
-            else:
-                thenote = midi_value_to_note_flat_39[abc]
-            # fi
-            o = int(thenote[0])
-            n = thenote[1]
+        if middle_c == (39 + 12) and sub_mid_c:
+            o = o - 1                       # Move down one octave
+        # else:
+        # Complicated, need to use KEY and acc_m and middle_c subtraction ... COMPLICATED!
         # fi
         if o <= 3:                                      # uppercase letter
             n = n.upper()
@@ -14787,7 +14779,8 @@ def handle_staff_note(add_these_staff_chords, original_line):
                     instak(voiceon, m, prenote, thenote, timeofnote, append_tie, onenotevolume, onenotepan, onenoteintensity, postnote, original_line)
                 # fi
             # rof
-            if newly_added is None or time_of_st_notes > newly_added:
+            # Want smallest note length in chord. time_of_st_notes (sequence/trill) is for multiple notes.
+            if newly_added is None or (time_of_st_notes != 0 and time_of_st_notes < newly_added):
                 newly_added = time_of_st_notes
             # fi
         # rof
