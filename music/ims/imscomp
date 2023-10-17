@@ -1804,6 +1804,8 @@ reverb = { }                        # Reverb value for voice, measure.
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global voice_prenote                # Index by voice.
 voice_prenote = {}
+global save_voice_prenote           # Index by staff. This is in case we must assign another voice in staff mode.
+save_voice_prenote = {}
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global pitch                        # Pitch change up or down by semitones.
 pitch = {}                          # Index by measure.
@@ -4520,6 +4522,7 @@ def print_debug_bufs(s):
         if staff_name[st] is not None:
             for v in staff_name[st]:
                 print_debug(f'    staff:{st} voice_prenote[{v}]={voice_prenote[v]}')
+        print_debug(f'    save_voice_prenote[{st}]={save_voice_prenote[st]}')
     for st in staff_chord_voices:
         print_debug("    staff_chord_voices[{}]={}".format(st,staff_chord_voices[st]))
 #+     for st in staff_chord_minlth:
@@ -6055,25 +6058,33 @@ def assign_another_voice(b4, where, original_line):
         staff_chord_voices[b4] = []
     # fi
     # Get mlth for the chord we are working on.
-    scml = 0                                            # Staff Chord mlth.
+    scml = None                                         # Staff Chord mlth.
     m = measure_on
 
     # Get an old voice in chord's note length, which we can then subtract from
     # mlth (measure length) for voice. This is the fill length for new voice.
     if staff_chord_voices[b4] is not None and staff_chord_voices[b4] != []:
-        v = staff_chord_voices[b4][0]
-        if m not in mlth[v]:
-            mlth[v][m] = 0
-        elif v in bufs_length and m in bufs_length[v]:
-            scml = mlth[v][m] - bufs_length[v][m][-1]
-        else:
-            scml = mlth[v][m]
-        # fi
+        for v in staff_name[b4]:
+            if v not in staff_chord_voices[b4]:
+                if m not in mlth[v]:
+                    mlth[v][m] = 0
+                elif v in bufs_length and m in bufs_length[v]:
+                    t = mlth[v][m] - bufs_length[v][m][-1]
+                    if scml is None or scml < scml:
+                        scml = t
+                    # fi
+                else:
+                    scml = mlth[v][m]
+                # fi
+            # fi
+        # rof
     # fi
 
     nv = mv
     initialize_set_voices(nv, original_line)
-    fill_1_voice_mlth(nv, scml, original_line)          # Need to make measure for this voice in staff up to here "mlth".
+    if scml is not None:
+        fill_1_voice_mlth(nv, scml, original_line)      # Need to make measure for this voice in staff up to here "mlth".
+    # fi
     if staff_name[b4] is None:
         ns = [ nv ]
     else:
@@ -6113,6 +6124,8 @@ def assign_another_voice(b4, where, original_line):
         cresc_volume_direction[nv] = copy.deepcopy(cresc_volume_direction[ov])
         future_volume_cresc_dimin[nv] = copy.deepcopy(future_volume_cresc_dimin[ov])
         running_volume_next[nv] = running_volume_next[ov]
+
+        voice_prenote[nv] = save_voice_prenote[b4]
     # fi
     staff_name[b4] = ns
     print_debug_bufs(f'assign_another_voice - measure_on={measure_on} staff={b4} staff_name[b4]={staff_name[b4]}')      #DEBUG
@@ -10096,6 +10109,7 @@ def do_staff(t_args, original_line):
     # fi
 
     staff_name[sn] = v                                  # Create or change it.
+    save_voice_prenote[sn] = ''                         # No predefined information before notes.
     staves.append(v)                                    # For order checking for ABC printing -- indirectly.
     last_voice_staff = [sn]
     setvar('voice', ','.join(last_voice_staff), 1)      # Doesn't need join, but do it for consistency.
@@ -13896,8 +13910,6 @@ def process_notes_oldway(line, original_line):
             if w is None:
                 break
             # fi
-#--            # The last one(s) have been used.
-#--            voice_prenote[voiceon] = ''
             w = w + 1
         # elihw
     # rof
@@ -14738,6 +14750,7 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):      
     global bufs_legato_next
     global bufs_tie_next
     global voice_prenote
+    global save_voice_prenote
     global oct
     global staff_name
     global time
@@ -14766,19 +14779,20 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):      
             print_debug_bufs(f'process_notes_for_staff - calling assign_another_voice - measure_on={measure_on} staff={st} staff_name[st]={staff_name[st]}')      #DEBUG
             assign_another_voice(st, 'process_notes_for_staff', original_line)
             staff_chord_voices[st].append(staff_name[st][-1])
+            print_debug_bufs(f'process_notes_for_staff - after assign_another_voice - measure_on={measure_on} staff={st} staff_name[st]={staff_name[st]}')      #DEBUG
         # fi
         if first_vn == None:
             first_vn = voice_num
         # fi
     # rof
     voiceon = staff_chord_voices[first_st][first_vn]
-    print_debug(f"process_notes_for_staff - #1 voice_prenote[{voiceon}]={voice_prenote[voiceon]}")
+    print_debug(f'process_notes_for_staff - #1 voice_prenote[{voiceon}]={voice_prenote[voiceon]} save_voice_prenote[{first_st}]={save_voice_prenote[first_st]}')
     prenote = voice_prenote[voiceon]
     postnote = ''
 
-    print_debug(f"process_notes_for_staff #A - prenote={prenote}")
+    print_debug(f'process_notes_for_staff #A - prenote={prenote}')
     temp1, prenote, postnote = find_vol_cresc_pan_intensity(send_these_notes, voiceon, prenote, postnote, original_line)
-    print_debug(f"process_notes_for_staff #B - prenote={prenote}")
+    print_debug(f'process_notes_for_staff #B - prenote={prenote}')
     if send_these_notes != temp1:
         for st in last_voice_staff:         # Go through staves
             if staff_name[st] is not None:
@@ -14786,16 +14800,17 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):      
                     voice_prenote[v] = prenote
                 # rof
             # rof
+            save_voice_prenote[st] = prenote
         # rof
     # fi
-    print_debug(f"process_notes_for_staff - #2 voice_prenote[{voiceon}]={voice_prenote[voiceon]}")
+    print_debug(f'process_notes_for_staff - #2 voice_prenote[{voiceon}]={voice_prenote[voiceon]}')
     if temp1 is None or temp1 == '':
         return True, ''
     # fi
     if temp1 != send_these_notes:
         return True, temp1
     # fi
-    print_debug(f"process_notes_for_staff - #3 voice_prenote[{voiceon}]={voice_prenote[voiceon]}")
+    print_debug(f'process_notes_for_staff - #3 voice_prenote[{voiceon}]={voice_prenote[voiceon]}')
     #.............................................................................
     # Need to go through all staves, getting the voice to put note on,
     # bufs_{legato,tie}_next, and afterwards processing too.
@@ -14806,17 +14821,17 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):      
         #.............................................................................
         a = separate_args(temp1, False, False, original_line)
         nt = a[0]
-        rest = " ".join(a[1:])
+        rest = ' '.join(a[1:])
         #.............................................................................
         next_tie = get_staff_arr(voiceon, bufs_tie_next, 'bufs_tie_next', 'process_notes_for_staff ' + original_line)
         next_legato = get_staff_arr(voiceon, bufs_legato_next, 'bufs_legato_next', 'process_notes_for_staff ' + original_line)
-        print_debug(f"process_notes_for_staff #C - prenote={prenote}")
+        print_debug(f'process_notes_for_staff #C - prenote={prenote}')
         lth, rest, prenote, postnote = do_a_note(nt, rest, voiceon, prenote, postnote, None, next_tie, next_legato, original_line)
-        print_debug(f"process_notes_for_staff #D - prenote={prenote}")
+        print_debug(f'process_notes_for_staff #D - prenote={prenote}')
 
         print_debug(f'lth={lth}')       #DEBUG
         voice_prenote[voiceon] = prenote
-        print_debug(f"process_notes_for_staff - #4 voice_prenote[{voiceon}]={voice_prenote[voiceon]}")
+        print_debug(f'process_notes_for_staff - #4 voice_prenote[{voiceon}]={voice_prenote[voiceon]}')
         if lth is not None:
             if st not in staff_chord_minlth or staff_chord_minlth[st] is None:
                 staff_chord_minlth[st] = lth
@@ -14915,7 +14930,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                 next_tokens = (tdelim + next_tokens).strip()
             # fi
             if lmp_executing_number > MAX_NESTING:
-                print_error("m:{} all_unique_macro_names#1 {} nesting to depth of more than {}".format(measure_on, token, MAX_NESTING), original_line)
+                print_error('m:{} all_unique_macro_names#1 {} nesting to depth of more than {}'.format(measure_on, token, MAX_NESTING), original_line)
                 return                                      # Error ... ouch, many errors will follow. *sigh*
             # fi
             for cnumber in all_unique_macro_names[token]:
@@ -14925,7 +14940,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                     return                                  # Henceforth get lines from macro_buffer.
                 # fi
             # rof
-            print_warning("m:{} macro {} did not match terminators correctly...".format(measure_on, token), original_line)
+            print_warning('m:{} macro {} did not match terminators correctly...'.format(measure_on, token), original_line)
         # fi
         if token == 'begin':
             if in_process_already:
@@ -14941,7 +14956,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                 set_process_quit()
                 in_process_already = False
             else:
-                print_error("quit without being in a process.", original_line)
+                print_error('quit without being in a process.', original_line)
             # fi
         elif token in staff_keywords:
             # process keyword - Might take multiple tokens.
@@ -15021,7 +15036,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                 # The voices that are at the same time playing length. (array)
                 staff_chord_voices[st] = find_mlth_values(st, measure_on, original_line)
                 staff_chord_minlth[st] = None               # No chords, start with next note... .
-                print_debug("process_staff_notes #1 - staff_chord_voices[{}]={}".format(st,staff_chord_voices[st]))      #DEBUG
+                print_debug(f'process_staff_notes #1 - staff_chord_voices[{st}]={staff_chord_voices[st]} save_voice_prenote[{st}]={save_voice_prenote[st]}')
             # rof
             if err:
                 return
@@ -15060,10 +15075,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                 staff_chord[st] = None
                 staff_chord_voices[st] = []                 # Nothing, next start chord, or single note sets it.
                 staff_chord_minlth[st] = None               # No chords, start with next note... .
-#--                for vn in staff_name[st]:
-#--                    voice_prenote[vn] = ''
-#--                # rof
-#--                print_debug(f"process_notes_for_staff - #5 voice_prenote[{voiceon}]={voice_prenote[voiceon]}")
+                save_voice_prenote[st] = ''                 # No longer a saved prenote string/value.
             # rof
         else:
             print_debug('..............................................................................')      #DEBUG
@@ -15094,6 +15106,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                 for v in staff_name[st]:                     # Go through staves
                     print_debug(f'process_staff_notes #2b - st={st} voice_prenote[{v}]={voice_prenote[v]}')
                 # rof
+                print_debug(f'process_staff_notes #2b - save_voice_prenote[{st}]={save_voice_prenote[st]}')
             # rof
 
             # Might take multiple tokens.
@@ -15102,6 +15115,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
             print_debug_bufs(f'process_notes_for - after process_notes_for_staff next_tokens={next_tokens}')      #DEBUG
             if flag:                                        # If doing a single note (not chord).
                 print_debug("process_staff_notes #3a - flag is true")      #DEBUG
+                pflag = False
                 for st in last_voice_staff:                 # Go through staves
                     print_debug(f'process_staff_notes #3b - st={st} staff_chord[st]={staff_chord[st]}')      #DEBUG
                     for vn in range(staff_chord[st], len(staff_chord_voices[st])):
@@ -15118,13 +15132,17 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                         if ny is not None:
                             instak(voiceon, measure_on, voice_prenote[voiceon], r, ny, '', '', original_line)
                             voice_prenote[voiceon] = ''
+                        else:
+                            pflag = True
                         # fi
-#--                        voice_prenote[voiceon] = ''
                         print_debug(f"process_notes_for_staff - #6 voice_prenote[{voiceon}]={voice_prenote[voiceon]}")
                     # rof
                     staff_chord[st] = None
                     staff_chord_voices[st] = []                 # Nothing, next start chord, or single note sets it.
                     staff_chord_minlth[st] = None               # No chords, start with next note... .
+                    if not pflag:
+                        save_voice_prenote[st] = ''
+                    # fi
                 # rof
                 print_debug_bufs('process_notes_for_staff - after possible rests')      #DEBUG
             # fi
