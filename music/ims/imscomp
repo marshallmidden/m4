@@ -1802,7 +1802,7 @@ vinstrument = { }                   # No instruments specified [voice][measure].
 global reverb
 reverb = { }                        # Reverb value for voice, measure.
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-global voice_prenote                # Index by voice or staff, depending on if using staff mode.
+global voice_prenote                # Index by voice.
 voice_prenote = {}
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global pitch                        # Pitch change up or down by semitones.
@@ -3920,6 +3920,7 @@ def process_fs_check(what, lth, min_next, vtlines, tempo_s, tempo_l):
     global fs_other_echo
     global gotoflg
     global gotolast
+    global key_sig_int
 
     for voice, lines in vtlines.items():
         v = int(voice)
@@ -3961,7 +3962,14 @@ def process_fs_check(what, lth, min_next, vtlines, tempo_s, tempo_l):
                     if strg1[0:11] == 'echo meter ':
                         really_print_output('echo "meter {}"'.format(strg1[11:]))
                     elif strg1[0:9] == 'echo key ':
-                        really_print_output('echo "key {}"'.format(strg1[9:]))
+                        x = strg1[9:]
+                        y = x.split(' ', 1)          # Key number.
+                        x = y[1]
+                        y = int(y[0])
+                        if y in key_sig_int:
+                            y = key_sig_int[y].upper()
+                        # fi
+                        really_print_output(f'echo "key {y} {x}"')
                     elif strg1[0:13] == 'echo Title_t ':
                         really_print_output('echo "Title {}"'.format(strg1[13]))
                     elif strg != fs_other_echo:
@@ -4508,6 +4516,10 @@ def print_debug_bufs(s):
     print_debug(f'print_debug_bufs - {s}')
     for st in staff_name:
         print_debug("    staff_name[{}]={}".format(st,staff_name[st]))
+    for st in staff_name:
+        if staff_name[st] is not None:
+            for v in staff_name[st]:
+                print_debug(f'    staff:{st} voice_prenote[{v}]={voice_prenote[v]}')
     for st in staff_chord_voices:
         print_debug("    staff_chord_voices[{}]={}".format(st,staff_chord_voices[st]))
     for st in staff_chord_minlth:
@@ -4652,7 +4664,7 @@ def pass2():
         # fi
     # fi
 
-#DEBUG    print_debug_bufs("pass2")      #DEBUG
+    print_debug_bufs("pass2")     #DEBUG
 
     if len(staves) != 0:
         if args.vertical or args.horizontal:
@@ -5185,11 +5197,11 @@ def fill_future_pvi(endingv, voiceon, bufs_pvi,
     m = start_m
     n = start_n
     ms = meas[m]
-#DEBUG    print_debug(f'e_m={e_m} measure_on={measure_on} ms={ms} n={n} ms={ms} voiceon={voiceon}')      #DEBUG
-#DEBUG    print_debug_bufs('fill_future_pvi')      #DEBUG
+    print_debug(f'e_m={e_m} measure_on={measure_on} ms={ms} n={n} ms={ms} voiceon={voiceon}')      #DEBUG
+    print_debug_bufs('fill_future_pvi')      #DEBUG
     if ms in bufs_pvi[voiceon] and bufs_pvi[voiceon][ms] != [] and len(bufs_pvi[voiceon][ms]) > n:
-#DEBUG        print_debug(f'bufs_pvi[{voiceon}]={bufs_pvi[voiceon]}')      #DEBUG
-#DEBUG        print_debug(f'bufs_length[{voiceon}]={bufs_length[voiceon]}')      #DEBUG
+        print_debug(f'bufs_pvi[{voiceon}]={bufs_pvi[voiceon]}')      #DEBUG
+        print_debug(f'bufs_length[{voiceon}]={bufs_length[voiceon]}')      #DEBUG
         p = bufs_pvi[voiceon][ms][n]            # first note starting pvi
         l = bufs_length[voiceon][ms][n]         # first note length
         if endingv is None:                     # Must be ending pvi.
@@ -5226,9 +5238,9 @@ def fill_future_pvi(endingv, voiceon, bufs_pvi,
             # elihw
             m = m + 1
         # elihw
-#DEBUG    else:      #DEBUG
-#DEBUG        print_debug('fill_future_pvi - nothing for voice to do')      #DEBUG
-#DEBUG    # fi      #DEBUG
+    else:      #DEBUG
+        print_debug('fill_future_pvi - nothing for voice to do')      #DEBUG
+    # fi      #DEBUG
     cresc_pvi[voiceon] = None
     cresc_pvi_time[voiceon] = None
     cresc_pvi_direction[voiceon] = None
@@ -5278,11 +5290,45 @@ def fill_future_volume_cresc_dimin(ev, voiceon, original_line):
     global cresc_volume_direction
     global future_volume_cresc_dimin
     global future_volume_cresc_time
+    global last_voice_staff
+    global staff_name
+    global voice_prenote
+    global measure_on
+    global volume
+    global running_volume
 
-#DEBUG    print_debug(f'fill_future_volume_cresc_dimin - voiceon={voiceon} bufs_volume={bufs_volume} future_volume_cresc_time={future_volume_cresc_time}')      #DEBUG
+    print_debug(f'fill_future_volume_cresc_dimin - voiceon={voiceon} bufs_volume={bufs_volume} future_volume_cresc_time={future_volume_cresc_time[voiceon]}')      #DEBUG
+    print_debug_bufs(f'fill_future_volume_cresc_dimin - before measure_on={measure_on} voiceon={voiceon}')      #DEBUG
     fill_future_pvi(ev, voiceon, bufs_volume,
                     future_volume_cresc_dimin, future_volume_cresc_time,
                     cresc_volume_direction, cresc_volume, cresc_volume_time, original_line)
+
+    if args.abc:
+        if type(last_voice_staff) is int:
+            loopon = [ last_voice_staff ]
+        else:
+            loopon = []
+            for st in last_voice_staff:
+                if st in staff_name and staff_name[st] is not None:
+                    loopon += staff_name[st]
+                # fi
+            # rof
+        # fi
+
+        print_debug(f'fill_future_volume_cresc_dimin - ev={ev} running_volume[{voiceon}]={running_volume[voiceon]}')
+#??         if ev is None:
+#??             ev = volume[voiceon][measure_on]
+#??         # fi
+#??         if ev < running_volume[voiceon]:
+#??             k = 'diminuendo)'
+#??         else:
+#??             k = 'crescendo)'
+#??         # fi
+        print_debug(f'fill_future_volume_cresc_dimin - ev={ev} volume[{voiceon}]={volume[voiceon]} bufs_volume[{voiceon}]={bufs_volume[voiceon]} running_volume[{voiceon}]={running_volume[voiceon]}')
+        print_debug(f'fill_future_volume_cresc_dimin - voiceon={voiceon} measure_on={measure_on} bufs={bufs[voiceon]}')
+#??         bufs[voiceon][measure_on] += DECORATIONS + k + DECORATIONS
+    # fi
+    print_debug_bufs(f'fill_future_volume_cresc_dimin - after measure_on={measure_on} voiceon={voiceon}')      #DEBUG
 # End of fill_future_volume_cresc_dimin
 
 # ----------------------------------------------------------------------------
@@ -5310,7 +5356,7 @@ def put_cresc_vpi(voiceon, timey, it, running, running_next,
                                   bufs_it, default_var):
     global measure_on
 
-#DEBUG    print_debug(f'put_cresc_vpi - measure_on={measure_on}')      #DEBUG
+    print_debug(f'put_cresc_vpi - measure_on={measure_on}')      #DEBUG
     if timey is None or timey == [ None, None, None, None ] or timey == [ None, None, None, None, None ]:
         ovpi = vnext = None
         cresc_it[voiceon] = None
@@ -5351,8 +5397,9 @@ def put_cresc_vpi(voiceon, timey, it, running, running_next,
     if running_next is not None:
         running_next[voiceon] = vnext
     # fi
-    it[voiceon][measure_on] = running[voiceon] = ovpi
-
+    if measure_on not in bufs_volume[voiceon] or len(bufs_volume[voiceon][measure_on]) < 1 :
+        it[voiceon][measure_on] = running[voiceon] = ovpi
+    # fi
     return
 # End of put_cresc_vpi
 
@@ -5413,15 +5460,15 @@ def put_volume(voiceon, onenotevolume, original_line):
     d_t_v = do_these_voices()
     for v in d_t_v:
         if cresc_volume_direction[v] is not None:
-#DEBUG            print_debug("put_volume - #A calling fill_future_volume_cresc_dimin({},{} ... measure_on={}".format(onenotevolume[0], v, measure_on))      #DEBUG
+            print_debug(f'put_volume - #A calling fill_future_volume_cresc_dimin({onenotevolume[0]},{v} ...  measure_on={measure_on}...) onenotevolume={onenotevolume}')      #DEBUG
             fill_future_volume_cresc_dimin(onenotevolume[0], v, original_line)
         # fi
-#DEBUG        print_debug(f'put_volume - #A v={v} onenotevolume={onenotevolume}')      #DEBUG
+        print_debug(f'put_volume - #A v={v} onenotevolume={onenotevolume}')      #DEBUG
         put_cresc_vpi(v, onenotevolume, volume, running_volume, running_volume_next,
                       cresc_volume, cresc_volume_time, cresc_volume_direction,
                       future_volume_cresc_dimin, future_volume_cresc_time,
                       bufs_volume, 'default_volume')
-#DEBUG        print_debug(f'put_volume - #B v={v} bufs_volume={bufs_volume}')      #DEBUG
+        print_debug(f'put_volume - #B v={v} bufs_volume={bufs_volume}')      #DEBUG
     # rof
     return
 # End of put_volume
@@ -5459,6 +5506,7 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, postn
     global pan
     global intensity
 
+    print_debug(f'put_on_bufs - voiceon={voiceon} p_meas={p_meas} thenote={thenote} timeofnote={timeofnote} prenote={prenote}')
     if type(voiceon) is not int:
         print_error("put_on_bufs - voiceon type is not int ({})".format(type(voiceon)), 'put_on_bufs')
         print_die("voiceon must be a voice.")
@@ -5508,8 +5556,8 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, postn
     # fi
 
     bufs_volume[voiceon][p_meas].append(running_volume[voiceon])        # Add volume stuff for this note.
-#DEBUG    print_debug(f'put_on_bufs - voiceon={voiceon} p_meas={p_meas} running_volume[voiceon]={running_volume[voiceon]}')      #DEBUG
-#DEBUG    print_debug(f'put_on_bufs - #B voiceon={voiceon} bufs_volume={bufs_volume}')      #DEBUG
+    print_debug(f'put_on_bufs - voiceon={voiceon} p_meas={p_meas} running_volume[voiceon]={running_volume[voiceon]}')      #DEBUG
+    print_debug(f'put_on_bufs - #B voiceon={voiceon} bufs_volume={bufs_volume}')      #DEBUG
     if running_volume_next[voiceon] is not None:
         running_volume[voiceon] = running_volume_next[voiceon]
         running_volume_next[voiceon] = None
@@ -5542,6 +5590,7 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, postn
         # fi
         bufs_suffixes[voiceon][p_meas].append(append_tie)
     else:           # ABC
+        print_debug(f'put_on_bufs #A - bufs[{voiceon}][{p_meas}]={bufs[voiceon][p_meas]} prenote={prenote} thenote={thenote} postnote={postnote}')
         bufs[voiceon][p_meas] = bufs[voiceon][p_meas] + prenote + thenote + postnote
     # fi
 
@@ -5572,13 +5621,16 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, postn
         return
     # fi
 
+    print_debug(f'put_on_bufs - flagv={flagv} flagp={flagp} flagi={flagi}')
     if flagv:
+        print_debug('put_on_bufs - flagv is True')
         if cresc_volume_time[voiceon] <= timeofnote:
             running_volume[voiceon] = cresc_volume[voiceon]
             cresc_volume_time[voiceon] = None                  # Or zero.
             if args.vertical or args.horizontal or args.midi1csv or args.fluidsynth:
                 pass
             else:
+                print_debug('put_on_bufs - flagv is True and abc format')
                 j = vol_to_vlprint_round(cresc_volume[voiceon])
                 if cresc_volume_direction[voiceon]:
                     k = 'crescendo)'
@@ -5588,6 +5640,7 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, postn
                 bufs[voiceon][p_meas] = bufs[voiceon][p_meas] + \
                                         DECORATIONS + vlprint[j] + DECORATIONS + \
                                         DECORATIONS + k + DECORATIONS
+                print_debug(f'put_on_bufs - bufs[{voiceon}][{p_meas}]={bufs[voiceon][p_meas]}')
             # fi
         else:
             dt = cresc_volume_time[voiceon] + 0.0
@@ -5599,6 +5652,8 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, postn
             # fi
             cresc_volume_time[voiceon] = cresc_volume_time[voiceon] - timeofnote
         # fi
+    else:
+        print_debug('put_on_bufs - flagv is False')
     # fi
 
     if flagp:
@@ -6051,7 +6106,7 @@ def assign_another_voice(b4, where, original_line):
         future_pan_cresc_dimin[nv] = copy.deepcopy(future_pan_cresc_dimin[ov])
 
         bufs_volume[nv] = copy.deepcopy(bufs_volume[ov])
-#DEBUG        print_debug(f'assign_another_voice - nv={nv} ov={ov} bufs_volume[nv]={bufs_volume[nv]}')      #DEBUG
+        print_debug(f'assign_another_voice - nv={nv} ov={ov} bufs_volume[nv]={bufs_volume[nv]}')      #DEBUG
         volume[nv] = volume[ov]
         running_volume[nv] = running_volume[ov]
         cresc_volume[nv] = copy.deepcopy(cresc_volume[ov])
@@ -6061,7 +6116,7 @@ def assign_another_voice(b4, where, original_line):
         running_volume_next[nv] = running_volume_next[ov]
     # fi
     staff_name[b4] = ns
-#DEBUG    print_debug_bufs(f'assign_another_voice - measure_on={measure_on} staff={b4} staff_name[b4]={staff_name[b4]}')      #DEBUG
+    print_debug_bufs(f'assign_another_voice - measure_on={measure_on} staff={b4} staff_name[b4]={staff_name[b4]}')      #DEBUG
 # End of assign_another_voice
 
 # ----------------------------------------------------------------------------
@@ -6082,7 +6137,7 @@ def separate_args(wline, integers, nospaces, original_line):
         elif integers is None:
             if b4 in staff_name:
                 if staff_name[b4] is None:
-#DEBUG                    print_debug_bufs(f'separate_args - calling assign_another_voice - measure_on={measure_on} staff={b4} staff_name[b4]={staff_name[b4]}')      #DEBUG
+                    print_debug_bufs(f'separate_args - calling assign_another_voice - measure_on={measure_on} staff={b4} staff_name[b4]={staff_name[b4]}')      #DEBUG
                     assign_another_voice(b4, 'separate_args', original_line)
                 # fi
                 for v in staff_name[b4]:
@@ -6374,11 +6429,11 @@ def to_abc_note(note_number):
     octaves = { 0:',,,', 1:',,', 2:',', 3:'', 4:'', 5:"'", 6:"''", 7:"'''", 8:"''''" }
     notes = { 0:'a', 1:'^a', 2:'b', 3:'c', 4:'^c', 5:'d', 6:'^d', 7:'e', 8:'f', 9:'^f', 10:'g', 11:'^g' }
     if o not in octaves:
-#DEBUG        print_debug("to_abc_note({}) bad octave ({})".format(note_number, o))      #DEBUG
+        print_debug("to_abc_note({}) bad octave ({})".format(note_number, o))      #DEBUG
         return 'z'
     # fi
     if n not in notes:
-#DEBUG        print_debug("to_abc_note({}) bad note ({})".format(note_number, n))      #DEBUG
+        print_debug("to_abc_note({}) bad note ({})".format(note_number, n))      #DEBUG
         return 'z'
     # fi
     n = notes[n]
@@ -9246,12 +9301,13 @@ def do_measure(t_args, original_line):
             acc_m[i] = {k: v for k, v in acc_v_init_v_or_h.items()}
             acc_m_xpose[i] = {k: v for k, v in acc_v_init_v_or_h.items()}
         # rof
-#DEBUG        print_debug_bufs(f'do_measure #1 - measure_on={measure_on}')      #DEBUG
+        print_debug_bufs(f'do_measure #1 - measure_on={measure_on}')      #DEBUG
         return
     # fi
 
     measure_on = str(f1)
     meas.append(measure_on)
+    print_debug(f'do_measure - set meas to have measure_on={measure_on}')
     for i in range(1, len(volume)+1):
         if not i in vinstrument:
             set_all_staff_arr(i, {}, vinstrument, 'vinstrument', original_line)
@@ -9291,9 +9347,9 @@ def do_measure(t_args, original_line):
         key_voice[i][measure_on] = key_voice[i][last_m]
 
         # Carry forward.
-# NOTDONEYET - volume - should this really be this way? No? Yes? running_volume over-rules?
-#DEBUG        print_debug_bufs(f'do_measure #2a - measure_on={measure_on}')      #DEBUG
+# YES - volume - this really should be this way. running_volume over-rules? for notes that play.
         volume[i][measure_on] = volume[i][last_m]
+        print_debug_bufs(f'do_measure #2a - measure_on={measure_on} volume[{i}][{last_m}]')      #DEBUG
         pan[i][measure_on] = running_pan[i]                 # Carry forward.
         intensity[i][measure_on] = running_intensity[i]     # Carry forward.
 
@@ -9311,7 +9367,7 @@ def do_measure(t_args, original_line):
     tempo_now_note_length[measure_on] = tempo_now_note_length[last_m]
     measure_meter[measure_on] = meter       # Each measure change can have a different meter.
     pitch[measure_on] = pitch[last_m]       # continue pitch from measure before.
-#DEBUG    print_debug_bufs(f'do_measure #2b - measure_on={measure_on}')      #DEBUG
+    print_debug_bufs(f'do_measure #2b - measure_on={measure_on}')      #DEBUG
     return
 # End of do_measure
 
@@ -10041,7 +10097,6 @@ def do_staff(t_args, original_line):
     # fi
 
     staff_name[sn] = v                                  # Create or change it.
-    voice_prenote[sn] = ''                              # No prenote for staff/voice.
     staves.append(v)                                    # For order checking for ABC printing -- indirectly.
     last_voice_staff = [sn]
     setvar('voice', ','.join(last_voice_staff), 1)      # Doesn't need join, but do it for consistency.
@@ -10729,26 +10784,35 @@ def get_volume_number(name, command_name, original_line):
 # End of get_volume_number
 
 # ----------------------------------------------------------------------------
-def set_volume_now(voiceon, vn, flag_middle_measure, original_line):
+def set_volume_now(voiceon, vn, original_line):
     global running_volume
     global running_volume_next
+    global measure_on
     global volume
     global cresc_volume
     global cresc_volume_time
     global cresc_volume_direction
 
+    print_debug(f'set_volume_now - voiceon={voiceon} vn={vn} measure_on={measure_on}')
+    if voiceon not in volume:
+        volume[voiceon] = {}
+    # fi
+    if voiceon not in mlth:
+        mlth[voiceon] = {}
+    # fi
+    if measure_on not in mlth[voiceon]:
+        mlth[voiceon][measure_on] = 0
+    # fi
+    volume[voiceon][measure_on] = vn    # Change volume for voice.
     if cresc_volume_direction[voiceon] is not None:
         fill_future_volume_cresc_dimin(voiceon, vn, original_line)
-    # fi
-    if not flag_middle_measure:
-        volume[voiceon][measure_on] = vn    # Change volume for voice.
     # fi
     running_volume[voiceon] = vn        # Force running change - also stop crescendo.
     running_volume_next[voiceon] = None
     cresc_volume[voiceon] = None
     cresc_volume_time[voiceon] = None
     cresc_volume_direction[voiceon] = None
-#DEBUG    print_debug_bufs(f'set_volume_now - measure_on={measure_on}')      #DEBUG
+    print_debug_bufs(f'set_volume_now - measure_on={measure_on}')      #DEBUG
 # End of set_volume_now
 
 # ----------------------------------------------------------------------------
@@ -10766,11 +10830,10 @@ def handle_volume_both(t_args, command_name, original_line):
     global cresc_volume_time
     global cresc_volume
 
-    flag_middle_measure = False
     for ve in range(1, len(volume)+1):
         if mlth[ve][measure_on] != 0:
             print_warning(f'{command_name} in the middle of a measure...', original_line)
-            flag_middle_measure = True
+            break
         # fi
     # rof
 
@@ -10800,7 +10863,7 @@ def handle_volume_both(t_args, command_name, original_line):
             if not i in volume:
                 new_voice_initialize(i, measure_on)
             # fi
-            set_volume_now(i, f1, flag_middle_measure, original_line)
+            set_volume_now(i, f1, original_line)
         # rof
     else:
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
@@ -10821,7 +10884,7 @@ def handle_volume_both(t_args, command_name, original_line):
                 print_error("voice number ({}) is greater than max allowed ({}) or less than 1".format(f1, MAXVOICES))
                 return
             # fi
-            set_volume_now(f1, vn, flag_middle_measure, original_line)
+            set_volume_now(f1, vn, original_line)
         # rof
     # fi
 
@@ -12499,7 +12562,8 @@ def find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, original_lin
 
     temp1 = temp1.strip()
 
-#DEBUG    print_debug(f"find_vol_cresc_pan_intensity - temp1='{temp1}'")      #DEBUG
+    print_debug(f"find_vol_cresc_pan_intensity - Entering temp1='{temp1}'")      #DEBUG
+    print_debug(f'find_vol_cresc_pan_intensity #A - prenote={prenote} postnote={postnote}')
     if type(voiceon) is str:
         try:
             new_v = int(voiceon)
@@ -12510,12 +12574,13 @@ def find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, original_lin
     # fi
 
     while True:
+        print_debug_bufs(f'find_vol_cresc_pan_intensity - while True: prenote={prenote} postnote={postnote}')
         flag = False
         temp1 = temp1.strip()                       # Toss spaces on both sides.
         whichone = re.sub(r'^(volume|vol|v|pan|p|intensity|i|cresc|dimin)[ \t]*(.*)', r'\1', temp1)
         whichone = whichone.strip()                 # Toss spaces on both sides.
         if whichone == temp1:
-#DEBUG            print_debug(f'find_vol_cresc_pan_intensity - #A bufs_volume={bufs_volume}')      #DEBUG
+            print_debug(f'find_vol_cresc_pan_intensity - #A bufs_volume={bufs_volume} prenote={prenote}')      #DEBUG
             return temp1, prenote, postnote
         # fi
         whatsafter = re.sub(r'^(volume|vol|v|pan|p|intensity|i|cresc|dimin)[ \t]*(.*)', r'\2', temp1)
@@ -12524,7 +12589,7 @@ def find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, original_lin
         if whatsafter[0] == '(':
             x = parens_match(')', whatsafter, 0, original_line)
             if x is None or x <= 2:                 # No array or part of a character string.
-#DEBUG                print_debug('find_vol_cresc_pan_intensity - #B return')      #DEBUG
+                print_debug('find_vol_cresc_pan_intensity - #B return prenote={prenote}')      #DEBUG
                 return temp1, prenote, postnote
             # fi
             # Have parenthesis and x for end of it.
@@ -12544,18 +12609,18 @@ def find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, original_lin
 
         new_first, new_second = get_one_or_two_args(token_gotten[len(whichone):], original_line)
         if new_first is None and whichone not in [ 'vol', 'v', 'volume' ]:
-#DEBUG            print_debug('find_vol_cresc_pan_intensity - #C return')      #DEBUG
+            print_debug('find_vol_cresc_pan_intensity - #C return prenote={prenote}')      #DEBUG
             return temp1, prenote, postnote
         # fi
         if len(trailing) > 0 and trailing[0] in [ '<', '>' ]: # crescendo/decrescendo.
             if whichone in [ 'cresc', 'dimin']:
                 print_error("find_vol_cresc_pan_intensity - cannot have cresc/dimin and trailing '{}'".format(trailing[0]), original_line)
-#DEBUG                print_debug('find_vol_cresc_pan_intensity - #D return')      #DEBUG
+                print_debug('find_vol_cresc_pan_intensity - #D return prenote={prenote}')      #DEBUG
                 return temp1, prenote, postnote
             # fi
             if new_second is not None:
                 print_error("find_vol_cresc_pan_intensity - cannot have two arguments and trailing '{}'".format(trailing[0]), original_line)
-#DEBUG                print_debug('find_vol_cresc_pan_intensity - #F return')      #DEBUG
+                print_debug('find_vol_cresc_pan_intensity - #F return prenote={prenote}')      #DEBUG
                 return temp1, prenote, postnote
             # fi
             therest = trailing[1:].lstrip()
@@ -12571,7 +12636,7 @@ def find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, original_lin
         # fi
 
         if whichone in [ 'vol', 'v', 'volume', 'cresc', 'dimin' ]:  # Check for funny 1st argument.
-#DEBUG            print_debug_bufs(f'find_vol_cresc_pan_intensity - whichone={whichone}')      #DEBUG
+#--            print_debug_bufs(f'find_vol_cresc_pan_intensity - whichone={whichone}')      #DEBUG
             if whichone == 'cresc':
                 crd = False
             elif whichone == 'dimin':
@@ -12592,19 +12657,19 @@ def find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, original_lin
                         onenotenextv = running_volume[voiceon]
                     # fi
                 elif new_first is None:             # Both are None - no volume name given.
-#DEBUG                    print_debug('find_vol_cresc_pan_intensity - #G return')      #DEBUG
+                    print_debug('find_vol_cresc_pan_intensity - #G return prenote={prenote}')      #DEBUG
                     return temp1, prenote, postnote
                 # fi
             elif new_second is not None:
                 # Do 2 argument crescendo.
                 # cresc(ff,5.25)    # volume to go to, 5.25 = time in floating.
                 if new_first is None:               # Must have 2 arguments.
-#DEBUG                    print_debug('find_vol_cresc_pan_intensity - #H return')      #DEBUG
+                    print_debug('find_vol_cresc_pan_intensity - #H return prenote={prenote}')      #DEBUG
                     return temp1, prenote, postnote
                 # fi
                 if Trd is not None and crd is not None:
                     print_error("find_vol_cresc_pan_intensity - cannot have two arguments and a trailing '{}'".format(trailing[0]), original_line)
-#DEBUG                    print_debug('find_vol_cresc_pan_intensity - #I return')      #DEBUG
+                    print_debug('find_vol_cresc_pan_intensity - #I return prenote={prenote}')      #DEBUG
                     return temp1, prenote, postnote
                 # fi
                 if args.midi1csv or args.fluidsynth:
@@ -12629,6 +12694,7 @@ def find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, original_lin
                     prenote = prenote + whichone + '(' + str(new_first) + ',' + str(new_second) + ')'
                     c_t = round(new_second * MIDICLICKSPERQUARTER * 4)          # cresc time
                 else:           # ABC
+                    print_debug(f"find_vol_cresc_pan_intensity - new_first #Z0 running_volume[{voiceon}]={running_volume[voiceon]} postnote={postnote}")      #DEBUG
                     if new_first > running_volume[voiceon]:
                         c_d = True
                         prenote = prenote + DECORATIONS + 'crescendo(' + DECORATIONS
@@ -12636,16 +12702,16 @@ def find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, original_lin
                         c_d = False
                         prenote = prenote + DECORATIONS + 'diminuendo(' + DECORATIONS
                     # fi
-                    prenote = prenote + DECORATIONS + 'crescendo(' + DECORATIONS
+#--                    prenote = prenote + DECORATIONS + 'crescendo(' + DECORATIONS
                     c_t = new_second + 0.0
                 # fi
                 temp1 = trailing.lstrip()
-#DEBUG                print_debug("find_vol_cresc_pan_intensity - calling put_volume() #Z1")      #DEBUG
+                print_debug(f"find_vol_cresc_pan_intensity - calling put_volume() #Z1 prenote={prenote} postnote={postnote}")      #DEBUG
                 put_volume(voiceon, [onenotevolume, onenotenextv, c_v, c_t, c_d], original_line)
                 continue
             elif new_first is None:
                 print_error("find_vol_cresc_pan_intensity - vol/v/volume needs 1 number, cresc/dimin needs two numbers", original_line)
-#DEBUG                print_debug('find_vol_cresc_pan_intensity - #J return')      #DEBUG
+                print_debug('find_vol_cresc_pan_intensity - #J return prenote={prenote}')      #DEBUG
                 return temp1, prenote, postnote
             # fi
             # One argument.
@@ -12653,7 +12719,7 @@ def find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, original_lin
             if Trd is None:                         # If not a future cresc/dimin.
                 if crd is not None:                 # If cresc/dimin.
                     print_error("find_vol_cresc_pan_intensity - cresc/dimin needs 2 numbers", original_line)
-#DEBUG                    print_debug('find_vol_cresc_pan_intensity - #K return')      #DEBUG
+                    print_debug('find_vol_cresc_pan_intensity - #K return prenote={prenote}')      #DEBUG
                     return temp1, prenote, postnote
                 # fi
                 therest = trailing
@@ -12673,8 +12739,15 @@ def find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, original_lin
                     j = vol_to_vlprint_round(onenotenextv)
                     postnote = postnote + DECORATIONS + vlprint[j] + DECORATIONS
                 # fi
+                if c_d is None:
+                    pass
+                elif c_d:                           # Decresendo to later vol/pan/intensity.
+                    prenote = prenote + DECORATIONS + 'diminuendo(' + DECORATIONS
+                else:
+                    prenote = prenote + DECORATIONS + 'crescendo(' + DECORATIONS
+                # fi
             # fi
-#DEBUG            print_debug("find_vol_cresc_pan_intensity - calling put_volume() #Z2")      #DEBUG
+            print_debug(f"find_vol_cresc_pan_intensity - calling put_volume() #Z2 prenote={prenote} postnote={postnote}")      #DEBUG
             put_volume(voiceon, [onenotevolume, onenotenextv, c_v, c_t, c_d], original_line)
             temp1 = therest
             continue
@@ -12684,14 +12757,14 @@ def find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, original_lin
             s1 = token_gotten[len(whichone)+1:-1]
             onenotepan = p_p = p_t = p_d = None
             if new_first is None:
-#DEBUG                print_debug('find_vol_cresc_pan_intensity - #L return')      #DEBUG
+                print_debug('find_vol_cresc_pan_intensity - #L return prenote={prenote}')      #DEBUG
                 return temp1, prenote, postnote
             # fi
             if new_second is not None:
                 # Do 2 argument pan crescendo.
                 if Trd is not None:
                     print_error("find_vol_cresc_pan_intensity - cannot have a two arguments and trailing '{}'".format(trailing[0]), original_line)
-#DEBUG                    print_debug('find_vol_cresc_pan_intensity - #M return')      #DEBUG
+                    print_debug('find_vol_cresc_pan_intensity - #M return prenote={prenote}')      #DEBUG
                     return temp1, prenote, postnote
                 # fi
                 p_p = new_first
@@ -12728,14 +12801,14 @@ def find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, original_lin
             onenoteintensity = i_p = i_t = i_d = None
             s1 = token_gotten[len(whichone)+1:-1]
             if new_first is None:
-#DEBUG                print_debug('find_vol_cresc_pan_intensity - #N return')      #DEBUG
+                print_debug('find_vol_cresc_pan_intensity - #N return prenote={prenote}')      #DEBUG
                 return temp1, prenote, postnote
             # fi
             if new_second is not None:
                 # Do 2 argument intensity crescendo.
                 if Trd is not None:
                     print_error("find_vol_cresc_pan_intensity - cannot have a two arguments and trailing '{}'".format(trailing[0]), original_line)
-#DEBUG                    print_debug('find_vol_cresc_pan_intensity - #O return')      #DEBUG
+                    print_debug('find_vol_cresc_pan_intensity - #O return prenote={prenote}')      #DEBUG
                     return temp1, prenote, postnote
                 # fi
                 i_p = new_first
@@ -12770,7 +12843,7 @@ def find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, original_lin
         # fi
 
         # Not found, strangeness!
-#DEBUG        print_debug('find_vol_cresc_pan_intensity - #P return')      #DEBUG
+        print_debug('find_vol_cresc_pan_intensity - #P return prenote={prenote}')      #DEBUG
         return temp1, prenote, postnote
     # elihw
 # End of find_vol_cresc_pan_intensity
@@ -13215,7 +13288,7 @@ def get_sequence_note(temp1, voiceon, number_in_sequence, prenote, w, postnote, 
         # then the rounding goes up and down by 1 nicely. *sigh* computers.
 
         numerator = timeofnote * MIDICLICKSPERQUARTER * 4.0
-#DEBUG        print_debug(f'get_sequence_note - numerator={numerator} timeofnote={timeofnote}')    #DEBUG
+        print_debug(f'get_sequence_note - numerator={numerator} timeofnote={timeofnote}')    #DEBUG
         lth_so_far = 0
         seq_num_so_far = number_in_sequence
         for i in range(0, len(notes)):
@@ -13379,17 +13452,18 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
         # fi
     # fi
 
-#DEBUG    print_debug(f"do_a_note - temp1='{temp1}'")      #DEBUG
+    print_debug(f"do_a_note - Entering temp1='{temp1}' prenote={prenote}")      #DEBUG
     #.............................................................................
     therest, thenote, typenote = getnote(temp1, voiceon, True, True, True, original_line) # get next note
     if thenote is None:
-        print_error("m:{} no note? therest='{}' thenote='{}' typenote='{}'".format(measure_on, therest, thenote, typenote), original_line)
+        print_error(f"m:{measure_on} no note? therest='{therest}' thenote='{thenote}' typenote='{typenote}' prenote={prenote}", original_line)
         return None, rest, prenote, postnote        # get next note for this voice (old way)
     # fi
     if type(thenote) == str and (thenote == '' or thenote == ' ' or thenote == "\t"):
         if prenote == ' ':
             prenote = ''
         # fi
+        print_debug(f"do_a_note #A - prenote={prenote} postnote={postnote}")
         return None, rest, prenote, postnote        # get next note for this voice (old way)
     # fi
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
@@ -13418,7 +13492,7 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
         else:
             lth = get_sequence_note(therest, voiceon, thenote, prenote, w, postnote, tie_next, legato_next, original_line)
         # fi
-#DEBUG        print_debug(f'do_a_note - lth={lth}')     #DEBUG
+        print_debug(f'do_a_note - lth={lth}')     #DEBUG
         return lth, rest, '', ''                    # get next note for this voice (old way) (put_on_bufs)
     # fi
     # Normal note processing follows.
@@ -13427,6 +13501,7 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
     #.............................................................................
     if r_suffixes is None or number_dots is None:
         print_error("m:{} Error getting time for note ('{}') - ('{}') -> timeofnote='{}' r_suffixes='{}' number_dots='{}' therest='{}'".format(measure_on, thenote, therest, timeofnote, r_suffixes, number_dots, therest), original_line)
+        print_debug(f"do_a_note #B - prenote={prenote} postnote={postnote}")
         return None, rest, prenote, postnote        # error occurred.
     # fi
     # suffix_legato = 16            -- glide to next note.
@@ -13439,6 +13514,7 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
     if timeofnote is None or timeofnote == 0:
         if number_dots != 0:
             print_error("m:{} cannot have dotted syntax on a default note length.".format(measure_on), original_line)
+            print_debug(f"do_a_note #C - prenote={prenote} postnote={postnote}")
             return None, rest, prenote, postnote    # error occurred.
         # fi
         timeofnote = get_staff_arr(voiceon, time, 'time', 'do_a_note1 ' + original_line)
@@ -13542,6 +13618,7 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
     # fi
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Use instak() to process note.
+    print_debug(f"do_a_note #D - calling handle_one_note - prenote={prenote} postnote={postnote}")
     notestuff = [ prenote, thenote, timeofnote, postnote ]
     suffixstuff = [ prev_tie, tie_this, append_tie, legato_next ]
     handle_one_note(False, voiceon, measure_on, notestuff, suffixstuff, original_line)
@@ -13572,6 +13649,7 @@ def handle_one_note(p_i, voiceon, m, notestuff, suffixstuff, original_line):
     bufs_tie_next[voiceon] = tie_this
     bufs_legato_next[voiceon] = append_legato
 
+    print_debug(f"handle_one_note #A - prenote={prenote} postnote={postnote}")
     if p_i:
         put_on_bufs(voiceon, m, prenote, thenote, timeofnote, append_tie, postnote, original_line)
     else:
@@ -13605,6 +13683,7 @@ def process_notes_oldway(line, original_line):
     global voice_prenote
     global MIDICLICKSPERQUARTER
 
+    print_debug(f'process_notes_oldway - Entering line={line}')
     if not measure_on or measure_on == '':  # no measure yet
         print_error("no measure processed yet - must have one before notes.", original_line)
         return
@@ -13818,8 +13897,8 @@ def process_notes_oldway(line, original_line):
             if w is None:
                 break
             # fi
-            # The last one(s) have been used.
-            voice_prenote[voiceon] = ''
+#--            # The last one(s) have been used.
+#--            voice_prenote[voiceon] = ''
             w = w + 1
         # elihw
     # rof
@@ -14611,9 +14690,9 @@ def find_mlth_values(stfs, m, original_line):
     global staff_name
     global mlth
     
-#DEBUG    if stfs in staff_chord_voices:    # DEBUG      #DEBUG
-#DEBUG        print_debug(f'find_mlth_values - staff_chord_voices[{stfs}]={staff_chord_voices[stfs]}')  # DEBUG      #DEBUG
-#DEBUG    # fi  # DEBUG      #DEBUG
+    if stfs in staff_chord_voices:    # DEBUG      #DEBUG
+        print_debug(f'find_mlth_values - staff_chord_voices[{stfs}]={staff_chord_voices[stfs]}')  # DEBUG      #DEBUG
+    # fi  # DEBUG      #DEBUG
     num0s = []
     minvalue = None
     nummins = []
@@ -14625,7 +14704,7 @@ def find_mlth_values(stfs, m, original_line):
             print_error("NOTDONEYET - m='{}' not in mlth[{}]".format(m,v), original_line)
             mlth[v][m] = 0
         # fi
-#DEBUG        print_debug(f"find_mlth_values - mlth[{v}][{m}]={mlth[v][m]}")      #DEBUG
+        print_debug(f"find_mlth_values - mlth[{v}][{m}]={mlth[v][m]}")      #DEBUG
         f = float(mlth[v][m])
         if math.isclose(f, float(0)):
             num0s.append(v)
@@ -14681,12 +14760,11 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):      
         if first_st == None:
             first_st = st
         # fi
-        prenote = voice_prenote[st]
         # Is there a note in chord already?
         voice_num = staff_chord[st]
         # If need to get another voice into staff...
         if voice_num == len(staff_chord_voices[st]):
-#DEBUG            print_debug_bufs(f'process_notes_for_staff - calling assign_another_voice - measure_on={measure_on} staff={st} staff_name[st]={staff_name[st]}')      #DEBUG
+            print_debug_bufs(f'process_notes_for_staff - calling assign_another_voice - measure_on={measure_on} staff={st} staff_name[st]={staff_name[st]}')      #DEBUG
             assign_another_voice(st, 'process_notes_for_staff', original_line)
             staff_chord_voices[st].append(staff_name[st][-1])
         # fi
@@ -14695,18 +14773,28 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):      
         # fi
     # rof
     voiceon = staff_chord_voices[first_st][first_vn]
+    print_debug(f"process_notes_for_staff - #1 voice_prenote[{voiceon}]={voice_prenote[voiceon]}")
+    prenote = voice_prenote[voiceon]
     postnote = ''
 
+    print_debug(f"process_notes_for_staff #A - prenote={prenote}")
     temp1, prenote, postnote = find_vol_cresc_pan_intensity(send_these_notes, voiceon, prenote, postnote, original_line)
+    print_debug(f"process_notes_for_staff #B - prenote={prenote}")
     for st in last_voice_staff:         # Go through staves
-        voice_prenote[st] = prenote
+        if staff_name[st] is not None:
+            for v in staff_name[st]:
+                voice_prenote[v] = prenote
+            # rof
+        # rof
     # rof
+    print_debug(f"process_notes_for_staff - #2 voice_prenote[{voiceon}]={voice_prenote[voiceon]}")
     if temp1 is None or temp1 == '':
         return True, ''
     # fi
     if temp1 != send_these_notes:
         return True, temp1
     # fi
+    print_debug(f"process_notes_for_staff - #3 voice_prenote[{voiceon}]={voice_prenote[voiceon]}")
     #.............................................................................
     # Need to go through all staves, getting the voice to put note on,
     # bufs_{legato,tie}_next, and afterwards processing too.
@@ -14721,11 +14809,13 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):      
         #.............................................................................
         next_tie = get_staff_arr(voiceon, bufs_tie_next, 'bufs_tie_next', 'process_notes_for_staff ' + original_line)
         next_legato = get_staff_arr(voiceon, bufs_legato_next, 'bufs_legato_next', 'process_notes_for_staff ' + original_line)
+        print_debug(f"process_notes_for_staff #C - prenote={prenote}")
         lth, rest, prenote, postnote = do_a_note(nt, rest, voiceon, prenote, postnote, None, next_tie, next_legato, original_line)
+        print_debug(f"process_notes_for_staff #D - prenote={prenote}")
 
-#DEBUG        print_debug(f'lth={lth}')       #DEBUG
-        voice_prenote[st] = prenote
+        print_debug(f'lth={lth}')       #DEBUG
         voice_prenote[voiceon] = prenote
+        print_debug(f"process_notes_for_staff - #4 voice_prenote[{voiceon}]={voice_prenote[voiceon]}")
         if lth is not None:
             if st not in staff_chord_minlth or staff_chord_minlth[st] is None:
                 staff_chord_minlth[st] = lth
@@ -14930,7 +15020,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                 # The voices that are at the same time playing length. (array)
                 staff_chord_voices[st] = find_mlth_values(st, measure_on, original_line)
                 staff_chord_minlth[st] = None               # No chords, start with next note... .
-#DEBUG                print_debug("process_staff_notes #1 - staff_chord_voices[{}]={}".format(st,staff_chord_voices[st]))      #DEBUG
+                print_debug("process_staff_notes #1 - staff_chord_voices[{}]={}".format(st,staff_chord_voices[st]))      #DEBUG
             # rof
             if err:
                 return
@@ -14968,12 +15058,13 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                 staff_chord[st] = None
                 staff_chord_voices[st] = []                 # Nothing, next start chord, or single note sets it.
                 staff_chord_minlth[st] = None               # No chords, start with next note... .
-                for vn in staff_name[st]:
-                    voice_prenote[vn] = ''
-                # rof
+#--                for vn in staff_name[st]:
+#--                    voice_prenote[vn] = ''
+#--                # rof
+#--                print_debug(f"process_notes_for_staff - #5 voice_prenote[{voiceon}]={voice_prenote[voiceon]}")
             # rof
         else:
-#DEBUG            print_debug('..............................................................................')      #DEBUG
+            print_debug('..............................................................................')      #DEBUG
             if token == '(':
                 array_args = separate_args('(' + next_tokens, False, False, original_line)
                 if len(array_args) < 1:
@@ -14996,22 +15087,23 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                     staff_chord[st] = 0                     # First voice for staff.
                     staff_chord_voices[st] = find_mlth_values(st, measure_on, original_line)
                     staff_chord_minlth[st] = None           # No chords, start with next note... .
-#DEBUG                    print_debug("process_staff_notes #2 - staff_chord_voices[{}]={}".format(st,staff_chord_voices[st]))      #DEBUG
+                    print_debug("process_staff_notes #2 - staff_chord_voices[{}]={}".format(st,staff_chord_voices[st]))      #DEBUG
                 # fi
+                for v in staff_name[st]:                     # Go through staves
+                    print_debug(f'process_staff_notes #2b - st={st} voice_prenote[{v}]={voice_prenote[v]}')
+                # rof
             # rof
 
             # Might take multiple tokens.
             pvi_tf, next_tokens = process_notes_for_staff(token, tdelim, next_tokens, original_line)
 
-#DEBUG            print_debug_bufs('process_notes_for_staff - after doing notes')      #DEBUG
+            print_debug_bufs(f'process_notes_for - after process_notes_for_staff next_tokens={next_tokens}')      #DEBUG
             if flag:                                        # If doing a single note (not chord).
-#DEBUG                print_debug("process_staff_notes #3a - flag is true")      #DEBUG
+                print_debug("process_staff_notes #3a - flag is true")      #DEBUG
                 for st in last_voice_staff:                 # Go through staves
-                    lthnote = staff_chord_minlth[st]
-#DEBUG                    print_debug(f'process_staff_notes #3b - st={st} staff_chord[st]={staff_chord[st]} lthnote={lthnote}')      #DEBUG
-#DEBUG                    print_debug(f'process_staff_notes #4b - st={st} staff_chord[st]={staff_chord[st]}')      #DEBUG
+                    print_debug(f'process_staff_notes #3b - st={st} staff_chord[st]={staff_chord[st]}')      #DEBUG
                     for vn in range(staff_chord[st], len(staff_chord_voices[st])):
-#DEBUG                        print_debug(f'process_staff_notes #4c - vn={vn}')      #DEBUG
+                        print_debug(f'process_staff_notes #4c - vn={vn}')      #DEBUG
                         if args.midi1csv or args.fluidsynth:
                             r = 0
                         elif args.abc:
@@ -15022,17 +15114,16 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                         voiceon = staff_chord_voices[st][vn]
                         ny = staff_chord_minlth[st]
                         if ny is not None:
-                            instak(voiceon, measure_on, '', r, ny, '', '', original_line)
+                            instak(voiceon, measure_on, voice_prenote[voiceon], r, ny, '', '', original_line)
                         # fi
+#--                        voice_prenote[voiceon] = ''
+                        print_debug(f"process_notes_for_staff - #6 voice_prenote[{voiceon}]={voice_prenote[voiceon]}")
                     # rof
                     staff_chord[st] = None
                     staff_chord_voices[st] = []                 # Nothing, next start chord, or single note sets it.
                     staff_chord_minlth[st] = None               # No chords, start with next note... .
-                    for vn in staff_name[st]:
-                        voice_prenote[vn] = ''
-                    # rof
                 # rof
-#DEBUG                print_debug_bufs('process_notes_for_staff - after possible rests')      #DEBUG
+                print_debug_bufs('process_notes_for_staff - after possible rests')      #DEBUG
             # fi
             if next_tokens is not None:
                 next_tokens = next_tokens.strip()
