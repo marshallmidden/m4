@@ -1,0 +1,54 @@
+#!/bin/bash -e
+sysctl -w kernel.softlockup_panic=1
+#-----------------------------------------------------------------------------
+DISK=/home/m4/file/lio/file0
+SIZE=16777216
+#-----------------------------------------------------------------------------
+#-- REMOTE_WWPN=iqn.1994-05.com.redhat:78c8376ef72a
+REMOTE_WWPN='iqn.2016-12.com.parseclabs:hyperqtg.f67ef4c2865f'
+#-----------------------------------------------------------------------------
+IQN=iqn.2016-12.com.parseclabs:hyperqtg.f67ef4c2865f
+#-----------------------------------------------------------------------------
+TYPE=fileio
+FILE_NAME=file0
+LUN=1
+#-----------------------------------------------------------------------------
+logger 'before creating target'
+sleep 1
+#-----------------------------------------------------------------------------
+targetcli <<EOF_TARGETCLI
+set global auto_cd_after_create=false
+/backstores/${TYPE} create ${FILE_NAME} ${DISK} ${SIZE}
+/iscsi/${IQN}/tpg1/luns/ create /backstores/${TYPE}/${FILE_NAME} ${LUN}
+/iscsi/${IQN}/tpg1/acls create ${REMOTE_WWPN}
+cd /
+EOF_TARGETCLI
+#-----------------------------------------------------------------------------
+logger 'after creating target'
+sleep 1
+/px/bin/targetcli_probe
+exit 0
+#=============================================================================
+# CONNECTIONS=2
+CONNECTIONS=1
+#-----------------------------------------------------------------------------
+see_iscsi()
+{
+    iscsiadm -m discovery || true
+    iscsiadm -m node || true
+    iscsiadm -m session || true
+}
+#-----------------------------------------------------------------------------
+iscsiadm -m discovery -t st -p ${SRC_ISCSI}
+#-- see_iscsi
+
+iscsiadm -m node -T $IQN --op=update --name=node.session.nr_sessions --value=${CONNECTIONS}
+#-- see_iscsi
+
+iscsiadm -m node -T $IQN --login
+see_iscsi
+
+#-----------------------------------------------------------------------------
+echo Done with $0
+exit 0
+#-----------------------------------------------------------------------------

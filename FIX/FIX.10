@@ -1,0 +1,230 @@
+#!/bin/bash -ex
+#++ A=`egrep -c -e '-4\.5\.0|r450' /px/PKG`
+#++ if [ "${A}" == "1" ]; then
+    VER=RH75
+#++ else
+#++     VER=CENTOS81
+#++ fi
+#-- set +e
+#-----------------------------------------------------------------------------
+if [ "${VER}" == "RH75" ]; then
+    /home/m4/bin/me-dev
+else
+    /home/m4/me-dev-8.1
+fi
+#-----------------------------------------------------------------------------
+yum install -y libnsl
+#-----------------------------------------------------------------------------
+exit 0
+#-----------------------------------------------------------------------------
+yum install -y avahi
+yum install -y tracker
+#+ yum install -y pam-devel
+#+ yum install -y rpm-build
+#+ yum install -y asciidoc
+#+ yum install -y pesign
+#-----------------------------------------------------------------------------
+yum install -y dwarves
+yum install -y llvm
+#-----------------------------------------------------------------------------
+(cd src/netatalk-3.1.12; make clean; ./AAA.RUN ; make clean)
+#.............................................................................
+#-- cp /etc/root2/usr/lib/systemd/system/netatalk.service /usr/lib/systemd/system/
+cat > /usr/lib/systemd/system/netatalk.service <<EOFnetatalkservice
+# This file is part of netatalk 3.1.11.
+
+[Unit]
+Description=Netatalk AFP fileserver for Macintosh clients
+Documentation=man:afp.conf(5) man:netatalk(8) man:afpd(8) man:cnid_metad(8) man:cnid_dbd(8)
+Documentation=http://netatalk.sourceforge.net/
+After=syslog.target network.target avahi-daemon.service
+
+[Service]
+Type=forking
+GuessMainPID=no
+ExecStart=/usr/local/sbin/netatalk
+PIDFile=/var/lock/netatalk
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target
+EOFnetatalkservice
+#.............................................................................
+#-- cp /etc/root2/etc/avahi/avahi-daemon.conf /etc/avahi/avahi-daemon.conf
+cat > /etc/avahi/avahi-daemon.conf  <<EOFavanidaemonconf
+# This file is part of avahi.
+#
+# avahi is free software; you can redistribute it and/or modify it
+# under the terms of the GNU Lesser General Public License as
+# published by the Free Software Foundation; either version 2 of the
+# License, or (at your option) any later version.
+#
+# avahi is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public
+# License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with avahi; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
+# USA.
+
+# See avahi-daemon.conf(5) for more information on this configuration
+# file!
+
+[server]
+host-name=m4stuff
+#domain-name=local
+#browse-domains=0pointer.de, zeroconf.org
+use-ipv4=yes
+use-ipv6=no
+#allow-interfaces=eth0
+#deny-interfaces=eth1
+check-response-ttl=no
+use-iff-running=no
+#enable-dbus=yes
+#disallow-other-stacks=no
+#allow-point-to-point=no
+#cache-entries-max=4096
+#clients-max=4096
+#objects-per-client-max=1024
+#entries-per-entry-group-max=32
+ratelimit-interval-usec=1000000
+ratelimit-burst=1000
+
+[wide-area]
+enable-wide-area=yes
+
+[publish]
+#disable-publishing=no
+#disable-user-service-publishing=no
+#add-service-cookie=no
+publish-addresses=yes
+publish-hinfo=yes
+#publish-workstation=yes
+publish-workstation=no
+publish-domain=yes
+#publish-dns-servers=192.168.50.1, 192.168.50.2
+#publish-resolv-conf-dns-servers=yes
+#publish-aaaa-on-ipv4=yes
+#publish-a-on-ipv6=no
+
+[reflector]
+enable-reflector=no
+reflect-ipv=no
+
+[rlimits]
+#rlimit-as=
+#limit-core=0
+rlimit-data=4194304
+rlimit-fsize=0
+rlimit-nofile=768
+rlimit-stack=4194304
+rlimit-nproc=3
+EOFavanidaemonconf
+#.............................................................................
+#-- cp /etc/root2/etc/avahi/services/afp.service /etc/avahi/services/
+cat > /etc/avahi/services/afp.service <<EOFafpservice
+<?xml version="1.0" standalone='no'?><!--*-nxml-*-->
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+ <name replace-wildcards="yes">%h</name>
+  <service>
+   <type>_afpovertcp._tcp</type>
+   <port>548</port>
+  </service>
+  <service>
+   <type>_device-info._tcp</type>
+   <port>0</port>
+   <txt-record>model=TimeCapsule</txt-record>
+  </service>
+  <service>
+   <type>_adisk._tcp</type>
+   <port>9</port>
+   <txt-record>sys=waMa=0,adVF=0x100,adVU=00000000-AAAA-BBBB-CCCC-111111111111</txt-record>
+   <txt-record>dk0=adVN=Backups,adVF=0x81</txt-record>
+  </service>
+</service-group>
+EOFafpservice
+#.............................................................................
+#-- cp /etc/root2/usr/local/etc/afppasswd /usr/local/etc/
+if [ \! -e /usr/local/etc/afppasswd ]; then
+    afppasswd -c
+fi
+#=============================================================================
+#-- cp /etc/root2/usr/local/etc/afp.conf /usr/local/etc/
+cat << ADD_afp_conf > /usr/local/etc/afp.conf
+;
+; Netatalk 3.x configuration file
+;
+
+[Global]
+; Global server settings
+;
+    uam list = uams_dhx.so uams_dhx2.so
+    save password = no
+    unix charset = UTF8
+    mac charset = MAC_ROMAN
+    start dbus = no
+    start tracker = no
+#USETHIS    log level = default:note
+#DEBUGTHIS     log level = default:maxdebug
+    log level = default:note
+    admin auth user = root
+    afp interfaces = mgmtbond0
+    zeroconf = yes
+    login message = "you logged in"
+
+[Homes]
+; basedir regex = /xxxx
+    basedir regex = /mnt/md4/home
+    time machine = yes
+
+ADD_afp_conf
+
+cp /usr/local/etc/afp.conf /etc/afp.conf
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+groupadd -g 5001 m4 || true
+useradd -d /mnt/md4/home/m4 -g 5001 -M -p '$6$qZx/F/FW$SeoArLnOXv/a/wnWW9vMuqEJSVwhXBbD1nZbZYxCTARu6LIdrJkKhoXISw7Sm5js4edzJ45lkfsJemrW0OxEL.' -s /bin/bash -u 5001 m4 || true
+#-- groupadd -g 5002 dan || true
+#-- useradd -d /mnt/md4/home/dan -g 5002 -M dan || true
+#-- cp /etc/root2/etc/group /etc/
+#-- cp /etc/root2/etc/passwd /etc/
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# ?? following bad ??
+#?? cp /etc/root2/usr/local/var/netatalk/afp_voluuid.conf /usr/local/var/netatalk/
+#=============================================================================
+### FIX file /etc/fstab -- 
+m=`grep -c '/mnt/md4' /etc/fstab` || true
+if [ "$m" -eq 0 ]; then
+cat << ADD_fstab_md4 >> /etc/fstab
+LABEL="BigAFS"     /mnt/md4          xfs  defaults                                        0 0
+ADD_fstab_md4
+fi
+m=`grep -c '/mnt/md5' /etc/fstab` || true
+if [ "$m" -eq 0 ]; then
+cat << ADD_fstab_md5 >> /etc/fstab
+LABEL="Optional"   /mnt/md5          xfs  noauto,defaults                                 0 0
+ADD_fstab_md5
+fi
+
+mkdir -p /mnt/md{4,5}
+mount -a
+#=============================================================================
+ln -s /usr/sbin/netatalk /usr/local/sbin/netatalk || true
+#=============================================================================
+date
+afppasswd -a m4
+#=============================================================================
+systemctl start avahi-daemon netatalk
+systemctl enable avahi-daemon netatalk
+systemctl daemon-reload
+#=============================================================================
+#-- (cd ~/src/cifs-utils && make install)
+#=============================================================================
+#??? sed -i 's/grub2-editenv/true # grub2-editenv/' /usr/lib/kernel/install.d/20-grub.install
+#=============================================================================
+echo "Done $0"
+#=============================================================================

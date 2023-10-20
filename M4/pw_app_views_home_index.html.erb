@@ -1,0 +1,696 @@
+<%require 'timeout'%>
+<%require 'date'%>
+<%require 'open3'%>
+
+<%file=File.open('/var/tmp/db.conf', 'r')%>
+<%super_secret = file.read%>
+<%runme = "python /var/www/pw/app/assets/scripts/pydcrypt.py '" + super_secret.to_s + "'"%>
+<%stdin, stdout, stderr = Open3.popen3(runme)%>
+<%dcoded = stdout.read%>
+
+<script type="text/javascript" src="assets/widgets/charts/flot/flot.js"></script>
+<script type="text/javascript" src="assets/widgets/charts/flot/flot-resize.js"></script>
+<script type="text/javascript" src="assets/widgets/charts/flot/flot-stack.js"></script>
+<script type="text/javascript" src="assets/widgets/charts/flot/flot-pie.js"></script>
+<script type="text/javascript" src="assets/widgets/charts/flot/flot-tooltip.js"></script>
+<script type="text/javascript" src="assets/widgets/charts/flot/jquery.flot.time.js"></script>
+
+<%=csrf_meta_tag%>
+
+<div id='page-title'>
+    <h2>dashboard</h2>
+    <p>Welcome to LightSpeed</p>
+</div>  
+
+<%if current_user.nil?%>
+	<%username = 'guest'%>
+<%else%>
+		<%username = current_user.name%>
+<%end%>
+
+
+
+<!-- Find offline devices -->
+<%@MFS_offline=Managedfilesystemlist.where("Used < ? AND Free < ? AND remotepxnid = ?", 0, 0, nil)%>
+<%@SBIN_offline=Storagena.where("active = ? AND Used < ? AND Free < ?", 1, 0, 0)%>
+
+<div class="row">
+    <div class="col-md-8">
+			
+				<%if Managedfilesystemlist.first != nil || Storagena.first != nil%>
+					<%if @MFS_offline.first == nil && @SBIN_offline.first == nil%>
+						<!-- All devices are online -->
+						<div class="content-box">
+								<h3 class="content-box-header bg-green">
+										All managed devices are online
+										<span class="header-buttons-separator">
+												<a href="#" class="icon-separator toggle-button">
+														<i class="glyph-icon icon-chevron-down"></i>
+												</a>
+										</span>
+								</h3>
+						</div>		
+						<!-- End online devices -->
+					<%else%>
+						<!-- Devices are offline -->
+						<div class="content-box">
+								<h3 class="content-box-header bg-red">
+										<%all_offline = @MFS_offline.count + @SBIN_offline.count%>
+									  <%if all_offline==1%>
+											1 managed device is offline
+										<%else%>
+											<%=raw all_offline%> managed devices are offline
+										<%end%>
+										<span class="header-buttons-separator">
+												<a href="#" class="icon-separator toggle-button">
+														<i class="glyph-icon icon-chevron-down"></i>
+												</a>
+										</span>
+								</h3>
+								<div id ='show_mfs' class="content-box-wrapper">
+										<%@MFS_offline.each do |mfs|%>
+											<i class="glyph-icon icon-close font-red font-size-15"></i>&nbsp;<%=mfs.Name%><br />
+										<%end%>
+										<%@SBIN_offline.each do |sbin|%>
+											<i class="glyph-icon icon-close font-red font-size-15"></i>&nbsp;<%=sbin.Name%><br />
+										<%end%>
+								</div>
+						</div>
+						<!-- End offline devices -->
+					<%end%>
+				
+				<%else%>
+					<!-- No devices are configured -->
+					<div class="content-box">
+							<h3 class="content-box-header bg-gray">
+									No managed devices are configured
+									<span class="header-buttons-separator">
+											<a href="#" class="icon-separator toggle-button">
+													<i class="glyph-icon icon-chevron-down"></i>
+											</a>
+									</span>
+							</h3>
+					</div>				
+					<!-- End no devices are configured -->
+				<%end%>
+				
+      <div class="content-box">
+      <h3 class="content-box-header bg-default">
+        <i class="glyph-icon icon-cog"></i>
+        LightSpeed Network Status over the past hour
+        <span class="header-buttons-separator">
+          <a href="#" class="icon-separator">
+            <i class="glyph-icon icon-question"></i>
+          </a>
+          <a href="#" class="icon-separator remove-button" data-animation="flipOutX">
+            <i class="glyph-icon icon-times"></i>
+          </a>
+        </span>
+        </h3>
+        <div class="content-box-wrapper">
+          <div id="data-example-3" style="width: 100%; height: 250px;"></div>
+        </div>
+      </div>
+        
+        
+      <!-- Calculated total storage -->
+      <% no_offline = Managedfilesystemlist.where("CAST(Used as integer)> ? AND CAST(Free as integer) > ?", -1, -1)%>
+      <% no_inactive = Storagena.where('active = ?', 1)%>  <!-- this query does no longer include cloud capcity -->
+      <% no_offline_stor = no_inactive.where("CAST(Used as integer) > ? AND CAST(Free as integer) > ?", -1, -1)%>
+      <% @mfs_used_sum = no_offline.sum(:Used).to_i%>
+      <% @mfs_free_sum = no_offline.sum(:Free).to_i%>
+      <% @mfs_sum = @mfs_used_sum.to_i + @mfs_free_sum.to_i %>
+      <% @sbin_used_sum = no_offline_stor.sum(:Used).to_i%>
+      <% @sbin_free_sum = no_offline_stor.sum(:Free).to_i%>
+      <!-- Also calculate what is in the cloud, we don't want to include that here -->
+      <%@cloud = Storagena.where('Name=?', 'clouddrive')%>
+      <%if @cloud.first == nil%>
+        <%cloud_sum=0%>
+        <%cloud_free=0%>
+        <%cloud_used=0%>
+      <%else%>
+        <%cloud_free=@cloud.first.Free.to_i%>
+        <%cloud_used=@cloud.first.Used.to_i%>
+        <%cloud_sum=@cloud.first.Used.to_i+@cloud.first.Free.to_i%>
+      <%end%>					
+      <%stor_only_free=@sbin_free_sum.to_i%>
+      <%stor_only_used=@sbin_used_sum.to_i%>
+
+      <!-- End Calc storage -->
+        
+      <div class="row">
+        <div class="col-md-7">
+          <div class="panel">
+            <div class="panel-body mrg5B mrg5T">
+              <h3 class="title-hero">
+                my environment
+              </h3>
+              <div class="example-box-wrapper clearfix">
+                <div id="data-donut-1" style="width: 100%; height: 200px;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+						
+        <% @total_sum = (@mfs_used_sum.to_i + @mfs_free_sum.to_i + stor_only_used.to_i+stor_only_free.to_i)%>
+        <div class="col-sm-5 mrg5B mrg15T">
+          <div class="tile-box tile-box-alt bg-orange">
+            <div class="tile-header">
+              Total Managed Data
+            </div>
+            <div class="tile-content-wrapper">
+              <i class="glyph-icon icon-cubes"></i>
+              <div class="tile-content">
+                <%=@total_sum%> GB
+              </div>
+            </div>
+          </div>
+        </div>
+										
+        <!-- Calculate GB in cloud -->
+        <%@cloud = Storagena.where('Name=?', 'clouddrive')%>
+        <%if @cloud.first == nil%>
+          <%cloud_sum='N/A'%>
+        <%else%>
+          <%cloud_sum=@cloud.first.Used.to_i%>
+        <%end%>
+        <!-- End calculation -->
+						
+        <div class="col-sm-5 mrg5B mrg15T">
+          <div class="tile-box tile-box-alt bg-blue">
+            <div class="tile-header">
+              Data in Cloud
+            </div>
+            <div class="tile-content-wrapper">
+              <i class="glyph-icon icon-cloud"></i>
+              <div class="tile-content">
+                <%=cloud_sum%> GB
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <% begin %>
+        <% licenseFile = File.open('/var/tmp/hyperq.txt', 'r') %>
+        <% licenseKeyText = licenseFile.readline() %>
+      <% rescue %>
+        <% licenseKeyText = " No license information found."%>
+      <% end %>
+      <%
+        server = Server.new
+
+        serverUptime = server.GetServerUptime
+      %>
+      <%begin%>
+        <%version=File.read('/var/www/pw/app/assets/scripts/hyperqversion.txt')%>
+      <%rescue%>
+        <%version = 'unversioned'%>
+      <%end%>
+      
+      <%sys=Systemsetup.first%>
+      <div class="row">
+        <div class="col-md-12">
+          <div class="panel">
+            <div class="panel-body mrg5B mrg5T">
+              <h3 class="title-hero">
+                system information
+              </h3>
+              <div class="example-box-wrapper clearfix">
+                <table class="table table-hover">
+                  <tbody>
+                    <tr>
+                    <td>Host</td>
+                    <td>Dev System</td>
+                    </tr>
+                    <tr>
+                    <td>IP Addresses</td>
+                    <td>
+                    <% allcards = NetworkCard.all %>
+                    <% allcards.each do |c|%>
+                      <%=c.IP + ' '%>
+                    <%end%>
+                    </td>
+                    </tr>
+                    <tr>
+                    <td>License</td>
+                    <td><%=licenseKeyText%></td>
+                    </tr>
+                    <tr>
+                    <td>Active Build</td>
+                    <td><%=version%></td>
+                    </tr>
+                    <tr>
+                    <td>Server</td>
+                    <td><%= raw serverUptime %></td>                    
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+        </div>
+  </div>
+  
+  <%if false%>
+  <!-- Parsec Routing -->
+  <%stat = nil
+  Timeout.timeout(5) do 
+    stat = `[ -f /var/tmp/pxfs_on ] && echo 'T'`
+  end%>
+
+  <%if stat.include? 'T'%>
+    <div class="col-sm-2 mrg25B" style="min-width: 200px;">
+      <div class="tile-box tile-box-alt bg-green">
+        <div class="tile-header">
+          Parsec Routing
+        </div>
+        <div class="tile-content-wrapper">
+          <i class="glyph-icon icon-power-off"></i>
+          <div class="tile-content">
+            ON
+          </div>
+        </div>
+        <a href="#" data-target='#offModal' data-toggle='modal' class="tile-footer tooltip-button" data-placement="bottom" title="Turn off">
+          turn off
+          <i class="glyph-icon icon-arrow-right"></i>
+        </a>
+      </div>
+    </div>
+
+    <div class='modal'  data-backdrop="false" id='offModal' tabindex=-1 role='dialog' aria-labelledby=myMdodalLabel1 aria-hidden='true'>
+      <div class='modal-dialog'>
+        <div class='modal-content'>
+          <div class='modal-header'>
+            <button type='button' class='close' data-dismiss='modal' aria-hidden='true'>&times;</button>
+            <h4 class='modal-title'>Confirm</h4>
+          </div>
+          <div class='modal-body'>
+            <p>Stop Parsec routing now?</p>
+          </div>
+          <div class='modal-footer'>
+            <button type='button' class='btn btn-default' data-dismiss='modal'>Close</button>
+            <button type='button' id='pxfs_off' class='btn btn-primary'>Okay</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  <%else%>
+    <div class="col-sm-2 mrg25B" style="min-width: 200px;">
+      <div class="tile-box tile-box-alt bg-black opacity-80">
+        <div class="tile-header">
+          Parsec Routing
+        </div>
+        <div class="tile-content-wrapper">
+          <i class="glyph-icon icon-power-off"></i>
+          <div class="tile-content">
+            OFF
+          </div>
+        </div>
+        <a href="#" class="tile-footer tooltip-button" data-placement="bottom" data-toggle="modal" data-target='#onModal' title="Turn on">
+          turn on
+          <i class="glyph-icon icon-arrow-right"></i>
+        </a>
+      </div>
+    </div>
+    <div class='modal' data-backdrop="false" id='onModal' tabindex=-1 role='dialog' aria-labelledby=myMdodalLabel1 aria-hidden='true'>
+      <div class='modal-dialog'>
+        <div class='modal-content'>
+          <div class='modal-header'>
+            <button type='button' class='close' data-dismiss='modal' aria-hidden='true'>&times;</button>
+            <h4 class='modal-title'>Confirm</h4>
+          </div>
+          <div class='modal-body'>
+            <p>Start Parsec routing now?</p>
+          </div>
+          <div class='modal-footer'>
+            <button type='button' class='btn btn-default' data-dismiss='modal'>Close</button>
+            <button type='button' id='pxfs_on' class='btn btn-primary'>Okay</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  <%end%>		
+  <!-- End Parsec Routing -->
+    
+  <!-- Start AD Status -->
+  <%begin%>
+    <% joined_file = File.open('/var/www/pw/app/assets/admon.hyperq', 'r') %>
+    <% joined = joined_file.readline().chop %>
+  <%rescue%>
+    <%joined = ''%>
+  <%end%>
+  <% if joined == '' %>
+    <div class="col-sm-2 mrg25B" style="min-width: 200px;">
+      <div class="tile-box tile-box-alt bg-black opacity-80">
+        <div class="tile-header">
+          Active Directory
+        </div>
+        <div class="tile-content-wrapper">
+          <i class="glyph-icon icon-users"></i>
+          <div class="tile-content">
+            OFF
+          </div>
+        </div>
+        <a href="/win_domains" class="tile-footer tooltip-button" data-placement="bottom" title="Active Directory">
+          join a domain
+          <i class="glyph-icon icon-arrow-right"></i>
+        </a>
+      </div>
+    </div>
+  <% else %>
+    <div class="col-sm-2 mrg25B" style="min-width: 200px;">
+      <div class="tile-box tile-box-alt bg-green">
+        <div class="tile-header">
+          Active Directory
+        </div>
+        <div class="tile-content-wrapper">
+          <i class="glyph-icon icon-users"></i>
+          <div class="tile-content">
+            ON
+          </div>
+        </div>
+        <a href="/win_domains" class="tile-footer tooltip-button" data-placement="bottom" title="Active Directory">
+          more details
+          <i class="glyph-icon icon-arrow-right"></i>
+        </a>
+      </div>
+    </div>
+  <%end%>
+  <!-- End AD Status -->
+    
+  <!-- Start Encryption Status -->
+  <%
+  parsecresult = `/bin/mount | grep parsecdata`
+  samsungresult = `/bin/mount | grep SamsungSSD`
+  if parsecresult.include? "parsecdata" and samsungresult.include? "SamsungSSD"
+    puts 'unlocked'%>											
+    <%my_id=Systemsetup.first%> 
+    <div class="col-sm-2 mrg25B" style="min-width: 200px;">
+      <div class="tile-box tile-box-alt bg-green">
+        <div class="tile-header">
+          Disk Encryption
+        </div>
+        <div class="tile-content-wrapper">
+          <i class="glyph-icon icon-hdd-o"></i>
+          <div class="tile-content">
+            READY
+          </div>
+        </div>
+        <%linkto='/systemsetups/'+my_id.id.to_s+'/edit'%>
+        <a href='<%=raw linkto%>' class="tile-footer tooltip-button" data-placement="bottom" title="Disk Encryption">
+          lock the disk
+          <i class="glyph-icon icon-arrow-right"></i>
+        </a>
+      </div>
+  </div>
+  <%
+  else
+    my_id=Systemsetup.first%> 
+    <div class="col-sm-2 mrg25B" style="min-width: 200px;">
+      <div class="tile-box tile-box-alt bg-black opacity-80">
+        <div class="tile-header">
+          Disk Encryption
+        </div>
+        <div class="tile-content-wrapper">
+          <i class="glyph-icon icon-hdd-o"></i>
+          <div class="tile-content">
+            LOCKED
+          </div>
+        </div>
+        <%linkto='/systemsetups/'+my_id.id.to_s+'/edit'%>
+        <a href='<%=raw linkto%>' class="tile-footer tooltip-button" data-placement="bottom" title="Disk Encryption">
+          unlock the disk
+          <i class="glyph-icon icon-arrow-right"></i>
+        </a>
+      </div>
+    </div> 
+  <%end%>
+  <!-- End Encryption Status -->
+      
+  <!-- Backup Status -->
+  <% begin %>
+    <%isOnline=False%>
+    <% licenseFile = File.open('/var/tmp/hyperq.txt', 'r') %>
+    <% licenseKeyText = licenseFile.readline() %>
+  <% rescue %>
+    <% licenseKeyText = " No license information found."%>
+  <% end %>
+  <% is_online = `test -e /var/www/pw/app/assets/scripts/databaseBackupIsOnline; echo $?`%>
+  <% if is_online.chop=='0' %>
+    <div class="col-sm-2 mrg25B" style="min-width: 200px;">
+      <div class="tile-box tile-box-alt bg-green">
+        <div class="tile-header">
+          Backup Status
+        </div>
+        <div class="tile-content-wrapper">
+          <i class="glyph-icon icon-life-saver"></i>
+          <div class="tile-content">
+            ON
+          </div>
+        </div>
+        <a href="/monitoring/backups" class="tile-footer tooltip-button" data-placement="bottom" title="Backup and Restore">
+          backup and restore
+          <i class="glyph-icon icon-arrow-right"></i>
+        </a>
+      </div>
+    </div>
+  <% else %>
+    <div class="col-sm-2 mrg25B" style="min-width: 200px;">
+      <div class="tile-box tile-box-alt bg-black opacity-80">
+        <div class="tile-header">
+          Backup Status
+        </div>
+        <div class="tile-content-wrapper">
+          <i class="glyph-icon icon-life-saver"></i>
+          <div class="tile-content">
+            OFF
+          </div>
+        </div>
+        <a href="/monitoring/backups" class="tile-footer tooltip-button" data-placement="bottom" title="Backup and Restore">
+          backup and restore
+          <i class="glyph-icon icon-arrow-right"></i>
+        </a>
+      </div>
+    </div>		
+  <% end %>
+  <!-- End Backup -->
+  <%end%>
+
+  
+    <div class="col-sm-4">
+        <div class="panel">
+            <div class="panel-body">
+                <h3 class="title-hero">
+                    latest activity
+                </h3>
+                <div class="example-box-wrapper">
+                    <div class="timeline-box timeline-box-left">
+                    <%last_errors=PxError.find_by_sql('SELECT * FROM px_errors ORDER BY created_at DESC LIMIT 5;')%>
+                    <%last_changes=PxChangeLog.find_by_sql('SELECT * FROM px_change_logs ORDER BY created_at DESC LIMIT 5;')%>
+                    <%last_runs=RunHistory.find_by_sql('SELECT * FROM run_histories ORDER BY created_at DESC LIMIT 5;')%>
+                    <%@all_events_r=[last_runs, last_changes, last_errors].flatten.sort_by{ |thing| thing.created_at }%>
+                    <%@all_events=@all_events_r.last(5).reverse%>
+										<%@all_events.each do |event|%>
+											<%if event.class.table_name == 'px_errors'%>
+                        <div class="tl-row">
+                            <div class="tl-item float-right">
+                                <div class="tl-icon bg-red">
+                                    <i class="glyph-icon icon-close"></i>
+                                </div>
+                                <div class="popover right">
+                                    <div class="arrow"></div>
+                                    <div class="popover-content">
+                                        <div class="tl-label bs-label label-danger">System Error</div>
+                                        <%if event.message.length > 300%>
+                                          <%myerr = event.message[0..300].encode('UTF-8', 'binary', invalid: :replace, undef: :replace, replace: '')+'...'%>
+                                        <%else%>
+                                          <%myerr = event.message.encode('UTF-8', 'binary', invalid: :replace, undef: :replace, replace: '')%>
+                                        <%end%>
+                                        <p class="tl-content" style='word-wrap: break-word;'><%=myerr%></p>
+                                        <div class="tl-time">
+                                            <i class="glyph-icon icon-clock-o"></i>
+                                            <%=event.created_at%>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+												<%elsif event.class.table_name == 'px_change_logs'%>
+                        <div class="tl-row">
+                            <div class="tl-item float-right">
+                                <div class="tl-icon bg-yellow">
+                                    <i class="glyph-icon icon-cog"></i>
+                                </div>
+                                <div class="popover right">
+                                    <div class="arrow"></div>
+                                    <div class="popover-content">
+                                        <div class="tl-label bs-label bg-yellow">Change</div>
+																				<p class="tl-content" style='word-wrap: break-word;'><%=event.message%></p>
+                                        <div class="tl-time">
+                                            <i class="glyph-icon icon-clock-o"></i>
+                                            <%=event.created_at%>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+												<%else event.class.table_name == 'run_histories'%>
+                        <div class="tl-row">
+                            <div class="tl-item float-right">
+                                <div class="tl-icon bg-primary">
+                                    <i class="glyph-icon icon-spinner"></i>
+                                </div>
+                                <div class="popover right">
+                                    <div class="arrow"></div>
+                                    <div class="popover-content">
+                                        <div class="tl-label bs-label label-primary">RUN HISTORY</div>
+                                        <p class="tl-content" style='word-wrap: break-word;'><%=event.script_name%></p>
+                                        <div class="tl-time">
+                                            <i class="glyph-icon icon-clock-o"></i>
+                                            <%=event.created_at%>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+											<%end%>
+											<%end%>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+        
+<script type = "text/javascript">
+  $(document).ready(function()
+  {
+    $('#show_mfs').hide();
+  });
+
+		$(function() {
+      var dataSet = [
+        { label: "Primary-Free", data: parseInt(<%=raw @mfs_free_sum.to_json%>), color: '#ffa866' },
+        { label: "Primary-Used", data: parseInt(<%=raw @mfs_used_sum.to_json%>), color: '#e86400' },
+        { label: "Storage-Free", data: parseInt(<%=raw stor_only_free.to_json%>), color: '#82e3ac' },
+        { label: "Storage-Used", data: parseInt(<%=raw stor_only_used.to_json%>), color: '#229955' }
+      ];
+      var data = [],
+          series = Math.floor(Math.random() * 5) + 3;
+      for (var i = 0; i < series; i++) {
+        data[i] = {
+          label: "Series" + (i + 1),
+          data: Math.floor(Math.random() * 100) + 1
+        }
+      }
+      $.plot('#data-donut-1', dataSet, {
+        series: {
+          pie: {
+            innerRadius: 0.5,
+            show: true,
+          },
+        }
+      });
+      function labelFormatter(label, series) {
+        return "<div style='font-size:12px; text-align:center; padding:5px; color:white;'>" + label + "<br/>" + Math.round(series.percent) + "%</div>";
+      }
+    });
+		
+</script>
+
+<script>
+$('#pxfs_on').click(function(e) {
+  e.preventDefault();
+  var username;
+  try {
+    username = <%=raw username.to_json%>;
+  }
+  catch(err){
+    username='guest';
+  }
+  $(this).find('.btn').toggleClass('active');
+  $(this).find('.btn').toggleClass('btn-primary');
+  var id = ($(this).find('.btn-primary').attr('id'));
+  $.ajaxSetup({
+    beforeSend: function(xhr) {
+      xhr.setRequestHeader('X-CSRF-Token',$('meta[name="csrf-token"]').attr('content'));
+    }
+  });
+  $.ajax({
+    url: '/run_histories',
+    type: "POST",
+    dataType:'json',
+    data: {run_history: {
+      run_by: username,
+      script_name: 'PXFS ON', 
+      scheduled_start: <%=raw DateTime.now.to_json%>}}
+          });
+    $('#onModal').modal('hide');
+		$('#pxfsmodal_on').modal();
+		setTimeout(function() { $('#pxfsmodal_on').modal('hide'); }, 30000);
+  setTimeout(function() { window.location = '/'; }, 30000);
+});
+</script>
+
+<script>
+$('#pxfs_off').click(function(e) {
+  e.preventDefault();
+  var username;
+  try {
+    username = <%=raw username.to_json%>;
+  }
+  catch(err){
+    username='guest';
+  }
+  $(this).find('.btn').toggleClass('active');
+  $(this).find('.btn').toggleClass('btn-primary');
+  var id = ($(this).find('.btn-primary').attr('id'));
+  $.ajaxSetup({
+    beforeSend: function(xhr) {
+      xhr.setRequestHeader('X-CSRF-Token',$('meta[name="csrf-token"]').attr('content'));
+    }
+  });
+  $.ajax({
+    url: '/run_histories',
+    type: "POST",
+    dataType:'json',
+    data: {run_history: {
+      run_by: username,
+      script_name: 'PXFS OFF', 
+      scheduled_start: <%=raw DateTime.now.to_json%>}}
+          });
+    $('#offModal').modal('hide');
+    $('#pxfsmodal_off').modal();
+    setTimeout(function() { $('#pxfsmodal_off').modal('hide'); }, 30000);
+  setTimeout(function() { window.location = '/'; }, 30000);
+});
+</script>
+
+<div class='modal' data-backdrop="false" style="background-color: rgba(0,0,0,0.5);" id='pxfsmodal_on' tabindex=-1 role='dialog' aria-labelledby=myMdodalLabel1 aria-hidden='true'>
+  <div class='modal-dialog'>
+    <div class='modal-content'>
+		<div class='modal-header' style='text-align: center'>
+			<h3>Starting Parsec routing</h3>
+		</div>
+      <div class='modal-body'>
+        <center><img src='/assets/spinner.gif'></img></center>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class='modal' data-backdrop="false" style="background-color: rgba(0,0,0,0.5);" id='pxfsmodal_off' tabindex=-1 role='dialog' aria-labelledby=myMdodalLabel1 aria-hidden='true'>
+  <div class='modal-dialog'>
+    <div class='modal-content'>
+		<div class='modal-header' style='text-align: center'>
+			<h3>Stopping Parsec routing</h3>
+		</div>
+      <div class='modal-body'>
+        <center><img src='/assets/spinner.gif'></img></center>
+      </div>
+    </div>
+  </div>
+</div>
+
