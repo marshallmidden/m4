@@ -120,7 +120,7 @@ class SymbolDesc:
 #   kind    - 'NUMBER' if a number
 
 def next_token(string):
-#PRINT    print("next_token - Entering type(string)='{}' string='{}'".format(type(string),string), file=sys.stderr,flush=True)   # PRINT
+#PRINT    print("next_token - Entering type(string)='{}' string='{}'".format(type(string),string), file=sys.stderr, flush=True)   # PRINT
     # Make sure string exists. next_token useable by other than tokenize.
     string = string.strip()
     if len(string) <= 0:
@@ -173,7 +173,7 @@ def next_token(string):
             # fi
             return None, c, 'MISMATCH #b len(string)={}'.format(len(string))
         elif c == '=' and len(string) >= 2: # Possible ==, =>, =<
-#PRINT            print("next_token#1({}) - c='{}'".format(string,c), file=sys.stderr,flush=True) # PRINT
+#PRINT            print("next_token#1({}) - c='{}'".format(string,c), file=sys.stderr, flush=True) # PRINT
             if string[1] == '=':
                 return string[2:], '==', 'OPER'
             elif string[1] == '>':
@@ -183,19 +183,19 @@ def next_token(string):
             # fi
             return string[1:], '=', 'OPER'
         elif c == '!' and len(string) >= 2: # Possible !=
-#PRINT            print("next_token#2({}) - c='{}'".format(string,c), file=sys.stderr,flush=True) # PRINT
+#PRINT            print("next_token#2({}) - c='{}'".format(string,c), file=sys.stderr, flush=True) # PRINT
             if string[1] == '=':
                 return string[2:], '!=', 'OPER'
             # fi
             return None, c, 'MISMATCH #c len(string)={}'.format(len(string))
         elif c == '<' and len(string) >= 2: # Possible <=
-#PRINT            print("next_token#3({}) - c='{}'".format(string,c), file=sys.stderr,flush=True) # PRINT
+#PRINT            print("next_token#3({}) - c='{}'".format(string,c), file=sys.stderr, flush=True) # PRINT
             if string[1] == '=':
                 return string[2:], '<=', 'OPER'
             # fi
             return string[1:], '<', 'OPER'
         elif c == '>' and len(string) >= 2: # Possible <=
-#PRINT            print("next_token#4({}) - c='{}'".format(string,c), file=sys.stderr,flush=True) # PRINT
+#PRINT            print("next_token#4({}) - c='{}'".format(string,c), file=sys.stderr, flush=True) # PRINT
             if string[1] == '=':
                 return string[2:], '>=', 'OPER'
             # fi
@@ -246,17 +246,17 @@ def next_token(string):
 
 #-----------------------------------------------------------------------------
 def tokenize(code):
-#PRINT    print("tokenize - Entering code='{}'".format(code), file=sys.stderr,flush=True) # PRINT
+#PRINT    print("tokenize - Entering code='{}'".format(code), file=sys.stderr, flush=True) # PRINT
     # Get next token.
     last_kind = ''
     last_token = ''
     while code is not None and code != '':
         therest, token, kind = next_token(code)
-#PRINT        print("tokenize - {},{},{}=next_token({})".format(therest,token,kind,code), file=sys.stderr,flush=True) # PRINT
+#PRINT        print("tokenize - {},{},{}=next_token({})".format(therest,token,kind,code), file=sys.stderr, flush=True) # PRINT
         if (last_kind == 'SYNTAX' and kind == 'SYNTAX' and
               (last_token == ')' and token == '{')):
             # character string token limiting.
-#PRINT            print("tokenize - imply TOKEN-LIMITING", file=sys.stderr,flush=True) # PRINT
+#PRINT            print("tokenize - imply TOKEN-LIMITING", file=sys.stderr, flush=True) # PRINT
             yield ['OPER', 'TOKEN-LIMITING']
         elif last_kind in ['NUMBER', 'ID'] and kind in ['NUMBER', 'ID']:
             # Implied multiplication between numbers and id's.
@@ -279,7 +279,7 @@ def tokenize(code):
 
 #-----------------------------------------------------------------------------
 def identity_eval(args):
-#PRINT    print("identity_eval - Entering args='{}'".format(args), file=sys.stderr,flush=True)    # PRINT
+#PRINT    print("identity_eval - Entering args='{}'".format(args), file=sys.stderr, flush=True)    # PRINT
     if len(args) == 1:
         if type(args[0]) == SymbolDesc:
             return [ args[0].symbol ]
@@ -300,23 +300,23 @@ def get_value(arg):
     global arrays
     global local_arrays
 
-#PRINT    print("get_value - Entering arg='{}'".format(arg), file=sys.stderr,flush=True)  # PRINT
+#PRINT    print("get_value - Entering arg='{}'".format(arg), file=sys.stderr, flush=True)  # PRINT
     if arg[0].startswith('ERROR'):
-#PRINT        print("get_value - #a", file=sys.stderr,flush=True)  # PRINT
+#PRINT        print("get_value - #a", file=sys.stderr, flush=True)  # PRINT
         return arg
     elif arg[0] == 'NUMBER':
-#PRINT        print("get_value - #b - type(arg[1])={} arg[1]='{}'".format(type(arg[1]),arg[1]), file=sys.stderr,flush=True)  # PRINT
+#PRINT        print("get_value - #b - type(arg[1])={} arg[1]='{}'".format(type(arg[1]),arg[1]), file=sys.stderr, flush=True)  # PRINT
         arg[1] = float(arg[1])
-#PRINT        print("get_value - #b1 - type(arg[1])={} arg[1]='{}'".format(type(arg[1]),arg[1]), file=sys.stderr,flush=True)  # PRINT
+#PRINT        print("get_value - #b1 - type(arg[1])={} arg[1]='{}'".format(type(arg[1]),arg[1]), file=sys.stderr, flush=True)  # PRINT
         return arg
     elif arg[0] == 'COMMA':
-#PRINT        print("get_value - #c", file=sys.stderr,flush=True)  # PRINT
+#PRINT        print("get_value - #c", file=sys.stderr, flush=True)  # PRINT
         return arg
     elif arg[0] == 'CHAR':
-#PRINT        print("get_value - #d", file=sys.stderr,flush=True)  # PRINT
+#PRINT        print("get_value - #d", file=sys.stderr, flush=True)  # PRINT
         return arg
     elif arg[0] == 'ADDRESS':
-#PRINT        print("get_value - #e", file=sys.stderr,flush=True)  # PRINT
+#PRINT        print("get_value - #e", file=sys.stderr, flush=True)  # PRINT
         a = arg[1]
         idx = a[0]
         warray = a[1]
@@ -332,14 +332,14 @@ def get_value(arg):
             arg[0] = 'CHAR'
             arg[1] = where_value
         # fi
-#PRINT        print("get_value - #f", file=sys.stderr,flush=True)  # PRINT
+#PRINT        print("get_value - #f", file=sys.stderr, flush=True)  # PRINT
         return arg
     elif arg[0] != 'ID':
-#PRINT        print("get_value - #g", file=sys.stderr,flush=True)  # PRINT
+#PRINT        print("get_value - #g", file=sys.stderr, flush=True)  # PRINT
         return [ "ERROR - get_value - unrecognized variable type='{}'".format(arg), None ]
     # fi
 
-#PRINT    print("get_value - #h", file=sys.stderr,flush=True)  # PRINT
+#PRINT    print("get_value - #h", file=sys.stderr, flush=True)  # PRINT
     maxmaclev = -1
     maxwary = None
 #--    print('arrays={}'.format(arrays), file=sys.stderr, flush=True)
@@ -353,7 +353,7 @@ def get_value(arg):
             # fi
         # fi
     # rof
-#PRINT    print("get_value - #i maxwary={}".format(maxwary), file=sys.stderr,flush=True)  # PRINT
+#PRINT    print("get_value - #i maxwary={}".format(maxwary), file=sys.stderr, flush=True)  # PRINT
     if maxwary is None:
         return [ "ERROR - get_value - unrecognized variable='{}'".format(arg), None ]
     elif len(maxwary[numarry_indexes]) != 0:
@@ -367,7 +367,7 @@ def get_value(arg):
         arg[0] = 'CHAR'
         arg[1] = str(maxwary[numarry_values][0])
     # fi
-#PRINT    print("get_value - #z arg[1]='{}'".format(arg[1]), file=sys.stderr,flush=True)  # PRINT
+#PRINT    print("get_value - #z arg[1]='{}'".format(arg[1]), file=sys.stderr, flush=True)  # PRINT
     return arg
 # End of get_value
 
@@ -388,7 +388,7 @@ def fix_to_number(t,a):
 #        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
 # Try to make both a1 and a2 numbers.
 def fix_to_numbers(t1,a1,t2,a2):
-#PRINT    print("fix_to_numbers - Entering t1={} a1={} t2={} a2={}".format(t1,a1,t2,a2), file=sys.stderr,flush=True)  # PRINT
+#PRINT    print("fix_to_numbers - Entering t1={} a1={} t2={} a2={}".format(t1,a1,t2,a2), file=sys.stderr, flush=True)  # PRINT
     t1, a1 = fix_to_number(t1, a1)
     t2, a2 = fix_to_number(t2, a2)
     return t1,a1,t2,a2
@@ -399,9 +399,9 @@ def compute_value(op, arg1, arg2):
     global arrays
     global local_arrays
 
-#PRINT    print("compute_value - Entering types:{} {} {} , vals:'{}' '{}' '{}'".format(type(op),type(arg1),type(arg2),op,arg1,arg2), file=sys.stderr,flush=True)  # PRINT
+#PRINT    print("compute_value - Entering types:{} {} {} , vals:'{}' '{}' '{}'".format(type(op),type(arg1),type(arg2),op,arg1,arg2), file=sys.stderr, flush=True)  # PRINT
     a2 = get_value(arg2)
-#PRINT    print("compute_value - after get_value a2='{}'".format(a2), file=sys.stderr,flush=True)  # PRINT
+#PRINT    print("compute_value - after get_value a2='{}'".format(a2), file=sys.stderr, flush=True)  # PRINT
     t2 = a2[0]
     if a2 is None:
         return [ "ERROR - Argument2 is None a2='{}'".format(a2), None ]
@@ -411,18 +411,18 @@ def compute_value(op, arg1, arg2):
     if arg1 is None:
         return [ "ERROR - Argument1 is None arg1='{}'".format(arg1), None ]
     elif arg1[0].startswith('ERROR'):
-#PRINT        print("compute_value - #a", file=sys.stderr,flush=True)  # PRINT
+#PRINT        print("compute_value - #a", file=sys.stderr, flush=True)  # PRINT
         return arg1
     # fi
     if t2 not in [ 'NUMBER', 'CHAR', 'COMMA' ]:
         return [ "ERROR - Argument2 is not a Number, character string, or comma list - a2='{}'".format(a2), None ]
     elif op == '=':
-#PRINT        print("compute_value - #b", file=sys.stderr,flush=True)  # PRINT
+#PRINT        print("compute_value - #b", file=sys.stderr, flush=True)  # PRINT
         t1 = arg1[0]
         a = arg1[1]
-#PRINT        print("compute_value - #c", file=sys.stderr,flush=True)  # PRINT
+#PRINT        print("compute_value - #c", file=sys.stderr, flush=True)  # PRINT
         if t1 == 'ADDRESS':
-#PRINT            print("compute_value - #d", file=sys.stderr,flush=True)  # PRINT
+#PRINT            print("compute_value - #d", file=sys.stderr, flush=True)  # PRINT
             idx = a[0]
             warray = a[1]
             warray[numarry_values][idx] = arg2[1]
@@ -433,17 +433,17 @@ def compute_value(op, arg1, arg2):
             else:
                 return [ "ERROR - ADDRESS and arg2 unrecognized '{}'".format(arg2), None]
             # fi
-#PRINT            print("compute_value #A- warray={} numarry_macro_arg={} idx={}".format(warray,numarry_macro_arg,idx), file=sys.stderr,flush=True)  # PRINT
-#PRINT            print("compute_value #A1 - warray[numarry_macro_arg]={}".format(warray[numarry_macro_arg]), file=sys.stderr,flush=True)  # PRINT
+#PRINT            print("compute_value #A- warray={} numarry_macro_arg={} idx={}".format(warray,numarry_macro_arg,idx), file=sys.stderr, flush=True)  # PRINT
+#PRINT            print("compute_value #A1 - warray[numarry_macro_arg]={}".format(warray[numarry_macro_arg]), file=sys.stderr, flush=True)  # PRINT
             warray[numarry_macro_arg] = False
-#PRINT            print("compute_value - #e", file=sys.stderr,flush=True)  # PRINT
+#PRINT            print("compute_value - #e", file=sys.stderr, flush=True)  # PRINT
             return arg2
         elif t1 != 'ID':
-#PRINT            print("compute_value - #f", file=sys.stderr,flush=True)  # PRINT
+#PRINT            print("compute_value - #f", file=sys.stderr, flush=True)  # PRINT
             return [ "ERROR - Argument1 is not a variable name arg1='{}'".format(arg1), None ]
         # fi
 
-#PRINT        print("compute_value - #g", file=sys.stderr,flush=True)  # PRINT
+#PRINT        print("compute_value - #g", file=sys.stderr, flush=True)  # PRINT
         # arrays here.
         maxmaclev = -1
         maxwary = None
@@ -455,9 +455,9 @@ def compute_value(op, arg1, arg2):
                 # fi
             # fi
         # rof
-#PRINT        print("compute_value - #h", file=sys.stderr,flush=True)  # PRINT
+#PRINT        print("compute_value - #h", file=sys.stderr, flush=True)  # PRINT
         if maxwary is None:
-            print("Assignment to unknown variable '{}', creating it='{}'".format(arg1, a2), file=sys.stderr,flush=True)
+            print("Assignment to unknown variable '{}', creating it='{}'".format(arg1, a2), file=sys.stderr, flush=True)
             if arg2[0] == 'NUMBER':
                 local_arrays.append( [ a, 0, [ ], [ arg2[1] ], [ 0 ], False ] )
             else:                               # Assume CHAR
@@ -465,23 +465,23 @@ def compute_value(op, arg1, arg2):
             # fi
             return arg2
         elif maxwary[numarry_indexes] != []:
-#PRINT            print("compute_value - #h1", file=sys.stderr,flush=True)  # PRINT
+#PRINT            print("compute_value - #h1", file=sys.stderr, flush=True)  # PRINT
             return [ "ERROR - compute_value - variable is array '{}'".format(arg1), None ]
         elif arg2[0] == 'NUMBER':
-#PRINT            print("compute_value - #i1", file=sys.stderr,flush=True)  # PRINT
+#PRINT            print("compute_value - #i1", file=sys.stderr, flush=True)  # PRINT
             maxwary[numarry_values][0] = float(arg2[1])
-#PRINT            print("compute_value - #i2", file=sys.stderr,flush=True)  # PRINT
+#PRINT            print("compute_value - #i2", file=sys.stderr, flush=True)  # PRINT
             maxwary[numarry_value_type][0] = 0
-#PRINT            print("compute_value - #i2", file=sys.stderr,flush=True)  # PRINT
+#PRINT            print("compute_value - #i2", file=sys.stderr, flush=True)  # PRINT
         else:                                   # Assume CHAR
-#PRINT            print("compute_value - #j", file=sys.stderr,flush=True)  # PRINT
+#PRINT            print("compute_value - #j", file=sys.stderr, flush=True)  # PRINT
             maxwary[numarry_values][0] = arg2[1]
             maxwary[numarry_value_type][0] = 1
         # fi
-#PRINT        print("compute_value - #iB-pre", file=sys.stderr,flush=True)  # PRINT
-#PRINT        print("compute_value #B - maxwary={}".format(maxwary), file=sys.stderr,flush=True)  # PRINT
+#PRINT        print("compute_value - #iB-pre", file=sys.stderr, flush=True)  # PRINT
+#PRINT        print("compute_value #B - maxwary={}".format(maxwary), file=sys.stderr, flush=True)  # PRINT
         maxwary[numarry_macro_arg] = False
-#PRINT        print("compute_value - #k", file=sys.stderr,flush=True)  # PRINT
+#PRINT        print("compute_value - #k", file=sys.stderr, flush=True)  # PRINT
         return arg2
     # fi
 
@@ -689,7 +689,7 @@ def quotes_eval(args):
 
 #-----------------------------------------------------------------------------
 def binary_eval(args):
-#PRINT    print('binary_eval - Entering args={}'.format(args), file=sys.stderr,flush=True)    # PRINT
+#PRINT    print('binary_eval - Entering args={}'.format(args), file=sys.stderr, flush=True)    # PRINT
     if args is None or len(args) != 3:
         return [ 'ERROR - binary_eval wrong number of arguments, args={}'.format(args), None ]
     # fi
@@ -770,20 +770,20 @@ def register_postsymbol(oper, lprio, rprio, eval=None):
 
 #-----------------------------------------------------------------------------
 def id_symbol(id):
-#PRINT    print('id_symbol - Entering id={}'.format(id), file=sys.stderr,flush=True)  # PRINT
+#PRINT    print('id_symbol - Entering id={}'.format(id), file=sys.stderr, flush=True)  # PRINT
     return SymbolDesc(id, 99999, 100000, identity_eval)
 # End of id_symbol
 
 #-----------------------------------------------------------------------------
 def evaluate_handle(args):
-#PRINT    print('evaluate_handle - Entering args={}'.format(args), file=sys.stderr,flush=True)  # PRINT
+#PRINT    print('evaluate_handle - Entering args={}'.format(args), file=sys.stderr, flush=True)  # PRINT
     for i in args:
         if type(i) == SymbolDesc:
             a = i.eval(args)
             return a
         # fi
     # rof
-    raise RuntimeError('Internal error: no eval found in {}'.format(args), file=sys.stderr,flush=True)
+    raise RuntimeError('Internal error: no eval found in {}'.format(args), file=sys.stderr, flush=True)
 # End of evaluate_handle
 
 #-----------------------------------------------------------------------------
@@ -798,7 +798,7 @@ def advance():
 #PRINT    print('advance - Entering', file=sys.stderr, flush=True)   # PRINT
     try:
         cur_token = lexer.__next__()                    # [ kind, item ]
-#PRINT        print('advance - cur_token={}'.format(cur_token), file=sys.stderr,flush=True) # PRINT
+#PRINT        print('advance - cur_token={}'.format(cur_token), file=sys.stderr, flush=True) # PRINT
     except StopIteration:
         cur_token = None
     # yrt
@@ -973,7 +973,7 @@ def result_functions(arg1, arg2):
     global arrays
     global local_arrays
 
-#PRINT    print('result_functions - #1 arg1={} arg2={}'.format(arg1,arg2), file=sys.stderr,flush=True)  # PRINT
+#PRINT    print('result_functions - #1 arg1={} arg2={}'.format(arg1,arg2), file=sys.stderr, flush=True)  # PRINT
     if arg1[0] != 'ID':
         # 'NUMBER' -- implied multiply
         # Do implied multiply
@@ -1002,14 +1002,24 @@ def result_functions(arg1, arg2):
         fu = functions[arg1[1]]
         wh = fu[0]
         ar = fu[1]
-#PRINT        print('result_functions - #2 fu={}'.format(fu), file=sys.stderr,flush=True)  # PRINT
-        if arg2[0] not in ar:
+#PRINT        print(f'result_functions - #2 ar={ar} arg2={arg2}', file=sys.stderr, flush=True)  # PRINT
+        flagit = False
+        for aaa in ar:
+#PRINT            print(f'result_functions - #3 aaa={aaa}', file=sys.stderr, flush=True)  # PRINT
+            my_regex = aaa + r'$'
+            if re.match(my_regex, arg2[0]):
+#PRINT                print(f'result_functions - #10 my_regex={my_regex} aaa={aaa}', file=sys.stderr, flush=True)  # PRINT
+                flagit = True
+                break
+            # fi
+        # rof
+        if not flagit:
             return [ "ERROR - function '{}' called with wrong argument type {} vs {}".format(arg1[1], arg2[0], ar), None ]
         # fi
         try:
-#PRINT            print('result_functions - #11', file=sys.stderr, flush=True)  # PRINT
+#PRINT            print(f'result_functions - #11 arg2={arg2}', file=sys.stderr, flush=True)  # PRINT
             a = wh(arg2)
-#PRINT            print('result_functions - #12', file=sys.stderr, flush=True)  # PRINT
+#PRINT            print(f'result_functions - #12 a={a}', file=sys.stderr, flush=True)  # PRINT
             return a
         except:
             return [ "ERROR - performing function '{}' with argument '{}'".format(arg1, arg2), None ]
@@ -1477,6 +1487,20 @@ def f_not(arg):
 # End of f_not
 
 #-----------------------------------------------------------------------------
+def f_defined(arg):
+    which = arg[0]
+    val = arg[1]
+    if which in [ 'NUMBER', 'CHAR', 'COMMA']:
+        return ['NUMBER', -1.0]                 # True
+    elif len(which) > 8 and which[0:8] == 'ERROR - ':
+        return ['NUMBER', 0.0]                  # False
+    else:
+        print(f'f_defined - UNKNOWN TYPE={which} len(which)={len(which)} which[0:9]={which[0:9]}', file=sys.stderr, flush=True)
+        return ['NUMBER', 0.0]                  # False
+    # fi
+# End of f_defined
+
+#-----------------------------------------------------------------------------
 def f_print(arg):
     which = arg[0]
     val = arg[1]
@@ -1494,7 +1518,7 @@ def f_print(arg):
         print(a)
         return arg
     else:
-        print('PRINT: UNKNOWN TYPE={}'.format(arg), file=sys.stderr,flush=True)
+        print('PRINT: UNKNOWN TYPE={}'.format(arg), file=sys.stderr, flush=True)
         return arg
     # fi
 # End of f_print
@@ -1591,6 +1615,7 @@ functions = {
     'sign':     [ f_sign,       ['NUMBER']],
     'sin':      [ f_sin,        ['NUMBER']],
     'sqrt':     [ f_sqrt,       ['NUMBER']],
+    'defined':  [ f_defined,    ['NUMBER', 'CHAR', 'COMMA', 'ERROR - .*']],
 #...............................................................................
 # Old musicomp functions.
     'freq':     [ f_freq,       ['NUMBER']],
