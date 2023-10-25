@@ -19,7 +19,7 @@ PAGES =
 MEASURES =
 VOICES =
 # All voices & staves.
-WHICH = "-D WHICH=0"
+#++ WHICH = "-D WHICH=0"
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 #++ WHICH = "-D WHICH=1"
 #++ VOICES = --voices 1..2
@@ -41,7 +41,8 @@ WHICH = "-D WHICH=0"
 #++ VOICES = --voices 19..20
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
-MC_ARGS ?= ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
+MC_ARGS ?= ${PAGES} ${MEASURES} ${VOICES}
+#-- MC_ARGS ?= ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 #-- MC_ARGS ?= --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.E
@@ -105,7 +106,7 @@ check:
 	@echo "PAGES=${PAGES}"
 	@echo "MEASURES=${MEASURES}"
 	@echo "VOICES=${VOICES}"
-	@echo "WHICH=${WHICH}"
+#--	@echo "WHICH=${WHICH}"
 #=============================================================================
 #-- .PHONY: all		#-- There is a bug in gmake. I don't understand.
 all: s1

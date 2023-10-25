@@ -23,7 +23,7 @@ PAGES =
 MEASURES =
 VOICES =
 # All voices & staves.
-WHICH = "-D WHICH=0"
+#-- WHICH = "-D WHICH=0"
 #-- PAGES = --pages 0,12..14
 #-- PAGES = --pages 0,69..100
 #-----------------------------------------------------------------------------
@@ -81,6 +81,7 @@ WHICH = "-D WHICH=0"
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 MC_ARGS ?= ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
+#-- MC_ARGS ?= ${PAGES} ${MEASURES} ${VOICES}
 #-- MC_ARGS ?= --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.E
@@ -152,7 +153,7 @@ check:
 	@echo "PAGES=${PAGES}"
 	@echo "MEASURES=${MEASURES}"
 	@echo "VOICES=${VOICES}"
-	@echo "WHICH=${WHICH}"
+#--	@echo "WHICH=${WHICH}"
 #=============================================================================
 #-- .PHONY: all		#-- There is a bug in gmake. I don't understand.
 all: ${V}_m.ps ${V}.fs ${V}.mid ${V}.pdf
