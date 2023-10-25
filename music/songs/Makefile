@@ -134,7 +134,7 @@ IMSCOMP = ~/ims/imscomp
 #-- YAPS         = yaps
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
-MC_ARGS ?=
+MC_ARGS ?= --nofillwarning --nooncewarning --norestswarning --noleftoverwarnings --notrillwarnings
 #-----------------------------------------------------------------------------
 # -b nn = starting bar number
 # -i = put red circle around errors.
@@ -265,11 +265,17 @@ all_m_ps: ${SONGS_M_PS} ${SONGS_M2_PS}
 .PHONY: all_pdf
 all_pdf: ${SONGS_PDF} ${SONGS_2PDF}
 #-----------------------------------------------------------------------------
+.PHONY: all_pdf2
+all_pdf2: ${SONGS_2PDF}
+#-----------------------------------------------------------------------------
 .PHONY: all_wav
 all_wav: ${SONGS_WAV} ${SONGS_2WAV}
 #-----------------------------------------------------------------------------
 .PHONY: fs all_fs
 fs all_fs: ${SONGS_FS} ${SONGS_2FS}
+#-----------------------------------------------------------------------------
+.PHONY: fs2 all_fs2
+fs2 all_fs2: ${SONGS_2FS}
 #-----------------------------------------------------------------------------
 .PHONY: v all_v
 v all_v: ${SONGS_V} ${SONGS_2V}
