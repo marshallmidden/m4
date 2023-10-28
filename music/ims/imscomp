@@ -1048,12 +1048,62 @@ createglobalvar('default_reverb', 0, 0, 0, True)        # No reverb.
 createglobalvar('default_velocity', 120, 0, 0, True)    # Note attack.
 
 # ----------------------------------------------------------------------------
+is_float_number = 0
+is_float_string = 1
+# ----------------------------------------------------------------------------
+# Calculate values here.
+# Input:
+#   strg            - The string to compute.
+#   type_float      - is_float_number if must be integer.
+#                     is_float_string if can return a character var.
+#   none_means_none = If true, return '' for None (or not set variable).
+# Returns:
+#   value      = So far computed value
+#   type_error = type of error
+
+def is_float(strg, type_float, none_means_none):
+    tree = calculate.parse(strg)            # parse the string
+    if tree is None or len(tree) != 2:
+        return None, None
+    elif tree[0] is None and tree[1] == 'error parsing':
+        return strg, tree[1]
+    elif tree[0] is not None and tree[0].startswith('ERROR'):
+        return strg, tree[0]
+    elif tree[1] is None:
+        if none_means_none:
+            return '', None
+        # fi
+        return strg, "is_float -- variable '{}' is not set".format(strg)
+    # fi
+    elif tree[1] == '.':
+        return strg, "bad input to calculator#2"
+    # fi
+    if type_float == is_float_number:
+        try:
+            sexpr = float(tree[1])
+            if sexpr.is_integer():
+                sexpr = int(sexpr)
+            # fi
+            return sexpr, None
+        except:
+            return strg, "bad input to calculator#3"
+        # yrt
+    # fi
+    recompute_whichchars()
+    return tree[1], None
+# End of is_float
+
+# ----------------------------------------------------------------------------
 global pages_to_do
 pages_to_do = []                    # argument line limiting which pages to do.
 global measures_to_do
 measures_to_do = []                 # argument line limiting which measures to do.
 global voices_to_do
 voices_to_do = []                   # argument line limiting which voices to do.
+global intensity_offset
+intensity_offset = ''               # Argument --intensity offset.
+global intensity_percentage
+intensity_percentage = 1.0          # Argument --intensity percentage.
 global args
 # ----------------------------------------------------------------------------
 def parse_args():
@@ -1061,6 +1111,8 @@ def parse_args():
     global pages_to_do
     global measures_to_do
     global voices_to_do
+    global intensity_offset
+    global intensity_percentage
 
 #--    def offset_value(v):
 #--        if len(v) > 0:
@@ -1169,6 +1221,9 @@ def parse_args():
     parser.add_argument('--intensitymatchesvolume', action='store_true',
                         help='For --fluidsynth, make intensity change and volume change together.')
 
+    parser.add_argument('--intensity', default='', action='store',
+                        help='For --fluidsynth, "128/2,50" intensity offset @ 64 + 50% of volume level.')
+
     parser.add_argument('rest', nargs='*',
                         help='Optional command to execute')
     args = parser.parse_args()
@@ -1176,6 +1231,49 @@ def parse_args():
 #--    if args.offset is not None:
 #--        args.offset = int(args.offset)
 #--    # fi
+
+    if args.intensity != '':
+        l = args.intensity.replace(' ','').split(',')
+        if len(l) < 0 or len(l) > 2:
+            print_error(f"Argument '--intensity {args.intensity}' must have offset and maybe percentage.")
+            args.intensity != ''
+        else:
+            if len(l) == 1:
+                intensity_percentage = 1.0          # Argument --intensity percentage.
+            else:
+                f, type_error = is_float(l[1], is_float_number, False)
+                if type_error is not None:
+                    print_error(f"--intensity percetage error - {type_error}", original_line)
+                    intensity_percentage = 1.0          # Argument --intensity percentage.
+                elif f is None:
+                    print_error("--intensity percetage did not return a value", original_line)
+                    intensity_percentage = 1.0          # Argument --intensity percentage.
+                else:
+                    try:
+                        intensity_percentage = float(f) / 100.0
+                    except:
+                        print_error("--intensity percetage is not a floating point number.", original_line)
+                        intensity_percentage = 1.0          # Argument --intensity percentage.
+                    # yrt
+                # fi
+            # fi
+            f, type_error = is_float(l[0], is_float_number, False)
+            if type_error is not None:
+                print_error("--intensity error - {}".format(type_error), original_line)
+                args.intensity != ''
+            elif f is None:
+                print_error("--intensity offset as a calculation did not return a value", original_line)
+                args.intensity != ''
+            else:
+                if f < 0:
+                    f = 0
+                elif f > 100:
+                    f = 100
+                # fi
+                intensity_offset = f
+            # fi
+        # fi
+    # fi
 
     if args.pages is not None and args.pages != '':
         # global pages_to_do
@@ -1260,9 +1358,6 @@ def parse_args():
 # ----------------------------------------------------------------------------
 parse_args()
 
-# ----------------------------------------------------------------------------
-is_float_number = 0
-is_float_string = 1
 # ----------------------------------------------------------------------------
 MAX_LOOP_VARIABLES = 10
 #-- MAX_LOOP_VARIABLES = 25
@@ -1971,9 +2066,15 @@ intensity[1] = { }
 intensity[1][''] = getvar('default_intensity')
 global running_intensity            # intensity levels changing thru measures. (set intensity to running_intensity at measure.)
 running_intensity = { }
-# NOTDONEYET --intensity=
 if args.intensitymatchesvolume:
     running_intensity[1] = running_volume[1]
+elif args.intensity != '':
+    running_intensity[1] = intensity_offset + running_volume[1] * intensity_percentage
+    if running_intensity[1] < 1:
+        running_intensity[1] = 0
+    elif running_intensity[1] > 126.49:
+        running_intensity[1] = 127
+    # fi
 else:
     running_intensity[1] = getvar('default_intensity')
 # fi
@@ -2498,6 +2599,8 @@ def new_voice_initialize(voiceon, m):
     global key_voice
     global clef
     global meas
+    global intensity_offset
+    global intensity_percentage
 
     if type(voiceon) is not int:
         print_error(f'new_voice_initialize - voice type is not int ({type(voiceon)})', 'new_voice_initialize')
@@ -2512,12 +2615,20 @@ def new_voice_initialize(voiceon, m):
     running_volume[voiceon] = getvar('default_volume')
     running_volume_next[voiceon] = None
     running_pan[voiceon] = getvar('default_pan')
-# NOTDONEYET --intensity=
+
     if args.intensitymatchesvolume:
         running_intensity[voiceon] = running_volume[voiceon]
+    elif args.intensity != '':
+        running_intensity[voiceon] = intensity_offset + running_volume[voiceon] * intensity_percentage
+        if running_intensity[1] < 1:
+            running_intensity[1] = 0
+        elif running_intensity[1] > 126.49:
+            running_intensity[1] = 127
+        # fi
     else:
         running_intensity[voiceon] = getvar('default_intensity')
     # fi
+
     if not voiceon in oct:
         oct[voiceon] = 3                # Default to middle c - other zero causes problems.
     # fi
@@ -2549,12 +2660,25 @@ def new_voice_initialize(voiceon, m):
         pan[voiceon][m] = getvar('default_pan')
     # fi
     if m not in intensity[voiceon]:
-# NOTDONEYET --intensity=
+        if args.intensitymatchesvolume:
+            intensity[voiceon][m] = volume[voiceon][m]
+        elif args.intensity != '':
+            intensity[voiceon][m] = intensity_offset + volume[voiceon][m] * intensity_percentage
+            if intensity[voiceon][m] < 1:
+                intensity[voiceon][m] = 0
+            elif intensity[voiceon][m] > 126.49:
+                intensity[voiceon][m] = 127
+            # fi
+        else:
+            intensity[voiceon][m] = getvar('default_intensity')
+        # fi
+
         if args.intensitymatchesvolume:
             intensity[voiceon][m] = volume[voiceon][m]
         else:
             intensity[voiceon][m] = getvar('default_intensity')
         # fi
+
     # fi
     if not voiceon in vinstrument:
         set_all_staff_arr(voiceon, {}, vinstrument, 'vinstrument', 'new_voice_initialize')
@@ -2681,10 +2805,18 @@ def rests_in_empty_measure_voices(m, voiceon):
     if running_volume_next[voiceon] is not None:
         running_volume[voiceon] = running_volume_next[voiceon]
         running_volume_next[voiceon] = None
-# NOTDONEYET --intensity=
+
         if args.intensitymatchesvolume:
             running_intensity[voiceon] = running_volume[voiceon]
+        elif args.intensity != '':
+            running_intensity[voiceon] = intensity_offset + running_volume[voiceon] * intensity_percentage
+            if running_intensity[voiceon] < 1:
+                running_intensity[voiceon] = 0
+            elif running_intensity[voiceon] > 126.49:
+                running_intensity[voiceon] = 127
+            # fi
         # fi
+
     # fi
     bufs_pan[voiceon][m].append(running_pan[voiceon])
     bufs_intensity[voiceon][m].append(running_intensity[voiceon])
@@ -3852,6 +3984,9 @@ def print_out_midi1csv_notes():
     global instruments
     global midi_value_to_note_sharp
 
+    global intensity_offset
+    global intensity_percentage
+
     channel = 0                                     # Next midi instrument channel to use.
     chan = 0                                        # The midi channel using now (allows for repeated use).
 
@@ -3935,9 +4070,15 @@ def print_out_midi1csv_notes():
         if voice in intensity and m in intensity[voice]:
             v_intens = intensity[voice][m]      # intensity level for this voice/measure.
         else:
-# NOTDONEYET --intensity=
             if args.intensitymatchesvolume:
                 v_intens = v_vl
+            elif args.intensity != '':
+                v_intens = intensity_offset + v_vl * intensity_percentage
+                if v_intens < 1:
+                    v_intens = 0
+                elif v_intens > 126.49:
+                    v_intens = 127
+                # fi
             else:
                 v_intens = getvar('default_intensity')  # Probably a rest, put as full intensity.
             # fi
@@ -4950,6 +5091,8 @@ def pass2():
     global lmp_executing_number
     global bufs_pan
     global volume
+    global intensity_offset
+    global intensity_percentage
 
     if in_process_already:
         # Delete process from stack.
@@ -5012,12 +5155,19 @@ def pass2():
     # First get the empty measures to have rests of appropriate length.
     # All measures have all voices with same length -- even if some are rests.
     save_def_vol = getvar('default_volume')
-# NOTDONEYET --intensity=
     if args.intensitymatchesvolume:
         save_def_int = save_def_vol
+    elif args.intensity != '':
+        save_def_int = intensity_offset + save_def_vol * intensity_percentage
+        if save_def_int < 1:
+            save_def_int = 0
+        elif save_def_int > 126.49:
+            save_def_int = 127
+        # fi
     else:
         save_def_int = getvar('default_intensity')
     # fi
+
     save_def_pan = getvar('default_pan')
     for i in range(0, len(meas)):
         m = meas[i]
@@ -5475,49 +5625,6 @@ def read_next_line():
 # End of read_next_line
 
 # ----------------------------------------------------------------------------
-# Calculate values here.
-# Input:
-#   strg            - The string to compute.
-#   type_float      - is_float_number if must be integer.
-#                     is_float_string if can return a character var.
-#   none_means_none = If true, return '' for None (or not set variable).
-# Returns:
-#   value      = So far computed value
-#   type_error = type of error
-
-def is_float(strg, type_float, none_means_none):
-    tree = calculate.parse(strg)            # parse the string
-    if tree is None or len(tree) != 2:
-        return None, None
-    elif tree[0] is None and tree[1] == 'error parsing':
-        return strg, tree[1]
-    elif tree[0] is not None and tree[0].startswith('ERROR'):
-        return strg, tree[0]
-    elif tree[1] is None:
-        if none_means_none:
-            return '', None
-        # fi
-        return strg, "is_float -- variable '{}' is not set".format(strg)
-    # fi
-    elif tree[1] == '.':
-        return strg, "bad input to calculator#2"
-    # fi
-    if type_float == is_float_number:
-        try:
-            sexpr = float(tree[1])
-            if sexpr.is_integer():
-                sexpr = int(sexpr)
-            # fi
-            return sexpr, None
-        except:
-            return strg, "bad input to calculator#3"
-        # yrt
-    # fi
-    recompute_whichchars()
-    return tree[1], None
-# End of is_float
-
-# ----------------------------------------------------------------------------
 # strg            = String to get value for.
 # none_means_none = If true, return '' for None (or not set variable).
 
@@ -5687,6 +5794,8 @@ def fill_future_volume_cresc_dimin(ev, voiceon, original_line):
     global measure_on
     global volume
     global running_volume
+    global intensity_offset
+    global intensity_percentage
 
 #--    print_debug(f'fill_future_volume_cresc_dimin - ev={ev}voiceon={voiceon} bufs_volume={bufs_volume} future_volume_cresc_time={future_volume_cresc_time[voiceon]}')      #DEBUG
 #-     print_debug_bufs(f'fill_future_volume_cresc_dimin - before measure_on={measure_on} voiceon={voiceon}')      #DEBUG
@@ -5711,10 +5820,17 @@ def fill_future_volume_cresc_dimin(ev, voiceon, original_line):
 #-         print_debug(f'fill_future_volume_cresc_dimin - voiceon={voiceon} measure_on={measure_on} bufs={bufs[voiceon]}')
     # fi
 
-# NOTDONEYET --intensity=
     if args.intensitymatchesvolume:
-#--        print_debug('fill_future_volume_cresc_dimin - calling fill_future_intensity_cresc_dimin')
-        fill_future_intensity_cresc_dimin(ev, voiceon, original_line)
+        ei = ev
+        fill_future_intensity_cresc_dimin(ei, voiceon, original_line)
+    elif args.intensity != '':
+        ei = intensity_offset + ev * intensity_percentage
+        if ei < 1:
+            ei = 0
+        elif ei > 126.49:
+            ei = 127
+        # fi
+        fill_future_intensity_cresc_dimin(ei, voiceon, original_line)
     # fi
 #-     print_debug_bufs(f'fill_future_volume_cresc_dimin - after measure_on={measure_on} voiceon={voiceon}')      #DEBUG
 # End of fill_future_volume_cresc_dimin
@@ -5889,6 +6005,8 @@ def put_volume(voiceon, onenotevolume, original_line):
     global save_cresc_volume_direction
     global save_future_volume_cresc_dimin
     global save_future_volume_cresc_time
+    global intensity_offset
+    global intensity_percentage
 
 #--    print_debug_bufs(f'put_volume - Entering onenotevolume={onenotevolume} voiceon={voiceon} d_t_v={do_these_voices()}')      #DEBUG
     new_prenote = ''
@@ -5908,10 +6026,20 @@ def put_volume(voiceon, onenotevolume, original_line):
                       bufs_volume, 'default_volume')
 #--         if v == 14: print_debug_bufs(f'put_volume - #B v={v}', v, measure_on)      #DEBUG
     # rof
-# NOTDONEYET --intensity=
     if args.intensitymatchesvolume:
         # There is no next item, ... that's for like "sfp" (two volumes needed...).
         put_intensity(voiceon, onenotevolume[0:1] + onenotevolume[2:], original_line)
+    elif args.intensity != '':
+        ei = onenotevolume[0]
+        if ei is not None:
+            ei = intensity_offset + onenotevolume[0] * intensity_percentage
+            if ei < 1:
+                ei = 0
+            elif ei > 126.49:
+                ei = 127
+            # fi
+        # fi
+        put_intensity(voiceon, [ei] + onenotevolume[2:], original_line)
     # fi
     return new_prenote
 # End of put_volume
@@ -5948,6 +6076,8 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, postn
     global MIDICLICKSPERQUARTER
     global pan
     global intensity
+    global intensity_offset
+    global intensity_percentage
 
 #-     print_debug(f'put_on_bufs - voiceon={voiceon} p_meas={p_meas} thenote={thenote} timeofnote={timeofnote} prenote={prenote}')
     if type(voiceon) is not int:
@@ -6004,9 +6134,16 @@ def put_on_bufs(voiceon, p_meas, prenote, thenote, timeofnote, append_tie, postn
     if running_volume_next[voiceon] is not None:
         running_volume[voiceon] = running_volume_next[voiceon]
         running_volume_next[voiceon] = None
-# NOTDONEYET --intensity=
         if args.intensitymatchesvolume:
             running_intensity[voiceon] = running_volume[voiceon]
+        elif args.intensity != '':
+            ei = intensity_offset + running_volume[voiceon] * intensity_percentage
+            if ei < 1:
+                ei = 0
+            elif ei > 126.49:
+                ei = 127
+            # fi
+            running_intensity[voiceon] = ei
         # fi
     # fi
     bufs_pan[voiceon][p_meas].append(running_pan[voiceon])              # Add pan stuff for this note.
@@ -7802,6 +7939,8 @@ def do_cis(t_args, original_line):
     global measure_on
     global instruments
     global drum_sounds
+    global intensity_offset
+    global intensity_percentage
 
     if t_args is None or t_args == '':
         print_error("cis does not have one or two arguments.", original_line)
@@ -7860,9 +7999,16 @@ def do_cis(t_args, original_line):
             vinstrument[cis][measure_on] = i
             reverb[cis][measure_on] = int(getvar_checkokay('default_reverb', original_line))
             pan[cis][measure_on] = int(getvar_checkokay('default_pan', original_line))
-# NOTDONEYET --intensity=
             if args.intensitymatchesvolume:
                 intensity[cis][measure_on] = int(getvar_checkokay('default_volume', original_line))
+            elif args.intensity != '':
+                ei = intensity_offset + int(getvar_checkokay('default_volume', original_line)) * intensity_percentage
+                if ei < 1:
+                    ei = 0
+                elif ei > 126.49:
+                    ei = 127
+                # fi
+                intensity[cis][measure_on] = ei
             else:
                 intensity[cis][measure_on] = int(getvar_checkokay('default_intensity', original_line))
             # fi
@@ -7893,9 +8039,16 @@ def do_cis(t_args, original_line):
             vinstrument[cis][measure_on] = q
             reverb[cis][measure_on] = int(getvar_checkokay('default_reverb', original_line))
             pan[cis][measure_on] = int(getvar_checkokay('default_pan', original_line))
-# NOTDONEYET --intensity=
             if args.intensitymatchesvolume:
                 intensity[cis][measure_on] = int(getvar_checkokay('default_volume', original_line))
+            elif args.intensity != '':
+                ei = intensity_offset + int(getvar_checkokay('default_volume', original_line)) * intensity_percentage
+                if ei < 1:
+                    ei = 0
+                elif ei > 126.49:
+                    ei = 127
+                # fi
+                intensity[cis][measure_on] = ei
             else:
                 intensity[cis][measure_on] = int(getvar_checkokay('default_intensity', original_line))
             # fi
@@ -10859,6 +11012,8 @@ def do_voice(t_args, original_line):
     global instruments
     global drum_sounds
     global mlth
+    global intensity_offset
+    global intensity_percentage
 
     if t_args is None or t_args == '':
         print_error("voice does not have at least one argument.", original_line)
@@ -10912,9 +11067,16 @@ def do_voice(t_args, original_line):
                 vinstrument[i+1][measure_on] = j
                 reverb[i+1][measure_on] = int(getvar_checkokay('default_reverb', original_line))
                 pan[i+1][measure_on] = int(getvar_checkokay('default_pan', original_line))
-# NOTDONEYET --intensity=
                 if args.intensitymatchesvolume:
                     intensity[i+1][measure_on] = int(getvar_checkokay('default_volume', original_line))
+                elif args.intensity != '':
+                    ei = intensity_offset + int(getvar_checkokay('default_volume', original_line)) * intensity_percentage
+                    if ei < 1:
+                        ei = 0
+                    elif ei > 126.49:
+                        ei = 127
+                    # fi
+                    intensity[i+1][measure_on] = ei
                 else:
                     intensity[i+1][measure_on] = int(getvar_checkokay('default_intensity', original_line))
                 # fi
@@ -10922,9 +11084,16 @@ def do_voice(t_args, original_line):
                 vinstrument[i+1][measure_on] = j
                 reverb[i+1][measure_on] = int(getvar_checkokay('default_reverb', original_line))
                 pan[i+1][measure_on] = int(getvar_checkokay('default_pan', original_line))
-# NOTDONEYET --intensity=
                 if args.intensitymatchesvolume:
                     intensity[i+1][measure_on] = int(getvar_checkokay('default_volume', original_line))
+                elif args.intensity != '':
+                    ei = intensity_offset + int(getvar_checkokay('default_volume', original_line)) * intensity_percentage
+                    if ei < 1:
+                        ei = 0
+                    elif ei > 126.49:
+                        ei = 127
+                    # fi
+                    intensity[i+1][measure_on] = ei
                 else:
                     intensity[i+1][measure_on] = int(getvar_checkokay('default_intensity', original_line))
                 # fi
@@ -10954,9 +11123,16 @@ def do_voice(t_args, original_line):
                 vinstrument[i+1][measure_on] = q
                 reverb[i+1][measure_on] = int(getvar_checkokay('default_reverb', original_line))
                 pan[i+1][measure_on] = int(getvar_checkokay('default_pan', original_line))
-# NOTDONEYET --intensity=
                 if args.intensitymatchesvolume:
                     intensity[i+1][measure_on] = int(getvar_checkokay('default_volume', original_line))
+                elif args.intensity != '':
+                    ei = intensity_offset + int(getvar_checkokay('default_volume', original_line)) * intensity_percentage
+                    if ei < 1:
+                        ei = 0
+                    elif ei > 126.49:
+                        ei = 127
+                    # fi
+                    intensity[i+1][measure_on] = ei
                 else:
                     intensity[i+1][measure_on] = int(getvar_checkokay('default_intensity', original_line))
                 # fi
@@ -11330,6 +11506,8 @@ def set_volume_now(voiceon, vn, original_line):
     global save_cresc_volume
     global save_cresc_volume_time
     global save_cresc_volume_direction
+    global intensity_offset
+    global intensity_percentage
 
 #-     print_debug(f'set_volume_now - voiceon={voiceon} vn={vn} measure_on={measure_on}')
     if voiceon not in volume:
@@ -11346,9 +11524,16 @@ def set_volume_now(voiceon, vn, original_line):
         fill_future_volume_cresc_dimin(voiceon, vn, original_line)
     # fi
     running_volume[voiceon] = vn        # Force running change - also stop crescendo.
-# NOTDONEYET --intensity=
     if args.intensitymatchesvolume:
         running_intensity[voiceon] = running_volume[voiceon]
+    elif args.intensity != '':
+        ei = intensity_offset + running_volume[voiceon] * intensity_percentage
+        if ei < 1:
+            ei = 0
+        elif ei > 126.49:
+            ei = 127
+        # fi
+        running_intensity[voiceon] = ei
     # fi
     running_volume_next[voiceon] = None
     cresc_volume[voiceon] = None
