@@ -2043,7 +2043,9 @@ future_volume_cresc_dimin = [ ]
 global future_volume_cresc_time     # Length of time for future cresc_dimin ... updated as notes put on voice.
 future_volume_cresc_time = [ ]
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-global pitch_bend                   # Pitch_bend levels for voices.
+global autopitchbend                # For staff mode, voices in staff are auto-pitchbend +/- (#%2) 100 * #/2.
+autopitchbend = False
+global pitchbend                    # Pitch_bend levels for voices.
 pitchbend = [ ]                     # Pitch bend pitchbend level by voice.
 global pan                          # pan levels at measures.
 pan = { }                           # Pan (balance 0=left, 126=right, 64=center) for voice, measure
@@ -3491,18 +3493,23 @@ def print_out_midi1csv_start(voiceon):
         print_die("voiceon must be a voice.")
     # fi
     print_output(f'{voiceon+1}, 0, Start_track')
-        # 121   Reset all Controllers.
+    # 121   Reset all Controllers.
     print_output(f'{voiceon+1}, 0, Control_c, 0, 121, 0')
     return
 # End of print_out_midi1csv_start
 
 # ----------------------------------------------------------------------------
 def print_out_midi1csv_end(voiceon, lthworkingmeasures, chan):
+    global volume
+
     if type(voiceon) is not int:
         print_error("print_out_midi1csv_end - voiceon type is not int ({})".format(type(voiceon)), 'print_out_midi1csv_end')
         print_die("voiceon must be a voice.")
     # fi
-    print_output(f'{voiceon+1}, {lthworkingmeasures + int(clicks_at_end_of_piece)}, Control_c, {chan}, 121, 0')
+    if (voiceon) == len(volume):
+        # 121   Reset all Controllers.
+        print_output(f'{voiceon+1}, {lthworkingmeasures + int(clicks_at_end_of_piece)}, Control_c, {chan}, 121, 0')
+    # fi
     print_output(f'{voiceon+1}, {lthworkingmeasures + int(clicks_at_end_of_piece)}, End_track')
     return
 # End of print_out_midi1csv_end
@@ -3547,6 +3554,7 @@ def print_out_midi1csv_instrument(m, voiceon, lthworkingmeasure, last_instrument
     global drums_MIDI_port
     global drum_sounds
     global instruments
+    global pitchbend
 
     if voiceon not in vinstrument:
         vinstrument[voiceon] = {}
@@ -3630,9 +3638,8 @@ def print_out_midi1csv_instrument(m, voiceon, lthworkingmeasure, last_instrument
 #????            print_output('{}, {}, Control_c, {}, 127, 0'.format(voiceon+1, lthworkingmeasure, chan))
         # 121   Reset all Controllers.
         # print_output(f'{voiceon+1}, {lthworkingmeasure}, Control_c, {chan}, 121, 0')
-# NOTDONEYET - Pitch_bend_c
         # Pitch_bend
-        if voiceon in pitchbend and pitchbend[voiceon] is not None:
+        if pitchbend[voiceon] is not None:
             print_output(f'{voiceon+1}, {lthworkingmeasure}, Pitch_bend, {chan}, {pitchbend[voiceon]}')
         # fi
         #   7   Volume
@@ -4361,6 +4368,7 @@ def process_fs_check(what, lth, min_next, vtlines, tempo_s, tempo_l):
     global gotoflg
     global gotolast
     global key_sig_int
+    global errors_happened
 
     for voice, lines in vtlines.items():
         v = int(voice)
@@ -4450,9 +4458,12 @@ def process_fs_check(what, lth, min_next, vtlines, tempo_s, tempo_l):
                 break
             elif strg[0:7] == 'noteon ':
                 break
+            elif strg[0:11] == 'pitch_bend ':
+#?                break
+                pass
             else:
                 print_error_no_line("Unrecognized - line='{}'".format(t))
-                error_now = error_now + 1
+                error_now = error_now + 1               # DIE NOW!
                 break
             # fi
             this_time[v] += 1
@@ -10328,11 +10339,32 @@ def do_pitch(t_args, original_line):
 
 # ----------------------------------------------------------------------------
 # This command changes the Pitch_bend for a voice. (See midi documentation.)
+# Pitchbend is 14 bits. 8192=normal pitch.
+#   0 is two semi-tones down (c->b-/a+, skipping b).
+#   16383 is two semi-tones up (c -> d, skipping c+).
+#       pitchbend 1..4 8192         $$ MIDI value 0 to 16383 for voices 1,2,3,4.
+#       pitchbend                   $$ Special for staff mode - do auto-pitchbend for voices on staff.
+#       pitchbend flute,clarinet 8192
+#
+# Fluidsynth:
+#   pitch_bend chan offset     Bends pitch
+# 8492    +300    6th
+# 8292    +100    3rd
+# 8192    0       1st instrument
+# 8092    -100    2nd French Horn
+# 7992    -200    4th
+# 7892    -300    5th
 
 def do_pitchbend(t_args, original_line):
     global pitchbend
     global staff_name
+    global autopitchbend
+    global pitchbend
 
+    if t_args == '':
+        autopitchbend = True
+        return
+    # fi
     vargs = get_voice_others(t_args, 1,2, 'pitchbend', original_line)
     if vargs is None:
         return
@@ -10686,6 +10718,8 @@ def do_staff(t_args, original_line):
     global staves
     global middle_c
     global precomment
+    global autopitchbend
+    global pitchbend
 
     if len(staff_name) == 0 and type(last_voice_staff) is int:
         print_error("staff command after notes in different format.", original_line)
@@ -10748,7 +10782,17 @@ def do_staff(t_args, original_line):
             initialize_set_voices(f1, original_line)     # If voices not set up yet, set them up.
             fill_voice_mlth(False, original_line)        # Need to make measure for other voices up to here "mlth".
             v.append(f1)
-        # fi
+            if autopitchbend:
+                l = len(v) % 20                         # Wrap at +10 and -10.
+                if l == 1:
+                    pitchbend[f1] = 8192
+                elif (l % 2) == 0:
+                    pitchbend[f1] = 8192 - (100 * int(l/2))
+                else:
+                    pitchbend[f1] = 8192 + (100 * int(l/2))
+                # fi
+            # fi
+        # rof
     # fi
 
     staff_name[sn] = v                                  # Create or change it.
