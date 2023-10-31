@@ -1094,6 +1094,209 @@ def is_float(strg, type_float, none_means_none):
 # End of is_float
 
 # ----------------------------------------------------------------------------
+# strng = int_range_to_array(strng, original_line)
+
+def int_range_to_array(strng, original_line):
+    a = strng.find('..')
+    if a == 0:
+        print_error("Range does not start with number.", original_line)
+        return [str(strng)]
+    elif a < 0:                                 # Not a range
+        strng, msg = is_float(strng, is_float_number, False)
+        if msg is not None or strng is None:
+            return [str(strng)]
+        # fi
+        if type(strng) is float and strng.is_integer():
+            strng = int(strng)
+        # fi
+        return [str(strng)]
+    # fi
+    first = strng[0:a]
+    second = strng[a+2:]
+    if second is None or second == '':
+        print_error("Second number in range bad.", original_line)
+        return [str(strng)]
+    # fi
+    n, msg = is_float(first, is_float_number, False)
+    if msg is not None or n is None or n == '':
+        print_error("Range first number bad. {} '{}'".format(msg, first), original_line)
+        return [str(strng)]
+    # fi
+    o, msg = is_float(second, is_float_number, False)
+    if msg is not None or o is None or o == '':
+        print_error("Range second number bad. {}".format(msg), original_line)
+        return [str(strng)]
+    # fi
+    if type(n) is str:
+        n = float(n)
+    # fi
+    if type(n) is float and n.is_integer():
+        first = int(n)
+    elif type(n) is not int:
+        print_error("Range first number not an integer.", original_line)
+        return [str(strng)]
+    # fi
+    if type(o) is str:
+        o = float(o)
+    # fi
+    if type(o) is float and o.is_integer():
+        second = int(o)
+    elif type(o) is not int:
+        print_error("Range second number not an integer.", original_line)
+        return [str(strng)]
+    # fi
+    array_args = []
+    while n < o + 1:
+        array_args.append(str(n))
+        n = n + 1
+    # rof
+    return array_args
+# End of int_range_to_array
+
+# ----------------------------------------------------------------------------
+# strng         is string where token name is.
+# terminator    is the termination character looking for.
+# doparens      True if should check parens match.
+# original_line for error printing..
+#
+# Returns where in strng termination is. -1 if not found. 0=first character.
+
+nest_terminator = { '(':')', '{':'}', "'":"'", '"':'"' }
+
+def find_terminator_in_string(strng, terminators, doparens, original_line):
+    w = 0
+    e = []
+    while w < len(strng):
+        c = strng[w]
+        if c in terminators:
+            return w                                # Terminator immediately - blank argument.,
+        # fi
+        if c in nest_terminator and doparens:
+            endterminator = nest_terminator[c]
+        else:
+            endterminator = None
+        # fi
+        e.append(endterminator)
+        w = w + 1
+        if w > len(strng):
+            return -1
+        # fi
+        while endterminator is not None:
+            while w < len(strng):
+                c = strng[w]
+                w = w + 1
+                if c == endterminator:
+                    break
+                # fi
+                if endterminator in ['"', "'"]:     # quotes nest nothing.
+                    continue
+                elif w >= len(strng):
+                    if doparens:
+                        print_error("nested parenthesis, did not find closing {}.".format(endterminator), original_line)
+                        return -1
+                    # fi
+                    break
+                elif c in nest_terminator:
+                    endterminator = nest_terminator[c]
+                    e.append(endterminator)
+                # fi
+            # elihw
+            e.pop()
+            if e != []:
+                endterminator = e[-1]
+            else:
+                endterminator = None
+                break
+            # fi
+        # elihw
+    # elihw
+    return -1
+# End of find_terminator_in_string
+
+# ----------------------------------------------------------------------------
+#   wline         - string to split
+#   integers      - True if expect numbers as arguments.
+#                 - False if alphanumberic.
+#                 - None if voice numbers - staff_name -> voice numbers.
+#                 - "volume" or "volumes" for 'f', etc.
+#   nospaces      - True if do not split on spaces.
+#   original_line - Line for error messages.
+
+def separate_args(wline, integers, nospaces, original_line):
+    def b4it(array_args, b4, integers, nospaces, original_line):
+        global staff_name
+
+        if b4 == '':
+            array_args.append(b4)
+        elif integers is None:
+            if b4 in staff_name:
+                if staff_name[b4] is None:
+                    assign_another_voice(b4, 'separate_args', original_line)
+                # fi
+                for v in staff_name[b4]:
+                    array_args.append(str(v))   # Do staff_name to voice numbers conversions.
+                # rof
+            else:                               # maybe voice numbers. :)
+                nums = int_range_to_array(b4, original_line)
+                array_args = array_args + nums
+            # fi
+        elif type(integers) is str:             # volume/volumes command.
+            nums = int_range_to_array(b4, original_line)
+            new_nums = []
+            for nm in nums:
+                if type(nm) is not str:
+                    nm = str(nm)
+                # fi
+                v = get_volume_number(nm, integers, original_line)
+                new_nums.append(v)
+            # fi
+            array_args = array_args + new_nums
+        elif integers:
+            nums = int_range_to_array(b4, original_line)
+            array_args = array_args + nums
+        else:
+            array_args.append(b4)
+        # fi
+        return array_args
+    # End of b4it
+
+    global args
+
+    splitter = [ ',', ";" ]
+    if args.spaces and not nospaces:
+        splitter = splitter + [ ' ', "\t" ]
+    # fi
+    strng = wline.strip()
+    if len(strng) == 0:
+        return []
+    # fi
+    strng = re.sub(r'\s*]', r' ]', strng, count = 1)
+    strng = re.sub(r'\s+', r' ', strng)
+    strng = re.sub(r'\s*\[', r' [', strng, count = 1)
+    strng = re.sub(r'\[\s*', r'[ ', strng, count = 1)
+    strng = re.sub(r'\s+', r' ', strng)
+    array_args = []
+    w = 0
+    b4 = ''
+    while w < len(strng):
+        s = strng[w:]
+        x = find_terminator_in_string(s, splitter, True, original_line)
+        # x == -1   end of strng.
+        if x < 0:                           # End of strng reached before splitter character found.
+            b4 = s
+            break
+        # fi
+        b4 = s[0:x]
+        array_args = b4it(array_args, b4, integers, nospaces, original_line)
+        b4 = ''
+        w = w + x + 1
+    # elihw
+    ti = integers
+    array_args = b4it(array_args, b4, ti, nospaces, original_line)
+    return array_args
+# End of separate_args
+
+# ----------------------------------------------------------------------------
 global pages_to_do
 pages_to_do = []                    # argument line limiting which pages to do.
 global measures_to_do
@@ -3493,8 +3696,8 @@ def print_out_midi1csv_start(voiceon):
         print_die("voiceon must be a voice.")
     # fi
     print_output(f'{voiceon+1}, 0, Start_track')
-    # 121   Reset all Controllers.
-    print_output(f'{voiceon+1}, 0, Control_c, 0, 121, 0')
+#--     # 121   Reset all Controllers.
+#--     print_output(f'{voiceon+1}, 0, Control_c, 0, 121, 0')
     return
 # End of print_out_midi1csv_start
 
@@ -3636,11 +3839,11 @@ def print_out_midi1csv_instrument(m, voiceon, lthworkingmeasure, last_instrument
 #????            print_output('{}, {}, Control_c, {}, 125, 0'.format(voiceon+1, lthworkingmeasure, chan))
 #????            # 127   Set device mode to Polyphonic.
 #????            print_output('{}, {}, Control_c, {}, 127, 0'.format(voiceon+1, lthworkingmeasure, chan))
-        # 121   Reset all Controllers.
-        # print_output(f'{voiceon+1}, {lthworkingmeasure}, Control_c, {chan}, 121, 0')
+#--         # 121   Reset all Controllers.
+#--         # print_output(f'{voiceon+1}, {lthworkingmeasure}, Control_c, {chan}, 121, 0')
         # Pitch_bend
         if pitchbend[voiceon] is not None:
-            print_output(f'{voiceon+1}, {lthworkingmeasure}, Pitch_bend, {chan}, {pitchbend[voiceon]}')
+            print_output(f'{voiceon+1}, {lthworkingmeasure}, Pitch_bend_c, {chan}, {pitchbend[voiceon]}')
         # fi
         #   7   Volume
         print_output(f'{voiceon+1}, {lthworkingmeasure}, Control_c, {chan}, {11}, {volume[voiceon][m]}')
@@ -3851,6 +4054,7 @@ def print_header():
         print_output("0, 0, FS, set synth.midi-channels 128")
         print_output("0, 0, FS, set synth.verbose 0")
         print_output("0, 0, FS, reset")
+        print_output("0, 0, FS, reset")
         if args.sf2 != '':
             print_output("0, 0, FS, load \"{}\"".format(args.sf2))
         elif not args.two:
@@ -3858,6 +4062,18 @@ def print_header():
         else:
             print_output("0, 0, FS, load /Users/m4/src/GeneralUser/GeneralUser.sf2")
         # fi
+        print_output('0, 0, FS, set synth.reverb.active 1')
+        print_output('0, 0, FS, set synth.reverb.room-size 0.61')
+        print_output('0, 0, FS, set synth.reverb.damp 0.23')
+        print_output('0, 0, FS, set synth.reverb.width 0.76')
+        print_output('0, 0, FS, set synth.reverb.level 0.57')
+
+        print_output('0, 0, FS, set synth.chorus.active 1')
+        print_output('0, 0, FS, set synth.chorus.nr 3')
+        print_output('0, 0, FS, set synth.chorus.level 1.2')
+        print_output('0, 0, FS, set synth.chorus.speed 0.3')
+        print_output('0, 0, FS, set synth.chorus.depth 8')
+
         print_output("0, 0, FS, prog 00 000")
 
         for t in header:
@@ -4500,7 +4716,7 @@ def print_out_fluidsynth():
         'Control_c': 'cc',
         'End_of_file': 'echo End_of_file',
         'Title_t': 'echo Title_t',
-        'Pitch_bend': 'pitch_bend',
+        'Pitch_bend_c': 'pitch_bend',
         # Track, Time, MIDI_port, Number This meta-event specifies that subsequent events in
         # the Track should be sent to MIDI port (bus) Number, between 0 and 255. This meta-event
         # usually appears at the start of a track with Time zero, but may appear within a track
@@ -6403,126 +6619,6 @@ def fill_voice_mlth(meter_check, original_line):
 # End of fill_voice_mlth
 
 # ----------------------------------------------------------------------------
-# strng         is string where token name is.
-# terminator    is the termination character looking for.
-# doparens      True if should check parens match.
-# original_line for error printing..
-#
-# Returns where in strng termination is. -1 if not found. 0=first character.
-
-nest_terminator = { '(':')', '{':'}', "'":"'", '"':'"' }
-
-def find_terminator_in_string(strng, terminators, doparens, original_line):
-    w = 0
-    e = []
-    while w < len(strng):
-        c = strng[w]
-        if c in terminators:
-            return w                                # Terminator immediately - blank argument.,
-        # fi
-        if c in nest_terminator and doparens:
-            endterminator = nest_terminator[c]
-        else:
-            endterminator = None
-        # fi
-        e.append(endterminator)
-        w = w + 1
-        if w > len(strng):
-            return -1
-        # fi
-        while endterminator is not None:
-            while w < len(strng):
-                c = strng[w]
-                w = w + 1
-                if c == endterminator:
-                    break
-                # fi
-                if endterminator in ['"', "'"]:     # quotes nest nothing.
-                    continue
-                elif w >= len(strng):
-                    if doparens:
-                        print_error("nested parenthesis, did not find closing {}.".format(endterminator), original_line)
-                        return -1
-                    # fi
-                    break
-                elif c in nest_terminator:
-                    endterminator = nest_terminator[c]
-                    e.append(endterminator)
-                # fi
-            # elihw
-            e.pop()
-            if e != []:
-                endterminator = e[-1]
-            else:
-                endterminator = None
-                break
-            # fi
-        # elihw
-    # elihw
-    return -1
-# End of find_terminator_in_string
-
-# ----------------------------------------------------------------------------
-# strng = int_range_to_array(strng, original_line)
-
-def int_range_to_array(strng, original_line):
-    a = strng.find('..')
-    if a == 0:
-        print_error("Range does not start with number.", original_line)
-        return [str(strng)]
-    elif a < 0:                                 # Not a range
-        strng, msg = is_float(strng, is_float_number, False)
-        if msg is not None or strng is None:
-            return [str(strng)]
-        # fi
-        if type(strng) is float and strng.is_integer():
-            strng = int(strng)
-        # fi
-        return [str(strng)]
-    # fi
-    first = strng[0:a]
-    second = strng[a+2:]
-    if second is None or second == '':
-        print_error("Second number in range bad.", original_line)
-        return [str(strng)]
-    # fi
-    n, msg = is_float(first, is_float_number, False)
-    if msg is not None or n is None or n == '':
-        print_error("Range first number bad. {} '{}'".format(msg, first), original_line)
-        return [str(strng)]
-    # fi
-    o, msg = is_float(second, is_float_number, False)
-    if msg is not None or o is None or o == '':
-        print_error("Range second number bad. {}".format(msg), original_line)
-        return [str(strng)]
-    # fi
-    if type(n) is str:
-        n = float(n)
-    # fi
-    if type(n) is float and n.is_integer():
-        first = int(n)
-    elif type(n) is not int:
-        print_error("Range first number not an integer.", original_line)
-        return [str(strng)]
-    # fi
-    if type(o) is str:
-        o = float(o)
-    # fi
-    if type(o) is float and o.is_integer():
-        second = int(o)
-    elif type(o) is not int:
-        print_error("Range second number not an integer.", original_line)
-        return [str(strng)]
-    # fi
-    array_args = []
-    while n < o + 1:
-        array_args.append(str(n))
-        n = n + 1
-    # rof
-    return array_args
-# End of int_range_to_array
-
-# ----------------------------------------------------------------------------
 # Fill voices with matching shortest total time in measure.
 # Input:
 #   v             - voice to fill measure up to lth.
@@ -6705,89 +6801,6 @@ def assign_another_voice(b4, where, original_line):
     # fi
     staff_name[b4] = ns
 # End of assign_another_voice
-
-# ----------------------------------------------------------------------------
-#   wline         - string to split
-#   integers      - True if expect numbers as arguments.
-#                 - False if alphanumberic.
-#                 - None if voice numbers - staff_name -> voice numbers.
-#                 - "volume" or "volumes" for 'f', etc.
-#   nospaces      - True if do not split on spaces.
-#   original_line - Line for error messages.
-
-def separate_args(wline, integers, nospaces, original_line):
-    def b4it(array_args, b4, integers, nospaces, original_line):
-        global staff_name
-
-        if b4 == '':
-            array_args.append(b4)
-        elif integers is None:
-            if b4 in staff_name:
-                if staff_name[b4] is None:
-                    assign_another_voice(b4, 'separate_args', original_line)
-                # fi
-                for v in staff_name[b4]:
-                    array_args.append(str(v))   # Do staff_name to voice numbers conversions.
-                # rof
-            else:                               # maybe voice numbers. :)
-                nums = int_range_to_array(b4, original_line)
-                array_args = array_args + nums
-            # fi
-        elif type(integers) is str:             # volume/volumes command.
-            nums = int_range_to_array(b4, original_line)
-            new_nums = []
-            for nm in nums:
-                if type(nm) is not str:
-                    nm = str(nm)
-                # fi
-                v = get_volume_number(nm, integers, original_line)
-                new_nums.append(v)
-            # fi
-            array_args = array_args + new_nums
-        elif integers:
-            nums = int_range_to_array(b4, original_line)
-            array_args = array_args + nums
-        else:
-            array_args.append(b4)
-        # fi
-        return array_args
-    # End of b4it
-
-    global args
-
-    splitter = [ ',', ";" ]
-    if args.spaces and not nospaces:
-        splitter = splitter + [ ' ', "\t" ]
-    # fi
-    strng = wline.strip()
-    if len(strng) == 0:
-        return []
-    # fi
-    strng = re.sub(r'\s*]', r' ]', strng, count = 1)
-    strng = re.sub(r'\s+', r' ', strng)
-    strng = re.sub(r'\s*\[', r' [', strng, count = 1)
-    strng = re.sub(r'\[\s*', r'[ ', strng, count = 1)
-    strng = re.sub(r'\s+', r' ', strng)
-    array_args = []
-    w = 0
-    b4 = ''
-    while w < len(strng):
-        s = strng[w:]
-        x = find_terminator_in_string(s, splitter, True, original_line)
-        # x == -1   end of strng.
-        if x < 0:                           # End of strng reached before splitter character found.
-            b4 = s
-            break
-        # fi
-        b4 = s[0:x]
-        array_args = b4it(array_args, b4, integers, nospaces, original_line)
-        b4 = ''
-        w = w + x + 1
-    # elihw
-    ti = integers
-    array_args = b4it(array_args, b4, ti, nospaces, original_line)
-    return array_args
-# End of separate_args
 
 # ----------------------------------------------------------------------------
 # Input:
