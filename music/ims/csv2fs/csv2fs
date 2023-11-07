@@ -64,25 +64,11 @@ def parse_args():
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='this is the epilog')
-
     parser.add_argument('--lines', '-lines', action='store_true',
                         help='Print each line as it is read from file or macro or loop.')
-
     parser.add_argument('rest', nargs='*',
-                        help='Optional command to execute')
+                        help='Optional input file, then optional output file.')
     args = parser.parse_args()
-
-    if args.rest is not None:
-        for indx in range(len(args.rest)):
-            if args.rest[indx][0] == '=':
-                nextargv = args.rest[indx]
-                if len(nextargv) > 0:
-                    nextargv = nextargv[1:]
-                # fi
-                args.rest[indx] = nextargv
-            # fi
-        # rof
-    # fi
     return
 # End of parse_args
 
@@ -166,6 +152,35 @@ this_time = []
 global MIDICLICKSPERQUARTER
 MIDICLICKSPERQUARTER = 480.0
 # ----------------------------------------------------------------------------
+# FF 58 04 nn dd cc bb Time Signature
+# The time signature is expressed as four numbers. nn and dd represent the numerator
+# and denominator of the time signature as it would be notated. The denominator
+# is a negative power of two: 2 represents a quarter-note, 3 represents an eighth-note,
+# etc. The cc parameter expresses the number of MIDI clocks in a metronome click.
+# The bb parameter expresses the number of notated 32nd-notes in a MIDI quarter-note
+# (24 MIDI clocks). This was added because there are already multiple programs which
+# allow a user to specify that what MIDI thinks of as a quarter-note (24 clocks) is
+# to be notated as, or related to in terms of, something else.
+# 
+# Therefore, the complete event for 6/8 time, where the metronome clicks every three
+# eighth-notes, but there are 24 clocks per quarter-note, 72 to the bar, would be (in hex):
+#       FF 58 04 06 03 24 08
+#                nn dd cc bb
+# That is, 6/8 time (8 is 2 to the 3rd power, so this is 06 03), 36 MIDI clocks per
+# dotted-quarter (24 hex!), and eight notated 32nd-notes per quarter-note. 
+#    i.e. 2*32=1/16, 4*32=1/8, 8*32=1/4.  And a 1/4 note is 0x24 time deltas long.
+# If the 8 was changed to 16, then a 1/2 note is 0x24 long. (0x24=36)
+
+def meter_readable(strg):
+    s = strg.split()
+    print_debug(f's={s}')
+    numerator = int(s[0])
+    denominator = 2 ** int(s[1])
+#--         print_output("{}, {}, Time_signature, {}, {}, 48, 8".format(
+#--                 voiceon+1, round(lthworkingmeasure), numerator, denominator))
+    return f'{numerator}/{denominator}'
+# End of print_out_midi1csv_ts
+# ----------------------------------------------------------------------------
 def process_fs_check(what, lth, min_next, vtlines, tempo_s, tempo_l):
     global this_time
     global fs_other_echo
@@ -195,6 +210,7 @@ def process_fs_check(what, lth, min_next, vtlines, tempo_s, tempo_l):
                 elif strg != fs_other_echo:
                     strg1 = strg.replace('"', "'")
                     if strg1[0:11] == 'echo meter ':
+#--                         print_fs(f'echo "meter {meter_readable(strg1[11:])}"')
                         print_fs(f'echo "meter {strg1[11:]}"')
                     elif strg1[0:9] == 'echo key ':
                         x = strg1[9:]
@@ -554,7 +570,9 @@ def main():
 
     print_fluidsynth_header()
     print_out_fluidsynth()
-    print_debug('\n'.join(array_of_fs))
+    for i in array_of_fs:
+        print_output(i)
+    # rof
     return
 # End of main
 
