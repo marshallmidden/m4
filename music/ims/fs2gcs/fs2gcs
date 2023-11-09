@@ -98,9 +98,34 @@ parse_args()
 # ----------------------------------------------------------------------------
 global voices                       # Number of voices
 voices = 1
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global measure
 measure = 1                         # Start measure at number 1.
+global MIDICLICKSPERQUARTER
+MIDICLICKSPERQUARTER = 480.0
+global tempo_s                      # 60 beats per quarter note.
+tempo_s = 60
+global tempo_l
+tempo_l = 0.25
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+global no_notes_yet
+no_notes_yet = True
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+global titles
+titles = ''
+global comments
+comments = ''
+global key_default
+key_default = None
+global meter_default
+meter_default = None
+global key_previous
+key_previous = None
+global meter_previous
+meter_previous = None
+global instrument_bank          # Indexed by voice number.
+instrument_bank = {}
+global instrument_number        # Indexed by voice number.
+instrument_number = {}
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global measures_length              # The length of measure (by voice).
 measures_length = {}                # measures_length[m][v] = floating_number
@@ -123,11 +148,10 @@ bufs_cc_7_cresc = {}                # bufs_cc_7_cresc[m][v] = []        True/Fal
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global array_of_original_lines      # For input, have an array of the original lines.
 array_of_original_lines = []
-
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # NOTDONEYET - gcs output.
 #-- global array_of_gcs                 # For gcs first pass output.
 #-- array_of_gcs = []
-
 # ----------------------------------------------------------------------------
 #-- # Following does not do multiple sharps or flats, but that is crazy anyway. Neither naturals.
 #-- global key_sig
@@ -143,72 +167,6 @@ array_of_original_lines = []
 #--     # fi
 #-- # rof
 #-- 
-# ----------------------------------------------------------------------------
-#-- global default_little_time
-#-- default_little_time = 0.1
-# ----------------------------------------------------------------------------
-#-- def print_fluidsynth_header():
-#--     # set audio.coreaudio.device coreaudio
-#--     print_fs('set audio.driver coreaudio')
-#--     print_fs('set midi.driver coremidi')
-#--     print_fs('unload 1')
-#--     print_fs('unload 2')
-#--     print_fs('unload 3')
-#--     print_fs('unload 4')
-#--     print_fs('unload 5')
-#--     print_fs('set synth.default-soundfont /Users/m4/src/GeneralUser/GeneralUser.sf2')
-#--     print_fs('set synth.midi-channels 128')
-#--     print_fs('set synth.verbose 0')
-#--     print_fs('reset')
-#--     print_fs('reset')
-#--     print_fs('load /Users/m4/src/GeneralUser/GeneralUser.sf2')
-#--     #
-#--     print_fs('set synth.reverb.active 1')
-#--     print_fs('set synth.reverb.room-size 0.61')
-#--     print_fs('set synth.reverb.damp 0.23')
-#--     print_fs('set synth.reverb.width 0.76')
-#--     print_fs('set synth.reverb.level 0.57')
-#--     #
-#--     print_fs('set synth.chorus.active 1')
-#--     print_fs('set synth.chorus.nr 3')
-#--     print_fs('set synth.chorus.level 1.2')
-#--     print_fs('set synth.chorus.speed 0.3')
-#--     print_fs('set synth.chorus.depth 8')
-#--     #
-#--     print_fs('prog 00 000')
-#--     #
-#--     return
-#-- # End of print_fluidsynth_header
-
-# ----------------------------------------------------------------------------
-global fs_other_echo
-fs_other_echo = ''
-global this_time
-this_time = []
-global MIDICLICKSPERQUARTER
-MIDICLICKSPERQUARTER = 480.0
-
-# ----------------------------------------------------------------------------
-global no_notes_yet
-no_notes_yet = True
-
-global titles
-titles = ''
-global comments
-comments = ''
-global key_default
-key_default = None
-global meter_default
-meter_default = None
-global key_previous
-key_previous = None
-global meter_previous
-meter_previous = None
-global instrument_bank          # Indexed by voice number.
-instrument_bank = {}
-global instrument_number        # Indexed by voice number.
-instrument_number = {}
-
 # ----------------------------------------------------------------------------
 # FF 58 04 nn dd cc bb Time Signature
 # The time signature is expressed as four numbers. nn and dd represent the numerator
@@ -241,60 +199,84 @@ def meter_readable(strg):
 # End of print_out_midi1csv_ts
 
 # ----------------------------------------------------------------------------
+def process_echo_lines(q):
+    global voices
+    global MIDICLICKSPERQUARTER
+    global titles
+    global meter_default
+    global meter_previous
+    global key_default
+    global key_previous
+    global comments
+
+    print_debug(f'process_echo_lines - q="{q}"')
+    if q[0:8] == '"Header ':
+        if q[-1] != '"':
+            print_error('Header line expected to end with a double quote')
+            return
+        # fi
+        r = q[8:-1].split()
+        voices = int(r[0])
+        MIDICLICKSPERQUARTER = int(r[1])
+        print_debug(f'process_echo_lines - Header: voices="{voices} MIDICLICKSPERQUARTER={MIDICLICKSPERQUARTER}"')
+        return
+    # fi
+    if q[0:7] == '"Title ':
+        titles += q[7:]
+        print_debug(f'process_echo_lines - Title: titles="{titles}"')
+        return
+    # fi
+    if q[0:7] == '"meter ':
+        if meter_default is not None and meter_previous != q:
+            print_error(f'Did not expect two meter lines - "{meter_previous}" verses "{q[0]}"')
+            return
+        # fi
+        if q[-1] != '"':
+            print_error('meter line expected to end with a double quote')
+            return
+        # fi
+        meter_previous = q
+        meter_default = meter_readable(q[7:-1])
+        print_debug(f'process_echo_lines - meter: meter_previous="{meter_previous}" meter_default={meter_default}')
+        return
+    # fi
+    if q[0:5] == '"key ':
+        if key_default is not None and key_previous != q:
+            print_error(f'Did not expect two key lines that did not match - "{key_previous}" verses "{q}"')
+            return
+        # fi
+        a = q[5:].split(None)
+        if len(a) < 2 or len(a) > 4:
+            print_error(f'key line expects key followed by "major" not {a}')
+            return
+        elif a[1] != "'major'\"":
+            print_error(f'key line expects "major" not {a[1]}')
+            return
+        # fi
+        key_previous = q
+        key_default = a[0]
+        print_debug(f'process_echo_lines - key: key_previous="{key_previous}" key_default={key_default}')
+        return
+    # fi
+    comments += q
+    print_debug(f'process_echo_lines - comments: comments="{comments}"')
+    return
+# End of process_echo_lines
+
+# ----------------------------------------------------------------------------
 global header_commands_ignore
 header_commands_ignore = [ 'set', 'unload', 'load', 'reset', 'prog', 'sleep', 'pitch_bend' ]
 
 def process_header_lines(q):
     global header_commands_ignore
-    global titles
-    global comments
-    global key_default
-    global key_previous
-    global meter_default
-    global meter_previous
     global instrument_bank
     global instrument_number
 
+    print_debug(f'process_header_lines - q="{q}"')
     if q[0] in header_commands_ignore:
         return
-    # fi
-    if q[0] == 'echo':
-        if q[1][0:7] == '"Title ':
-            titles += q[1][7:]
-            return
-        # fi
-        if q[1][0:7] == '"meter ':
-            if meter_default is not None and meter_previous != q[1]:
-                print_error(f'Did not expect two meter lines - "{meter_previous}" verses "{q[0]}"')
-                return
-            # fi
-            if q[1][-1] != '"':
-                print_error('meter line expected to end with a double quote')
-                return
-            # fi
-            meter_previous = q[1]
-            meter_default = meter_readable(q[1][7:-1])
-            return
-        # fi
-        if q[1][0:5] == '"key ':
-            if key_default is not None and key_previous != q[1]:
-                print_error(f'Did not expect two key lines that did not match - "{key_previous}" verses "{q[1]}"')
-                return
-            # fi
-            a = q[1][5:].split(None)
-            if len(a) < 2 or len(a) > 4:
-                print_error(f'key line expects key followed by "major" not {q[1]}')
-                return
-            elif a[1] != "'major'\"":
-                print_error(f'key line expects "major" not {q[1]}')
-                return
-            # fi
-            key_previous = q[1]
-            key_default = a[0]
-            return
-        # fi
-        comments += q[1]
-        return
+    elif q[0] == 'echo':
+        process_echo_lines(q[1])
     elif q[0] == 'select':
         a = q[1].split()
         if len(a) < 1 or len(a) > 4:
@@ -422,6 +404,9 @@ def process_noteoff(r):
 
 # -----------------------------------------------------------------------------
 def process_sleep(r):
+    global tempo_s
+    global tempo_l
+
 #--     if current_time >= 0 and (min_next - current_time) != 0:
 #--         ms_1000 = float(min_next - current_time)
 #--         if ms_1000 < default_little_time:
@@ -460,6 +445,9 @@ def process_note_lines(q):
 
     print_debug(f'process_note_lines - "{q}"')
     if q[0] == 'noteon':
+        process_noteon(q[1])
+        return
+    elif q[0] == 'echo':
         process_noteon(q[1])
         return
     elif q[0] == 'noteoff':
