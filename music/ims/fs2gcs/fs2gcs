@@ -45,6 +45,12 @@ def print_error(strg):
 # End of print_error
 
 # ----------------------------------------------------------------------------
+def print_warning(strg):
+    print_stderr('WARNING - ' + strg)
+    return
+# End of print_warning
+
+# ----------------------------------------------------------------------------
 def print_output(strg):
     global output_file
 
@@ -168,6 +174,66 @@ array_of_original_lines = []
 #-- # rof
 #-- 
 # ----------------------------------------------------------------------------
+#--         MIDICLICKSPERQUARTER = int(r[1])
+global midi_2_note_lengths
+midi_2_note_lengths = {}
+
+def do_note_length_calculate():
+    global MIDICLICKSPERQUARTER
+    global midi_2_note_lengths
+
+    for nl in (1,2,4,8,16,32,64,128):
+        # note length.
+        m = (MIDICLICKSPERQUARTER / 0.25) / nl
+        if int(m * 1000) != int(m)*1000:
+            print_debug(f'Note length {nl} does not divide by {nl} nicely into MIDICLICKSPERQUARTER {MIDICLICKSPERQUARTER} ... {m}')
+        else:
+            m = int(m)
+            if m == 0:
+                print_debug(f'Note length {nl} gives midi click value of 0')
+            else:
+                midi_2_note_lengths[m] = ( str(nl), 1.0 / nl )
+            # fi
+        # fi
+
+        # dotted note lengths.
+        md = ((MIDICLICKSPERQUARTER / 0.25) / nl) * 1.5
+        if int(md * 1000) != int(md)*1000:
+            print_debug(f'Note length {nl}d does not divide nicely into MIDICLICKSPERQUARTER {MIDICLICKSPERQUARTER}  ... {md}')
+        else:
+            md = int(md)
+            if md == 0:
+                print_debug(f'Note length {nl} gives midi click value of 0')
+            elif md not in midi_2_note_lengths:
+                midi_2_note_lengths[md] = ( str(nl) + 'd', (1.0/nl)*1.5 )
+            else:
+                print_debug(f'Note length {nl}d has clicks {md} already in array as {midi_2_note_lengths[md]}')
+            # fi
+        # fi
+
+        # double dotted note lengths.
+        mdd = ((MIDICLICKSPERQUARTER / 0.25) / nl) * 1.5 * 1.5
+        if int(mdd * 1000) != int(mdd)*1000:
+            print_debug(f'Note length {nl}dd does not divide nicely into MIDICLICKSPERQUARTER {MIDICLICKSPERQUARTER}  ... {mdd}')
+        else:
+            mdd = int(mdd)
+            if mdd == 0:
+                print_debug(f'Note length {nl} gives midi click value of 0')
+            elif mdd not in midi_2_note_lengths:
+                midi_2_note_lengths[mdd] = ( str(nl) + 'd' + 'd', (1.0/nl)*1.5*1.5 )
+            else:
+                print_debug(f'Note length {nl}dd has clicks {mdd} already in array as {midi_2_note_lengths[mdd]}')
+            # fi
+        # fi
+    # rof
+#++     ml = list(midi_2_note_lengths.keys())
+#++     ml.sort()
+#++     for n in ml:
+#++         print_debug(f'midi_2_note_lengths - {n} -> {midi_2_note_lengths[n]}')
+#++     # rof
+# End of do_note_length_calculate
+
+# ----------------------------------------------------------------------------
 # FF 58 04 nn dd cc bb Time Signature
 # The time signature is expressed as four numbers. nn and dd represent the numerator
 # and denominator of the time signature as it would be notated. The denominator
@@ -221,6 +287,7 @@ def process_echo_lines(q):
         voices = int(r[0])
         MIDICLICKSPERQUARTER = int(r[1])
         print_debug(f'process_echo_lines - Header: voices="{voices} MIDICLICKSPERQUARTER={MIDICLICKSPERQUARTER}"')
+        do_note_length_calculate()
         return
     # fi
     if q[0:7] == '"Title ':
@@ -326,30 +393,46 @@ def process_header_lines(q):
 # End of process_header_lines
 
 # ----------------------------------------------------------------------------
-#--             elif strg[0:5] == 'echo ':           # echo 'measure xxx'
-#--                 if strg[0:6] == 'echo "':
-#--                     print_fs(f'{strg}')
-#--                 elif strg != fs_other_echo:
-#--                     strg1 = strg.replace('"', "'")
-#--                     if strg1[0:11] == 'echo meter ':
-#-- #--                         print_fs(f'echo "meter {meter_readable(strg1[11:])}"')
-#--                         print_fs(f'echo "meter {strg1[11:]}"')
-#--                     elif strg1[0:9] == 'echo key ':
-#--                         x = strg1[9:]
-#--                         y = x.split(' ', 1)          # Key number.
-#--                         x = y[1]
-#--                         y = int(y[0].replace(',', '').strip())
-#--                         if y in key_sig_int:
-#--                             y = key_sig_int[y].upper()
-#--                         # fi
-#--                         print_fs(f'echo "key {y} {x}"')
-#--                     elif strg1[0:13] == 'echo Title_t ':
-#--                         print_fs(f'echo "Title {strg1[13:]}"')
-#--                     elif strg != fs_other_echo:
-#--                         print_fs(f'echo "{strg1[5:]}"')
-#--                     # fi
-#--                     fs_other_echo = strg
-#--                 # fi
+def get_time_for_note(v4):
+    global midi_2_note_lengths
+
+    t = round(v4)
+    ml = list(midi_2_note_lengths.keys())
+    if t in midi_2_note_lengths:
+        print_debug(f'process_sleep - {t} is length {midi_2_note_lengths[t]}')
+    else:
+        ml = list(midi_2_note_lengths.keys())
+        ml.sort()
+        flagless = None
+        printed = False
+        for n in ml:
+            if t < n:
+                if flagless is None:
+                    print_warning(f'process_sleep - {t}:[{v4}] less than smallest value {n}->{midi_2_note_lengths[n]}')
+                else:
+#--                     print_warning(f'process_sleep - {flagless}->{midi_2_note_lengths[flagless]} < {t}:[{v4}] < {n}->{midi_2_note_lengths[n]}')
+                    low = t - flagless
+                    high = n - t
+                    if low < high:
+                        print_warning(f'#A process_sleep - {flagless}->{midi_2_note_lengths[flagless]} less than {t}:[{v4}] by {low}')
+                        t = flagless
+                    else:
+                        print_warning(f'#B process_sleep - {n}->{midi_2_note_lengths[n]} greater than {t}:[{v4}] by {high}')
+                        t = n
+                    # fi
+                # fi
+                printed = True
+                break
+            # fi
+            flagless = n
+        # rof
+        if not printed:
+            print_warning(f'process_sleep - {t}:[{v3}] > largest value {flagless}->{midi_2_note_lengths[flagless]}')
+        # fi
+    # fi
+# End of get_time_for_note
+
+# ----------------------------------------------------------------------------
 #--             elif strg[0:3] == 'cc ':
 #--                 break
 #--             elif strg[0:8] == 'noteoff ':
@@ -359,7 +442,6 @@ def process_header_lines(q):
 #--                 h = strg[7:].split(', ')
 #--                 break
 #--             # fi
-
 # ----------------------------------------------------------------------------
 #-- global voices                       # Number of voices
 #-- voices = 1
@@ -405,20 +487,22 @@ def process_noteon(r):
     # We need the time of various notes.
     # Check if note is already on, if so, then need new voice created for instrument/etc.
     #   and then turn note on. Fun in noteoff. :)
-#++    print_die('NOTDONEYET - noteon')
+    print_debug('NOTDONEYET - noteon')
 # End of process_noteon
 
 # -----------------------------------------------------------------------------
 def process_noteoff(r):
-    a = r[1].split()
+    global voices
+
+    a = r.split()
     if len(a) != 3:
         print_error(f'noteoff line needs 3 arguments, not {len(a)} - {r}.')
         return
     # fi
-    if a[0] > voices:
-        voices = v[0]
+    if int(a[0]) > voices:
+        voices = int(v[0])
     # fi
-    print_die('NOTDONEYET - noteoff')
+    print_debug('NOTDONEYET - noteoff')
 # End of process_noteoff
 
 # -----------------------------------------------------------------------------
@@ -426,49 +510,20 @@ def process_sleep(r):
     global tempo_s
     global tempo_l
 
-#--     if current_time >= 0 and (min_next - current_time) != 0:
-#--         ms_1000 = float(min_next - current_time)
-#--         if ms_1000 < default_little_time:
-#--             ms_1000 = default_little_time
-#--         else:
-#--             # 480 => 250
-#--             ms_1000 = ms_1000 * 1000.0
-#--             ms_1000 = ms_1000 / ((float(tempo_s)/60.0) * (float(tempo_l) * 4.0))
-#--             ms_1000 = int((ms_1000 / MIDICLICKSPERQUARTER) * 1000)
-#--             ms_1000 = float(ms_1000) / 1000.0
-#--         # fi
-#--         print_fs(f'sleep {ms_1000}')
-#--     # fi
-#   r = sleep value.
 # Want note length value.
     v1= float(r) * 1000
-    print_debug(f'v1={v1} = {r}*1000')
     v2 = (v1 * MIDICLICKSPERQUARTER) / 1000
-    print_debug(f'v2={v2} = ({v1} * {MIDICLICKSPERQUARTER}) / 1000')
     v3 = v2 * ((tempo_s / 60) * (tempo_l * 4))
-    print_debug(f'v3={v3} = {v2} * (({tempo_s} / 60) * ({tempo_l} * 4))')
     v4 = v3 / 1000
-    print_debug(f'v4={v4} = {v3} / 1000')
 
-    print_die('NOTDONEYET - sleep')
+    get_time_for_note(v4)
+
+    print_debug('NOTDONEYET - sleep')
 # End of process_sleep
 
-# DEBUG - process_echo_lines - Header: voices="2 MIDICLICKSPERQUARTER=480"
-# DEBUG - process_echo_lines - q=""tempo_s=150 tempo_l=0.25""
-# DEBUG - process_echo_lines - comments: comments=""tempo_s=150 tempo_l=0.25""
-# DEBUG - process_header_lines - q="['echo', '"meter 1 2 48 8"']"
-# DEBUG - process_echo_lines - q=""meter 1 2 48 8""
-# DEBUG - process_echo_lines - meter: meter_previous=""meter 1 2 48 8"" meter_default=1/4
-# DEBUG - process_header_lines - q="['select', '0 1 0 73']"
-# DEBUG - process_note_lines - "['noteon', '0 74 95']"
-# DEBUG - process_note_lines - "['sleep', '400.000']"
-# DEBUG - v1=400000.0 = 400.000*1000
-# DEBUG - v2=192000.0 = (400000.0 * 480) / 1000
-# DEBUG - v3=192000.0 = 192000.0 * ((60 / 60) * (0.25 * 4))
-# DEBUG - v4=192.0 = 192000.0 / 1000
 # -----------------------------------------------------------------------------
 def process_cc(r):
-    print_die('NOTDONEYET - cc')
+    print_debug('NOTDONEYET - cc')
 # End of process_sleep
 
 # -----------------------------------------------------------------------------
@@ -480,7 +535,7 @@ def process_note_lines(q):
         process_noteon(q[1])
         return
     elif q[0] == 'echo':
-        process_noteon(q[1])
+        process_echo_lines(q[1])
         return
     elif q[0] == 'noteoff':
         process_noteoff(q[1])
@@ -494,7 +549,7 @@ def process_note_lines(q):
     else:
         print_error(f'NOTDONEYET - Unexpected command ({q[0]}) in FS input')
     # fi
-    print_die('NOTDONEYET - process_note_lines')
+    print_debug('NOTDONEYET - process_note_lines')
 # End of process_note_lines
 
 # ----------------------------------------------------------------------------
