@@ -8,23 +8,23 @@ import re
 import readline
 import sys
 # ----------------------------------------------------------------------------
-global errors_happened
+global errors_happened              # Count of number of errors that occurred.
 errors_happened = 0
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-global which_file_in
+global which_file_in                # Input file name (default to stdin).
 which_file_in = 'stdin'
-global linecount
+global linecount                    # Line number from input file
 linecount = 0
-global which_file_out
+global which_file_out               # Output file name (default to stdout).
 which_file_out = 'stdout'
-global which_file_hint
+global which_file_hint              # Hint file name.                       -- NOTDONEYET
 which_file_hint = 'None'
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global input_file                   # File to read for input (default is use tty - stdin).
 input_file = None
 global output_file                  # File to print to (default is sys.stdout).
 output_file = sys.stdout
-global hint_file                    # File to print to (default is None).
+global hint_file                    # File for hints (default is None).     -- NOTDONEYET
 hint_file = None
 # ----------------------------------------------------------------------------
 def print_stderr(strg):
@@ -40,6 +40,9 @@ def print_debug(strg):
 
 # ----------------------------------------------------------------------------
 def print_error(strg):
+    global errors_happened          # Count of number of errors that occurred.
+
+    errors_happened = errors_happened + 1
     print_stderr('ERROR - ' + strg)
     return
 # End of print_error
@@ -106,12 +109,17 @@ global voices                       # Number of voices
 voices = 1
 global measure
 measure = 1                         # Start measure at number 1.
+# ----------------------------------------------------------------------------
+MAXVOICES = 256
+# ----------------------------------------------------------------------------
 global MIDICLICKSPERQUARTER
 MIDICLICKSPERQUARTER = 480.0
 global tempo_s                      # 60 beats per quarter note.
 tempo_s = 60
 global tempo_l
 tempo_l = 0.25
+global running_time
+running_time = 0.0                  # Nothing yet.
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global no_notes_yet
 no_notes_yet = True
@@ -128,36 +136,58 @@ global key_previous
 key_previous = None
 global meter_previous
 meter_previous = None
-global instrument_bank          # Indexed by voice number.
+global instrument_bank              # Indexed by voice number.
 instrument_bank = {}
-global instrument_number        # Indexed by voice number.
+global instrument_number            # Indexed by voice number.
 instrument_number = {}
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global measures_length              # The length of measure (by voice).
-measures_length = {}                # measures_length[m][v] = floating_number
+measures_length = {}                # measures_length[v] = floating_number
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+global bufs_notes_voices            # Voices for chords on this voice.
+bufs_notes_voices = {}
 global bufs_notes                   # Midi note number. An array indexed by measure, voice.
-bufs_notes = {}                     # bufs_notes[m][v] = []             Midi note number.
-global bufs_notes_length            # length of this note. An array indexed by measure.
-bufs_notes_length = {}              # bufs_notes_length[m][v] = []      Added to by multiple sleeps.
-global bufs_tie                     # If this note is tied to next measure. An array indexed by measure.
-bufs_tie = {}                       # bufs_tie[m][v] = []               True/False
-global bufs_velocity                # Velocity for this note.
-bufs_velocity = {}                  # bufs_velocity[m][v] = []          0-127
-global bufs_cc_10                   # Volume for this note.
-bufs_cc_10 = {}                     # bufs_cc_10[m][v] = []             0-127
-global bufs_cc_10_cresc             # If volume is cresc/dimin for this note.
-bufs_cc_10_cresc = {}               # bufs_cc_10_cresc[m][v] = []       True/False
-global bufs_cc_7                    # Intensity for this note.
-bufs_cc_7 = {}                      # bufs_cc_7[m][v] = []              0-127
-global bufs_cc_7_cresc              # If volume is cresc/dimin for this note.
-bufs_cc_7_cresc = {}                # bufs_cc_7_cresc[m][v] = []        True/False
+bufs_notes = {}                     # bufs_notes[v] = []             Midi note number.
+global bufs_notes_start             # calculated clicks to start of each note for a voice.
+bufs_notes_start = {}
+global bufs_notes_end               # calculated clicks to end of each note for a voice.
+bufs_notes_end = {}                 #   Used to recognize 'chords'.
+global bufs_notes_velocity          # The intensity of note start. (Typically the total volume. *sigh*)
+bufs_notes_velocity = {}
+global bufs_cc_start                # [voice][cc#]      time in clicks when CC occurred.
+bufs_cc_start = {}
+global last_cc                      # If doing a note, the last_cc. NOTE: defaults for 7,10,11,64,68,91.
+last_cc = {}
+for v in range(0,MAXVOICES):        # Voices if multiple turned on, run to alternative.
+    bufs_notes_voices[v] = [v]      # Start with 1:1 voice to chord voice. Note: voices global set with Header -> max.
+    bufs_notes[v] = []              # No notes yet.
+    bufs_notes_start[v] = []        # No starting time click time for notes.
+    bufs_notes_end[v] = []          # No ending time click time for notes.
+    bufs_notes_velocity[v] = []     # No note start intensity volume levels.
+    bufs_cc_start[v] = []           # No starting cc's.
+    for cc in range(0, 127):
+        bufs_cc_start[v][cc] = []   # No starting cc's.
+        if cc == 7:
+            last_cc[cc] = 100       # default_volume variable.
+        elif cc == 10:
+            last_cc[cc] = 64        # default_pan variable.
+        elif cc == 11:
+            last_cc[cc] = 100       # default_intensity variable.
+        elif cc == 64:
+            last_cc[cc] = 0         # damper off.
+        elif cc == 68:
+            last_cc[cc] = 0         # legato off.
+        elif cc == 91:
+            last_cc[cc] = 0         # reverb none.
+        else:
+            last_cc[cc] = 0         # Otherwise intialize to 0.
+        # fi
+    # rof
+# rof
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global array_of_original_lines      # For input, have an array of the original lines.
 array_of_original_lines = []
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-# NOTDONEYET - gcs output.
-#-- global array_of_gcs                 # For gcs first pass output.
-#-- array_of_gcs = []
 # ----------------------------------------------------------------------------
 #-- # Following does not do multiple sharps or flats, but that is crazy anyway. Neither naturals.
 #-- global key_sig
@@ -351,7 +381,7 @@ def process_echo_lines(q):
 
 # ----------------------------------------------------------------------------
 global header_commands_ignore
-header_commands_ignore = [ 'set', 'unload', 'load', 'reset', 'prog', 'sleep', 'pitch_bend' ]
+header_commands_ignore = [ 'set', 'unload', 'load', 'reset', 'prog', 'pitch_bend' ]
 
 def process_header_lines(q):
     global header_commands_ignore
@@ -363,6 +393,8 @@ def process_header_lines(q):
         return
     elif q[0] == 'echo':
         process_echo_lines(q[1])
+    elif q[0] == 'sleep':
+        process_sleep(q[1])
     elif q[0] == 'select':
         a = q[1].split()
         if len(a) < 1 or len(a) > 4:
@@ -399,35 +431,35 @@ def get_time_for_note(v4):
     t = round(v4)
     ml = list(midi_2_note_lengths.keys())
     if t in midi_2_note_lengths:
-        print_debug(f'process_sleep - {t} is length {midi_2_note_lengths[t]}')
+        print_debug(f'get_time_for_note - {t} is length {midi_2_note_lengths[t]}')
     else:
         ml = list(midi_2_note_lengths.keys())
         ml.sort()
         flagless = None
-        printed = False
+        foundit = False
         for n in ml:
             if t < n:
                 if flagless is None:
-                    print_warning(f'process_sleep - {t}:[{v4}] less than smallest value {n}->{midi_2_note_lengths[n]}')
+                    print_warning(f'get_time_for_note - {t}:[{v4}] less than smallest value {n}->{midi_2_note_lengths[n]}')
                 else:
-#--                     print_warning(f'process_sleep - {flagless}->{midi_2_note_lengths[flagless]} < {t}:[{v4}] < {n}->{midi_2_note_lengths[n]}')
+#--                     print_warning(f'get_time_for_note - {flagless}->{midi_2_note_lengths[flagless]} < {t}:[{v4}] < {n}->{midi_2_note_lengths[n]}')
                     low = t - flagless
                     high = n - t
                     if low < high:
-                        print_warning(f'#A process_sleep - {flagless}->{midi_2_note_lengths[flagless]} less than {t}:[{v4}] by {low}')
+                        print_warning(f'#A get_time_for_note - {flagless}->{midi_2_note_lengths[flagless]} less than {t}:[{v4}] by {low}')
                         t = flagless
                     else:
-                        print_warning(f'#B process_sleep - {n}->{midi_2_note_lengths[n]} greater than {t}:[{v4}] by {high}')
+                        print_warning(f'#B get_time_for_note - {n}->{midi_2_note_lengths[n]} greater than {t}:[{v4}] by {high}')
                         t = n
                     # fi
                 # fi
-                printed = True
+                foundit = True
                 break
             # fi
             flagless = n
         # rof
-        if not printed:
-            print_warning(f'process_sleep - {t}:[{v3}] > largest value {flagless}->{midi_2_note_lengths[flagless]}')
+        if not foundit:
+            print_warning(f'get_time_for_note - {t}:[{v3}] > largest value {flagless}->{midi_2_note_lengths[flagless]}')
         # fi
     # fi
 # End of get_time_for_note
@@ -448,45 +480,99 @@ def get_time_for_note(v4):
 #-- # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 #-- global measure
 #-- measure = 1                         # Start measure at number 1.
-#-- # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 #-- global measures_length              # The length of measure (by voice).
-#-- measures_length = {}                # measures_length[m][v] = floating_number
+#-- measures_length = {}                # measures_length[v] = floating_number
+#-- # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 #-- global bufs_notes                   # Midi note number. An array indexed by measure, voice.
-#-- bufs_notes = {}                     # bufs_notes[m][v] = []             Midi note number.
+#-- bufs_notes = {}                     # bufs_notes[v] = []                Midi note number.
 #-- global bufs_notes_length            # length of this note. An array indexed by measure.
-#-- bufs_notes_length = {}              # bufs_notes_length[m][v] = []      Added to by multiple sleeps.
+#-- bufs_notes_length = {}              # bufs_notes_length[v] = []         Added to by multiple sleeps.
 #-- global bufs_tie                     # If this note is tied to next measure. An array indexed by measure.
-#-- bufs_tie = {}                       # bufs_tie[m][v] = []               True/False
+#-- bufs_tie = {}                       # bufs_tie[v] = []                  True/False
 #-- global bufs_velocity                # Velocity for this note.
-#-- bufs_velocity = {}                  # bufs_velocity[m][v] = []          0-127
+#-- bufs_velocity = {}                  # bufs_velocity[v] = []             0-127
 #-- global bufs_cc_10                   # Volume for this note.
-#-- bufs_cc_10 = {}                     # bufs_cc_10[m][v] = []             0-127
+#-- bufs_cc_10 = {}                     # bufs_cc_10[v] = []                0-127
 #-- global bufs_cc_10_cresc             # If volume is cresc/dimin for this note.
-#-- bufs_cc_10_cresc = {}               # bufs_cc_10_cresc[m][v] = []       True/False
+#-- bufs_cc_10_cresc = {}               # bufs_cc_10_cresc[v] = []          True/False
 #-- global bufs_cc_7                    # Intensity for this note.
-#-- bufs_cc_7 = {}                      # bufs_cc_7[m][v] = []              0-127
+#-- bufs_cc_7 = {}                      # bufs_cc_7[v] = []                 0 -127
 #-- global bufs_cc_7_cresc              # If volume is cresc/dimin for this note.
-#-- bufs_cc_7_cresc = {}                # bufs_cc_7_cresc[m][v] = []        True/False
+#-- bufs_cc_7_cresc = {}                # bufs_cc_7_cresc[v] = []           True/False
 # -----------------------------------------------------------------------------
 def process_noteon(r):
     global voices
+    global running_time
+    global bufs_notes_voices
+    global bufs_notes                   # Midi note number. An array indexed by measure, voice.
+    global bufs_notes_start
+    global bufs_notes_end
+    global bufs_notes_velocity
+    global bufs_notes_cc10_start
+    global bufs_notes_cc10_end
+    global bufs_notes_cc7_start
+    global bufs_notes_cc7_end
+    global bufs_notes_cc11_start
+    global bufs_notes_cc11_end
+    global bufs_notes_cc64
+    global bufs_notes_cc68
+    global bufs_notes_cc91
+    global bufs_notes_cc7
+    global bufs_notes_cc11
+    global last_cc10
+    global last_cc7
+    global last_cc11
+    global last_cc64
+    global last_cc68
+    global last_cc91
 
     a = r.split()
     if len(a) != 3:
         print_error(f'noteon line needs 3 arguments, not {len(a)} - {r}.')
         return
     # fi
-    if a[2] == 0:
+    v = int(a[0])
+    n = int(a[1])
+    i = int(a[2])
+    if i == 0:
         process_noteoff(r)
         return
     # fi
-    if int(a[0]) > voices:
-        voices = int(a[0])
+    if v > voices:
+        voices = v
     # fi
     # Okay, we have the voice and the note, and somehow calculated the current 'time'.
-    # We need the time of various notes.
-    # Check if note is already on, if so, then need new voice created for instrument/etc.
-    #   and then turn note on. Fun in noteoff. :)
+
+    # determine which real voice to use... if chords.
+    flag = False
+    print_debug(f'process_noteon - v={v}  bufs_notes_voices[v]={bufs_notes_voices[v]}')
+    for v2s in bufs_notes_voices[v]:
+        if v2s in bufs_notes_end and len(bufs_notes_end[v2s]) > 0 and bufs_notes_end[v2s][-1] != 0:
+            continue
+        # fi
+        flag = v2s
+        break
+    # rof
+    if flag is False:                                   # Need a new voice for chord.
+        voices = voices + 1
+        bufs_notes_voices[v].append(voices)
+        v2s = voices
+    # fi
+
+    bufs_notes[v2s].append(n)
+    bufs_notes_start[v2s].append(running_time)          # Starting time for note.
+    bufs_notes_end[v2s].append(0)                       # No ending time note.
+    bufs_notes_velocity[v2s].append(i)                  # Note start intensity volume level.
+    bufs_notes_cc10_start[v2s].append(last_cc10[v2s])   # Starting cc10 (pan) level.
+    bufs_notes_cc10_end[v2s].append(last_cc10[v2s])     # Ending cc10 (pan) level.
+    bufs_notes_cc7_start[v2s].append(last_cc7[v2s])     # Starting cc7 (volume) level.
+    bufs_notes_cc7_end[v2s].append(last_cc7[v2s])       # Ending cc7 (volume) level.
+    bufs_notes_cc11_start[v2s].append(last_cc11[v2s])   # Starting cc11 (intensity) level.
+    bufs_notes_cc11_end[v2s].append(last_cc11[v2s])     # Ending cc11 (intensity) level.
+    bufs_notes_cc64[v2s].append(last_cc64[v2s])         # cc64 (Damper) on/off.
+    bufs_notes_cc68[v2s].append(last_cc68[v2s])         # cc68 (Legato) on/off.
+    bufs_notes_cc91[v2s].append(last_cc91[v2s])         # cc91 (Reverb) level.
+
     print_debug('NOTDONEYET - noteon')
 # End of process_noteon
 
@@ -506,25 +592,29 @@ def process_noteoff(r):
 # End of process_noteoff
 
 # -----------------------------------------------------------------------------
+#++    if not no_notes_yet:
+#++        get_time_for_note(v4)
+#++    # fi
+# -----------------------------------------------------------------------------
+
 def process_sleep(r):
     global tempo_s
     global tempo_l
+    global running_time
 
 # Want note length value.
     v1= float(r) * 1000
     v2 = (v1 * MIDICLICKSPERQUARTER) / 1000
     v3 = v2 * ((tempo_s / 60) * (tempo_l * 4))
     v4 = v3 / 1000
-
-    get_time_for_note(v4)
-
-    print_debug('NOTDONEYET - sleep')
+    running_time = running_time + v4
+#--     print_debug(f'process_sleep - running_time={running_time}')
 # End of process_sleep
 
 # -----------------------------------------------------------------------------
 def process_cc(r):
     print_debug('NOTDONEYET - cc')
-# End of process_sleep
+# End of process_cc
 
 # -----------------------------------------------------------------------------
 def process_note_lines(q):
@@ -633,6 +723,9 @@ def read_next_line():
             # fi
         # fi
         if line is None or line == '':
+            if errors_happened != 0:
+                print_stderr(f'exiting with errors_happened={errors_happened}')
+            # fi
             sys.exit(errors_happened)
         # fi
         linecount = linecount + 1
@@ -709,6 +802,9 @@ def main():
         # fi
         if len(args.rest) > 3:              # Too many.
             print_error(f'Too many arguments, input, output, hint only. {args.rest}')
+            if errors_happened != 0:
+                print_stderr(f'exiting with errors_happened={errors_happened}')
+            # fi
             sys.exit(1)
         # fi
     # fi
@@ -731,6 +827,9 @@ if __name__ == '__main__':
     main()
 # fi
 # ----------------------------------------------------------------------------
+if errors_happened != 0:
+    print_stderr(f'exiting with errors_happened={errors_happened}')
+# fi
 sys.exit(errors_happened)
 # ----------------------------------------------------------------------------
 # End of program fs2gcs
