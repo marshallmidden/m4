@@ -1,8 +1,5 @@
 #!/usr/bin/python3 -B
 # ----------------------------------------------------------------------------
-# Need keys to have time clicks. (Put inside measures, after/as those are calculated.)
-# Need comments to have time clicks. (Put inside measures, after/as those are calculated.)
-# ----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 # ----------------------------------------------------------------------------
 import argparse
@@ -109,7 +106,7 @@ parse_args()
 
 # ----------------------------------------------------------------------------
 global voices                       # Number of voices
-voices = 1
+voices = 0
 global measure
 measure = 1                         # Start measure at number 1.
 # ----------------------------------------------------------------------------
@@ -128,17 +125,24 @@ global no_notes_yet
 no_notes_yet = True
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global titles
-titles = ''
+titles = []
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global comments
-comments = ''
-global key_default
-key_default = None
-global meter_default
-meter_default = None
-global key_previous
-key_previous = None
-global meter_previous
-meter_previous = None
+comments = []
+global comments_clicks
+comments_clicks = []
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+global key                          # key[voice] = ... .
+key = {}
+global key_clicks                   # key_clicks = running_time.
+key_clicks = {}
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+global meter
+meter = {}
+global meter_clicks
+meter_clicks = {}
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global instrument_bank              # Indexed by voice number.
 instrument_bank = {}
 global instrument_number            # Indexed by voice number.
@@ -308,52 +312,55 @@ def process_echo_lines(q):
     global voices
     global MIDICLICKSPERQUARTER
     global titles
-    global meter_default
-    global meter_previous
-    global key_default
-    global key_previous
+    global running_time
+    global meter
+    global meter_clicks
+    global key
+    global key_clicks
     global comments
+    global comments_clicks
     global tempo_s
     global tempo_l
 
-    print_debug(f'process_echo_lines - q="{q}"')
     if q[0:8] == '"Header ':
         if q[-1] != '"':
             print_error('Header line expected to end with a double quote')
             return
         # fi
         r = q[8:-1].split()
-        voices = int(r[0])
+        voices = int(r[0]) - 1              # Remember 0 is the first one.
         MIDICLICKSPERQUARTER = int(r[1])
-        print_debug(f'process_echo_lines - Header: voices="{voices} MIDICLICKSPERQUARTER={MIDICLICKSPERQUARTER}"')
+#--        print_debug(f'process_echo_lines - Header: voices="{voices} MIDICLICKSPERQUARTER={MIDICLICKSPERQUARTER}"')
         do_note_length_calculate()
         return
     # fi
     if q[0:7] == '"Title ':
-        titles += q[7:]
-        print_debug(f'process_echo_lines - Title: titles="{titles}"')
+        v = q[7:].split(' ', 1)
+#--        print_debug(f'process_echo_lines - v={v}')
+        titles.append(q[7:])
         return
     # fi
     if q[0:7] == '"meter ':
-        if meter_default is not None and meter_previous != q:
-            print_error(f'Did not expect two meter lines - "{meter_previous}" verses "{q[0]}"')
-            return
-        # fi
         if q[-1] != '"':
             print_error('meter line expected to end with a double quote')
             return
         # fi
-        meter_previous = q
-        meter_default = meter_readable(q[7:-1])
-        print_debug(f'process_echo_lines - meter: meter_previous="{meter_previous}" meter_default={meter_default}')
+        vs = q[7:].split(' ', 1)
+        v = int(vs[0])
+#--        print_debug(f'process_echo_lines - meter v={v}')
+        meter_new = meter_readable(vs[1])
+        if v not in meter or meter[v] != meter_new:
+            meter[v] = meter_new
+            meter_clicks[v] = running_time
+        # fi
+#--        print_debug(f'process_echo_lines - meter: meter="{meter[v]}" meter_clicks={meter_clicks[v]}')
         return
     # fi
     if q[0:5] == '"key ':
-        if key_default is not None and key_previous != q:
-            print_error(f'Did not expect two key lines that did not match - "{key_previous}" verses "{q}"')
-            return
-        # fi
-        a = q[5:].split(None)
+        vs = q[5:].split(' ', 1)
+        v = int(vs[0])
+#--        print_debug(f'process_echo_lines - key v={v}')
+        a = vs[1].split(None)
         if len(a) < 2 or len(a) > 4:
             print_error(f'key line expects key followed by "major" not {a}')
             return
@@ -362,13 +369,16 @@ def process_echo_lines(q):
             return
         # fi
         key_previous = q
-        key_default = a[0]
-        print_debug(f'process_echo_lines - key: key_previous="{key_previous}" key_default={key_default}')
+        if v not in key or key[v] != a[0]:
+            key[v] = a[0]
+            key_clicks[v] = running_time
+        # fi
+#--        print_debug(f'process_echo_lines - key: key="{key[v]}" key_clicks={key_clicks[v]}')
         return
     # fi
     if q[0:9] == '"tempo_s=':
 # DEBUG - process_echo_lines - q=""tempo_s=150 tempo_l=0.25""
-        print_debug(f'process_echo_lines - Starting tempo: tempo_s="{tempo_s}" tempo_l={tempo_l}')
+#--        print_debug(f'process_echo_lines - Starting tempo: tempo_s="{tempo_s}" tempo_l={tempo_l}')
         if q[-1] != '"':
             print_error('tempo_s line expected to end with a double quote')
             return
@@ -380,15 +390,12 @@ def process_echo_lines(q):
             return
         # fi
         tempo_l = float(r[1][8:])
-        print_debug(f'process_echo_lines - Ending tempo: tempo_s="{tempo_s}" tempo_l={tempo_l}')
+#--        print_debug(f'process_echo_lines - Ending tempo: tempo_s="{tempo_s}" tempo_l={tempo_l}')
         return
     # fi
-    if comments == '':
-        comments = q
-    else:
-        comments += "\n" + q
-    # fi
-    print_debug(f'process_echo_lines - comments: comments="{comments}"')
+    comments.append(q)
+    comments_clicks.append(running_time)
+#--    print_debug(f'process_echo_lines - comments: comments="{comments}"')
     return
 # End of process_echo_lines
 
@@ -401,7 +408,6 @@ def process_header_lines(q):
     global instrument_bank
     global instrument_number
 
-    print_debug(f'process_header_lines - q="{q}"')
     if q[0] in header_commands_ignore:
         return
     elif q[0] == 'echo':
@@ -517,10 +523,10 @@ def process_noteon(r):
 
     # determine which real voice to use... if chords.
     flag = False
-    print_debug(f'process_noteon - v={v}  bufs_notes_voices[v]={bufs_notes_voices[v]}')
+#--    print_debug(f'process_noteon - v={v}  bufs_notes_voices[v]={bufs_notes_voices[v]}')
     for v2s in bufs_notes_voices[v]:
-        print_debug(f'process_noteon -    bufs_notes_start[v2s]={bufs_notes_start[v2s]} len()={len(bufs_notes_start[v2s])}')
-        print_debug(f'process_noteon -    bufs_notes_end[v2s]={bufs_notes_end[v2s]} len()={len(bufs_notes_end[v2s])}')
+#--        print_debug(f'process_noteon -    bufs_notes_start[v2s]={bufs_notes_start[v2s]} len()={len(bufs_notes_start[v2s])}')
+#--        print_debug(f'process_noteon -    bufs_notes_end[v2s]={bufs_notes_end[v2s]} len()={len(bufs_notes_end[v2s])}')
         if v2s in bufs_notes_end and len(bufs_notes_end[v2s]) > 0 and bufs_notes_end[v2s][-1] == 0:
             continue
         # fi
@@ -543,7 +549,7 @@ def process_noteon(r):
         bufs_cc_end[v2s][cc].append(0)
     # rof
 
-    print_debug_internal_1(f'{linecount} - after - {array_of_original_lines[-1]}')
+#--     print_debug_internal_1(f'{linecount} - after - {array_of_original_lines[-1]}')
 
 # End of process_noteon
 
@@ -585,7 +591,7 @@ def process_noteoff(r):
         bufs_cc_end[v2s][cc][-1] = last_cc[v][cc]
     # rof
 
-    print_debug_internal_1(f'{linecount} - after - {array_of_original_lines[-1]}')
+#--     print_debug_internal_1(f'{linecount} - after - {array_of_original_lines[-1]}')
 
 # End of process_noteoff
 
@@ -626,7 +632,7 @@ def process_cc(r):
 def process_note_lines(q):
     global voices                       # Number of voices
 
-    print_debug(f'process_note_lines - "{q}"')
+#--     print_debug(f'process_note_lines - "{q}"')
     if q[0] == 'noteon':
         process_noteon(q[1])
         return
