@@ -40,7 +40,7 @@ cc 0 65 0
 cc 0 68 0
 cc 0 64 0
 cc 0 91 54
-echo "meter 2 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 2 D 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "bars 12"
@@ -60,7 +60,7 @@ cc 1 65 0
 cc 1 68 0
 cc 1 64 0
 cc 1 91 54
-echo "meter 3 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 3 D 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "voice 3"
@@ -76,7 +76,7 @@ cc 2 65 0
 cc 2 68 0
 cc 2 64 0
 cc 2 91 54
-echo "meter 4 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 4 D 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "voice 4"
@@ -92,7 +92,7 @@ cc 3 65 0
 cc 3 68 0
 cc 3 64 0
 cc 3 91 54
-echo "meter 5 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 5 D 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "voice 5"
@@ -108,7 +108,7 @@ cc 4 65 0
 cc 4 68 0
 cc 4 64 0
 cc 4 91 54
-echo "meter 6 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 6 F 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "voice 6"
@@ -124,7 +124,7 @@ cc 5 65 0
 cc 5 68 0
 cc 5 64 0
 cc 5 91 54
-echo "meter 7 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 7 F 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "voice 7"
@@ -140,7 +140,7 @@ cc 6 65 0
 cc 6 68 0
 cc 6 64 0
 cc 6 91 67
-echo "meter 8 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 8 D 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "voice 8"
@@ -156,7 +156,7 @@ cc 7 65 0
 cc 7 68 0
 cc 7 64 0
 cc 7 91 67
-echo "meter 9 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 9 D 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "voice 9"
@@ -172,7 +172,7 @@ cc 8 65 0
 cc 8 68 0
 cc 8 64 0
 cc 8 91 0
-echo "meter 10 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 10 C 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "voice 10"
@@ -188,7 +188,7 @@ cc 10 65 0
 cc 10 68 0
 cc 10 64 0
 cc 10 91 0
-echo "meter 11 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 11 C 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "voice 11"
@@ -204,7 +204,7 @@ cc 11 65 0
 cc 11 68 0
 cc 11 64 0
 cc 11 91 0
-echo "meter 12 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 12 C 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "voice 12"
@@ -220,7 +220,7 @@ cc 12 65 0
 cc 12 68 0
 cc 12 64 0
 cc 12 91 0
-echo "meter 13 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 13 C 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "voice 13"
@@ -236,7 +236,7 @@ cc 13 65 0
 cc 13 68 0
 cc 13 64 0
 cc 13 91 89
-echo "meter 14 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 14 C 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "voice 14"
@@ -252,7 +252,7 @@ cc 14 65 0
 cc 14 68 0
 cc 14 64 0
 cc 14 91 32
-echo "meter 15 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 15 D 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "voice 15"
@@ -268,7 +268,7 @@ cc 15 65 0
 cc 15 68 0
 cc 15 64 0
 cc 15 91 32
-echo "meter 16 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 16 D 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "voice 16"
@@ -284,7 +284,7 @@ cc 16 65 0
 cc 16 68 0
 cc 16 64 0
 cc 16 91 32
-echo "meter 17 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 17 D 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "measure 2 - $$ Page 40, Top, 2nd"
@@ -301,7 +301,7 @@ cc 17 65 0
 cc 17 68 0
 cc 17 64 0
 cc 17 91 32
-echo "meter 18 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 18 D 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "measure 1 - $$ Page 40, Top, 1st"
@@ -318,7 +318,7 @@ cc 18 65 0
 cc 18 68 0
 cc 18 64 0
 cc 18 91 32
-echo "meter 19 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 19 D 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "voice 19"
@@ -334,7 +334,7 @@ cc 19 65 0
 cc 19 68 0
 cc 19 64 0
 cc 19 91 32
-echo "meter 20 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 20 D 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "measure 2 - $$ Page 40, Top, 2nd"
@@ -351,7 +351,7 @@ cc 20 65 0
 cc 20 68 0
 cc 20 64 0
 cc 20 91 35
-echo "meter 21 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 21 D 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "measure 1 - $$ Page 40, Top, 1st"
@@ -368,7 +368,7 @@ cc 21 65 0
 cc 21 68 0
 cc 21 64 0
 cc 21 91 35
-echo "meter 22 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 22 D 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "voice 22"
@@ -384,7 +384,7 @@ cc 22 65 0
 cc 22 68 0
 cc 22 64 0
 cc 22 91 35
-echo "meter 23 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 23 D 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "voice 23"
@@ -400,7 +400,7 @@ cc 23 65 0
 cc 23 68 0
 cc 23 64 0
 cc 23 91 55
-echo "meter 24 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 24 D 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "voice 24"
@@ -416,7 +416,7 @@ cc 24 65 0
 cc 24 68 0
 cc 24 64 0
 cc 24 91 0
-echo "meter 25 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 25 D 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "measure 2 - $$ Page 40, Top, 2nd"
@@ -433,7 +433,7 @@ cc 25 65 0
 cc 25 68 0
 cc 25 64 0
 cc 25 91 0
-echo "meter 26 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 26 D 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "measure 1 - $$ Page 40, Top, 1st"
@@ -451,7 +451,7 @@ cc 26 65 0
 cc 26 68 0
 cc 26 64 0
 cc 26 91 55
-echo "meter 27 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "key 27 D 'major'"
 echo "tempo_s=300 tempo_l=0.25"
 echo "measure 1 - $$ Page 40, Top, 1st"
@@ -8730,7 +8730,7 @@ noteoff 22 50 0
 noteoff 23 38 0
 sleep 200.0
 sleep 200.0
-echo "meter 2 2 2 48 8"
+echo "meter 2 2 48 8"
 echo "measure 86 - $$ Page 43, Bottom, 1st"
 noteon 0 86 120
 noteon 1 86 120
@@ -8780,7 +8780,7 @@ noteoff 20 62 0
 noteoff 22 50 0
 noteoff 23 38 0
 sleep 200.0
-echo "meter 2 1 2 48 8"
+echo "meter 1 2 48 8"
 echo "bars 15"
 echo "measure 87 - $$ Page 43, Bottom, 2nd"
 noteon 2 74 120
@@ -8791,7 +8791,7 @@ noteon 2 76 120
 noteoff 2 74 0
 cc 2 68 0
 sleep 100.0
-echo "meter 2 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "measure 88 - $$ Page 43, Bottom, 3rd"
 noteoff 2 76 0
 noteon 2 76 120
@@ -9287,7 +9287,7 @@ noteon 7 45 120
 noteon 8 66 120
 noteon 10 59 120
 sleep 200.0
-echo "meter 2 2 2 48 8"
+echo "meter 2 2 48 8"
 echo "measure 86 - $$ Page 43, Bottom, 1st"
 noteoff 2 76 0
 noteoff 3 73 0
@@ -9309,7 +9309,7 @@ noteoff 7 50 0
 noteoff 8 64 0
 noteoff 10 56 0
 sleep 200.0
-echo "meter 2 1 2 48 8"
+echo "meter 1 2 48 8"
 echo "measure 87 - $$ Page 43, Bottom, 2nd"
 noteon 2 74 120
 cc 2 68 127
@@ -9318,7 +9318,7 @@ noteon 2 76 120
 noteoff 2 74 0
 cc 2 68 0
 sleep 100.0
-echo "meter 2 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "measure 88 - $$ Page 43, Bottom, 3rd"
 noteoff 2 76 0
 noteon 2 76 120
@@ -9811,7 +9811,7 @@ noteon 7 45 120
 noteon 8 66 120
 noteon 10 59 120
 sleep 200.0
-echo "meter 2 2 2 48 8"
+echo "meter 2 2 48 8"
 echo "measure 95 - $$ Page 43, Bottom, 10th [Ending 2]"
 noteoff 2 76 0
 noteoff 3 73 0
@@ -9833,7 +9833,7 @@ noteoff 7 50 0
 noteoff 8 64 0
 noteoff 10 56 0
 sleep 200.0
-echo "meter 2 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "* Start of next repeat."
 echo "measure 96 - $$ Page 43, Bottom, 11th"
 noteon 2 74 120
@@ -21135,7 +21135,7 @@ noteoff 22 50 0
 noteoff 23 38 0
 sleep 200.0
 sleep 200.0
-echo "meter 2 2 2 48 8"
+echo "meter 2 2 48 8"
 echo "measure 86 - $$ Page 43, Bottom, 1st"
 noteon 0 86 120
 noteon 1 86 120
@@ -21183,7 +21183,7 @@ noteoff 20 62 0
 noteoff 22 50 0
 noteoff 23 38 0
 sleep 200.0
-echo "meter 2 1 2 48 8"
+echo "meter 1 2 48 8"
 echo "measure 87 - $$ Page 43, Bottom, 2nd"
 noteon 2 74 120
 cc 2 68 127
@@ -21193,7 +21193,7 @@ noteon 2 76 120
 noteoff 2 74 0
 cc 2 68 0
 sleep 100.0
-echo "meter 2 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "measure 88 - $$ Page 43, Bottom, 3rd"
 noteoff 2 76 0
 noteon 2 76 120
@@ -21689,7 +21689,7 @@ noteon 7 45 120
 noteon 8 66 120
 noteon 10 59 120
 sleep 200.0
-echo "meter 2 2 2 48 8"
+echo "meter 2 2 48 8"
 echo "measure 86 - $$ Page 43, Bottom, 1st"
 noteoff 2 76 0
 noteoff 3 73 0
@@ -21711,7 +21711,7 @@ noteoff 7 50 0
 noteoff 8 64 0
 noteoff 10 56 0
 sleep 200.0
-echo "meter 2 1 2 48 8"
+echo "meter 1 2 48 8"
 echo "measure 87 - $$ Page 43, Bottom, 2nd"
 noteon 2 74 120
 cc 2 68 127
@@ -21720,7 +21720,7 @@ noteon 2 76 120
 noteoff 2 74 0
 cc 2 68 0
 sleep 100.0
-echo "meter 2 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "measure 88 - $$ Page 43, Bottom, 3rd"
 noteoff 2 76 0
 noteon 2 76 120
@@ -22213,7 +22213,7 @@ noteon 7 45 120
 noteon 8 66 120
 noteon 10 59 120
 sleep 200.0
-echo "meter 2 2 2 48 8"
+echo "meter 2 2 48 8"
 echo "measure 95 - $$ Page 43, Bottom, 10th [Ending 2]"
 noteoff 2 76 0
 noteoff 3 73 0
@@ -22235,7 +22235,7 @@ noteoff 7 50 0
 noteoff 8 64 0
 noteoff 10 56 0
 sleep 200.0
-echo "meter 2 3 2 48 8"
+echo "meter 3 2 48 8"
 echo "measure 96 - $$ Page 43, Bottom, 11th"
 noteon 2 74 120
 noteon 3 74 120

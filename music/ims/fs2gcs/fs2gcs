@@ -107,8 +107,6 @@ parse_args()
 # ----------------------------------------------------------------------------
 global voices                       # Number of voices
 voices = 0
-#-- global measure
-#-- measure = 1                         # Start measure at number 1.
 # ----------------------------------------------------------------------------
 MAXVOICES = 256
 # ----------------------------------------------------------------------------
@@ -116,9 +114,11 @@ global MIDICLICKSPERQUARTER
 MIDICLICKSPERQUARTER = 480.0
 global tempo_s                      # 60 beats per quarter note.
 tempo_s = 60
-global tempo_l
+global tempo_l                      # The quarter note for tempo beats.
 tempo_l = 0.25
-global running_time
+global first_note_time              # When the first note starts.
+first_note_time = 0                 # Nothing yet.
+global running_time                 # The running time for 'sleep'. At end, it is the end.
 running_time = 0                    # Nothing yet.
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global no_notes_yet
@@ -137,19 +137,18 @@ key = {}
 global key_clicks                   # key_clicks = running_time.
 key_clicks = {}
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-global meter
-meter = {}
-global meter_clicks
-meter_clicks = {}
+global meter                        # printable meter
+meter = []
+global meter_fractions              # MIDICLICKSPERQUARTER*4 * meter_fraction (clicks per measure)
+meter_fractions = []
+global meter_clicks                 # Where in running clicks meter occurred.
+meter_clicks = []
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global instrument_bank              # Indexed by voice number.
 instrument_bank = {}
 global instrument_number            # Indexed by voice number.
 instrument_number = {}
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-#-- global measures_length              # The length of measure (by voice).
-#-- measures_length = {}                # measures_length[v] = floating_number
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global bufs_notes_voices            # Voices for chords on this voice.
 bufs_notes_voices = {}
@@ -277,6 +276,51 @@ def do_note_length_calculate():
 # End of do_note_length_calculate
 
 # ----------------------------------------------------------------------------
+def figure_out_measure_locations():
+    global no_notes_yet
+    global voices
+    global bufs_notes_voices
+    global bufs_notes
+    global bufs_notes_start
+    global bufs_notes_end
+    global bufs_notes_velocity
+    global bufs_cc_start
+    global bufs_cc_end
+
+    global first_note_time
+    global running_time
+    global meter
+    global meter_fractions
+    global meter_clicks
+    global last_measure
+    global measures_length
+    measures_length = {}                # measures_length[#] = delta clicks
+
+    if not no_note_yet:
+        print_error('No notes found.')
+        sys.exit(errors_happened)
+    # fi
+
+    working_time = first_note_time
+    last_measure = 1                    # Start measure at number 1.
+meter[]
+meter_fractions[]
+meter_clicks[]
+    mc = ?? 
+    while working_time < running_time:
+        measures_length[last_measure]  = working_time
+        working_time = working_time + 
+    # elihw
+
+    for v in range(0,voices+1):         # Voices if multiple turned on, run to alternative.
+        print_debug(f'{stg}: bufs_notes_voices[{v}]={bufs_notes_voices[v]}')
+        for n in range(0, len(bufs_notes[v])):
+            print_debug(f'    {bufs_notes[v][n]:2} {bufs_notes_velocity[v][n]:3} {bufs_notes_start[v][n]:7} {bufs_notes_end[v][n]:7} cc7={bufs_cc_start[v][7][n]:3}-{bufs_cc_end[v][7][n]:3} cc10={bufs_cc_start[v][10][n]:3}-{bufs_cc_end[v][10][n]:3} cc11={bufs_cc_start[v][11][n]:3}-{bufs_cc_end[v][11][n]:3} cc64={bufs_cc_start[v][64][n]:3}-{bufs_cc_end[v][64][n]:3} cc65={bufs_cc_start[v][65][n]:3}-{bufs_cc_end[v][65][n]:3} cc91={bufs_cc_start[v][91][n]:3}-{bufs_cc_end[v][91][n]:3}')
+        # rof
+    # rof
+# End of figure_out_measure_locations
+
+# ----------------------------------------------------------------------------
 # FF 58 04 nn dd cc bb Time Signature
 # The time signature is expressed as four numbers. nn and dd represent the numerator
 # and denominator of the time signature as it would be notated. The denominator
@@ -304,8 +348,8 @@ def meter_readable(strg):
     # fi
     numerator = int(s[0])
     denominator = 2 ** int(s[1])
-    return f'{numerator}/{denominator}'
-# End of print_out_midi1csv_ts
+    return f'{numerator}/{denominator}', float(numerator)/float(denominator)
+# End of meter_readable
 
 # ----------------------------------------------------------------------------
 def process_echo_lines(q):
@@ -314,6 +358,7 @@ def process_echo_lines(q):
     global titles
     global running_time
     global meter
+    global meter_fractions
     global meter_clicks
     global key
     global key_clicks
@@ -331,6 +376,11 @@ def process_echo_lines(q):
         voices = int(r[0]) - 1              # Remember 0 is the first one.
         MIDICLICKSPERQUARTER = int(r[1])
 #--        print_debug(f'process_echo_lines - Header: voices="{voices} MIDICLICKSPERQUARTER={MIDICLICKSPERQUARTER}"')
+        if meter == []:
+            meter.append('4/4')
+            meter_fractions.append(MIDICLICKSPERQUARTER * 4)
+            meter_clicks.append(running_time)
+        # fi
         do_note_length_calculate()
         return
     # fi
@@ -346,14 +396,14 @@ def process_echo_lines(q):
             return
         # fi
         vs = q[7:].split(' ', 1)
-        v = int(vs[0])
-#--        print_debug(f'process_echo_lines - meter v={v}')
-        meter_new = meter_readable(vs[1])
-        if v not in meter or meter[v] != meter_new:
-            meter[v] = meter_new
-            meter_clicks[v] = running_time
+#--        print_debug(f'process_echo_lines - meter vs={vs}')
+        meter_new, meter_new_fraction = meter_readable(vs[0])
+        if meter != [] and meter[-1] != meter_new:
+            meter.append(meter_new)
+            meter_fractions.append(MIDICLICKSPERQUARTER*4 * meter_new_fraction)
+            meter_clicks.append(running_time)
         # fi
-#--        print_debug(f'process_echo_lines - meter: meter="{meter[v]}" meter_clicks={meter_clicks[v]}')
+#--        print_debug(f'process_echo_lines - meter: meter="{meter}" meter_clicks={meter_clicks} meter_fractions={meter_fractions}')
         return
     # fi
     if q[0:5] == '"key ':
@@ -696,9 +746,9 @@ def process_line(original_line):
         if q[0] != 'noteon':
             process_header_lines(q)
             return False
-        else:
-            no_notes_yet = False
         # fi
+        no_notes_yet = False
+        first_note_time = running_time  # The running time when first note occurs, 1st measure.
     # fi
     process_note_lines(q)
     return False
@@ -798,7 +848,6 @@ def print_debug_internal_1(stg):
 
     for v in range(0,voices+1):        # Voices if multiple turned on, run to alternative.
         print_debug(f'{stg}: bufs_notes_voices[{v}]={bufs_notes_voices[v]}')
-        # rof
         for n in range(0, len(bufs_notes[v])):
             print_debug(f'    {bufs_notes[v][n]:2} {bufs_notes_velocity[v][n]:3} {bufs_notes_start[v][n]:7} {bufs_notes_end[v][n]:7} cc7={bufs_cc_start[v][7][n]:3}-{bufs_cc_end[v][7][n]:3} cc10={bufs_cc_start[v][10][n]:3}-{bufs_cc_end[v][10][n]:3} cc11={bufs_cc_start[v][11][n]:3}-{bufs_cc_end[v][11][n]:3} cc64={bufs_cc_start[v][64][n]:3}-{bufs_cc_end[v][64][n]:3} cc65={bufs_cc_start[v][65][n]:3}-{bufs_cc_end[v][65][n]:3} cc91={bufs_cc_start[v][91][n]:3}-{bufs_cc_end[v][91][n]:3}')
         # rof
@@ -839,6 +888,8 @@ def main():
     readthefile()
 
     print_debug_internal_1('DONE')
+
+    figure_out_measure_locations()
 
     for i in array_of_original_lines:
         print_output(i)
