@@ -1,5 +1,9 @@
 #!/usr/bin/python3 -B
 # ----------------------------------------------------------------------------
+# a) When new CHORD = copy key, instrument.
+# b) Print comments[] & comments_clicks = [].
+# c) Print titles[].
+# ----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 # ----------------------------------------------------------------------------
 import argparse
@@ -150,15 +154,15 @@ global measures_clicks_start        # Dictionary of clicks for when measure star
 measures_clicks_start = {}
 global measures_clicks_length       # Dictionary of clicks in each measure.
 measures_clicks_length = {}
+global measures_meter               # Dictionary of meters for when measure starts.
+measures_meter = {}
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-global instrument_bank              # Indexed by voice number.
-instrument_bank = {}
-global instrument_number            # Indexed by voice number.
-instrument_number = {}
+global instrument                   # Indexed by voice number.
+instrument = {}                     # Array by voice of: (bank, number, running_time)
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-global bufs_notes_voices            # Voices for chords on this voice.
+global bufs_notes_voices            # Array of Voices for chords on this voice.
 bufs_notes_voices = {}
-global bufs_notes                   # Midi note number. An array indexed by measure, voice.
+global bufs_notes                   # Midi note number. An array indexed by voice.
 bufs_notes = {}                     # bufs_notes[v] = []             Midi note number.
 global bufs_notes_start             # calculated clicks to start of each note for a voice.
 bufs_notes_start = {}
@@ -234,7 +238,8 @@ def do_note_length_calculate():
         # note length.
         m = (MIDICLICKSPERQUARTER / 0.25) / nl
         if int(m * 1000) != int(m)*1000:
-            print_debug(f'Note length {nl} does not divide by {nl} nicely into MIDICLICKSPERQUARTER {MIDICLICKSPERQUARTER} ... {m}')
+#--             print_debug(f'Note length {nl} does not divide by {nl} nicely into MIDICLICKSPERQUARTER {MIDICLICKSPERQUARTER} ... {m}')
+            pass
         else:
             m = int(m)
             if m == 0:
@@ -247,7 +252,8 @@ def do_note_length_calculate():
         # dotted note lengths.
         md = ((MIDICLICKSPERQUARTER / 0.25) / nl) * 1.5
         if int(md * 1000) != int(md)*1000:
-            print_debug(f'Note length {nl}d does not divide nicely into MIDICLICKSPERQUARTER {MIDICLICKSPERQUARTER}  ... {md}')
+#--             print_debug(f'Note length {nl}d does not divide nicely into MIDICLICKSPERQUARTER {MIDICLICKSPERQUARTER}  ... {md}')
+            pass
         else:
             md = int(md)
             if md == 0:
@@ -262,7 +268,8 @@ def do_note_length_calculate():
         # double dotted note lengths.
         mdd = ((MIDICLICKSPERQUARTER / 0.25) / nl) * 1.5 * 1.5
         if int(mdd * 1000) != int(mdd)*1000:
-            print_debug(f'Note length {nl}dd does not divide nicely into MIDICLICKSPERQUARTER {MIDICLICKSPERQUARTER}  ... {mdd}')
+#--             print_debug(f'Note length {nl}dd does not divide nicely into MIDICLICKSPERQUARTER {MIDICLICKSPERQUARTER}  ... {mdd}')
+            pass
         else:
             mdd = int(mdd)
             if mdd == 0:
@@ -301,51 +308,37 @@ def figure_out_measure_locations():
     global last_measure                 # Number of last measure - set when figuring out measure lengths.
     global measures_clicks_start        # Dictionary of clicks for when measure starts.
     global measures_clicks_length       # Dictionary of clicks in each measure.
+    global measures_meter               # Dictionary of meters for when measure starts.
+
+    global key
+    global key_clicks
 
     working_time = first_note_time
     lm = 1                              # Start measure at number 1.
     last_inc = meter_fractions[0]
+    last_meter = meter[0]
     for i in range(0, len(meter)):
-        print_debug(f'measure_locations - i={i} lm={lm} working_time={working_time} meter={meter[i]} meter_fractions={meter_fractions[i]} meter_clicks={meter_clicks[i]} last_inc={last_inc}')
-#--        while working_time <= meter_clicks[i]:
         while working_time < meter_clicks[i]:
             measures_clicks_start[lm] = working_time
             measures_clicks_length[lm] = last_inc
+            measures_meter[lm] = last_meter
             working_time = working_time + last_inc
-            print_debug(f'                  -     measures_clicks_start[{lm}]={measures_clicks_start[lm]} measures_clicks_length[{lm}]={measures_clicks_length[lm]}')
             lm = lm +1
         # elihw
         last_inc = meter_fractions[i]
+        last_meter = meter[i]
     # rof
     # Do to end of song.
     while working_time < running_time:
         measures_clicks_start[lm] = working_time
         measures_clicks_length[lm] = last_inc
+        measures_meter[lm] = last_meter
         working_time = working_time + last_inc
-        print_debug(f'                  -     measures_clicks_start[{lm}]={measures_clicks_start[lm]} measures_clicks_length[{lm}]={measures_clicks_length[lm]}')
         lm = lm +1
     # elihw
     last_measure = lm - 1
     measures_clicks_length[last_measure] = running_time - (working_time - last_inc)
 
-    j = int(last_measure / 10) * 10
-    for i in range(1, j + 1, 10):
-        print_debug(f'{i:4} - measures_clicks_start: {measures_clicks_start[i]:7} {measures_clicks_start[i + 1]:7} {measures_clicks_start[i + 2]:7} {measures_clicks_start[i + 3]:7} {measures_clicks_start[i + 4]:7} {measures_clicks_start[i + 5]:7} {measures_clicks_start[i + 6]:7} {measures_clicks_start[i + 7]:7} {measures_clicks_start[i + 8]:7} {measures_clicks_start[i + 9]:7}')
-        print_debug(f'{i:4} - measures_clicks_length:{measures_clicks_length[i]:7} {measures_clicks_length[i + 1]:7} {measures_clicks_length[i + 2]:7} {measures_clicks_length[i + 3]:7} {measures_clicks_length[i + 4]:7} {measures_clicks_length[i + 5]:7} {measures_clicks_length[i + 6]:7} {measures_clicks_length[i + 7]:7} {measures_clicks_length[i + 8]:7} {measures_clicks_length[i + 9]:7}')
-    # rof
-    if last_measure - j != 0:
-        i = j + 1
-        print_debug(f'{i:4} - measures_clicks_start:', end='')
-        for k in range(i, last_measure + 1):
-            print(f' {measures_clicks_start[k]:7}', file=sys.stderr, end='')
-        # rof
-        print('', file=sys.stderr)
-        print_debug(f'{i:4} - measures_clicks_length:', end='')
-        for k in range(i, last_measure + 1):
-            print(f'{measures_clicks_length[k]:7} ', file=sys.stderr, end='')
-        # rof
-        print('', file=sys.stderr)
-    # fi
 
     return
 # End of figure_out_measure_locations
@@ -405,7 +398,6 @@ def process_echo_lines(q):
         r = q[8:-1].split()
         voices = int(r[0]) - 1              # Remember 0 is the first one.
         MIDICLICKSPERQUARTER = int(r[1])
-#--        print_debug(f'process_echo_lines - Header: voices="{voices} MIDICLICKSPERQUARTER={MIDICLICKSPERQUARTER}"')
         if meter == []:
             meter.append('4/4')
             meter_fractions.append(MIDICLICKSPERQUARTER * 4)
@@ -416,7 +408,6 @@ def process_echo_lines(q):
     # fi
     if q[0:7] == '"Title ':
         v = q[7:].split(' ', 1)
-#--        print_debug(f'process_echo_lines - v={v}')
         titles.append(q[7:])
         return
     # fi
@@ -427,7 +418,6 @@ def process_echo_lines(q):
         # fi
         vs = q[7:].split(' ', 1)
         meter_new, meter_new_fraction = meter_readable(vs[0], vs[1])
-        print_debug(f'process_echo_lines - vs={vs} running_time={running_time} meter_new={meter_new} meter_new_fraction={meter_new_fraction}')
         if meter != [] and meter[-1] != meter_new:
             if running_time == meter_clicks[-1]:
                 meter[-1] = meter_new
@@ -438,13 +428,11 @@ def process_echo_lines(q):
                 meter_clicks.append(running_time)
             # fi
         # fi
-#--         print_debug(f'process_echo_lines - meter="{meter}" meter_clicks={meter_clicks[-1]} meter_fractions={meter_fractions[-1]}')
         return
     # fi
     if q[0:5] == '"key ':
         vs = q[5:].split(' ', 1)
         v = int(vs[0])
-#--        print_debug(f'process_echo_lines - key v={v}')
         a = vs[1].split(None)
         if len(a) < 2 or len(a) > 4:
             print_error(f'key line expects key followed by "major" not {a}')
@@ -458,47 +446,54 @@ def process_echo_lines(q):
             key[v] = a[0]
             key_clicks[v] = running_time
         # fi
-#--        print_debug(f'process_echo_lines - key: key="{key[v]}" key_clicks={key_clicks[v]}')
         return
     # fi
-    if q[0:9] == '"tempo_s=':
+    a = q.split()
+    if len(a) == 3 and len(a[1]) > 8 and a[1][0:8] == 'tempo_s=':
 # DEBUG - process_echo_lines - q=""tempo_s=150 tempo_l=0.25""
-#--        print_debug(f'process_echo_lines - Starting tempo: tempo_s="{tempo_s}" tempo_l={tempo_l}')
         if q[-1] != '"':
             print_error('tempo_s line expected to end with a double quote')
             return
         # fi
-        r = q[9:-1].split()
-        tempo_s = float(r[0])
-        if r[1][0:8] != 'tempo_l=':
-            print_error(f'tempo_s line expects tempo_l not {r[1]}')
+        s = a[1][8:]
+        tempo_s = float(s)
+        if a[2][0:8] != 'tempo_l=':
+            print_error(f'tempo_s line expects tempo_l not {a[2]}')
             return
         # fi
-        tempo_l = float(r[1][8:])
-#--        print_debug(f'process_echo_lines - Ending tempo: tempo_s="{tempo_s}" tempo_l={tempo_l}')
+        l = a[2][8:len(a[2]) - 1]
+        tempo_l = float(l)
         return
     # fi
     comments.append(q)
     comments_clicks.append(running_time)
-#--    print_debug(f'process_echo_lines - comments: comments="{comments}"')
     return
 # End of process_echo_lines
 
 # ----------------------------------------------------------------------------
 global header_commands_ignore
-header_commands_ignore = [ 'set', 'unload', 'load', 'reset', 'prog', 'pitch_bend' ]
+header_commands_ignore = [ 'set', 'unload', 'load', 'reset', 'pitch_bend' ]
 
 def process_header_lines(q):
     global header_commands_ignore
-    global instrument_bank
-    global instrument_number
+    global instrument
+    global running_time
 
     if q[0] in header_commands_ignore:
-        return
+        pass
     elif q[0] == 'echo':
         process_echo_lines(q[1])
     elif q[0] == 'sleep':
         process_sleep(q[1])
+    elif q[0] == 'prog':
+        a = q[1].split()
+        ibank = int(a[0])
+        instr = int(a[1])
+        if instrument == {}:
+            instrument[0] = [ [ibank, instr, running_time] ]
+        else:
+            print_error(f"ignoring prog that isn't before select commands. {q}")
+        # fi
     elif q[0] == 'select':
         a = q[1].split()
         if len(a) < 1 or len(a) > 4:
@@ -512,19 +507,21 @@ def process_header_lines(q):
         vn = int(a[0])
         ibank = int(a[2])
         instr = int(a[3])
-        if vn in instrument_bank:
-            if instrument_bank[vn] != ibank or instrument_number[vn] != instr:
-                print_error(f'select line for voice {vn} does not match previous bank {instrument_bank[vn]} instrument {instrument_number[vn]}')
-                return
+        if vn in instrument:
+            if instrument[vn][-1][0] == ibank and instrument[vn][-1][1] == instr:
+                pass
+            else:
+                if instrument[vn][-1][0] == ibank and instrument[vn][-1][2] == running_time:
+                    instrument[vn][-1] = [ibank, instr, running_time]
+                else:
+                    instrument[vn].append( [ibank, instr, running_time] )
+                # fi
             # fi
-            return
+        else:
+            instrument[vn] = [ [ibank, instr, running_time] ]
         # fi
-        instrument_bank[vn] = ibank
-        instrument_number[vn] = instr
-        return
     elif q[0] == 'cc':
         process_cc(q[1])
-        return
     else:
         print_error(f'Line is unexpected - {q}')
     # fi
@@ -608,10 +605,7 @@ def process_noteon(r):
 
     # determine which real voice to use... if chords.
     flag = False
-#--    print_debug(f'process_noteon - v={v}  bufs_notes_voices[v]={bufs_notes_voices[v]}')
     for v2s in bufs_notes_voices[v]:
-#--        print_debug(f'process_noteon -    bufs_notes_start[v2s]={bufs_notes_start[v2s]} len()={len(bufs_notes_start[v2s])}')
-#--        print_debug(f'process_noteon -    bufs_notes_end[v2s]={bufs_notes_end[v2s]} len()={len(bufs_notes_end[v2s])}')
         if v2s in bufs_notes_end and len(bufs_notes_end[v2s]) > 0 and bufs_notes_end[v2s][-1] == 0:
             continue
         # fi
@@ -633,9 +627,6 @@ def process_noteon(r):
         bufs_cc_start[v2s][cc].append(last_cc[v][cc])
         bufs_cc_end[v2s][cc].append(0)
     # rof
-
-#--     print_debug_internal_1(f'{linecount} - after - {array_of_original_lines[-1]}')
-
 # End of process_noteon
 
 # -----------------------------------------------------------------------------
@@ -681,9 +672,6 @@ def process_noteoff(r):
     for cc in range(0, 127):
         bufs_cc_end[v2s][cc][-1] = last_cc[v][cc]
     # rof
-
-#--     print_debug_internal_1(f'{linecount} - after - {array_of_original_lines[-1]}')
-
 # End of process_noteoff
 
 # -----------------------------------------------------------------------------
@@ -722,27 +710,44 @@ def process_cc(r):
 # -----------------------------------------------------------------------------
 def process_note_lines(q):
     global voices                       # Number of voices
+    global running_time
+    global instrument
 
-#--     print_debug(f'process_note_lines - "{q}"')
     if q[0] == 'noteon':
         process_noteon(q[1])
-        return
     elif q[0] == 'echo':
         process_echo_lines(q[1])
-        return
     elif q[0] == 'noteoff':
         process_noteoff(q[1])
-        return
     elif q[0] == 'sleep':
         process_sleep(q[1])
-        return
     elif q[0] == 'cc':
         process_cc(q[1])
-        return
+    elif q[0] == 'select':
+        a = q[1].split()
+        if len(a) < 1 or len(a) > 4:
+            print_error(f'select line wants 4 arguments not {len(a)} - {q[1]}')
+            return
+        # fi
+        # a[0] = voice #
+        # a[1] = timeclicks
+        # a[2] = bank
+        # a[3] = instrument
+        vn = int(a[0])
+        ibank = int(a[2])
+        instr = int(a[3])
+        if vn in instrument:
+            if instrument[vn][-1][0] == ibank and instrument[vn][-1][1] == instr:
+                pass
+            else:
+                instrument[vn].append( (ibank, instr, running_time) )
+            # fi
+        else:
+            instrument[vn] = (ibank, instr, running_time)
+        # fi
     else:
-        print_error(f'NOTDONEYET - Unexpected command ({q[0]}) in FS input')
+        print_error(f'NOTDONEYET - Unexpected command ({q}) in FS input')
     # fi
-    print_debug('NOTDONEYET - process_note_lines')
 # End of process_note_lines
 
 # ----------------------------------------------------------------------------
@@ -879,6 +884,17 @@ def readthefile():
 
 # ----------------------------------------------------------------------------
 def print_debug_internal_1(stg):
+    global meter                        # Array of printable meter (text).
+    global meter_fractions              # Array of MIDICLICKSPERQUARTER*4 * meter_fraction (clicks per measure).
+    global meter_clicks                 # Array of where in running clicks meter occurred.
+    global last_measure                 # Number of last measure - set when figuring out measure lengths.
+    global measures_clicks_start        # Dictionary of clicks for when measure starts.
+    global measures_clicks_length       # Dictionary of clicks in each measure.
+    global measures_meter               # Dictionary of meters for when measure starts.
+
+    global key
+    global key_clicks
+
     global voices
     global bufs_notes_voices
     global bufs_notes
@@ -888,8 +904,68 @@ def print_debug_internal_1(stg):
     global bufs_cc_start
     global bufs_cc_end
 
+    global comments
+    global comments_clicks
+    global titles
+
+    print_stderr(f'\n{stg}:')
+    j = int(last_measure / 10) * 10
+    for i in range(1, j + 1, 10):
+        print_debug(f'{i:4} - measures_clicks_start: {measures_clicks_start[i]:7} {measures_clicks_start[i + 1]:7} {measures_clicks_start[i + 2]:7} {measures_clicks_start[i + 3]:7} {measures_clicks_start[i + 4]:7} {measures_clicks_start[i + 5]:7} {measures_clicks_start[i + 6]:7} {measures_clicks_start[i + 7]:7} {measures_clicks_start[i + 8]:7} {measures_clicks_start[i + 9]:7}')
+        print_debug(f'{i:4} - measures_clicks_length:{measures_clicks_length[i]:7} {measures_clicks_length[i + 1]:7} {measures_clicks_length[i + 2]:7} {measures_clicks_length[i + 3]:7} {measures_clicks_length[i + 4]:7} {measures_clicks_length[i + 5]:7} {measures_clicks_length[i + 6]:7} {measures_clicks_length[i + 7]:7} {measures_clicks_length[i + 8]:7} {measures_clicks_length[i + 9]:7}')
+        print_debug(f'{i:4} - measures_meter        :{measures_meter[i]:>7} {measures_meter[i + 1]:>7} {measures_meter[i + 2]:>7} {measures_meter[i + 3]:>7} {measures_meter[i + 4]:>7} {measures_meter[i + 5]:>7} {measures_meter[i + 6]:>7} {measures_meter[i + 7]:>7} {measures_meter[i + 8]:>7} {measures_meter[i + 9]:>7}')
+    # rof
+    if last_measure - j != 0:
+        i = j + 1
+        print_debug(f'{i:4} - measures_clicks_start:', end='')
+        for k in range(i, last_measure + 1):
+            print(f' {measures_clicks_start[k]:7}', file=sys.stderr, end='')
+        # rof
+        print('', file=sys.stderr)
+        print_debug(f'{i:4} - measures_clicks_length:', end='')
+        for k in range(i, last_measure + 1):
+            print(f'{measures_clicks_length[k]:7} ', file=sys.stderr, end='')
+        # rof
+        print('', file=sys.stderr)
+        print_debug(f'{i:4} - measures_meter        :', end='')
+        for k in range(i, last_measure + 1):
+            print(f'{measures_meter[k]:>7} ', file=sys.stderr, end='')
+        # rof
+        print('', file=sys.stderr)
+    # fi
+
+    print_stderr(f'\n{stg}: Title - ')
+    for t in range(0, len(titles)):
+        print_debug(f'    "{titles[t]}"')
+    # rof
+
+    print_stderr(f'\n{stg}: Comments - ')
+    for c in range(0, len(comments)):
+        print_debug(f'    comments_clicks={comments_clicks[c]} - "{comments[c]}"')
+    # rof
+
+# b) Print titles[].
+# c) Print comments[] & comments_clicks = [].
+
+    print_stderr(f'\n{stg}:')
+    for v in range(0, voices+1):
+        if v in key:
+            print_debug(f'{v:4} - key={key[v]}  key_clicks={key_clicks[v]}')
+        # fi
+    # rof
+
+    print_stderr(f'\n{stg}:')
+    for v in range(0, voices+1):
+        if v in instrument:
+            for i in range(0,len(instrument[v])):
+                print_debug(f'{v:4} - instrument bank={instrument[v][i][0]} number={instrument[v][i][1]} clicks={instrument[v][i][2]}')
+            # rof
+        # fi
+    # rof
+
+    print_stderr(f'\n{stg}:')
     for v in range(0,voices+1):        # Voices if multiple turned on, run to alternative.
-        print_debug(f'{stg}: bufs_notes_voices[{v}]={bufs_notes_voices[v]}')
+        print_debug(f'bufs_notes_voices[{v}]={bufs_notes_voices[v]}')
         print_debug(f'  note vel   clicks-on/off cc7= on/off cc10= on/off cc11= on/off cc64= on/off cc65= on/off cc91= on/off')
         for n in range(0, len(bufs_notes[v])):
             print_debug(f'    {bufs_notes[v][n]:2} {bufs_notes_velocity[v][n]:3} {bufs_notes_start[v][n]:7} {bufs_notes_end[v][n]:7} cc7={bufs_cc_start[v][7][n]:3}-{bufs_cc_end[v][7][n]:3} cc10={bufs_cc_start[v][10][n]:3}-{bufs_cc_end[v][10][n]:3} cc11={bufs_cc_start[v][11][n]:3}-{bufs_cc_end[v][11][n]:3} cc64={bufs_cc_start[v][64][n]:3}-{bufs_cc_end[v][64][n]:3} cc65={bufs_cc_start[v][65][n]:3}-{bufs_cc_end[v][65][n]:3} cc91={bufs_cc_start[v][91][n]:3}-{bufs_cc_end[v][91][n]:3}')
@@ -905,6 +981,10 @@ def main():
     global output_file                  # File to print to (default is sys.stdout).
     global hint_file                    # File to print to (default is None).
     global array_of_original_lines
+
+    global key
+    global voices
+    global key_clicks
 
     if args.rest:
         if len(args.rest) >= 1:             # Input.
@@ -931,6 +1011,19 @@ def main():
     readthefile()
 
     figure_out_measure_locations()
+
+    # Set keys if not specified. NOTE: This may be an error.
+    for k in key:
+        if k == 0:
+            for v in range(1, voices):
+                if v not in key:
+                    key[v] = key[0]
+                    key_clicks[v] = key_clicks[0]
+                # fi
+            # rof
+            break
+        # fi
+    # rof
 
     print_debug_internal_1('DONE')
 
