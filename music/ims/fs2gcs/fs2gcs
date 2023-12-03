@@ -6,9 +6,35 @@ import argparse
 import os
 import re
 import readline
+import shlex
 import sys
+#-- import pprint
+#-- # Usage:   pprint.pprint(v_t_lines, width=110, sort_dicts=False)
+
+from fractions import Fraction
+# ----------------------------------------------------------------------------
+#++ import inspect
+#++ print(inspect.currentframe().f_code.co_name, '#0', file=sys.stderr, flush=True)
+# ----------------------------------------------------------------------------
 import math
 # ----------------------------------------------------------------------------
+d = os.path.dirname(__file__)
+while d.endswith('/.'):
+    d = re.sub(r'/[.]$', r'', d)
+# elihw
+if d.endswith('/fs2gcs'):
+    d = os.path.dirname(d)
+    while d.endswith('/.'):
+        d = re.sub(r'/[.]$', r'', d)
+    # elihw
+# fi
+sys.path.insert(0, d)                       # for calculate.py
+
+import calculate
+
+calculate.cexp_parser()                     # initialize parser
+#  
+# ============================================================================
 global errors_happened              # Count of number of errors that occurred.
 errors_happened = 0
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
@@ -1008,6 +1034,1923 @@ def print_debug_internal_1(stg):
     # rof
 # End of print_debug_internal_1
 
+# ============================================================================
+# ============================================================================
+is_float_number = 0
+is_float_string = 1
+# ----------------------------------------------------------------------------
+# Calculate values here.
+# Input:
+#   strg            - The string to compute.
+#   type_float      - is_float_number if must be integer.
+#                     is_float_string if can return a character var.
+#   none_means_none = If true, return '' for None (or not set variable).
+# Returns:
+#   value      = So far computed value
+#   type_error = type of error
+
+def is_float(strg, type_float, none_means_none):
+    tree = calculate.parse(strg)            # parse the string
+    if tree is None or len(tree) != 2:
+        return None, None
+    elif tree[0] is None and tree[1] == 'error parsing':
+        return strg, tree[1]
+    elif tree[0] is not None and tree[0].startswith('ERROR'):
+        return strg, tree[0]
+    elif tree[1] is None:
+        if none_means_none:
+            return '', None
+        # fi
+        return strg, f"is_float -- variable '{strg}' is not set"
+    # fi
+    elif tree[1] == '.':
+        return strg, "bad input to calculator#2"
+    # fi
+    if type_float == is_float_number:
+        try:
+            sexpr = float(tree[1])
+            if sexpr.is_integer():
+                sexpr = int(sexpr)
+            # fi
+            return sexpr, None
+        except:
+            return strg, "bad input to calculator#3"
+        # yrt
+    # fi
+    recompute_whichchars()
+    return tree[1], None
+# End of is_float
+
+# ----------------------------------------------------------------------------
+# strng = int_range_to_array(strng, original_line)
+
+def int_range_to_array(strng, original_line):
+    a = strng.find('..')
+    if a == 0:
+        print_error("Range does not start with number.", original_line)
+        return [str(strng)]
+    elif a < 0:                                 # Not a range
+        strng, msg = is_float(strng, is_float_number, False)
+        if msg is not None or strng is None:
+            return [str(strng)]
+        # fi
+        if type(strng) is float and strng.is_integer():
+            strng = int(strng)
+        # fi
+        return [str(strng)]
+    # fi
+    first = strng[0:a]
+    second = strng[a+2:]
+    if second is None or second == '':
+        print_error("Second number in range bad.")
+        return [str(strng)]
+    # fi
+    n, msg = is_float(first, is_float_number, False)
+    if msg is not None or n is None or n == '':
+        print_error(f"Range first number bad. {msg} '{first}'")
+        return [str(strng)]
+    # fi
+    o, msg = is_float(second, is_float_number, False)
+    if msg is not None or o is None or o == '':
+        print_error(f"Range second number bad. {msg}")
+        return [str(strng)]
+    # fi
+    if type(n) is str:
+        n = float(n)
+    # fi
+    if type(n) is float and n.is_integer():
+        first = int(n)
+    elif type(n) is not int:
+        print_error("Range first number not an integer.", original_line)
+        return [str(strng)]
+    # fi
+    if type(o) is str:
+        o = float(o)
+    # fi
+    if type(o) is float and o.is_integer():
+        second = int(o)
+    elif type(o) is not int:
+        print_error("Range second number not an integer.", original_line)
+        return [str(strng)]
+    # fi
+    array_args = []
+    while n < o + 1:
+        array_args.append(str(n))
+        n = n + 1
+    # rof
+    return array_args
+# End of int_range_to_array
+
+# ----------------------------------------------------------------------------
+# strng         is string where token name is.
+# terminator    is the termination character looking for.
+# doparens      True if should check parens match.
+# original_line for error printing..
+#
+# Returns where in strng termination is. -1 if not found. 0=first character.
+
+nest_terminator = { '(':')', '{':'}', "'":"'", '"':'"' }
+
+def find_terminator_in_string(strng, terminators, doparens, original_line):
+    w = 0
+    e = []
+    while w < len(strng):
+        c = strng[w]
+        if c in terminators:
+            return w                                # Terminator immediately - blank argument.,
+        # fi
+        if c in nest_terminator and doparens:
+            endterminator = nest_terminator[c]
+        else:
+            endterminator = None
+        # fi
+        e.append(endterminator)
+        w = w + 1
+        if w > len(strng):
+            return -1
+        # fi
+        while endterminator is not None:
+            while w < len(strng):
+                c = strng[w]
+                w = w + 1
+                if c == endterminator:
+                    break
+                # fi
+                if endterminator in ['"', "'"]:     # quotes nest nothing.
+                    continue
+                elif w >= len(strng):
+                    if doparens:
+                        print_error(f"nested parenthesis, did not find closing {endterminator}.")
+                        return -1
+                    # fi
+                    break
+                elif c in nest_terminator:
+                    endterminator = nest_terminator[c]
+                    e.append(endterminator)
+                # fi
+            # elihw
+            e.pop()
+            if e != []:
+                endterminator = e[-1]
+            else:
+                endterminator = None
+                break
+            # fi
+        # elihw
+    # elihw
+    return -1
+# End of find_terminator_in_string
+
+# ----------------------------------------------------------------------------
+#   wline         - string to split
+#   integers      - True if expect numbers as arguments.
+#                 - False if alphanumberic.
+#                 - None if voice numbers - staff_name -> voice numbers.
+#                 - "volume" or "volumes" for 'f', etc.
+#   nospaces      - True if do not split on spaces.
+#   original_line - Line for error messages.
+
+def separate_args(wline, integers, nospaces, original_line):
+    def b4it(array_args, b4, integers, nospaces, original_line):
+        global staff_name
+
+        if b4 == '':
+            array_args.append(b4)
+        elif integers is None:
+            if b4 in staff_name:
+                if staff_name[b4] is None:
+                    assign_another_voice(b4, 'separate_args', original_line)
+                # fi
+                for v in staff_name[b4]:
+                    array_args.append(str(v))   # Do staff_name to voice numbers conversions.
+                # rof
+            else:                               # maybe voice numbers. :)
+                nums = int_range_to_array(b4, original_line)
+                array_args = array_args + nums
+            # fi
+        elif type(integers) is str:             # volume/volumes command.
+            nums = int_range_to_array(b4, original_line)
+            new_nums = []
+            for nm in nums:
+                if type(nm) is not str:
+                    nm = str(nm)
+                # fi
+                v = get_volume_number(nm, integers, original_line)
+                new_nums.append(v)
+            # fi
+            array_args = array_args + new_nums
+        elif integers:
+            nums = int_range_to_array(b4, original_line)
+            array_args = array_args + nums
+        else:
+            array_args.append(b4)
+        # fi
+        return array_args
+    # End of b4it
+
+    global args
+
+    splitter = [ ',', ";" ]
+    if args.spaces and not nospaces:
+        splitter = splitter + [ ' ', "\t" ]
+    # fi
+    strng = wline.strip()
+    if len(strng) == 0:
+        return []
+    # fi
+    strng = re.sub(r'\s*]', r' ]', strng, count = 1)
+    strng = re.sub(r'\s+', r' ', strng)
+    strng = re.sub(r'\s*\[', r' [', strng, count = 1)
+    strng = re.sub(r'\[\s*', r'[ ', strng, count = 1)
+    strng = re.sub(r'\s+', r' ', strng)
+    array_args = []
+    w = 0
+    b4 = ''
+    while w < len(strng):
+        s = strng[w:]
+        x = find_terminator_in_string(s, splitter, True, original_line)
+        # x == -1   end of strng.
+        if x < 0:                           # End of strng reached before splitter character found.
+            b4 = s
+            break
+        # fi
+        b4 = s[0:x]
+        array_args = b4it(array_args, b4, integers, nospaces, original_line)
+        b4 = ''
+        w = w + x + 1
+    # elihw
+    ti = integers
+    array_args = b4it(array_args, b4, ti, nospaces, original_line)
+    return array_args
+# End of separate_args
+
+# ----------------------------------------------------------------------------
+global allkeys
+allkeys = [ 'c', 'd', 'e', 'f', 'g', 'a', 'b',
+            'cn', 'dn', 'en', 'fn', 'gn', 'an', 'bn',
+            'c-', 'd-', 'e-', 'f-', 'g-', 'a-', 'b-',
+            'c--', 'd--', 'e--', 'f--', 'g--', 'a--', 'b--',
+            'c+', 'd+', 'e+', 'f+', 'g+', 'a+', 'b+',
+            'c++', 'd++', 'e++', 'f++', 'g++', 'a++', 'b++' ]
+
+global legal_notes
+legal_notes =   {
+       '1/64': 0.015625,
+      '3/128': 0.0234375,
+       '1/32': 0.03125,
+       '3/64': 0.046875,
+      '7/128': 0.0546875,
+       '1/16': 0.0625,
+       '3/32': 0.09375,
+       '7/64': 0.109375,
+     '15/128': 0.1171875,
+        '1/8': 0.125,
+       '3/16': 0.1875,
+       '7/32': 0.21875,
+      '15/64': 0.234375,
+     '31/128': 0.2421875,
+        '1/4': 0.25,
+        '3/8': 0.375,
+       '7/16': 0.4375,
+      '15/32': 0.46875,
+      '31/64': 0.484375,
+     '63/128': 0.4921875,
+        '1/2': 0.5,
+        '3/4': 0.75,
+        '7/8': 0.875,
+      '15/16': 0.9375,
+      '31/32': 0.96875,
+      '63/64': 0.984375,
+    '127/128': 0.9921875,
+          '1': 1.0,
+        '3/2': 1.5,
+        '7/4': 1.75,
+       '15/8': 1.875,
+      '31/16': 1.9375,
+      '63/32': 1.96875,
+     '127/64': 1.984375,
+    '255/128': 1.9921875,
+          '2': 2.0,
+          '3': 3.0,
+        '7/2': 3.5,
+       '15/4': 3.75,
+       '31/8': 3.875,
+      '63/16': 3.9375,
+     '127/32': 3.96875,
+     '255/64': 3.984375,
+    '511/128': 3.9921875,
+       }
+
+legal_mc_notes = {
+        0.015625 : '64',
+       0.0234375 : '64d',
+         0.03125 : '32',
+        0.046875 : '32d',
+          0.0625 : '16',
+         0.09375 : '16d',
+           0.125 : '8',
+          0.1875 : '8d',
+            0.25 : '4',
+           0.375 : '4d',
+             0.5 : '2',
+            0.75 : '2d',
+             1.0 : '1',
+             1.5 : '1d',
+}
+
+global legal_floating_times
+legal_floating_times = sorted(legal_notes.values())
+
+global vlprint
+# 2022-08-12_15-39-03 - allow more space at low range and upper range. (Gives intensity some space.)
+vlprint = {  0: 'ppppp',        # Below anything to expect.
+            20: 'pppp',
+            30: 'ppp',
+            40: 'pp',
+            50: 'p',
+            60: 'mp',
+            70: 'mf',
+            80: 'f',
+            90: 'ff',
+            100: 'fff',
+            110: 'ffff',
+            127: 'fffff',       # Above anything to expect.
+          }
+global v_name_print
+v_name_print = {}
+for i in vlprint:
+    v_name_print[ vlprint[ i ] ] = i
+# rof
+
+# ------------------------------------------------------------------------------
+global midi_instruments
+# select chan sfont bank prog -      prog, bank.
+midi_instruments = {
+    'Piano'.lower() : [0, 0],
+    'Acoustic Grand Piano'.lower() : [0, 0],
+    'Stereo Grand'.lower() : [0, 0],
+    'Bright Acoustic Piano'.lower() : [1, 0],
+    'Bright Grand'.lower() : [1, 0],
+    'Electric Grand Piano'.lower() : [2, 0],
+    'Electric Grand'.lower() : [2, 0],
+    'Honky-tonk Piano'.lower() : [3, 0],
+    'Honky-tonk'.lower() : [3, 0],
+    'Electric Piano 1'.lower() : [4, 0],
+    'Time Electric Piano 1'.lower() : [4, 0],
+    'Electric Piano 2'.lower() : [5, 0],
+    'FM Electric Piano'.lower() : [5, 0],
+    'Harpsichord'.lower() : [6, 0],
+    'Clavi'.lower() : [7, 0],
+    'Clavinet'.lower() : [7, 0],
+    'Celesta'.lower() : [8, 0],
+    'Glockenspiel'.lower() : [9, 0],
+    'Music Box'.lower() : [10, 0],
+    'Vibraphone'.lower() : [11, 0],
+    'Marimba'.lower() : [12, 0],
+    'Xylophone'.lower() : [13, 0],
+    'Tubular Bells'.lower() : [14, 0],
+    'Dulcimer'.lower() : [15, 0],
+    'Drawbar Organ'.lower() : [16, 0],
+    'Tonewheel Organ'.lower() : [16, 0],
+    'Percussive Organ'.lower() : [17, 0],
+    'Rock Organ'.lower() : [18, 0],
+    'Church Organ'.lower() : [19, 0],
+    'Pipe Organ'.lower() : [19, 0],
+    'Reed Organ'.lower() : [20, 0],
+    'Accordion'.lower() : [21, 0],
+    'Harmonica'.lower() : [22, 0],
+    'Tango Accordion'.lower() : [23, 0],
+    'Bandoneon'.lower() : [23, 0],
+    'Acoustic Guitar (nylon)'.lower() : [24, 0],
+    'Nylon Guitar'.lower() : [24, 0],
+    'Acoustic Guitar (steel)'.lower() : [25, 0],
+    'Steel Guitar'.lower() : [25, 0],
+    'Electric Guitar (jazz)'.lower() : [26, 0],
+    'Jazz Guitar'.lower() : [26, 0],
+    'Electric Guitar (clean)'.lower() : [27, 0],
+    'Clean Guitar'.lower() : [27, 0],
+    'Electric Guitar (muted)'.lower() : [28, 0],
+    'Muted Guitar'.lower() : [28, 0],
+    'Overdriven Guitar'.lower() : [29, 0],
+    'Overdrive Guitar'.lower() : [29, 0],
+    'Distortion Guitar'.lower() : [30, 0],
+    'Guitar Harmonics'.lower() : [31, 0],
+    'Acoustic Bass'.lower() : [32, 0],
+    'Electric Bass (finger)'.lower() : [33, 0],
+    'Finger Bass'.lower() : [33, 0],
+    'Electric Bass (pick)'.lower() : [34, 0],
+    'Pick Bass'.lower() : [34, 0],
+    'Fretless Bass'.lower() : [35, 0],
+    'Slap Bass 1'.lower() : [36, 0],
+    'Slap Bass 2'.lower() : [37, 0],
+    'Synth Bass 1'.lower() : [38, 0],
+    'Synth Bass 2'.lower() : [39, 0],
+    'Violin'.lower() : [40, 0],
+    'Viola'.lower() : [41, 0],
+    'Cello'.lower() : [42, 0],
+    'Contrabass'.lower() : [43, 0],
+    'Double Bass'.lower() : [43, 0],
+    'Tremolo Strings'.lower() : [44, 0],
+    'Stero Strings Trem'.lower() : [44, 0],
+    'Pizzicato Strings'.lower() : [45, 0],
+    'Orchestral Harp'.lower() : [46, 0],
+    'Timpani'.lower() : [47, 0],
+    'String Ensemble 1'.lower() : [48, 0],
+    'Stereo Strings Fast'.lower() : [48, 0],
+    'String Ensemble 2'.lower() : [49, 0],
+    'Stereo Strings Slow'.lower() : [49, 0],
+    'Synth Strings 1'.lower() : [50, 0],
+    'Synth Strings 2'.lower() : [51, 0],
+    'Choir Aahs'.lower() : [52, 0],
+    'Concert Choir'.lower() : [52, 0],
+    'Voice Oohs'.lower() : [53, 0],              # NOT RIGHT!
+    'Synth Voice'.lower() : [54, 0],             # NOT RIGHT!
+    'Orchestra Hit'.lower() : [55, 0],           # ?? strange sound. ??
+    'Trumpet'.lower() : [56, 0],
+    'Trombone'.lower() : [57, 0],
+    'Tuba'.lower() : [58, 0],
+    'Muted Trumpet'.lower() : [59, 0],
+    'French Horn'.lower() : [60, 0],
+    'French Horns'.lower() : [60, 0],
+    'Brass Section'.lower() : [61, 0],
+    'Synth Brass 1'.lower() : [62, 0],
+    'Synth Brass 2'.lower() : [63, 0],
+    'Soprano Sax'.lower() : [64, 0],
+    'Alto Sax'.lower() : [65, 0],
+    'Tenor Sax'.lower() : [66, 0],
+    'Baritone Sax'.lower() : [67, 0],
+    'Oboe'.lower() : [68, 0],
+    'English Horn'.lower() : [69, 0],
+    'Bassoon'.lower() : [70, 0],
+    'Clarinet'.lower() : [71, 0],
+    'Piccolo'.lower() : [72, 0],
+    'Flute'.lower() : [73, 0],
+    'Recorder'.lower() : [74, 0],
+    'Pan Flute'.lower() : [75, 0],
+    'Blown bottle'.lower() : [76, 0],
+    'Bottle Blow'.lower() : [76, 0],
+    'Shakuhachi'.lower() : [77, 0],
+    'Whistle'.lower() : [78, 0],
+    'Irish Tin Whistle'.lower() : [78, 0],
+    'Ocarina'.lower() : [79, 0],
+    'Lead 1 (square)'.lower() : [80, 0],
+    'Square Lead'.lower() : [80, 0],
+    'Lead 2 (sawtooth)'.lower() : [81, 0],
+    'Saw Lead'.lower() : [81, 0],
+    'Lead 3 (calliope)'.lower() : [82, 0],
+    'Synth Calliope'.lower() : [82, 0],
+    'Lead 4 (chiff)'.lower() : [83, 0],
+    'Chiffer Lead'.lower() : [83, 0],
+    'Lead 5 (charang)'.lower() : [84, 0],
+    'Charang'.lower() : [84, 0],
+    'Lead 6 (voice)'.lower() : [85, 0],
+    'Solo Vox'.lower() : [85, 0],
+    'Lead 7 (fifths)'.lower() : [86, 0],
+    '5th Saw Wave'.lower() : [86, 0],
+    'Lead 8 (bass + lead)'.lower() : [87, 0],
+    'Bass & lead'.lower() : [87, 0],
+    'Pad 1 (new age)'.lower() : [88, 0],
+    'Fantasia'.lower() : [88, 0],
+    'Pad 2 (warm)'.lower() : [89, 0],
+    'Warm Pad'.lower() : [89, 0],
+    'Pad 3 (polysynth)'.lower() : [90, 0],
+    'Polysynth'.lower() : [90, 0],
+    'Pad 4 (choir)'.lower() : [91, 0],
+    'Space Voice'.lower() : [91, 0],
+    'Pad 5 (bowed)'.lower() : [92, 0],
+    'Bowed Glass'.lower() : [92, 0],
+    'Pad 6 (metallic)'.lower() : [93, 0],
+    'Metal Pad'.lower() : [93, 0],
+    'Pad 7 (halo)'.lower() : [94, 0],
+    'Halo Pad'.lower() : [94, 0],
+    'Pad 8 (sweep)'.lower() : [95, 0],
+    'Sweep Pad'.lower() : [95, 0],
+    'FX 1 (rain)'.lower() : [96, 0],
+    'Ice Rain'.lower() : [96, 0],
+    'FX 2 (soundtrack)'.lower() : [97, 0],
+    'Soundtrack'.lower() : [97, 0],
+    'FX 3 (crystal)'.lower() : [98, 0],
+    'Crystal'.lower() : [98, 0],
+    'FX 4 (atmosphere)'.lower() : [99, 0],
+    'Atmosphere'.lower() : [99, 0],
+    'FX 5 (brightness)'.lower() : [100, 0],
+    'Brightness'.lower() : [100, 0],
+    'FX 6 (goblins)'.lower() : [101, 0],
+    'Goblins'.lower() : [101, 0],
+    'FX 7 (echoes)'.lower() : [102, 0],
+    'Echo Drops'.lower() : [102, 0],
+    'FX 8 (sci-fi)'.lower() : [103, 0],
+    'Star Theme'.lower() : [103, 0],
+    'Sitar'.lower() : [104, 0],
+    'Banjo'.lower() : [105, 0],
+    'Shamisen'.lower() : [106, 0],
+    'Koto'.lower() : [107, 0],
+    'Kalimba'.lower() : [108, 0],
+    'Bag pipe'.lower() : [109, 0],
+    'Bagpipes'.lower() : [109, 0],
+    'Fiddle'.lower() : [110, 0],
+    'Shanai'.lower() : [111, 0],
+    'Shenai'.lower() : [111, 0],
+    'Tinkle Bell'.lower() : [112, 0],
+    'Tinker Bell'.lower() : [112, 0],
+    'Agogo'.lower() : [113, 0],
+    'Steel Drums'.lower() : [114, 0],
+    'Woodblock'.lower() : [115, 0],
+    'Wood Block'.lower() : [115, 0],
+    'Taiko Drum'.lower() : [116, 0],
+    'Melodic Tom'.lower() : [117, 0],
+    'Synth Drum'.lower() : [118, 0],
+    'Reverse Cymbal'.lower() : [119, 0],
+    'Guitar Fret Noise'.lower() : [120, 0],
+    'Fret Noise'.lower() : [120, 0],
+    'Breath Noise'.lower() : [121, 0],
+    'Seashore'.lower() : [122, 0],
+    'Bird Tweet'.lower() : [123, 0],
+    'Birds'.lower() : [123, 0],
+    'Telephone Ring'.lower() : [124, 0],
+    'Telephone 1'.lower() : [124, 0],
+    'Helicopter'.lower() : [125, 0],
+    'Applause'.lower() : [126, 0],
+    'Gunshot'.lower() : [127, 0],
+    'Gun Shot'.lower() : [127, 0],
+    'Synth Bass 101'.lower() : [38, 1],
+    'Mono Strings Trem'.lower() : [44, 1],
+    'Mono Strings Fast'.lower() : [48, 1],
+    'Mono Strings Slow'.lower() : [49, 1],
+    'Concert Choir Mono'.lower() : [52, 1],
+    'Trumpet 2'.lower() : [56, 1],
+    'Trombone 2'.lower() : [57, 1],
+    'Muted Trumpet 2'.lower() : [59, 1],
+    'Solo French Horn'.lower() : [60, 1],
+    'Brass Section Mono'.lower() : [61, 1],
+    'Square Wave'.lower() : [80, 1],
+    'Saw Wave'.lower() : [81, 1],
+    'Synth Mallet'.lower() : [98, 1],
+    'Cut Noise'.lower() : [120, 1],
+    'Fl. Key Click'.lower() : [121, 1],
+    'Rain'.lower() : [122, 1],
+    'Dog'.lower() : [123, 1],
+    'Telephone 2'.lower() : [124, 1],
+    'Car-Engine'.lower() : [125, 1],
+    'Laughing'.lower() : [126, 1],
+    'Machine Gun'.lower() : [127, 1],
+    'Echo Pan'.lower() : [102, 2],
+    'String Slap'.lower() : [120, 2],
+    'Thunder'.lower() : [122, 2],
+    'Horse Gallop'.lower() : [123, 2],
+    'Door Creaking'.lower() : [124, 2],
+    'Car-Stop'.lower() : [125, 2],
+    'Scream'.lower() : [126, 2],
+    'Lasergun'.lower() : [127, 2],
+    'Howling Winds'.lower() : [122, 3],
+    'Bird 2'.lower() : [123, 3],
+    'Door'.lower() : [124, 3],
+    'Car-Pass'.lower() : [125, 3],
+    'Punch'.lower() : [126, 3],
+    'Explosion'.lower() : [127, 3],
+    'Stream'.lower() : [122, 4],
+    'Scratch'.lower() : [123, 4],
+    'Car-Crash'.lower() : [125, 4],
+    'Heart Beat'.lower() : [126, 4],
+    'Bubbles'.lower() : [122, 5],
+    'Windchime'.lower() : [124, 5],
+    'Siren'.lower() : [125, 5],
+    'Footsteps'.lower() : [126, 5],
+    'Train'.lower() : [125, 6],
+    'Jet Plane'.lower() : [125, 7],
+    'Chorused Tine EP'.lower() : [4, 8],
+    'Chorused FM EP'.lower() : [5, 8],
+    'Coupled Harpsichord'.lower() : [6, 8],
+    'Church Bells'.lower() : [14, 8],
+    'Detuned Tnwl. Organ'.lower() : [16, 8],
+    'Detuned Perc. Organ'.lower() : [17, 8],
+    'Pipe Organ 2'.lower() : [19, 8],
+    'Italian Accordian'.lower() : [21, 8],
+    'Ukulele'.lower() : [24, 8],
+    '12-String Guitar'.lower() : [25, 8],
+    'Hawaiian Guitar'.lower() : [26, 8],
+    'Chorused Clean Gt.'.lower() : [27, 8],
+    'Funk Guitar'.lower() : [28, 8],
+    'Feedback Guitar'.lower() : [30, 8],
+    'Guitar Feedback'.lower() : [31, 8],
+    'Synth Bass 3'.lower() : [38, 8],
+    'Synth Bass 4'.lower() : [39, 8],
+    'Orchestra Pad'.lower() : [48, 8],
+    'Synth Strings 3'.lower() : [50, 8],
+    'Brass Section 2'.lower() : [61, 8],
+    'Synth Brass 3'.lower() : [62, 8],
+    'Synth Brass 4'.lower() : [63, 8],
+    'Sine Wave'.lower() : [80, 8],
+    'Doctor Solo'.lower() : [81, 8],
+    'Taisho Koto'.lower() : [107, 8],
+    'Castanets'.lower() : [115, 8],
+    'Concert Bass Drum'.lower() : [116, 8],
+    'Melodic Tom 2'.lower() : [117, 8],
+    '808 Tom'.lower() : [118, 8],
+    'Starship'.lower() : [125, 8],
+    'Carillon'.lower() : [14, 9],
+    'Burst Noise'.lower() : [125, 9],
+    'Piano & Str.-Fade'.lower() : [0, 11],
+    'Piano & Str.-Sus'.lower() : [1, 11],
+    'Tine & FM EPs'.lower() : [4, 11],
+    'Piano & FM EP'.lower() : [5, 11],
+    'Tinkling Bells'.lower() : [8, 11],
+    'Bell Tower'.lower() : [14, 11],
+    'Techno Bass'.lower() : [38, 11],
+    'Pulse Bass'.lower() : [39, 11],
+    'Stereo Strings Velo'.lower() : [49, 11],
+    'Synth Strings 4'.lower() : [50, 11],
+    'Synth Strings 5'.lower() : [51, 11],
+    'Brass Section 3'.lower() : [61, 11],
+    'Whistlin'.lower() : [78, 11],
+    'Sawtooth Stab'.lower() : [81, 11],
+    "Doctor's Solo".lower() : [87, 11],
+    'Harpsi Pad'.lower() : [88, 11],
+    'Solar Wind'.lower() : [89, 11],
+    'Mystery Pad'.lower() : [96, 11],
+    'Synth Chime'.lower() : [98, 11],
+    'Bright Saw Stack'.lower() : [100, 11],
+    'Cymbal Crash'.lower() : [119, 11],
+    'Filter Snap'.lower() : [121, 11],
+    'Interference'.lower() : [127, 11],
+    'Bell Piano'.lower() : [0, 12],
+    'Bell Tine EP'.lower() : [4, 12],
+    'Christmas Bells'.lower() : [10, 12],
+    'Clean Guitar 2'.lower() : [27, 12],
+    'Mean Saw Bass'.lower() : [38, 12],
+    'Full Orchestra'.lower() : [48, 12],
+    'Mono Strings Velo'.lower() : [49, 12],
+    'Square Lead 2'.lower() : [80, 12],
+    'Saw Lead 2'.lower() : [81, 12],
+    'Fantasia 2'.lower() : [88, 12],
+    'Solar Wind 2'.lower() : [89, 12],
+    'White Noise Wave'.lower() : [122, 12],
+    'Shooting Star'.lower() : [127, 12],
+    'Woodwind Choir'.lower() : [48, 13],
+    'Square Lead 3'.lower() : [80, 13],
+    'Saw Lead 3'.lower() : [81, 13],
+    'Night Vision'.lower() : [88, 13],
+    'Mandolin'.lower() : [25, 16],
+    'Standard Drums'.lower() : [0, 120],
+    'Standard 2 Drums'.lower() : [1, 120],
+    'Room Drums'.lower() : [8, 120],
+    'Power Drums'.lower() : [16, 120],
+    'Electronic Drums'.lower() : [24, 120],
+    '808/909 Drums'.lower() : [25, 120],
+    'Dance Drums'.lower() : [26, 120],
+    'Jazz Drums'.lower() : [32, 120],
+    'Brush Drums'.lower() : [40, 120],
+    'Orchestral Perc.'.lower() : [48, 120],
+    'SFX Kit'.lower() : [56, 120],
+    'Standard'.lower() : [0, 128],
+    'Standard 2'.lower() : [1, 128],
+    'Room'.lower() : [8, 128],
+    'Power'.lower() : [16, 128],
+    'Electronic'.lower() : [24, 128],
+    '808/909'.lower() : [25, 128],
+    'Dance'.lower() : [26, 128],
+    'Jazz'.lower() : [32, 128],
+    'Brush'.lower() : [40, 128],
+    'Orchestral'.lower() : [48, 128],
+    'SFX'.lower() : [56, 128],
+}
+
+# ------------------------------------------------------------------------------
+global drum_sounds
+drum_sounds = {
+    'Acoustic Bass Drum'.lower(): 35,
+    'Bass Drum 1'.lower(): 36,
+    'Side Stick'.lower(): 37,
+    'Acoustic Snare'.lower(): 38,
+    'Hand Clap'.lower(): 39,
+    'Electric Snare'.lower(): 40,
+    'Low Floor Tom'.lower(): 41,
+    'Closed Hi Hat'.lower(): 42,
+    'High Floor Tom'.lower(): 43,
+    'Pedal Hi-Hat'.lower(): 44,
+    'Low Tom'.lower(): 45,
+    'Open Hi-Hat'.lower(): 46,
+    'Low-Mid Tom'.lower(): 47,
+    'Hi Mid Tom'.lower(): 48,
+    'Crash Cymbal 1'.lower(): 49,
+    'High Tom'.lower(): 50,
+    'Ride Cymbal 1'.lower(): 51,
+    'Chinese Cymbal'.lower(): 52,
+    'Ride Bell'.lower(): 53,
+    'Tambourine'.lower(): 54,
+    'Splash Cymbal'.lower(): 55,
+    'Cowbell'.lower(): 56,
+    'Crash Cymbal 2'.lower(): 57,
+    'Vibraslap'.lower(): 58,
+    'Ride Cymbal 2'.lower(): 59,
+    'Hi Bongo'.lower(): 60,
+    'Low Bongo'.lower(): 61,
+    'Mute Hi Conga'.lower(): 62,
+    'Open Hi Conga'.lower(): 63,
+    'Low Conga'.lower(): 64,
+    'High Timbale'.lower(): 65,
+    'Low Timbale'.lower(): 66,
+    'High Agogo'.lower(): 67,
+    'Low Agogo'.lower(): 68,
+    'Cabasa'.lower(): 69,
+    'Maracas'.lower(): 70,
+    'Short Whistle'.lower(): 71,
+    'Long Whistle'.lower(): 72,
+    'Short Guiro'.lower(): 73,
+    'Long Guiro'.lower(): 74,
+    'Claves'.lower(): 75,
+    'Hi Wood Block'.lower(): 76,
+    'Low Wood Block'.lower(): 77,
+    'Mute Cuica'.lower(): 78,
+    'Open Cuica'.lower(): 79,
+    'Mute Triangle'.lower(): 80,
+    'Open Triangle'.lower(): 81,
+}
+
+# ----------------------------------------------------------------------------
+#       bars    7+1             $$ The first one must be one more than wanted -- due to "measure 0"
+#                               $$ setting things line meter up. Dunno, it works.
+#       bars    7               $$ Group the next 7 bars on one staff line -- .abc file.
+
+def do_bars(t_args, original_line):
+    global bars
+
+    print_error("NOTDONEYET - do_bars")
+
+    if t_args is None or t_args == '':
+        print_error("bars does not have an expression to process", original_line)
+        return
+    # fi
+
+    m = t_args
+
+    f, type_error = is_float(m, is_float_number, False)
+    if type_error is not None:
+        print_error(f"bars error - {type_error}")
+        return
+    # fi
+    if f is None:
+        print_error("bars argument as a calculation did not return a value", original_line)
+        return
+    # fi
+    bars[measure_on] = round(f)
+    # fi
+    return
+# End of do_bars
+
+# ----------------------------------------------------------------------------
+#       clef    1,2,3   treble          $$ Set voices 1,2,3 to treble.
+#       clef    4       alto
+#       clef    treble,bass,alto,tenor  $$ A different way to do it.
+# NOTE: The argument is put into the .abc file, and NOT checked in any way.
+
+def do_clef(t_args, original_line):
+    global clef
+    global staff_name
+
+    print_error("NOTDONEYET - do_clef")
+
+    vargs = get_voice_others(t_args, 1,2, 'clef', original_line)
+    if vargs is None:
+        return
+    # fi
+
+    if len(vargs) == 1:
+        wargs = separate_args(vargs[0], False, True, original_line)
+        if not wargs or len(wargs) < 1:
+            print_error("no clef selection arguments", original_line)
+            return
+        # fi
+        for i in range(1, len(wargs)+1):
+            clef[i][measure_on] = wargs[i-1].strip()   # No checking.
+        # rof
+        return
+    # fi
+    clf = vargs[1]
+
+    jkl = str(vargs[0])
+    wargs = separate_args(jkl, None, True, original_line)   # Allow staff_name and voice numbers.
+    if not wargs or len(wargs) < 1:
+        print_error("no voice arguments on clef line", original_line)
+        return
+    # fi
+    for w in wargs:
+        f1, type_error = is_float(w, is_float_number, False)
+        if type_error is not None:
+            print_error(f"clef error - {type_error}")
+            return
+        # fi
+        if f1 is None:
+            print_error(f"voice {w} is not a number.")
+            return
+        # fi
+        f1 = round(f1)
+        clef[f1][measure_on] = clf
+    # rof
+    return
+# End of do_clef
+
+# ----------------------------------------------------------------------------
+def get_voice_others(t_args, mn, mx, command, original_line):
+    if t_args is None or t_args == '':
+        print_error(f"{command} command does not have any arguments")
+        return None
+    # fi
+
+    targs = re.sub(r'\s*,\s*', ',', t_args)
+    targs = re.sub(r'\s*\.\.\s*', '..', targs)
+    # Voice numbers (optional), followed by key name, with major/minor (optional).
+    vargs = targs.split()
+
+    if len(vargs) < mn or len(vargs) > mx:
+        print_error(f"{mn} command does not have correct number of arguments (mn..{mx}) verses {len(vargs)}")
+        return None
+    # fi
+    return vargs
+# End of get_voice_others
+
+# ----------------------------------------------------------------------------
+#       key     a                   $$ key of a major for all voices. f+,c+,g+
+#       =key    violaA..violaB g-   $$ viola - six flats
+#       key     1,2 c major         $$ If "major" is present ...
+#       key     1, 2  c minor       $$ b-,e-,a-  same as key e- or key e- major.
+#       key     1, 2  atonal        $$ Each note is stand-alone.
+#       key     atonal              $$ Each note is stand-alone.
+# Changes at start of a measure.
+
+def do_key(t_args, original_line):
+    global args
+    global key_sig
+    global key_default
+    global key_voice
+    global mlth
+    global vol
+    global minor_key_to_major
+    global staff_name
+
+    print_error("NOTDONEYET - do_key")
+
+    vargs = get_voice_others(t_args, 1,3, 'key', original_line)
+    if vargs is None:
+        return
+    # fi
+
+    if len(vargs) == 3:                     # Handle major or minor.
+        k = vargs[1].lower()
+        mm = vargs[2].lower()
+        vs = vargs[0]
+        if mm == "minor":
+            if k not in minor_key_to_major:
+                print_error(f"key command does not recognize minor {k}")
+                return
+            # fi
+            k = minor_key_to_major[k]
+        elif mm == "major":
+            if k not in key_sig:
+                print_error(f"key '{k}' not recognized.")
+                return
+            # fi
+        else:
+            print_error(f"key command does not recognize {vargs[2]} as major or minor")
+            return
+        # fi
+    elif len(vargs) == 2:
+        k = vargs[0].lower()
+        mm = vargs[1].lower()
+        vs = None
+        if mm == "minor":
+            if k not in minor_key_to_major:
+                print_error(f"key command does not recognize minor {k}")
+                return
+            # fi
+            k = minor_key_to_major[k]
+        elif mm == "major":
+            if k not in key_sig:
+                print_error(f"key '{k}' not recognized.")
+                return
+            # fi
+        else:                               # No major or minor, so "key 1,2 c-" format.
+            vs = vargs[0]
+            k = mm
+            if k not in key_sig and k not in ['none', 'atonal']:
+                print_error(f"key '{k}' not recognized.")
+                return
+            # fi
+        # fi
+    else:
+        vs = None
+        k = vargs[0].lower()
+        if k not in key_sig and k not in ['none', 'atonal']:
+            print_error(f"key '{k}' not recognized.")
+            return
+        # fi
+    # fi
+
+    if k in ('none', 'atonal'):
+        k = 'atonal'
+    elif args.vertical or args.horizontal:
+        pass                                # printing and used are the same.
+    elif args.midi1csv or args.fluidsynth:
+        k = key_sig[k]                      # Key number extracted.
+    else:                   # ABC
+        k = k.upper()
+        k = k.replace('-', 'b')             # Does multiple flats
+        k = k.replace('+', '#')             # Does multiple sharps.
+        k = k.replace('n', '=')             # Does multiple naturals.
+    # fi
+    # k = value to store in key_voice, key_default, etc. -- used for printing, etc.
+
+    #-- fill_voice_mlth(original_line)                   # Need to make measure for other voices up to here "mlth".
+    # By not doing this, we allow vertical format to specify keys for voices in the first measure (or any).
+
+    if vs is None:                          # One argument, all voices change.
+        for ve in range(1, len(volume)+1):
+            if mlth[ve][measure_on] != 0:
+                print_error("key with one argument not allowed in the middle of a measure", original_line)
+                return
+            # fi
+        # rof
+        if measure_on == '':
+            key_default = k                 # Used in xpose, and when printing midicsv output.
+        # fi
+        for ve in range(1, MAXVOICES+1):
+            set_staff_arr_double(ve, k, measure_on, key_voice, None, original_line)
+        # rof
+        return
+    # fi                # multiple arguments, voices first.
+
+    wargs = separate_args(vs, None, True, original_line)    # Allow staff_name and voice numbers.
+    if not wargs or len(wargs) < 1:
+        print_error("no voice arguments on key line", original_line)
+        return
+    # fi
+    for w in wargs:
+        f1, type_error = is_float(w, is_float_number, False)
+        if type_error is not None:
+            print_error(f"key error - {type_error}")
+            return
+        # fi
+        if f1 is None:
+            print_error("voice {w} is not a number.")
+            return
+        # fi
+        f1 = round(f1)
+        if f1 not in mlth:
+            print_error(f"key with too many voices not allowed, voice {f1} is too many")
+            return
+        # fi
+        if mlth[f1][measure_on] != 0:
+            for ve in range(1, len(volume)+1):
+                print_error_no_line(f"mlth[{ve}][{measure_on}]='{mlth[ve][measure_on]}'")
+            # rof
+            print_error(f"key with two arguments not allowed in the middle of a measure, voice {f1}")
+            return
+        # fi
+        set_staff_arr_double(f1, k, measure_on, key_voice, None, original_line)
+    # rof
+    return
+# End of do_key
+
+# ----------------------------------------------------------------------------
+#   instrument 1,2 flute                $$ voices for an instrument.
+# See source for list of all instruments.
+
+def do_instrument(t_args, original_line):
+    global vinstrument
+    global midi_instruments
+    global drum_sound
+    global mlth
+    global staff_name
+
+    print_error("NOTDONEYET - do_instrument")
+
+    # Note: 99 allows any number ... instrument with spaces within.
+    vargs = get_voice_others(t_args, 1, 99, 'instrument', original_line)
+    if vargs is None:
+        return
+    # fi
+    if len(vargs) == 1:
+        INST = " ".join(vargs).lower()
+        vargs = [ f"1..{len(volume)}" ]
+    else:
+        INST = " ".join(vargs[1:]).lower()
+    # fi
+    foundinstrument = None
+    for i in midi_instruments:
+        if i.lower() == INST:
+            foundinstrument = i
+            break
+        # fi
+    # rof
+    if foundinstrument is None:
+        for i in drum_sounds:
+            if i.lower() == INST:
+                foundinstrument = i
+                break
+            # fi
+        # rof
+    # fi
+    if foundinstrument is None:
+        print_error(f"do_instrument - midi_instruments does not have INST='{INST}'")
+        f1, type_error = is_float(INST, is_float_number, False)
+        if type_error is not None:
+            print_error(f"instrument error - {type_error}")
+            return
+        # fi
+        if f1 is None:
+            print_error(f"voice does not have instrument argument {INST} as a number.")
+            return
+        # fi
+        f1 = round(f1)
+        for i in midi_instruments:
+            if midi_instruments[i] == [f1, 0]:
+                foundinstrument = i
+                break
+            # fi
+        # rof
+        if foundinstrument is None:
+            print_error(f"instrument value {f1} not in instrument table.")
+            return
+        # fi
+        INST = foundinstrument
+    # fi
+
+    jkl = str(vargs[0])
+    wargs = separate_args(jkl, None, True, original_line)   # Allow staff_name and voice numbers.
+    if not wargs or len(wargs) < 1:
+        print_error("no voice arguments on instrument line", original_line)
+        return
+    # fi
+    for w in wargs:
+        f1, type_error = is_float(w, is_float_number, False)
+        if type_error is not None:
+            print_error(f"instrument error - {type_error}")
+            return
+        # fi
+        if f1 is None:
+            print_error(f"voice {w} is not a number.")
+            return
+        # fi
+        f1 = round(f1)
+        if f1 not in mlth:
+            print_error(f"instrument with too many voices not allowed, voice {f1} is too many")
+            return
+        # fi
+        if mlth[f1][measure_on] != 0:
+            print_error(f"instrument in the middle of measure '{measure_on}' not allowed, voice '{f1}'")
+            return
+        # fi
+        vinstrument[f1][measure_on] = foundinstrument
+    # rof
+
+    return
+# End of do_instrument
+
+# ----------------------------------------------------------------------------
+# The number of notes of second argument note length in a measure.
+#       meter   1/4             $$ 1 quarter note per measure.
+#       meter   12/8            $$ 12 eighth notes per measure.
+#       meter   4,4             $$ 4 quarter notes per measure.
+# Note: the comma allows for IMS format "time" command.
+
+def do_meter(t_args, original_line):
+    global meter
+    global measure_meter
+    global measure_meter_value
+    global args
+    global mlth
+
+    print_error("NOTDONEYET - do_meter")
+
+    if t_args is None or t_args == '':
+        print_error("meter does not have an expression to process", original_line)
+        return
+    # fi
+
+    for ve in range(1, len(volume)+1):
+        if mlth[ve][measure_on] != 0:
+            print_error("meter in the middle of a measure not allowed", original_line)
+            return
+        # fi
+    # rof
+
+    m = t_args
+    m = re.sub(r',', r'/', m)
+
+    f, type_error = is_float(m, is_float_number, False)
+    if type_error is not None:
+        print_error(f"meter error - {type_error}")
+        return
+    # fi
+    if f is None:
+        print_error("meter argument as a calculation did not return a value", original_line)
+        return
+    # fi
+    meter = m
+    measure_meter[measure_on] = m                       # Save text for meter.
+
+    f, type_error = is_float(m, is_float_number, False)
+    if type_error is not None:
+        print_error(f"meter error - {type_error}")
+        return
+    # fi
+    if f is None:
+        print_error("calculating meter did not return a value", original_line)
+        return
+    # fi
+    measure_meter_value = f
+    return
+# End of do_meter
+
+# ----------------------------------------------------------------------------
+# The value for middle_c.
+#       middlec 4c
+#       middlec 3c
+#       middlec 2b-
+
+def do_middle_c(t_args, original_line):
+    global middle_c
+    global note_to_midi_value
+
+    print_error("NOTDONEYET - do_middle_c")
+
+    if t_args is None:
+        print_error("middlec does not have a note to process", original_line)
+        return
+    # fi
+    if t_args == '':
+        compute_middle_c(39)                    # Default to 3c (39).
+        return
+    # fi
+    note_to_decode = t_args
+    temp3 = 0                                   # character pointer
+    if note_to_decode[0] == '(':
+        thenote, type_error = is_float(note_to_decode, is_float_number, False)
+        if type_error is not None:
+            print_error("middlec does not have a valid number in parenthesis", original_line)
+            return
+        # fi
+        if thenote is None:
+            print_error(f"middle_c - m:{measure_on} Note is not legal '{note_to_decode}', computation failed")
+            return
+        # fi
+        note_to_decode = round(thenote)
+        note_to_decode = note_to_decode + 12 + 12 - 3     # 3c -> 39 must be 60 for midi.
+        if note_to_decode <= 0 or note_to_decode >= 127:
+            print_error(f"middle_c - m:{measure_on} Note number '{thenote}' not in range")
+            return
+        # fi
+        compute_middle_c(round(thenote))
+        return
+     # fi
+
+    if note_to_decode not in note_to_midi_value:
+        print_error(f"middle_c - m:{measure_on} note_to_decode '{note_to_decode}' legal note")
+        return
+    # fi
+    number = note_to_midi_value[note_to_decode] - (60 - middle_c)
+    compute_middle_c(number)
+    return
+# End of do_middle_c
+
+# ----------------------------------------------------------------------------
+# Set page. This is only used for --pages argument to musicomp2abc command to
+# limit which pages to do output for (.fs, .mid, .csv, .abc, .v, .h).
+
+global page_warn_once
+page_warn_once = True
+
+def do_page(t_args, original_line):
+    global cstop_processing
+    global pages_to_do
+    global args
+    global page_warn_once
+
+    print_error("NOTDONEYET - do_page")
+
+    if t_args is None or t_args == '':
+        print_error("Page missing argument.", original_line)
+        return
+    # fi
+
+    vargs = t_args
+    n, mesg = is_float(vargs, is_float_string, False)
+    if mesg is not None or n is None:
+        if page_warn_once:
+            if not args.nooncewarning:
+                print_warning("ONCE#A: page is also a variable, and cannot set character string variable to it.", original_line)
+            # fi
+            page_warn_once = False
+        # fi
+        setvar('page', -1, 0)           # integer/floating value
+        n = vargs
+    elif type(n) is float:
+        if n.is_integer():
+            n = int(n)
+        # fi
+        setvar('page', n, 0)            # integer/floating value
+    elif type(n) is int:
+        setvar('page', n, 0)            # integer/floating value
+    else:
+        if page_warn_once:
+            if not args.nooncewarning:
+                print_warning("ONCE#B: page is a command, and cannot set character string variable to it.", original_line)
+            # fi
+            page_warn_once = False
+        # fi
+        setvar('page', -1, 0)           # integer/floating value
+        n = vargs
+    # fi
+
+    if args.pages == None or args.pages == '':
+        return
+    # fi
+    if n not in pages_to_do:
+        cstop_processing = True
+        return
+    # fi
+    # Do cstart.
+    cstop_processing = False
+    return
+# End of do_page
+
+# ----------------------------------------------------------------------------
+#       pan     1..4  90        $$ MIDI value 0 to 64 to 127.
+# This is the left/right positioning of the audio sound. 64=straight ahead.
+
+def do_pan(t_args, original_line):
+    global pan
+    global measure_on
+    global staff_name
+
+    vargs = get_voice_others(t_args, 1,2, 'pan', original_line)
+    if vargs is None:
+        return
+    # fi
+    if len(vargs) == 1:
+        p = vargs[0]
+        vargs = [ f"1..{len(volume)}" ]
+    else:
+        p = vargs[1]
+    # fi
+    f1, type_error = is_float(p, is_float_number, False)
+    if type_error is not None:
+        print_error(f"pan error - {type_error}")
+        return
+    # fi
+    if f1 is None:
+        print_error(f"voice does not have pan argument {p} as a number.")
+        return
+    # fi
+    p = round(f1)
+    if p < 0 or p > 127:
+        print_error(f"pan value {p} not in range 0 to 127.")
+        return
+    # fi
+    jkl = str(vargs[0])
+    wargs = separate_args(jkl, None, True, original_line)   # Allow staff_name and voice numbers.
+    if not wargs or len(wargs) < 1:
+        print_error("no voice arguments on pan line", original_line)
+        return
+    # fi
+    for w in wargs:
+        f1, type_error = is_float(w, is_float_number, False)
+        if type_error is not None:
+            print_error(f"pan error - {type_error}")
+            return
+        # fi
+        if f1 is None:
+            print_error(f"voice {w} is not a number.")
+            return
+        # fi
+        f1 = round(f1)
+
+        pan[f1][measure_on] = p
+    # rof
+    return
+# End of do_pan
+
+# ----------------------------------------------------------------------------
+# Set MIDI reverb value for voice.
+#       reverb  1..4  90        $$ MIDI value 0 to 127.
+
+def do_reverb(t_args, original_line):
+    global reverb
+    global measure_on
+    global staff_name
+
+    vargs = get_voice_others(t_args, 1,2, 'reverb', original_line)
+    if vargs is None:
+        return
+    # fi
+    if len(vargs) == 1:
+        r = vargs[0]
+        vargs = [ f"1..{len(volume)}" ]
+    else:
+        r = vargs[1]
+    # fi
+    f1, type_error = is_float(r, is_float_number, False)
+    if type_error is not None:
+        print_error(f"reverb error - {type_error} ... r='{r}'")
+        return
+    # fi
+    if f1 is None:
+        print_error(f"voice does not have reverb argument {r} as a number.")
+        return
+    # fi
+    r = round(f1)
+    if r < 0 or r > 127:
+        print_error(f"reverb value {r} not in range 0 to 127.")
+        return
+    # fi
+
+    jkl = str(vargs[0])
+    wargs = separate_args(jkl, None, True, original_line)   # Allow staff_name and voice numbers.
+
+    if not wargs or len(wargs) < 1:
+        print_error("no voice arguments on reverb line", original_line)
+        return
+    # fi
+    for w in wargs:
+        f1, type_error = is_float(w, is_float_number, False)
+        if type_error is not None:
+            print_error(f"reverb error - {type_error} ... f1='{f1}'")
+            return
+        # fi
+        if f1 is None:
+            print_error(f"voice {w} is not a number.")
+            return
+        # fi
+        f1 = round(f1)
+
+        reverb[f1][measure_on] = r
+    # rof
+    return
+# End of do_reverb
+
+# ----------------------------------------------------------------------------
+# Give a title to a printed or played song (abcm2ps, or .mid).
+#       title   Inventio 15    by Bach
+#       title   for plato by Marshall Midden
+
+def do_title(t_args, original_line):
+    global header
+    global args
+
+    print_error("NOTDONEYET - do_title")
+
+    if t_args is None or t_args == '':
+        #-- print_warning("Title does not have any text.", original_line)
+        if args.vertical or args.horizontal:
+            header = header + "title   \n"
+        elif args.midi1csv or args.fluidsynth:
+            pass
+        else:           # ABC
+            header = header + "T:\n"
+        # fi
+        return
+    # fi
+    # T: Title of tune        (can have multiple)
+    if args.vertical or args.horizontal:
+        header = header + f"title   {t_args}\n"
+    elif args.midi1csv or args.fluidsynth:
+        header.append(t_args)
+    else:           # ABC
+        header = header + f"T:{t_args}\n"
+    # fi
+    return
+# End of do_title
+
+# ----------------------------------------------------------------------------
+# NOTE/WARNING: if you have xpose without a key, it goes to key_default.
+# This is UGLY.
+#       =xpose  clarinetA..clarinetB -2     $$ clarinett in B ...  C, B-, B  ->  -2
+#       xpose   c-                          $$ all voices, from current key to key c-.
+#       xpose   1 c-                        $$ voice 1, from current key to key c-.
+#       xpose   1 -1 c-                     $$ voice 1, down 1 semi-tone, then to key c-,
+# and change to key c- if --vertical/--horizontal.
+#       xpose   1 +12                       $$ 4c = 5c
+#       xpose   1,2..5,7 +2                 $$ French Horn in D plays 2 semitones higher from what is written
+#       xpose   1 -12                       $$ French Horn in C plays 12 semitones lower
+#       xpose   1 -7                        $$ 4c = 3f
+#       xpose   1 +2                        $$ Trombone in D plays 2 semitones higher from what is written
+#       xpose   1 -3                        $$ Clarinet in A ... "C" plays "A" (i.e. C, B, B-, A = -3)
+#       =xpose  bassdrumA  -13              $$ 2c (printed) -> 0bn (played)
+#       =xpose  cymbalA  -1                 $$ 2e (printed) -> 2d- (played)
+# NOTE: the --vertical and --horizontal and key changes ... *sigh* complicated.
+
+def do_xpose(t_args, original_line):
+    global xpose
+    global xpose_new_key
+    global measure_on
+    global key_sig
+    global key_sig_int
+    global key_default
+    global args
+    global key_voice
+    global minor_key_to_major
+    global staff_name
+
+    print_error("NOTDONEYET - do_title")
+
+    if args.noxpose:
+        print_warning("Ignoring xpose parsing due to --noxpose argument.", original_line)
+        return
+    # fi
+    if args.abc:
+        print_warning("Ignoring xpose parsing for --abc output format. ", original_line)
+        return
+    # fi
+    if t_args is None or t_args == '':
+        print_error("xpose does not have arguments.", original_line)
+        return
+    # fi
+    targs = re.sub(r'\s*,\s*', ',', t_args)
+    vargs = targs.split()
+    if len(vargs) <= 0 or len(vargs) > 4:
+        print_error("xpose does not have correct number of arguments.", original_line)
+        return
+    # fi
+    kl = None
+    if len(vargs) > 1:
+        mm = vargs[len(vargs) - 1].lower()      # Last argument
+        kl = vargs[len(vargs) - 2].lower()      # Second to last argument
+        if mm == 'minor':
+            if kl not in minor_key_to_major:
+                print_error(f"xpose command, key does not recognize minor {kl}")
+                return
+            # fi
+            kl = minor_key_to_major[kl].lower()
+            vargs.pop()
+        elif mm == 'major':
+            if kl not in key_sig:
+                print_error(f"xpose command, key '{kl}' not recognized.")
+                return
+            # fi
+            vargs.pop()
+        else:
+            kl = None
+        # fi
+    # fi
+    if len(vargs) > 1:
+        if len(vargs) == 4:
+            print_error("xpose command only allows 3 arguments.")
+            return
+        elif len(vargs) == 3:
+            if kl is None:
+                kl = vargs[2].lower()
+            # fi
+            x = vargs[1]                # shifting amount
+            vs = vargs[0]               # voices to change
+        elif len(vargs) == 2:
+            vs = vargs[0]               # voices to change
+            # Check if key, or a number.
+            if kl is None:
+                kl = vargs[1].lower()   # new key?
+            # fi
+            if kl in key_sig:
+                x = '0'                 # shifting amount
+            else:       # is a number?
+                f1, type_error = is_float(kl, is_float_number, False)
+                if type_error is not None:
+                    print_error(f"xpose error#1 - {type_error}")
+                    return
+                # fi
+                if f1 is None:
+                    print_error(f"voice does not have xpose argument {kl} as a number or key.")
+                    return
+                # fi
+                x = str(round(f1))      # Must be an integer as a string.
+                kl = None
+            # fi
+        else:
+            print_error("xpose has a problem.", original_line)
+            return
+        # fi
+    else:   # Only one argument -- key or number?
+        # Check if key, or a number.
+        if kl is None:
+            kl = vargs[0].lower()       # new key
+        # fi
+        if kl.lower() in key_sig:
+            x = '0'                     # shifting amount
+        else:       # is a number?
+            x = kl
+            kl = None
+            f1, type_error = is_float(x, is_float_number, False)
+            if type_error is not None:
+                print_error(f"xpose error#2 - {type_error}")
+                return
+            # fi
+            if f1 is None:
+                print_error(f"voice does not have xpose argument {kl} as a number or key.")
+                return
+            # fi
+            x = str(round(f1)) # Must be an integer as a string..
+        # fi
+        vs = '{1}..{len(volume)}'       # all voices
+    # fi
+    if type(kl) is str:
+        if kl not in key_sig:
+            print_error(f"no key '{kl}' in key_sig({key_sig})")
+            return
+        # fi
+    # fi
+
+    f1, type_error = is_float(x, is_float_number, False)
+    if type_error is not None:
+        print_error(f"xpose error#3 - {type_error}")
+        return
+    # fi
+    if f1 is None:
+        print_error(f"voice does not have xpose argument {x} as a number.")
+        return
+    # fi
+    x = round(f1)              # Must be an integer.
+
+    # kl is used in getnote via xpose_new_key (musicomp text)
+    # kl is None means to use current key for voice.
+
+    jkl = str(vs)
+    wargs = separate_args(jkl, None, True, original_line)   # Allow staff_name and voice numbers.
+    if not wargs or len(wargs) < 1:
+        print_error("no voice arguments on xpose", original_line)
+        return
+    # fi
+    # If kl is None, use key_default.
+    if args.vertical or args.horizontal:
+        kprint_lc = key_default                 # printing and used in xpose are the same.
+    else:
+        kprint_lc = key_sig_int[key_default]    # Key name extracted.
+    # fi
+    for w in wargs:
+        f1, type_error = is_float(w, is_float_number, False)
+        if type_error is not None:
+            print_error(f"xpose error#4 - {type_error}")
+            return
+        # fi
+        if f1 is None:
+            print_error(f"voice {w} is not a number.")
+            return
+        # fi
+        f1 = round(f1)
+        if kl is None:
+            if f1 in key_voice and measure_on in key_voice[f1]:
+                xpose_new_key[f1] = key_voice[f1][measure_on]   # Use current key for voice
+            else:
+                xpose_new_key[f1] = kprint_lc
+            # fi
+        else:
+            xpose_new_key[f1] = kl
+        # fi
+        xpose[f1] = x
+    # rof
+    return
+# End of do_xpose
+
+# ----------------------------------------------------------------------------
+# Following does not do multiple sharps or flats, but that is crazy anyway. Neither naturals.
+global key_sig
+key_sig = { 'c+':7, 'f+':6, 'b':5, 'bn':5, 'e':4, 'en':4, 'a':3, 'an':3, 'd':2,
+            'dn':2, 'g':1, 'gn':1, 'c':0, 'cn':0, 'f':-1, 'b-':-2, 'e-':-3,
+            'a-':-4, 'd-':-5, 'g-':-6, 'c-':-7 }
+
+global key_sig_int
+key_sig_int = {}
+for i in key_sig:
+    if key_sig[i] not in key_sig_int:
+        key_sig_int[key_sig[i]] = i
+    # fi
+# rof
+
+global key_to_accidentals
+key_to_accidentals = {
+    'c':  ('c', 'd', 'e', 'f', 'g', 'a', 'b'),
+    'cn':  ('c', 'd', 'e', 'f', 'g', 'a', 'b'),
+
+    'f':  ('c', 'd', 'e', 'f', 'g', 'a', 'b-'),
+    'b-': ('c', 'd', 'e-', 'f', 'g', 'a', 'b-'),
+    'e-': ('c', 'd', 'e-', 'f', 'g', 'a-', 'b-'),
+    'a-': ('c', 'd-', 'e-', 'f', 'g', 'a-', 'b-'),
+    'd-': ('c', 'd-', 'e-', 'f', 'g-', 'a-', 'b-'),
+    'g-': ('c-', 'd-', 'e-', 'f', 'g-', 'a-', 'b-'),
+    'c-': ('c-', 'd-', 'e-', 'f-', 'g-', 'a-', 'b-'),
+
+    'g':  ('c', 'd', 'e', 'f+', 'g', 'a', 'b'),
+    'd':  ('c+', 'd', 'e', 'f+', 'g', 'a', 'b'),
+    'a':  ('c+', 'd', 'e', 'f+', 'g+', 'a', 'b'),
+    'e':  ('c+', 'd+', 'e', 'f+', 'g+', 'a', 'b'),
+    'b':  ('c+', 'd+', 'e', 'f+', 'g+', 'a+', 'b'),
+    'f+': ('c+', 'd+', 'e+', 'f+', 'g+', 'a+', 'b'),
+    'c+': ('c+', 'd+', 'e+', 'f+', 'g+', 'a+', 'b+')
+}
+
+global key_convert
+key_convert = { }
+for i in key_to_accidentals:
+    l = {}
+    for o in range(0, 9) :
+        m = 0
+        for n in ('c', 'd', 'e', 'f', 'g', 'a', 'b'):
+            l[str(o) + n + '--'] = str(o) + n + '--'
+            l[str(o) + n + '-']  = str(o) + n + '-'
+            l[str(o) + n]        = str(o) + key_to_accidentals[i][m]
+            l[str(o) + n + 'n']  = str(o) + n + 'n'
+            l[str(o) + n + '+']  = str(o) + n + '+'
+            l[str(o) + n + '++'] = str(o) + n + '++'
+            m = m + 1
+        # rof
+    # rof
+    key_convert[i] = l
+# rof
+
+global minor_key_to_major
+minor_key_to_major = {
+    'a+': 'c+',
+    'd+': 'f+',
+    'g+': 'b',
+    'c+': 'e',
+    'f+': 'c+',
+    'b':  'd',
+    'e':  'g',
+
+    'a':  'c',
+
+    'd':  'f',
+    'g':  'b-',
+    'c':  'e-',
+    'f':  'a-',
+    'b-': 'd-',
+    'e-': 'g-',
+    'a-': 'c-'
+}
+
+# ----------------------------------------------------------------------------
+# dictionary commandname : routine. execute via(?): globals()['do_cstopnow'](t_args, line)
+global hint_commands
+hint_commands = {
+#            Command         Routine
+             'bars'       : do_bars,
+             'clef'       : do_clef,
+             'instrument' : do_instrument,
+             'key'        : do_key,
+             'meter'      : do_meter,
+             'middlec'    : do_middle_c,
+             'page'       : do_page,
+             'title'      : do_title,
+             'transpose'  : do_xpose,
+             'xpose'      : do_xpose,
+           }
+
+# ----------------------------------------------------------------------------
+#    octave  0      1      2      3      4       5       6       7       8
+#  c/b+     24     36     48     60     72      84      96     108     120
+#  c+/d-    25     37     49     61     73      85      97     109     121
+#  d        26     38     50     62     74      86      98     110     122
+#  d+/e-    27     39     51     63     75      87      99     111     123
+#  e/f-     28     40     52     64     76      88     100     112     124
+#  f/e+     29     41     53     65     77      89     101     113     125
+#  f+/g-    30     42     54     66     78      90     102     114     126
+#  g        31     43     55     67     79      91     103     115     127
+#  g+/a-    32     44     56     68     80      92     104     116
+#  a        33     45     57     69     81      93     105     117
+#  a+/b-    34     46     58     70     82      94     106     118
+#  b/c-     35     47     59     71     83      95     107     119
+
+# For octave 3c = 60.
+global note_in_octave_value
+note_in_octave_value = {
+   'c--':58, 'c-':59, 'c':60, 'cn':60, 'c+':61, 'c++':62,
+   'd--':60, 'd-':61, 'd':62, 'dn':62, 'd+':63, 'd++':64,
+   'e--':62, 'e-':63, 'e':64, 'en':64, 'e+':65, 'e++':66,
+   'f--':63, 'f-':64, 'f':65, 'fn':65, 'f+':66, 'f++':67,
+   'g--':65, 'g-':66, 'g':67, 'gn':67, 'g+':68, 'g++':69,
+   'a--':67, 'a-':68, 'a':69, 'an':69, 'a+':70, 'a++':71,
+   'b--':69, 'b-':70, 'b':71, 'bn':71, 'b+':72, 'b++':73
+}
+
+global note_to_midi_value
+note_to_midi_value = { }
+global note_to_midi_value_39
+note_to_midi_value_39 = { }
+
+global midi_value_to_note_flat
+midi_value_to_note_flat = { }
+global midi_value_to_note_flat_39
+midi_value_to_note_flat_39 = { }
+
+global midi_value_to_note_sharp
+midi_value_to_note_sharp = { }
+global midi_value_to_note_sharp_39
+midi_value_to_note_sharp_39 = { }
+
+global middle_c
+middle_c = 39                   # Default to 60, as per cyber1 (1978 era) musicomp.
+
+def compute_middle_c(f):
+    global note_in_octave_value
+    global note_to_midi_value
+    global note_to_midi_value_39
+    global midi_value_to_note_sharp
+    global midi_value_to_note_sharp_39
+    global midi_value_to_note_flat
+    global midi_value_to_note_flat_39
+    global middle_c
+
+    middle_c = f
+    f = f + 12 + 12 - 3             # 3c -> 39 must be 60 for midi.
+    f39 = 39 + 12 + 12 - 3         # 3c -> 39 must be 60 for midi.
+    note_to_midi_value = {}
+    note_to_midi_value_39 = {}
+    midi_value_to_note_sharp = {}
+    midi_value_to_note_sharp_39 = {}
+    midi_value_to_note_flat = {}
+    midi_value_to_note_flat_39 = {}
+
+    for o in range(0, 9):           # 0 thru 8
+        for n in note_in_octave_value:
+            x = str(o) + n
+            v = (note_in_octave_value[n] - (f - 24)) + (12 * o)  # 60-36=24 = '0c'
+            v39 = (note_in_octave_value[n] - (f39 - 24)) + (12 * o)  # 60-36=24 = '0c'
+            note_to_midi_value[x] = v
+            note_to_midi_value_39[x] = v39
+            if len(n) >= 3:         # ignore double flat and double sharp
+                pass
+            elif len(n) == 2:       # accidental
+                if n[1] == '+':
+                    if v not in midi_value_to_note_sharp:   # Prefer no sharp/flat.
+                        midi_value_to_note_sharp[v] = x
+                    # fi
+                    if v39 not in midi_value_to_note_sharp_39: # Prefer no sharp/flat.
+                        midi_value_to_note_sharp_39[v39] = x
+                    # fi
+                # fi
+                if n[1] == '-':
+                    if v not in midi_value_to_note_flat:    # Prefer no sharp/flat.
+                        midi_value_to_note_flat[v] = x
+                    # fi
+                    if v39 not in midi_value_to_note_flat_39:  # Prefer no sharp/flat.
+                        midi_value_to_note_flat_39[v39] = x
+                    # fi
+                # Ignore 'n'.
+                # fi
+            else:
+                midi_value_to_note_sharp[v] = x             # Prefer no sharp/flag.
+                midi_value_to_note_flat[v] = x
+                midi_value_to_note_sharp_39[v39] = x        # Prefer no sharp/flag.
+                midi_value_to_note_flat_39[v39] = x
+            # fi
+        # rof
+    # rof
+    return
+# End of compute_middle_c
+
+compute_middle_c(middle_c)                      # Default to 3c
+
+# ----------------------------------------------------------------------------
+def compute_hint_command_args(expand_line):
+    if not expand_line:
+        return '', '', ''
+    # fi
+    t0 = re.sub(r'^([a-zA-Z0-9%_*]*).*$', r'\1', expand_line, count=1)   # First token on line.
+    t1 = re.sub(r'^[a-zA-Z0-9%_*]*(.*)$', r'\1', expand_line, count=1)   # Rest of line.
+
+    command = t0.lstrip()
+    t_args = t1.strip()
+
+    if len(t1) > 0:
+        delimiter = t1[0]
+    else:
+        delimiter = ''
+    # fi
+    # Note: t0 + t1 = line. :) [Thus know how to do things in character variable substitution.]
+    return command, t_args, delimiter
+# End of compute_hint_command_args
+
+# ----------------------------------------------------------------------------
+# Parse and process hint file line.
+
+def process_hint_line(original_line):
+    global hint_commands
+
+    qline = original_line
+    command, t_args, delimiter = compute_hint_command_args(qline)
+
+    # Try to process command. If not a command, process notes.
+    if command is not None and command in hint_commands:
+        try:
+            r = hint_commands[command]              # Had an error once ... thus try/expect.
+        except:
+            print_error(f"Not found processing routine for command '{command}' '{delimiter}' '{t_args}'")
+            print_stderr("    " + sys.exc_info()[0] + sys.exc_info)
+        # yrt
+        print_debug(f'command="{command}" delimiter="{delimiter}" t_args="{t_args}"')
+        r(t_args, original_line)
+    else:
+        print_error(f"Unexpected line in hint file: '{command}' '{t_args}'")
+    # fi
+# End of process_hint_line
+
+# ----------------------------------------------------------------------------
+# Get the next hint file line.
+# Return:
+#   full_line           - the line without $$ or # comments.
+#   commentdollardollar - The $$ or # comment, with the two dollar signs or #.
+
+def read_next_hint_line():
+    global linecount
+    global args
+    global hint_file
+    global errors_happened
+
+    if hint_file is None:
+        return None, None
+    # fi
+    full_line = ''
+    while True:
+        try:
+            line = hint_file.readline()
+            if line is None or line == '':
+                sys.exit(errors_happened)
+            # fi
+            linecount = linecount + 1
+            if line:
+                line = line.rstrip()                # trailing spaces gone.
+                if line and line[-1] == '\\':       # if continued on next line
+                    line = line[:-1]
+                    line = line.rstrip()            # trailing spaces gone.
+                    full_line += line
+                    continue
+                # fi
+                full_line += line
+                commentdollardollar = ''
+                if '$$' in full_line:
+                    # delete anything from $$ onwards.
+                    commentdollardollar = re.sub(r'^.*[$][$]', '$$', full_line, count=1)
+                    commentdollardollar = commentdollardollar.rstrip()  # trailing spaces gone
+                    full_line = re.sub(r'[$][$].*$', '', full_line)
+                # fi
+                if '#' in full_line:
+                    # delete anything from # onwards.
+                    commentdollardollar = re.sub(r'^.*[#]', '#', full_line, count=1)
+                    commentdollardollar = commentdollardollar.rstrip()  # trailing spaces gone
+                    full_line = re.sub(r'[#].*$', '', full_line)
+                # fi
+#-- need to know continued line ... 8 spaces or start with a tab.
+                return full_line, commentdollardollar
+            # fi
+        except EOFError:
+            if full_line != '':
+                return full_line, commentdollardollar
+            # fi
+            pass            # print("Read gave EOF", file=sys.stderr, flush=True)
+        except SystemExit:
+            if full_line != '':
+                return full_line, commentdollardollar
+            # fi
+            pass            # print("Read gave system exit", file=sys.stderr, flush=True)
+        except KeyboardInterrupt:
+            print_error("Read got keyboard interrupt")
+        except:
+            if full_line != '':
+                return full_line, commentdollardollar
+            # fi
+            print_error("Read got a processing error")
+            print_stderr("    " + sys.exc_info()[0] + sys.exc_info)
+        # yrt
+        break
+    # elihw
+    return None, None
+# End of read_next_hint_line
+
+# ----------------------------------------------------------------------------
+def readhintfile():
+    global linecount
+    global args
+
+    while True:                                         # Read the file loop.
+        line, commentonline = read_next_hint_line()
+        if line is None and commentonline is None:      # If end of file.
+            break
+        elif line is None:                              # Blank line
+            continue
+        # fi
+        if args.lines:
+            print_stderr(f"linecount={linecount} line='{line}'")
+        # fi
+        line = line.strip()
+        if line == '':                                  # Blank line
+            continue
+        # fi
+        # If command == '*' ignore.
+        if re.match(r'^\s*[#*]', line):                 # Comment line.
+            continue
+        # fi
+        process_hint_line(line)
+    # elihw
+    return
+# End of readhintfile
+
 # ----------------------------------------------------------------------------
 # NOTDONEYET - gcs output.
 #--     global array_of_gcs
@@ -1063,6 +3006,8 @@ def main():
         # fi
     # fi
 
+    readhintfile()
+
     readthefile()                       # Parse the input fs file into arrays/dictionaries/etc.
 
     figure_out_measure_locations()      # Where are the starts of measures - from meter clicks and tempos.
@@ -1094,5 +3039,5 @@ if errors_happened != 0:
 # fi
 sys.exit(errors_happened)
 # ----------------------------------------------------------------------------
-# End of program fs2gcs
+# End of program mmm.py
 # ----------------------------------------------------------------------------
