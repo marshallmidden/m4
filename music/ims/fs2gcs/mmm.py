@@ -2832,6 +2832,7 @@ def process_hint_line(original_line):
             print_error(f"Not found processing routine for command '{command}' '{delimiter}' '{t_args}'")
             print_stderr("    " + sys.exc_info()[0] + sys.exc_info)
         # yrt
+        print_debug(f'command={command} delimiter={delimiter} t_args={t_args}')
         r(t_args, original_line)
     else:
         print_error(f"Unexpected line in hint file: '{command}' '{t_args}'")
