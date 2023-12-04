@@ -212,7 +212,10 @@ for v in range(0,MAXVOICES):        # Voices if multiple turned on, run to alter
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global array_of_original_lines      # For input, have an array of the original lines.
 array_of_original_lines = []
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# ----------------------------------------------------------------------------
+# These are from the Hints file, and are for printing out the GCS source.
+global bars_for_measure
+bars_for_measure = {}
 # ----------------------------------------------------------------------------
 #-- # Following does not do multiple sharps or flats, but that is crazy anyway. Neither naturals.
 #-- global key_sig
@@ -1035,6 +1038,14 @@ def print_debug_internal_1(stg):
 # End of print_debug_internal_1
 
 # ============================================================================
+def print_debug_hints():
+    global bars_for_measure
+
+    for b in bars_for_measure:
+        print_debug(f'measure {bars_for_measure[b]} = {b}')
+    # rof
+# End of print_debug_hints
+
 # ============================================================================
 is_float_number = 0
 is_float_string = 1
@@ -1082,12 +1093,12 @@ def is_float(strg, type_float, none_means_none):
 # End of is_float
 
 # ----------------------------------------------------------------------------
-# strng = int_range_to_array(strng, original_line)
+# strng = int_range_to_array(strng)
 
-def int_range_to_array(strng, original_line):
+def int_range_to_array(strng):
     a = strng.find('..')
     if a == 0:
-        print_error("Range does not start with number.", original_line)
+        print_error("Range does not start with number.")
         return [str(strng)]
     elif a < 0:                                 # Not a range
         strng, msg = is_float(strng, is_float_number, False)
@@ -1121,7 +1132,7 @@ def int_range_to_array(strng, original_line):
     if type(n) is float and n.is_integer():
         first = int(n)
     elif type(n) is not int:
-        print_error("Range first number not an integer.", original_line)
+        print_error("Range first number not an integer.")
         return [str(strng)]
     # fi
     if type(o) is str:
@@ -1130,7 +1141,7 @@ def int_range_to_array(strng, original_line):
     if type(o) is float and o.is_integer():
         second = int(o)
     elif type(o) is not int:
-        print_error("Range second number not an integer.", original_line)
+        print_error("Range second number not an integer.")
         return [str(strng)]
     # fi
     array_args = []
@@ -1145,13 +1156,12 @@ def int_range_to_array(strng, original_line):
 # strng         is string where token name is.
 # terminator    is the termination character looking for.
 # doparens      True if should check parens match.
-# original_line for error printing..
 #
 # Returns where in strng termination is. -1 if not found. 0=first character.
 
 nest_terminator = { '(':')', '{':'}', "'":"'", '"':'"' }
 
-def find_terminator_in_string(strng, terminators, doparens, original_line):
+def find_terminator_in_string(strng, terminators, doparens):
     w = 0
     e = []
     while w < len(strng):
@@ -1203,47 +1213,14 @@ def find_terminator_in_string(strng, terminators, doparens, original_line):
 
 # ----------------------------------------------------------------------------
 #   wline         - string to split
-#   integers      - True if expect numbers as arguments.
-#                 - False if alphanumberic.
-#                 - None if voice numbers - staff_name -> voice numbers.
-#                 - "volume" or "volumes" for 'f', etc.
-#   nospaces      - True if do not split on spaces.
-#   original_line - Line for error messages.
 
-def separate_args(wline, integers, nospaces, original_line):
-    def b4it(array_args, b4, integers, nospaces, original_line):
-        global staff_name
-
+def separate_args(wline):
+    def b4it(array_args, b4):
         if b4 == '':
             array_args.append(b4)
-        elif integers is None:
-            if b4 in staff_name:
-                if staff_name[b4] is None:
-                    assign_another_voice(b4, 'separate_args', original_line)
-                # fi
-                for v in staff_name[b4]:
-                    array_args.append(str(v))   # Do staff_name to voice numbers conversions.
-                # rof
-            else:                               # maybe voice numbers. :)
-                nums = int_range_to_array(b4, original_line)
-                array_args = array_args + nums
-            # fi
-        elif type(integers) is str:             # volume/volumes command.
-            nums = int_range_to_array(b4, original_line)
-            new_nums = []
-            for nm in nums:
-                if type(nm) is not str:
-                    nm = str(nm)
-                # fi
-                v = get_volume_number(nm, integers, original_line)
-                new_nums.append(v)
-            # fi
-            array_args = array_args + new_nums
-        elif integers:
-            nums = int_range_to_array(b4, original_line)
-            array_args = array_args + nums
         else:
-            array_args.append(b4)
+            nums = int_range_to_array(b4)
+            array_args = array_args + nums
         # fi
         return array_args
     # End of b4it
@@ -1251,9 +1228,6 @@ def separate_args(wline, integers, nospaces, original_line):
     global args
 
     splitter = [ ',', ";" ]
-    if args.spaces and not nospaces:
-        splitter = splitter + [ ' ', "\t" ]
-    # fi
     strng = wline.strip()
     if len(strng) == 0:
         return []
@@ -1268,19 +1242,18 @@ def separate_args(wline, integers, nospaces, original_line):
     b4 = ''
     while w < len(strng):
         s = strng[w:]
-        x = find_terminator_in_string(s, splitter, True, original_line)
+        x = find_terminator_in_string(s, splitter, True)
         # x == -1   end of strng.
         if x < 0:                           # End of strng reached before splitter character found.
             b4 = s
             break
         # fi
         b4 = s[0:x]
-        array_args = b4it(array_args, b4, integers, nospaces, original_line)
+        array_args = b4it(array_args, b4)
         b4 = ''
         w = w + x + 1
     # elihw
-    ti = integers
-    array_args = b4it(array_args, b4, ti, nospaces, original_line)
+    array_args = b4it(array_args, b4)
     return array_args
 # End of separate_args
 
@@ -1770,68 +1743,89 @@ drum_sounds = {
 # ----------------------------------------------------------------------------
 #       bars    7+1             $$ The first one must be one more than wanted -- due to "measure 0"
 #                               $$ setting things line meter up. Dunno, it works.
-#       bars    7               $$ Group the next 7 bars on one staff line -- .abc file.
+#       bars    7               $$ Group the next 7 bars on one staff line.
 
-def do_bars(t_args, original_line):
-    global bars
-
-    print_error("NOTDONEYET - do_bars")
+def do_bars(t_args):
+    global bars_for_measure
 
     if t_args is None or t_args == '':
-        print_error("bars does not have an expression to process", original_line)
+        print_error("bars does not have an expression to process")
         return
     # fi
 
-    m = t_args
+    vargs = get_voice_measure_other(t_args, 'bars')
+    if vargs is None:
+        return
+    # fi
+    if len(vargs) > 2:
+        print_error("bars format is number bars printed for staff, then optional measures")
+        return
+    # fi
+    m = vargs[0]
 
-    f, type_error = is_float(m, is_float_number, False)
+    f1, type_error = is_float(m, is_float_number, False)
     if type_error is not None:
         print_error(f"bars error - {type_error}")
         return
     # fi
-    if f is None:
-        print_error("bars argument as a calculation did not return a value", original_line)
+    if f1 is None:
+        print_error("bars argument as a calculation did not return a value")
         return
     # fi
-    bars[measure_on] = round(f)
+    f1 = round(f1)
+
+    # See if measures.
+    if len(vargs) == 1:
+        wargs = ( '1' )               # default to measure 1 
+    else:
+        wargs = separate_args(vargs[1])     # The measure numbers.
     # fi
+    if not wargs or len(wargs) < 1:
+        print_error("no measure argument(s) for bar command")
+        return
+    # fi
+    for w in wargs:
+        f2, type_error = is_float(w, is_float_number, False)
+        if type_error is not None:
+            print_error(f"clef error - {type_error}")
+            return
+        # fi
+        if f2 is None:
+            print_error(f"voice {w} is not a number.")
+            return
+        # fi
+        f2 = round(f2)
+        bars_for_measure[f2] = f1
+    # rof
     return
 # End of do_bars
 
 # ----------------------------------------------------------------------------
-#       clef    1,2,3   treble          $$ Set voices 1,2,3 to treble.
-#       clef    4       alto
-#       clef    treble,bass,alto,tenor  $$ A different way to do it.
-# NOTE: The argument is put into the .abc file, and NOT checked in any way.
+# clef 1,2,3 1,10,22,50 treble  # voices 1,2,3 in measures 1,10,22,50 to treble .
+# clef 4                alto    # voice 4 to alto
 
-def do_clef(t_args, original_line):
+def do_clef(t_args):
     global clef
-    global staff_name
 
     print_error("NOTDONEYET - do_clef")
 
-    vargs = get_voice_others(t_args, 1,2, 'clef', original_line)
+    vargs = get_voice_measure_other(t_args, 'clef')
+
+    if len(vargs) < 2:
+        print_error(f"clef does not have at least 2 arguments (has {len(vargs)})")
+        return None
+    # fi
+
     if vargs is None:
         return
     # fi
 
-    if len(vargs) == 1:
-        wargs = separate_args(vargs[0], False, True, original_line)
-        if not wargs or len(wargs) < 1:
-            print_error("no clef selection arguments", original_line)
-            return
-        # fi
-        for i in range(1, len(wargs)+1):
-            clef[i][measure_on] = wargs[i-1].strip()   # No checking.
-        # rof
-        return
-    # fi
     clf = vargs[1]
 
     jkl = str(vargs[0])
-    wargs = separate_args(jkl, None, True, original_line)   # Allow staff_name and voice numbers.
+    wargs = separate_args(jkl)   # Allow voice numbers.
     if not wargs or len(wargs) < 1:
-        print_error("no voice arguments on clef line", original_line)
+        print_error("no voice arguments on clef line")
         return
     # fi
     for w in wargs:
@@ -1851,7 +1845,9 @@ def do_clef(t_args, original_line):
 # End of do_clef
 
 # ----------------------------------------------------------------------------
-def get_voice_others(t_args, mn, mx, command, original_line):
+# Get t_args of voice numbers, followed by optional measures, then next.
+
+def get_voice_measure_other(t_args, command):
     if t_args is None or t_args == '':
         print_error(f"{command} command does not have any arguments")
         return None
@@ -1861,13 +1857,8 @@ def get_voice_others(t_args, mn, mx, command, original_line):
     targs = re.sub(r'\s*\.\.\s*', '..', targs)
     # Voice numbers (optional), followed by key name, with major/minor (optional).
     vargs = targs.split()
-
-    if len(vargs) < mn or len(vargs) > mx:
-        print_error(f"{mn} command does not have correct number of arguments (mn..{mx}) verses {len(vargs)}")
-        return None
-    # fi
     return vargs
-# End of get_voice_others
+# End of get_voice_measure_other
 
 # ----------------------------------------------------------------------------
 #       key     a                   $$ key of a major for all voices. f+,c+,g+
@@ -1878,7 +1869,7 @@ def get_voice_others(t_args, mn, mx, command, original_line):
 #       key     atonal              $$ Each note is stand-alone.
 # Changes at start of a measure.
 
-def do_key(t_args, original_line):
+def do_key(t_args):
     global args
     global key_sig
     global key_default
@@ -1886,13 +1877,17 @@ def do_key(t_args, original_line):
     global mlth
     global vol
     global minor_key_to_major
-    global staff_name
 
     print_error("NOTDONEYET - do_key")
 
-    vargs = get_voice_others(t_args, 1,3, 'key', original_line)
+    vargs = get_voice_measure_other(t_args, 'key')
     if vargs is None:
         return
+    # fi
+
+    if len(vargs) < 2:
+        print_error(f"key does not have at least 2 arguments (has {len(vargs)})")
+        return None
     # fi
 
     if len(vargs) == 3:                     # Handle major or minor.
@@ -1960,13 +1955,10 @@ def do_key(t_args, original_line):
     # fi
     # k = value to store in key_voice, key_default, etc. -- used for printing, etc.
 
-    #-- fill_voice_mlth(original_line)                   # Need to make measure for other voices up to here "mlth".
-    # By not doing this, we allow vertical format to specify keys for voices in the first measure (or any).
-
     if vs is None:                          # One argument, all voices change.
         for ve in range(1, len(volume)+1):
             if mlth[ve][measure_on] != 0:
-                print_error("key with one argument not allowed in the middle of a measure", original_line)
+                print_error("key with one argument not allowed in the middle of a measure")
                 return
             # fi
         # rof
@@ -1974,14 +1966,14 @@ def do_key(t_args, original_line):
             key_default = k                 # Used in xpose, and when printing midicsv output.
         # fi
         for ve in range(1, MAXVOICES+1):
-            set_staff_arr_double(ve, k, measure_on, key_voice, None, original_line)
+            set_staff_arr_double(ve, k, measure_on, key_voice, None)
         # rof
         return
     # fi                # multiple arguments, voices first.
 
-    wargs = separate_args(vs, None, True, original_line)    # Allow staff_name and voice numbers.
+    wargs = separate_args(vs)    # Allow voice numbers.
     if not wargs or len(wargs) < 1:
-        print_error("no voice arguments on key line", original_line)
+        print_error("no voice arguments on key line")
         return
     # fi
     for w in wargs:
@@ -2006,7 +1998,7 @@ def do_key(t_args, original_line):
             print_error(f"key with two arguments not allowed in the middle of a measure, voice {f1}")
             return
         # fi
-        set_staff_arr_double(f1, k, measure_on, key_voice, None, original_line)
+        set_staff_arr_double(f1, k, measure_on, key_voice, None)
     # rof
     return
 # End of do_key
@@ -2015,20 +2007,25 @@ def do_key(t_args, original_line):
 #   instrument 1,2 flute                $$ voices for an instrument.
 # See source for list of all instruments.
 
-def do_instrument(t_args, original_line):
+def do_instrument(t_args):
     global vinstrument
     global midi_instruments
     global drum_sound
     global mlth
-    global staff_name
 
     print_error("NOTDONEYET - do_instrument")
 
     # Note: 99 allows any number ... instrument with spaces within.
-    vargs = get_voice_others(t_args, 1, 99, 'instrument', original_line)
+    vargs = get_voice_measure_other(t_args, 'instrument')
     if vargs is None:
         return
     # fi
+
+    if len(vargs) < 2:
+        print_error(f"instrument does not have at least 2 arguments (has {len(vargs)})")
+        return None
+    # fi
+
     if len(vargs) == 1:
         INST = " ".join(vargs).lower()
         vargs = [ f"1..{len(volume)}" ]
@@ -2076,9 +2073,9 @@ def do_instrument(t_args, original_line):
     # fi
 
     jkl = str(vargs[0])
-    wargs = separate_args(jkl, None, True, original_line)   # Allow staff_name and voice numbers.
+    wargs = separate_args(jkl)   # Allow voice numbers.
     if not wargs or len(wargs) < 1:
-        print_error("no voice arguments on instrument line", original_line)
+        print_error("no voice arguments on instrument line")
         return
     # fi
     for w in wargs:
@@ -2113,7 +2110,7 @@ def do_instrument(t_args, original_line):
 #       meter   4,4             $$ 4 quarter notes per measure.
 # Note: the comma allows for IMS format "time" command.
 
-def do_meter(t_args, original_line):
+def do_meter(t_args):
     global meter
     global measure_meter
     global measure_meter_value
@@ -2123,13 +2120,13 @@ def do_meter(t_args, original_line):
     print_error("NOTDONEYET - do_meter")
 
     if t_args is None or t_args == '':
-        print_error("meter does not have an expression to process", original_line)
+        print_error("meter does not have an expression to process")
         return
     # fi
 
     for ve in range(1, len(volume)+1):
         if mlth[ve][measure_on] != 0:
-            print_error("meter in the middle of a measure not allowed", original_line)
+            print_error("meter in the middle of a measure not allowed")
             return
         # fi
     # rof
@@ -2143,7 +2140,7 @@ def do_meter(t_args, original_line):
         return
     # fi
     if f is None:
-        print_error("meter argument as a calculation did not return a value", original_line)
+        print_error("meter argument as a calculation did not return a value")
         return
     # fi
     meter = m
@@ -2155,7 +2152,7 @@ def do_meter(t_args, original_line):
         return
     # fi
     if f is None:
-        print_error("calculating meter did not return a value", original_line)
+        print_error("calculating meter did not return a value")
         return
     # fi
     measure_meter_value = f
@@ -2168,14 +2165,12 @@ def do_meter(t_args, original_line):
 #       middlec 3c
 #       middlec 2b-
 
-def do_middle_c(t_args, original_line):
+def do_middle_c(t_args):
     global middle_c
     global note_to_midi_value
 
-    print_error("NOTDONEYET - do_middle_c")
-
     if t_args is None:
-        print_error("middlec does not have a note to process", original_line)
+        print_error("middlec does not have a note to process")
         return
     # fi
     if t_args == '':
@@ -2184,52 +2179,40 @@ def do_middle_c(t_args, original_line):
     # fi
     note_to_decode = t_args
     temp3 = 0                                   # character pointer
-    if note_to_decode[0] == '(':
+    if note_to_decode not in note_to_midi_value:
         thenote, type_error = is_float(note_to_decode, is_float_number, False)
         if type_error is not None:
-            print_error("middlec does not have a valid number in parenthesis", original_line)
+            print_error("middlec does not have a valid number in parenthesis")
             return
         # fi
         if thenote is None:
-            print_error(f"middle_c - m:{measure_on} Note is not legal '{note_to_decode}', computation failed")
+            print_error(f"middle_c - Note is not legal '{note_to_decode}', computation failed")
             return
         # fi
         note_to_decode = round(thenote)
         note_to_decode = note_to_decode + 12 + 12 - 3     # 3c -> 39 must be 60 for midi.
         if note_to_decode <= 0 or note_to_decode >= 127:
-            print_error(f"middle_c - m:{measure_on} Note number '{thenote}' not in range")
+            print_error(f"middle_c - Note number '{thenote}' not in range")
             return
         # fi
-        compute_middle_c(round(thenote))
+        number = round(thenote)
         return
-     # fi
-
-    if note_to_decode not in note_to_midi_value:
-        print_error(f"middle_c - m:{measure_on} note_to_decode '{note_to_decode}' legal note")
-        return
+    else:
+        number = note_to_midi_value[note_to_decode] - (60 - middle_c)
     # fi
-    number = note_to_midi_value[note_to_decode] - (60 - middle_c)
     compute_middle_c(number)
     return
 # End of do_middle_c
 
 # ----------------------------------------------------------------------------
-# Set page. This is only used for --pages argument to musicomp2abc command to
-# limit which pages to do output for (.fs, .mid, .csv, .abc, .v, .h).
+# Set page for measure(s).
 
-global page_warn_once
-page_warn_once = True
-
-def do_page(t_args, original_line):
-    global cstop_processing
-    global pages_to_do
-    global args
-    global page_warn_once
+def do_page(t_args):
 
     print_error("NOTDONEYET - do_page")
 
     if t_args is None or t_args == '':
-        print_error("Page missing argument.", original_line)
+        print_error("Page missing argument.")
         return
     # fi
 
@@ -2238,7 +2221,7 @@ def do_page(t_args, original_line):
     if mesg is not None or n is None:
         if page_warn_once:
             if not args.nooncewarning:
-                print_warning("ONCE#A: page is also a variable, and cannot set character string variable to it.", original_line)
+                print_warning("ONCE#A: page is also a variable, and cannot set character string variable to it.")
             # fi
             page_warn_once = False
         # fi
@@ -2254,153 +2237,29 @@ def do_page(t_args, original_line):
     else:
         if page_warn_once:
             if not args.nooncewarning:
-                print_warning("ONCE#B: page is a command, and cannot set character string variable to it.", original_line)
+                print_warning("ONCE#B: page is a command, and cannot set character string variable to it.")
             # fi
             page_warn_once = False
         # fi
         setvar('page', -1, 0)           # integer/floating value
         n = vargs
     # fi
-
-    if args.pages == None or args.pages == '':
-        return
-    # fi
-    if n not in pages_to_do:
-        cstop_processing = True
-        return
-    # fi
-    # Do cstart.
-    cstop_processing = False
     return
 # End of do_page
-
-# ----------------------------------------------------------------------------
-#       pan     1..4  90        $$ MIDI value 0 to 64 to 127.
-# This is the left/right positioning of the audio sound. 64=straight ahead.
-
-def do_pan(t_args, original_line):
-    global pan
-    global measure_on
-    global staff_name
-
-    vargs = get_voice_others(t_args, 1,2, 'pan', original_line)
-    if vargs is None:
-        return
-    # fi
-    if len(vargs) == 1:
-        p = vargs[0]
-        vargs = [ f"1..{len(volume)}" ]
-    else:
-        p = vargs[1]
-    # fi
-    f1, type_error = is_float(p, is_float_number, False)
-    if type_error is not None:
-        print_error(f"pan error - {type_error}")
-        return
-    # fi
-    if f1 is None:
-        print_error(f"voice does not have pan argument {p} as a number.")
-        return
-    # fi
-    p = round(f1)
-    if p < 0 or p > 127:
-        print_error(f"pan value {p} not in range 0 to 127.")
-        return
-    # fi
-    jkl = str(vargs[0])
-    wargs = separate_args(jkl, None, True, original_line)   # Allow staff_name and voice numbers.
-    if not wargs or len(wargs) < 1:
-        print_error("no voice arguments on pan line", original_line)
-        return
-    # fi
-    for w in wargs:
-        f1, type_error = is_float(w, is_float_number, False)
-        if type_error is not None:
-            print_error(f"pan error - {type_error}")
-            return
-        # fi
-        if f1 is None:
-            print_error(f"voice {w} is not a number.")
-            return
-        # fi
-        f1 = round(f1)
-
-        pan[f1][measure_on] = p
-    # rof
-    return
-# End of do_pan
-
-# ----------------------------------------------------------------------------
-# Set MIDI reverb value for voice.
-#       reverb  1..4  90        $$ MIDI value 0 to 127.
-
-def do_reverb(t_args, original_line):
-    global reverb
-    global measure_on
-    global staff_name
-
-    vargs = get_voice_others(t_args, 1,2, 'reverb', original_line)
-    if vargs is None:
-        return
-    # fi
-    if len(vargs) == 1:
-        r = vargs[0]
-        vargs = [ f"1..{len(volume)}" ]
-    else:
-        r = vargs[1]
-    # fi
-    f1, type_error = is_float(r, is_float_number, False)
-    if type_error is not None:
-        print_error(f"reverb error - {type_error} ... r='{r}'")
-        return
-    # fi
-    if f1 is None:
-        print_error(f"voice does not have reverb argument {r} as a number.")
-        return
-    # fi
-    r = round(f1)
-    if r < 0 or r > 127:
-        print_error(f"reverb value {r} not in range 0 to 127.")
-        return
-    # fi
-
-    jkl = str(vargs[0])
-    wargs = separate_args(jkl, None, True, original_line)   # Allow staff_name and voice numbers.
-
-    if not wargs or len(wargs) < 1:
-        print_error("no voice arguments on reverb line", original_line)
-        return
-    # fi
-    for w in wargs:
-        f1, type_error = is_float(w, is_float_number, False)
-        if type_error is not None:
-            print_error(f"reverb error - {type_error} ... f1='{f1}'")
-            return
-        # fi
-        if f1 is None:
-            print_error(f"voice {w} is not a number.")
-            return
-        # fi
-        f1 = round(f1)
-
-        reverb[f1][measure_on] = r
-    # rof
-    return
-# End of do_reverb
 
 # ----------------------------------------------------------------------------
 # Give a title to a printed or played song (abcm2ps, or .mid).
 #       title   Inventio 15    by Bach
 #       title   for plato by Marshall Midden
 
-def do_title(t_args, original_line):
+def do_title(t_args):
     global header
     global args
 
     print_error("NOTDONEYET - do_title")
 
     if t_args is None or t_args == '':
-        #-- print_warning("Title does not have any text.", original_line)
+        #-- print_warning("Title does not have any text.")
         if args.vertical or args.horizontal:
             header = header + "title   \n"
         elif args.midi1csv or args.fluidsynth:
@@ -2439,36 +2298,34 @@ def do_title(t_args, original_line):
 #       =xpose  cymbalA  -1                 $$ 2e (printed) -> 2d- (played)
 # NOTE: the --vertical and --horizontal and key changes ... *sigh* complicated.
 
-def do_xpose(t_args, original_line):
+def do_xpose(t_args):
     global xpose
     global xpose_new_key
-    global measure_on
     global key_sig
     global key_sig_int
     global key_default
     global args
     global key_voice
     global minor_key_to_major
-    global staff_name
 
     print_error("NOTDONEYET - do_title")
 
     if args.noxpose:
-        print_warning("Ignoring xpose parsing due to --noxpose argument.", original_line)
+        print_warning("Ignoring xpose parsing due to --noxpose argument.")
         return
     # fi
     if args.abc:
-        print_warning("Ignoring xpose parsing for --abc output format. ", original_line)
+        print_warning("Ignoring xpose parsing for --abc output format. ")
         return
     # fi
     if t_args is None or t_args == '':
-        print_error("xpose does not have arguments.", original_line)
+        print_error("xpose does not have arguments.")
         return
     # fi
     targs = re.sub(r'\s*,\s*', ',', t_args)
     vargs = targs.split()
     if len(vargs) <= 0 or len(vargs) > 4:
-        print_error("xpose does not have correct number of arguments.", original_line)
+        print_error("xpose does not have correct number of arguments.")
         return
     # fi
     kl = None
@@ -2524,7 +2381,7 @@ def do_xpose(t_args, original_line):
                 kl = None
             # fi
         else:
-            print_error("xpose has a problem.", original_line)
+            print_error("xpose has a problem.")
             return
         # fi
     else:   # Only one argument -- key or number?
@@ -2572,9 +2429,9 @@ def do_xpose(t_args, original_line):
     # kl is None means to use current key for voice.
 
     jkl = str(vs)
-    wargs = separate_args(jkl, None, True, original_line)   # Allow staff_name and voice numbers.
+    wargs = separate_args(jkl)   # Allow voice numbers.
     if not wargs or len(wargs) < 1:
-        print_error("no voice arguments on xpose", original_line)
+        print_error("no voice arguments on xpose")
         return
     # fi
     # If kl is None, use key_default.
@@ -2845,7 +2702,7 @@ def process_hint_line(original_line):
             print_stderr("    " + sys.exc_info()[0] + sys.exc_info)
         # yrt
         print_debug(f'command="{command}" delimiter="{delimiter}" t_args="{t_args}"')
-        r(t_args, original_line)
+        r(t_args)
     else:
         print_error(f"Unexpected line in hint file: '{command}' '{t_args}'")
     # fi
@@ -3007,6 +2864,7 @@ def main():
     # fi
 
     readhintfile()
+    print_debug_hints()
 
     readthefile()                       # Parse the input fs file into arrays/dictionaries/etc.
 
