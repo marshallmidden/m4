@@ -44,14 +44,14 @@ global linecount                    # Line number from input file
 linecount = 0
 global which_file_out               # Output file name (default to stdout).
 which_file_out = 'stdout'
-global which_file_hint              # Hint file name.                       -- NOTDONEYET
+global which_file_hint              # Hint file name.
 which_file_hint = 'None'
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global input_file                   # File to read for input (default is use tty - stdin).
 input_file = None
 global output_file                  # File to print to (default is sys.stdout).
 output_file = sys.stdout
-global hint_file                    # File for hints (default is None).     -- NOTDONEYET
+global hint_file                    # File for hints (default is None).
 hint_file = None
 # ----------------------------------------------------------------------------
 def print_stderr(strg, end="\n"):
@@ -214,10 +214,12 @@ global array_of_original_lines      # For input, have an array of the original l
 array_of_original_lines = []
 # ----------------------------------------------------------------------------
 # These are from the Hints file, and are for printing out the GCS source.
-global bars_measure
-bars_measure = {}
-global pages_measure
-pages_measure = {}
+global bars_measures
+bars_measures = {}
+global pages_measures
+pages_measures = {}
+global meters_measures
+meters_measures = {}
 global clef_voice_measures
 clef_voice_measures = {}
 global instrument_voice_measures
@@ -311,7 +313,8 @@ def do_note_length_calculate():
 #
 
 def notes_fitted_into_measures():
-    print_stderr('\nNOTDONEYET - notes_fitted_into_measures')
+    print_stderr('\n')
+    print_error('NOTDONEYET - notes_fitted_into_measures')
     pass
 # End of notes_fitted_into_measures
 
@@ -329,7 +332,8 @@ def notes_fitted_into_measures():
 #   v1: r4, 3c4, 3d8, 3e(0.333333), r(0.666666)
 
 def printable_measures():
-    print_stderr('\nNOTDONEYET - printable_measures')
+    print_stderr('\n')
+    print_error('NOTDONEYET - printable_measures')
     pass
 # End of printable_measures
 
@@ -1050,29 +1054,45 @@ def print_debug_hints():
     global bars_measure
     global clef_voice_measures
     global instrument_voice_measures
+    global pages_measures
+    global meters_measures
 
-    for b in bars_measure:
-        print_debug(f'bars: measure {b} = {bars_measure[b]}')
+#--     print_debug(f'pages_measures={pages_measures}')
+    for b in pages_measures:
+        print_debug(f'pages: measure {b} = {pages_measures[b]}')
     # rof
 
+#--     print_debug(f'bars_measures={bars_measures}')
+    for b in bars_measures:
+        print_debug(f'bars: measure {b} = {bars_measures[b]}')
+    # rof
+
+#--     print_debug(f'clef_voice_measures={clef_voice_measures}')
     for v in clef_voice_measures:
-        for m in v:
-            print_debug(f'clefs: voice {v} measure {m} = {v[m]}')
+        for m in clef_voice_measures[v]:
+            print_debug(f'clefs: voice {v} measure {m} = {clef_voice_measures[v][m]}')
         # rof
     # rof
 
+#--     print_debug(f'instrument_voice_measures={instrument_voice_measures}')
     for v in instrument_voice_measures:
-        for m in v:
-            print_debug(f'instruments: voice {v} measure {m} = {v[m]}')
+        for m in instrument_voice_measures[v]:
+            print_debug(f'instruments: voice {v} measure {m} = {instrument_voice_measures[v][m]}')
         # rof
     # rof
 
+#--     print_debug(f'key_voice_measures={key_voice_measures}')
     for v in key_voice_measures:
-        for m in v:
-            print_debug(f'keys: voice {v} measure {m} = {v[m]}')
+        for m in key_voice_measures[v]:
+            print_debug(f'keys: voice {v} measure {m} = {key_voice_measures[v][m]}')
         # rof
     # rof
 
+#--     print_debug(f'meters_measures={meters_measures}')
+    for m in meters_measures:
+        print_debug(f'meters: measure {m} = {meters_measures[m]}')
+    # rof
+    return
 # End of print_debug_hints
 
 # ============================================================================
@@ -1804,15 +1824,15 @@ def do_bars(t_args):
 
     # See if measures.
     if len(vargs) == 1:
-        wargs = ( '1' )               # default to measure 1 
+        mn = ( '1' )               # default to measure 1 
     else:
-        wargs = separate_args(str(vargs[1]))     # The measure numbers.
+        mn = separate_args(str(vargs[1]))     # The measure numbers.
     # fi
-    if not wargs or len(wargs) < 1:
+    if not mn or len(mn) < 1:
         print_error("no measure argument(s) for bar command")
         return
     # fi
-    for w in wargs:
+    for w in mn:
         f2, type_error = is_float(w, is_float_number, False)
         if type_error is not None:
             print_error(f"bars voice {w} error - {type_error}")
@@ -1823,7 +1843,7 @@ def do_bars(t_args):
             return
         # fi
         f2 = round(f2)
-        bars_measure[f2] = f1
+        bars_measures[f2] = f1
     # rof
     return
 # End of do_bars
@@ -1922,7 +1942,7 @@ def get_voice_measure_other(t_args, command):
 # Changes at start of a measure.
 
 def do_key(t_args):
-    global clef_voice_measures
+    global key_voice_measures
 
     vargs = get_voice_measure_other(t_args, 'key')
     if vargs is None:
@@ -2097,57 +2117,62 @@ def do_instrument(t_args):
 
 # ----------------------------------------------------------------------------
 # The number of notes of second argument note length in a measure.
-#       meter   1/4             $$ 1 quarter note per measure.
-#       meter   12/8            $$ 12 eighth notes per measure.
-#       meter   4,4             $$ 4 quarter notes per measure.
-# Note: the comma allows for IMS format "time" command.
+#               measure     meter-for-measure
+#       meter   1,10        1/8
+#       meter   2,11        4/4
+#       meter   13          3/4
 
 def do_meter(t_args):
-    global meter
-    global measure_meter
-    global measure_meter_value
-    global args
-    global mlth
-
-    print_error("NOTDONEYET - do_meter")
+    global meters_measures
 
     if t_args is None or t_args == '':
         print_error("meter does not have an expression to process")
         return
     # fi
 
-    for ve in range(1, len(volume)+1):
-        if mlth[ve][measure_on] != 0:
-            print_error("meter in the middle of a measure not allowed")
+    vargs = get_voice_measure_other(t_args, 'meter')
+    if vargs is None:
+        return
+    # fi
+    if len(vargs) > 2:
+        print_error("meter format is for all staves, then optional measures")
+        return
+    # fi
+
+    mn = separate_args(str(vargs[0]))       # The measure numbers.
+    # fi
+    if not mn or len(mn) < 1:
+        print_error("no measure argument(s) for bar command")
+        return
+    # fi
+
+    # Get meter.
+    meter = vargs[1]
+    meter = re.sub(r',', r'/', meter)       # Change 3,4 to 3/4.
+
+    f, type_error = is_float(meter, is_float_number, False)
+    if type_error is not None:
+        print_error(f"meter {meter} error - {type_error}")
+        return
+    # fi
+    if f is None:
+        print_error("meter {meter} argument as a calculation did not return a value")
+        return
+    # fi
+
+    for w in mn:
+        f1, type_error = is_float(w, is_float_number, False)
+        if type_error is not None:
+            print_error(f"bars voice {w} error - {type_error}")
             return
         # fi
+        if f1 is None:
+            print_error(f"bars voice {w} is not a number.")
+            return
+        # fi
+        f1 = round(f1)
+        meters_measures[f1] = meter         # Save text for meter.
     # rof
-
-    m = t_args
-    m = re.sub(r',', r'/', m)
-
-    f, type_error = is_float(m, is_float_number, False)
-    if type_error is not None:
-        print_error(f"meter error - {type_error}")
-        return
-    # fi
-    if f is None:
-        print_error("meter argument as a calculation did not return a value")
-        return
-    # fi
-    meter = m
-    measure_meter[measure_on] = m                       # Save text for meter.
-
-    f, type_error = is_float(m, is_float_number, False)
-    if type_error is not None:
-        print_error(f"meter error - {type_error}")
-        return
-    # fi
-    if f is None:
-        print_error("calculating meter did not return a value")
-        return
-    # fi
-    measure_meter_value = f
     return
 # End of do_meter
 
@@ -2230,15 +2255,15 @@ def do_page(t_args):
 
     # See if measures.
     if len(vargs) == 1:
-        wargs = ( '1' )               # default to measure 1 
+        mn = ( '1' )               # default to measure 1 
     else:
-        wargs = separate_args(str(vargs[1]))     # The measure numbers.
+        mn = separate_args(str(vargs[1]))     # The measure numbers.
     # fi
-    if not wargs or len(wargs) < 1:
+    if not mn or len(mn) < 1:
         print_error("no measure argument(s) for page command")
         return
     # fi
-    for w in wargs:
+    for w in mn:
         f2, type_error = is_float(w, is_float_number, False)
         if type_error is not None:
             print_error(f"page voice {w} error - {type_error}")
@@ -2249,7 +2274,7 @@ def do_page(t_args):
             return
         # fi
         f2 = round(f2)
-        pages_measure[f2] = f1
+        pages_measures[f2] = f1
     # rof
     return
 # End of do_page
@@ -2299,7 +2324,7 @@ def do_xpose(t_args):
     global key_voice
     global minor_key_to_major
 
-    print_error("NOTDONEYET - do_title")
+    print_error("NOTDONEYET - do_xpose")
 
     if args.noxpose:
         print_warning("Ignoring xpose parsing due to --noxpose argument.")
@@ -2419,8 +2444,8 @@ def do_xpose(t_args):
     # kl is used in getnote via xpose_new_key (musicomp text)
     # kl is None means to use current key for voice.
 
-    wargs = separate_args(str(vs))   # Allow voice numbers.
-    if not wargs or len(wargs) < 1:
+    mn = separate_args(str(vs))   # Allow voice numbers.
+    if not mn or len(mn) < 1:
         print_error("no voice arguments on xpose")
         return
     # fi
@@ -2430,7 +2455,7 @@ def do_xpose(t_args):
     else:
         kprint_lc = key_sig_int[key_default]    # Key name extracted.
     # fi
-    for w in wargs:
+    for w in mn:
         f1, type_error = is_float(w, is_float_number, False)
         if type_error is not None:
             print_error(f"xpose error#4 - {type_error}")
@@ -2797,7 +2822,8 @@ def readhintfile():
 #--     return
 
 def printout_gcs():
-    print_stderr('\nNOTDONEYET - printout_gcs')
+    print_stderr('\n')
+    print_error('NOTDONEYET - printout_gcs')
     pass
 # End of printout_gcs
 
