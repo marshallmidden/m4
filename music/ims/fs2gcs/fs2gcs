@@ -214,8 +214,14 @@ global array_of_original_lines      # For input, have an array of the original l
 array_of_original_lines = []
 # ----------------------------------------------------------------------------
 # These are from the Hints file, and are for printing out the GCS source.
-global bars_for_measure
-bars_for_measure = {}
+global bars_measure
+bars_measure = {}
+global pages_measure
+pages_measure = {}
+global clef_voice_measures
+clef_voice_measures = {}
+global instrument_voice_measures
+instrument_voice_measures = {}
 # ----------------------------------------------------------------------------
 #-- # Following does not do multiple sharps or flats, but that is crazy anyway. Neither naturals.
 #-- global key_sig
@@ -1039,11 +1045,26 @@ def print_debug_internal_1(stg):
 
 # ============================================================================
 def print_debug_hints():
-    global bars_for_measure
+    global bars_measure
+    global clef_voice_measures
+    global instrument_voice_measures
 
-    for b in bars_for_measure:
-        print_debug(f'measure {bars_for_measure[b]} = {b}')
+    for b in bars_measure:
+        print_debug(f'bars: measure {b} = {bars_measure[b]}')
     # rof
+
+    for v in clef_voice_measures:
+        for m in v:
+            print_debug(f'clefs: voice {v} measure {m} = {v[m]}')
+        # rof
+    # rof
+
+    for v in instrument_voice_measures:
+        for m in v:
+            print_debug(f'instruments: voice {v} measure {m} = {v[m]}')
+        # rof
+    # rof
+
 # End of print_debug_hints
 
 # ============================================================================
@@ -1741,12 +1762,11 @@ drum_sounds = {
 }
 
 # ----------------------------------------------------------------------------
-#       bars    7+1             $$ The first one must be one more than wanted -- due to "measure 0"
-#                               $$ setting things line meter up. Dunno, it works.
-#       bars    7               $$ Group the next 7 bars on one staff line.
+# bars    7                 $$ Group the next 7 bars on one staff line.
+# bars    7 10,20,30        $$ Group the 7 bars on one staff line for measures.
 
 def do_bars(t_args):
-    global bars_for_measure
+    global bars_measure
 
     if t_args is None or t_args == '':
         print_error("bars does not have an expression to process")
@@ -1778,7 +1798,7 @@ def do_bars(t_args):
     if len(vargs) == 1:
         wargs = ( '1' )               # default to measure 1 
     else:
-        wargs = separate_args(vargs[1])     # The measure numbers.
+        wargs = separate_args(str(vargs[1]))     # The measure numbers.
     # fi
     if not wargs or len(wargs) < 1:
         print_error("no measure argument(s) for bar command")
@@ -1787,15 +1807,15 @@ def do_bars(t_args):
     for w in wargs:
         f2, type_error = is_float(w, is_float_number, False)
         if type_error is not None:
-            print_error(f"clef error - {type_error}")
+            print_error(f"bars voice {w} error - {type_error}")
             return
         # fi
         if f2 is None:
-            print_error(f"voice {w} is not a number.")
+            print_error(f"bars voice {w} is not a number.")
             return
         # fi
         f2 = round(f2)
-        bars_for_measure[f2] = f1
+        bars_measure[f2] = f1
     # rof
     return
 # End of do_bars
@@ -1805,41 +1825,67 @@ def do_bars(t_args):
 # clef 4                alto    # voice 4 to alto
 
 def do_clef(t_args):
-    global clef
-
-    print_error("NOTDONEYET - do_clef")
+    global clef_voice_measures
 
     vargs = get_voice_measure_other(t_args, 'clef')
-
+    if vargs is None:
+        return
+    # fi
     if len(vargs) < 2:
         print_error(f"clef does not have at least 2 arguments (has {len(vargs)})")
         return None
     # fi
-
-    if vargs is None:
-        return
+    if len(vargs) > 3:
+        print_error(f"clef has more than 3 arguments (voices measures clef) - has {len(vargs)}")
+        return None
     # fi
 
-    clf = vargs[1]
-
-    jkl = str(vargs[0])
-    wargs = separate_args(jkl)   # Allow voice numbers.
-    if not wargs or len(wargs) < 1:
+    vn = separate_args(str(vargs[0]))   # Allow voice numbers.
+    if not vn or len(vn) < 1:
         print_error("no voice arguments on clef line")
         return
     # fi
-    for w in wargs:
-        f1, type_error = is_float(w, is_float_number, False)
+    
+    # See if measures present.
+    if len(vargs) == 3:
+        mn = separate_args(str(vargs[1]))   # Allow measure numbers.
+        if not mn or len(mn) < 1:
+            print_error("no measure arguments on clef line")
+            return
+        # fi
+        clf = vargs[2]
+    else:
+        mn = ( '1' )
+        clf = vargs[1]
+    # fi
+
+    for v in vn:
+        f1, type_error = is_float(v, is_float_number, False)
         if type_error is not None:
-            print_error(f"clef error - {type_error}")
+            print_error(f"clef voice {v} error - {type_error}")
             return
         # fi
         if f1 is None:
-            print_error(f"voice {w} is not a number.")
+            print_error(f"clef voice {v} is not a number.")
             return
         # fi
         f1 = round(f1)
-        clef[f1][measure_on] = clf
+        for m in mn:
+            f2, type_error = is_float(m, is_float_number, False)
+            if type_error is not None:
+                print_error(f"clef measure {m} error - {type_error}")
+                return
+            # fi
+            if f2 is None:
+                print_error(f"clef measure {m} is not a number.")
+                return
+            # fi
+            f2 = round(f2)
+            if f1 not in clef_voice_measures:
+                clef_voice_measures[f1] = {}
+            # fi
+            clef_voice_measures[f1][f2] = clf
+        # rof
     # rof
     return
 # End of do_clef
@@ -2004,102 +2050,104 @@ def do_key(t_args):
 # End of do_key
 
 # ----------------------------------------------------------------------------
+def check_instr(instr):
+    global midi_instruments
+    global drum_sounds
+
+    instr = instr.lower()
+    if instr in midi_instruments:
+        return instr
+    # fi
+    if instr in drum_sounds:
+        return instr
+    # fi
+    f1, type_error = is_float(instr, is_float_number, False)
+    if type_error is not None:
+        return None
+    # fi
+    if f1 is None:
+        return None
+    # fi
+    return round(f1)
+# End of check_instr
+
+# ----------------------------------------------------------------------------
 #   instrument 1,2 flute                $$ voices for an instrument.
+#   instrument 1,2 20,30,50 flute       $$ voices, measures for an instrument.
 # See source for list of all instruments.
 
 def do_instrument(t_args):
-    global vinstrument
-    global midi_instruments
-    global drum_sound
-    global mlth
+    global instrument_voice_measures
 
-    print_error("NOTDONEYET - do_instrument")
-
-    # Note: 99 allows any number ... instrument with spaces within.
     vargs = get_voice_measure_other(t_args, 'instrument')
     if vargs is None:
         return
     # fi
-
     if len(vargs) < 2:
-        print_error(f"instrument does not have at least 2 arguments (has {len(vargs)})")
+        print_error(f"clef does not have at least 2 arguments (has {len(vargs)})")
         return None
     # fi
-
-    if len(vargs) == 1:
-        INST = " ".join(vargs).lower()
-        vargs = [ f"1..{len(volume)}" ]
+    vn = vargs[0]
+    if len(vargs) > 3:
+        instr = check_instr(' '.join(vargs[2:]))
+        mn = vargs[1]
+    elif len(vargs) == 3:               # Does 2 and 3 make an instrument?
+        instr = check_instr(' '.join(vargs[1:]))
+        if instr is None:
+            instr = check_instr(vargs[2])
+            mn = vargs[1]
+        else:
+            mn = [ '1' ]
+        # fi
     else:
-        INST = " ".join(vargs[1:]).lower()
+        instr = check_instr(vargs[1])
+        mn = [ '1' ]
     # fi
-    foundinstrument = None
-    for i in midi_instruments:
-        if i.lower() == INST:
-            foundinstrument = i
-            break
-        # fi
-    # rof
-    if foundinstrument is None:
-        for i in drum_sounds:
-            if i.lower() == INST:
-                foundinstrument = i
-                break
-            # fi
-        # rof
-    # fi
-    if foundinstrument is None:
-        print_error(f"do_instrument - midi_instruments does not have INST='{INST}'")
-        f1, type_error = is_float(INST, is_float_number, False)
-        if type_error is not None:
-            print_error(f"instrument error - {type_error}")
-            return
-        # fi
-        if f1 is None:
-            print_error(f"voice does not have instrument argument {INST} as a number.")
-            return
-        # fi
-        f1 = round(f1)
-        for i in midi_instruments:
-            if midi_instruments[i] == [f1, 0]:
-                foundinstrument = i
-                break
-            # fi
-        # rof
-        if foundinstrument is None:
-            print_error(f"instrument value {f1} not in instrument table.")
-            return
-        # fi
-        INST = foundinstrument
+    if instr is None:
+        print_error("instrument not found.")
+        return
     # fi
 
-    jkl = str(vargs[0])
-    wargs = separate_args(jkl)   # Allow voice numbers.
-    if not wargs or len(wargs) < 1:
+    vn = separate_args(str(vn))         # The voice numbers.
+    if not vn or len(vn) < 1:
         print_error("no voice arguments on instrument line")
         return
     # fi
-    for w in wargs:
-        f1, type_error = is_float(w, is_float_number, False)
+    
+    mn = separate_args(str(mn))         # The measure numbers.
+    if not mn or len(mn) < 1:
+        print_error("no measure arguments on instrument line")
+        return
+    # fi
+    
+    for v in vn:
+        f1, type_error = is_float(v, is_float_number, False)
         if type_error is not None:
-            print_error(f"instrument error - {type_error}")
+            print_error(f"instrument voice {v} error - {type_error}")
             return
         # fi
         if f1 is None:
-            print_error(f"voice {w} is not a number.")
+            print_error(f"instrument voice {v} is not a number.")
             return
         # fi
         f1 = round(f1)
-        if f1 not in mlth:
-            print_error(f"instrument with too many voices not allowed, voice {f1} is too many")
-            return
-        # fi
-        if mlth[f1][measure_on] != 0:
-            print_error(f"instrument in the middle of measure '{measure_on}' not allowed, voice '{f1}'")
-            return
-        # fi
-        vinstrument[f1][measure_on] = foundinstrument
+        for m in mn:
+            f2, type_error = is_float(m, is_float_number, False)
+            if type_error is not None:
+                print_error(f"instrument measure {m} error - {type_error}")
+                return
+            # fi
+            if f2 is None:
+                print_error(f"instrument measure {m} is not a number.")
+                return
+            # fi
+            f2 = round(f2)
+            if f1 not in instrument_voice_measures:
+                instrument_voice_measures[f1] = {}
+            # fi
+            instrument_voice_measures[f1][f2] = instr
+        # rof
     # rof
-
     return
 # End of do_instrument
 
@@ -2182,7 +2230,7 @@ def do_middle_c(t_args):
     if note_to_decode not in note_to_midi_value:
         thenote, type_error = is_float(note_to_decode, is_float_number, False)
         if type_error is not None:
-            print_error("middlec does not have a valid number in parenthesis")
+            print_error("middlec does not have a valid number - {note_to_decode}")
             return
         # fi
         if thenote is None:
@@ -2208,42 +2256,57 @@ def do_middle_c(t_args):
 # Set page for measure(s).
 
 def do_page(t_args):
-
-    print_error("NOTDONEYET - do_page")
+    global pages_measure
 
     if t_args is None or t_args == '':
-        print_error("Page missing argument.")
+        print_error("page does not have an expression to process")
         return
     # fi
 
-    vargs = t_args
-    n, mesg = is_float(vargs, is_float_string, False)
-    if mesg is not None or n is None:
-        if page_warn_once:
-            if not args.nooncewarning:
-                print_warning("ONCE#A: page is also a variable, and cannot set character string variable to it.")
-            # fi
-            page_warn_once = False
-        # fi
-        setvar('page', -1, 0)           # integer/floating value
-        n = vargs
-    elif type(n) is float:
-        if n.is_integer():
-            n = int(n)
-        # fi
-        setvar('page', n, 0)            # integer/floating value
-    elif type(n) is int:
-        setvar('page', n, 0)            # integer/floating value
-    else:
-        if page_warn_once:
-            if not args.nooncewarning:
-                print_warning("ONCE#B: page is a command, and cannot set character string variable to it.")
-            # fi
-            page_warn_once = False
-        # fi
-        setvar('page', -1, 0)           # integer/floating value
-        n = vargs
+    vargs = get_voice_measure_other(t_args, 'page')
+    if vargs is None:
+        return
     # fi
+    if len(vargs) > 2:
+        print_error("page format is number, then optional measures")
+        return
+    # fi
+    m = vargs[0]
+
+    f1, type_error = is_float(m, is_float_number, False)
+    if type_error is not None:
+        print_error(f"page {m} error - {type_error}")
+        return
+    # fi
+    if f1 is None:
+        print_error("page {m} argument as a calculation did not return a value")
+        return
+    # fi
+    f1 = round(f1)
+
+    # See if measures.
+    if len(vargs) == 1:
+        wargs = ( '1' )               # default to measure 1 
+    else:
+        wargs = separate_args(str(vargs[1]))     # The measure numbers.
+    # fi
+    if not wargs or len(wargs) < 1:
+        print_error("no measure argument(s) for page command")
+        return
+    # fi
+    for w in wargs:
+        f2, type_error = is_float(w, is_float_number, False)
+        if type_error is not None:
+            print_error(f"page voice {w} error - {type_error}")
+            return
+        # fi
+        if f2 is None:
+            print_error(f"page voice {w} is not a number.")
+            return
+        # fi
+        f2 = round(f2)
+        pages_measure[f2] = f1
+    # rof
     return
 # End of do_page
 
@@ -2428,8 +2491,7 @@ def do_xpose(t_args):
     # kl is used in getnote via xpose_new_key (musicomp text)
     # kl is None means to use current key for voice.
 
-    jkl = str(vs)
-    wargs = separate_args(jkl)   # Allow voice numbers.
+    wargs = separate_args(str(vs))   # Allow voice numbers.
     if not wargs or len(wargs) < 1:
         print_error("no voice arguments on xpose")
         return
