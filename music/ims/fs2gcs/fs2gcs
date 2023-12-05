@@ -222,6 +222,8 @@ global clef_voice_measures
 clef_voice_measures = {}
 global instrument_voice_measures
 instrument_voice_measures = {}
+global key_voice_measures
+key_voice_measures = {}
 # ----------------------------------------------------------------------------
 #-- # Following does not do multiple sharps or flats, but that is crazy anyway. Neither naturals.
 #-- global key_sig
@@ -1062,6 +1064,12 @@ def print_debug_hints():
     for v in instrument_voice_measures:
         for m in v:
             print_debug(f'instruments: voice {v} measure {m} = {v[m]}')
+        # rof
+    # rof
+
+    for v in key_voice_measures:
+        for m in v:
+            print_debug(f'keys: voice {v} measure {m} = {v[m]}')
         # rof
     # rof
 
@@ -1907,144 +1915,80 @@ def get_voice_measure_other(t_args, command):
 # End of get_voice_measure_other
 
 # ----------------------------------------------------------------------------
-#       key     a                   $$ key of a major for all voices. f+,c+,g+
-#       =key    violaA..violaB g-   $$ viola - six flats
-#       key     1,2 c major         $$ If "major" is present ...
-#       key     1, 2  c minor       $$ b-,e-,a-  same as key e- or key e- major.
-#       key     1, 2  atonal        $$ Each note is stand-alone.
-#       key     atonal              $$ Each note is stand-alone.
+#       key     1..5           g-       $$ six flats, measure 1 onwards.
+#       key     1,2            f        $$ one flat, measure 1 onwards.
+#       key     1   10,20,30   c        $$ no flats or sharps, voice 1, measures 10,20,30.
+#       key     1              c        $$ Measure 1 onwards.
 # Changes at start of a measure.
 
 def do_key(t_args):
-    global args
-    global key_sig
-    global key_default
-    global key_voice
-    global mlth
-    global vol
-    global minor_key_to_major
-
-    print_error("NOTDONEYET - do_key")
+    global clef_voice_measures
 
     vargs = get_voice_measure_other(t_args, 'key')
     if vargs is None:
         return
     # fi
-
     if len(vargs) < 2:
         print_error(f"key does not have at least 2 arguments (has {len(vargs)})")
         return None
     # fi
-
-    if len(vargs) == 3:                     # Handle major or minor.
-        k = vargs[1].lower()
-        mm = vargs[2].lower()
-        vs = vargs[0]
-        if mm == "minor":
-            if k not in minor_key_to_major:
-                print_error(f"key command does not recognize minor {k}")
-                return
-            # fi
-            k = minor_key_to_major[k]
-        elif mm == "major":
-            if k not in key_sig:
-                print_error(f"key '{k}' not recognized.")
-                return
-            # fi
-        else:
-            print_error(f"key command does not recognize {vargs[2]} as major or minor")
-            return
-        # fi
-    elif len(vargs) == 2:
-        k = vargs[0].lower()
-        mm = vargs[1].lower()
-        vs = None
-        if mm == "minor":
-            if k not in minor_key_to_major:
-                print_error(f"key command does not recognize minor {k}")
-                return
-            # fi
-            k = minor_key_to_major[k]
-        elif mm == "major":
-            if k not in key_sig:
-                print_error(f"key '{k}' not recognized.")
-                return
-            # fi
-        else:                               # No major or minor, so "key 1,2 c-" format.
-            vs = vargs[0]
-            k = mm
-            if k not in key_sig and k not in ['none', 'atonal']:
-                print_error(f"key '{k}' not recognized.")
-                return
-            # fi
-        # fi
-    else:
-        vs = None
-        k = vargs[0].lower()
-        if k not in key_sig and k not in ['none', 'atonal']:
-            print_error(f"key '{k}' not recognized.")
-            return
-        # fi
+    if len(vargs) > 3:
+        print_error(f"key has more than 3 arguments (voices measures key) - has {len(vargs)}")
+        return None
     # fi
 
-    if k in ('none', 'atonal'):
-        k = 'atonal'
-    elif args.vertical or args.horizontal:
-        pass                                # printing and used are the same.
-    elif args.midi1csv or args.fluidsynth:
-        k = key_sig[k]                      # Key number extracted.
-    else:                   # ABC
-        k = k.upper()
-        k = k.replace('-', 'b')             # Does multiple flats
-        k = k.replace('+', '#')             # Does multiple sharps.
-        k = k.replace('n', '=')             # Does multiple naturals.
-    # fi
-    # k = value to store in key_voice, key_default, etc. -- used for printing, etc.
-
-    if vs is None:                          # One argument, all voices change.
-        for ve in range(1, len(volume)+1):
-            if mlth[ve][measure_on] != 0:
-                print_error("key with one argument not allowed in the middle of a measure")
-                return
-            # fi
-        # rof
-        if measure_on == '':
-            key_default = k                 # Used in xpose, and when printing midicsv output.
-        # fi
-        for ve in range(1, MAXVOICES+1):
-            set_staff_arr_double(ve, k, measure_on, key_voice, None)
-        # rof
-        return
-    # fi                # multiple arguments, voices first.
-
-    wargs = separate_args(vs)    # Allow voice numbers.
-    if not wargs or len(wargs) < 1:
+    vn = separate_args(str(vargs[0]))   # Allow voice numbers.
+    if not vn or len(vn) < 1:
         print_error("no voice arguments on key line")
         return
     # fi
-    for w in wargs:
-        f1, type_error = is_float(w, is_float_number, False)
+    
+    # See if measures present.
+    if len(vargs) == 3:
+        mn = separate_args(str(vargs[1]))   # Allow measure numbers.
+        if not mn or len(mn) < 1:
+            print_error("no measure arguments on key line")
+            return
+        # fi
+        ky = vargs[2].lower()
+    else:
+        mn = ( '1' )
+        ky = vargs[1].lower()
+    # fi
+
+    # Validate key argument.
+    if ky not in key_sig:
+        print_error(f"key '{ky}' not recognized.")
+        return
+    # fi
+
+    for v in vn:
+        f1, type_error = is_float(v, is_float_number, False)
         if type_error is not None:
-            print_error(f"key error - {type_error}")
+            print_error(f"key voice {v} error - {type_error}")
             return
         # fi
         if f1 is None:
-            print_error("voice {w} is not a number.")
+            print_error(f"key voice {v} is not a number.")
             return
         # fi
         f1 = round(f1)
-        if f1 not in mlth:
-            print_error(f"key with too many voices not allowed, voice {f1} is too many")
-            return
-        # fi
-        if mlth[f1][measure_on] != 0:
-            for ve in range(1, len(volume)+1):
-                print_error_no_line(f"mlth[{ve}][{measure_on}]='{mlth[ve][measure_on]}'")
-            # rof
-            print_error(f"key with two arguments not allowed in the middle of a measure, voice {f1}")
-            return
-        # fi
-        set_staff_arr_double(f1, k, measure_on, key_voice, None)
+        for m in mn:
+            f2, type_error = is_float(m, is_float_number, False)
+            if type_error is not None:
+                print_error(f"key measure {m} error - {type_error}")
+                return
+            # fi
+            if f2 is None:
+                print_error(f"key measure {m} is not a number.")
+                return
+            # fi
+            f2 = round(f2)
+            if f1 not in key_voice_measures:
+                key_voice_measures[f1] = {}
+            # fi
+            key_voice_measures[f1][f2] = ky
+        # rof
     # rof
     return
 # End of do_key
@@ -2084,7 +2028,7 @@ def do_instrument(t_args):
         return
     # fi
     if len(vargs) < 2:
-        print_error(f"clef does not have at least 2 arguments (has {len(vargs)})")
+        print_error(f"instrument does not have at least 2 arguments (has {len(vargs)})")
         return None
     # fi
     vn = vargs[0]
@@ -2316,30 +2260,14 @@ def do_page(t_args):
 #       title   for plato by Marshall Midden
 
 def do_title(t_args):
-    global header
-    global args
-
-    print_error("NOTDONEYET - do_title")
+    global titles
 
     if t_args is None or t_args == '':
         #-- print_warning("Title does not have any text.")
-        if args.vertical or args.horizontal:
-            header = header + "title   \n"
-        elif args.midi1csv or args.fluidsynth:
-            pass
-        else:           # ABC
-            header = header + "T:\n"
-        # fi
+        titles.append( '' )
         return
     # fi
-    # T: Title of tune        (can have multiple)
-    if args.vertical or args.horizontal:
-        header = header + f"title   {t_args}\n"
-    elif args.midi1csv or args.fluidsynth:
-        header.append(t_args)
-    else:           # ABC
-        header = header + f"T:{t_args}\n"
-    # fi
+    titles.append( t_args )
     return
 # End of do_title
 
@@ -2582,27 +2510,6 @@ for i in key_to_accidentals:
     # rof
     key_convert[i] = l
 # rof
-
-global minor_key_to_major
-minor_key_to_major = {
-    'a+': 'c+',
-    'd+': 'f+',
-    'g+': 'b',
-    'c+': 'e',
-    'f+': 'c+',
-    'b':  'd',
-    'e':  'g',
-
-    'a':  'c',
-
-    'd':  'f',
-    'g':  'b-',
-    'c':  'e-',
-    'f':  'a-',
-    'b-': 'd-',
-    'e-': 'g-',
-    'a-': 'c-'
-}
 
 # ----------------------------------------------------------------------------
 # dictionary commandname : routine. execute via(?): globals()['do_cstopnow'](t_args, line)
