@@ -167,6 +167,8 @@ key_clicks = {}
 key_clicks[0] = [ 0 ]               # Default start of it.
 global measures_key                 # Dictionary of voices: dictionary of measures [1-...]: key
 measures_key = {}                   # measures_key[voice][measure] = key
+global measures_instrument          # Dictionary of voices: dictionary of measures [1-...]: key
+measures_instrument = {}            # measures_instrument[voice][measure] = instrument
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global instrument                   # Indexed by voice number.
 instrument = {}                     # Array by voice of: (bank, number, running_time)
@@ -365,6 +367,54 @@ def printable_measures():
 # End of printable_measures
 
 # ----------------------------------------------------------------------------
+# Use instrument_voice_measures_hint and instruments[] to determine when/where.
+
+def set_instrument_measures():
+    global instrument               # Array by voice of: (bank, number, running_time)
+    global voices
+    global measures_instrument     # Dictionary of voices: dictionary of measures [1-...]: instrument
+
+    for v in range(0, voices):
+        if v not in measures_instrument:
+            measures_instrument[v] = {}
+        # fi
+        i = 0
+        if v in instrument:
+            last_i = check_instr(instrument[v][i][1], instrument[v][i][0])
+#--             print_debug(f'E# set_instrument_measures - last_i={last_i}    bank={instrument[v][i][0]} number={instrument[v][i][1]}')
+            last_ic = instrument[v][i][2]
+        else:
+            last_i = 0
+#--             print_debug(f'F# set_instrument_measures - last_i={last_i}')
+            last_ic = 0
+        # fi
+        if v in instrument_voice_measures_hint and 1 in instrument_voice_measures_hint[v]:
+            last_i = instrument_voice_measures_hint[v][1]
+#--             print_debug(f'G# set_instrument_measures - last_i={last_i}')
+            last_ic = measures_clicks_start[1]
+        # fi
+        for m in range(1, last_measure+1):
+            if (last_ic >= measures_clicks_start[m] and
+                last_ic < measures_clicks_start[m] + measures_clicks_length[m]):
+                last_i = check_instr(instrument[v][i][1], instrument[v][i][0])
+#--                 print_debug(f'H# set_instrument_measures - last_i={last_i}')
+                last_ic = instrument[v][i][2]
+                if i < len(instrument[v]) -1:
+                    i = i + 1
+                # fi
+            # fi
+            if v in instrument_voice_measures_hint and m in instrument_voice_measures_hint[v]:
+                last_i = instrument_voice_measures_hint[v][m]
+#--                 print_debug(f'I# set_instrument_measures - last_i={last_i}')
+            # fi
+            measures_instrument[v][m] = last_i
+#--             print_debug(f'set_instrument_measures - measures_instrument[{v}][{m}]={measures_instrument[v][m]}')
+        # rof
+    # rof
+    return
+# End of set_instrument_measures
+
+# ----------------------------------------------------------------------------
 def set_keys_if_not_specified():
     global key
     global key_clicks
@@ -416,7 +466,6 @@ def set_keys_if_not_specified():
         # rof
     # rof
     return
-
 # End of set_keys_if_not_specified
 
 # ----------------------------------------------------------------------------
@@ -777,15 +826,21 @@ def process_noteon(r):
             if voices not in instrument_voice_measures_hint:
                 instrument_voice_measures_hint[voices] = {}
             # fi
-            instrument_voice_measures_hint[voices] = instrument_voice_measures_hint[v]
+            if v in instrument_voice_measures_hint:
+                instrument_voice_measures_hint[voices] = instrument_voice_measures_hint[v]
+            # fi
             if voices not in clef_voice_measures_hint:
                 clef_voice_measures_hint[voices] = {}
             # fi
-            clef_voice_measures_hint[voices] = clef_voice_measures_hint[v]
+            if v in clef_voice_measures_hint:
+                clef_voice_measures_hint[voices] = clef_voice_measures_hint[v]
+            # fi
             if voices not in key_voice_measures_hint:
                 key_voice_measures_hint[voices] = {}
             # fi
-            key_voice_measures_hint[voices] = key_voice_measures_hint[v]
+            if v in key_voice_measures_hint:
+                key_voice_measures_hint[voices] = key_voice_measures_hint[v]
+            # fi
         # fi
         v2s = voices
 #--         print_debug(f'process_noteon - New Voice-CHORD: v2s={v2s}  bufs_notes_voices[v]={bufs_notes_voices[v]}')
@@ -2121,17 +2176,22 @@ def do_key(t_args):
 # End of do_key
 
 # ----------------------------------------------------------------------------
-def check_instr(instr):
+def check_instr(instr, bank):
     global midi_instruments
     global drum_sounds
 
-    instr = instr.lower()
+    if type(instr) is str:
+        instr = instr.lower()
+    else:
+        instr = str(instr)
+    # fi
     if instr in midi_instruments:
         return instr
     # fi
     if instr in drum_sounds:
         return instr
     # fi
+
     f1, type_error = is_float(instr, is_float_number, False)
     if type_error is not None:
         return None
@@ -2139,7 +2199,14 @@ def check_instr(instr):
     if f1 is None:
         return None
     # fi
-    return round(f1)
+    f1 = round(f1)
+
+    for i in midi_instruments:
+        if midi_instruments[i][0] == f1 and midi_instruments[i][1] == bank:
+            return i
+        # fi
+    # rof
+    return f1
 # End of check_instr
 
 # ----------------------------------------------------------------------------
@@ -2160,18 +2227,22 @@ def do_instrument(t_args):
     # fi
     vn = vargs[0]
     if len(vargs) > 3:
-        instr = check_instr(' '.join(vargs[2:]))
+        instr = check_instr(' '.join(vargs[2:]), 0)
+#--         print_debug(f'A# do_instrument - instr={instr}')
         mn = vargs[1]
     elif len(vargs) == 3:               # Does 2 and 3 make an instrument?
-        instr = check_instr(' '.join(vargs[1:]))
+        instr = check_instr(' '.join(vargs[1:]), 0)
+#--         print_debug(f'B# do_instrument - instr={instr}')
         if instr is None:
-            instr = check_instr(vargs[2])
+            instr = check_instr(vargs[2], 0)
+#--             print_debug(f'C# do_instrument - instr={instr}')
             mn = vargs[1]
         else:
             mn = [ '1' ]
         # fi
     else:
-        instr = check_instr(vargs[1])
+        instr = check_instr(vargs[1], 0)
+#--         print_debug(f'D# do_instrument - instr={instr}')
         mn = [ '1' ]
     # fi
     if instr is None:
@@ -2217,6 +2288,7 @@ def do_instrument(t_args):
                 instrument_voice_measures_hint[f1] = {}
             # fi
             instrument_voice_measures_hint[f1][f2] = instr
+#--             print_debug(f'do_instrument - instrument_voice_measures_hint[{f1}][{f2}]={instrument_voice_measures_hint[f1][f2]}')
         # rof
     # rof
     return
@@ -2847,11 +2919,14 @@ def printout_gcs():
                 # fi
             # fi
         # rof
+
         for v in range(0, voices):
-            if v in instrument_voice_measures_hint and m in instrument_voice_measures_hint[v]:
-                if v not in last_instrument or instrument_voice_measures_hint[v][m] != last_instrument[v]:
-                    print_output(f'instrument {v+1} {instrument_voice_measures_hint[v][m]}')
-                    last_instrument[v] = instrument_voice_measures_hint[v][m]
+            if v in measures_instrument and m in measures_instrument[v]:
+                if v not in last_instrument or measures_instrument[v][m] != last_instrument[v]:
+                    if measures_instrument[v][m] != 0:
+                        print_output(f'instrument {v+1} {measures_instrument[v][m]}')
+                    # fi
+                    last_instrument[v] = measures_instrument[v][m]
                 # fi
             # fi
         # rof
@@ -2919,6 +2994,8 @@ def main():
     figure_out_measure_locations()      # Where are the starts of measures - from meter clicks and tempos.
 
     set_keys_if_not_specified()         # Set a default key.
+
+    set_instrument_measures()           # Using instrument_voice_measures_hint and instruments[]
 
     notes_fitted_into_measures()        # NOTDONEYET
 
