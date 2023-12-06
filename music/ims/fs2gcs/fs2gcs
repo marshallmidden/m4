@@ -251,6 +251,8 @@ global instrument_voice_measures_hint   # hint instrument by voice and measure.
 instrument_voice_measures_hint = {}
 global key_voice_measures_hint      # hint key by voice and measure.
 key_voice_measures_hint = {}
+global xpose_voice                  # Transpose voice up/down this many semi-tones.
+xpose_voice = {}
 # ----------------------------------------------------------------------------
 #-- # Following does not do multiple sharps or flats, but that is crazy anyway. Neither naturals.
 #-- global key_sig
@@ -746,6 +748,12 @@ def process_noteon(r):
     if v > voices:
         voices = v
     # fi
+
+    # Do transpose.
+    if v in xpose_voice:
+        n = n + xpose_voice[v]
+    # fi
+    
     # Okay, we have the voice and the note, and calculated the current 'running_time'.
 
     # determine which real voice to use... if chords.
@@ -819,6 +827,12 @@ def process_noteoff(r):
         print_error(f'noteoff line for voice does not turn off note?')
         return
     # fi
+
+    # Do transpose.
+    if v in xpose_voice:
+        n = n + xpose_voice[v]
+    # fi
+
     # Okay, we have the voice and the note, and calculated the current 'running_time'.
     # determine which real voice to use... if chords.
     flag = False
@@ -2395,185 +2409,55 @@ def do_title(t_args):
 # End of do_title
 
 # ----------------------------------------------------------------------------
-# NOTE/WARNING: if you have xpose without a key, it goes to key_default.
-# This is UGLY.
-#       =xpose  clarinetA..clarinetB -2     $$ clarinett in B ...  C, B-, B  ->  -2
-#       xpose   c-                          $$ all voices, from current key to key c-.
-#       xpose   1 c-                        $$ voice 1, from current key to key c-.
-#       xpose   1 -1 c-                     $$ voice 1, down 1 semi-tone, then to key c-,
-# and change to key c- if --vertical/--horizontal.
-#       xpose   1 +12                       $$ 4c = 5c
-#       xpose   1,2..5,7 +2                 $$ French Horn in D plays 2 semitones higher from what is written
-#       xpose   1 -12                       $$ French Horn in C plays 12 semitones lower
-#       xpose   1 -7                        $$ 4c = 3f
-#       xpose   1 +2                        $$ Trombone in D plays 2 semitones higher from what is written
-#       xpose   1 -3                        $$ Clarinet in A ... "C" plays "A" (i.e. C, B, B-, A = -3)
-#       =xpose  bassdrumA  -13              $$ 2c (printed) -> 0bn (played)
-#       =xpose  cymbalA  -1                 $$ 2e (printed) -> 2d- (played)
-# NOTE: the --vertical and --horizontal and key changes ... *sigh* complicated.
+# Do to processing immediately with noteon/noteoff - no need for copy to CHORD.
+#       xpose   1 -12
+#       xpose   2 -1 
+#       xpose   1 +12
+#       xpose   1,3..5,7 +2
 
 def do_xpose(t_args):
-    global xpose
-    global xpose_new_key
-    global key_sig
-    global key_sig_int
-    global key_default
-    global args
-    global key_voice
-    global minor_key_to_major
+    global xpose_voice
 
-    print_error("NOTDONEYET - do_xpose")
-
-    if args.noxpose:
-        print_warning("Ignoring xpose parsing due to --noxpose argument.")
+    vargs = get_voice_measure_other(t_args, 'xpose')
+    if vargs is None:
         return
     # fi
-    if args.abc:
-        print_warning("Ignoring xpose parsing for --abc output format. ")
-        return
-    # fi
-    if t_args is None or t_args == '':
-        print_error("xpose does not have arguments.")
-        return
-    # fi
-    targs = re.sub(r'\s*,\s*', ',', t_args)
-    vargs = targs.split()
-    if len(vargs) <= 0 or len(vargs) > 4:
-        print_error("xpose does not have correct number of arguments.")
-        return
-    # fi
-    kl = None
-    if len(vargs) > 1:
-        mm = vargs[len(vargs) - 1].lower()      # Last argument
-        kl = vargs[len(vargs) - 2].lower()      # Second to last argument
-        if mm == 'minor':
-            if kl not in minor_key_to_major:
-                print_error(f"xpose command, key does not recognize minor {kl}")
-                return
-            # fi
-            kl = minor_key_to_major[kl].lower()
-            vargs.pop()
-        elif mm == 'major':
-            if kl not in key_sig:
-                print_error(f"xpose command, key '{kl}' not recognized.")
-                return
-            # fi
-            vargs.pop()
-        else:
-            kl = None
-        # fi
-    # fi
-    if len(vargs) > 1:
-        if len(vargs) == 4:
-            print_error("xpose command only allows 3 arguments.")
-            return
-        elif len(vargs) == 3:
-            if kl is None:
-                kl = vargs[2].lower()
-            # fi
-            x = vargs[1]                # shifting amount
-            vs = vargs[0]               # voices to change
-        elif len(vargs) == 2:
-            vs = vargs[0]               # voices to change
-            # Check if key, or a number.
-            if kl is None:
-                kl = vargs[1].lower()   # new key?
-            # fi
-            if kl in key_sig:
-                x = '0'                 # shifting amount
-            else:       # is a number?
-                f1, type_error = is_float(kl, is_float_number, False)
-                if type_error is not None:
-                    print_error(f"xpose error#1 - {type_error}")
-                    return
-                # fi
-                if f1 is None:
-                    print_error(f"voice does not have xpose argument {kl} as a number or key.")
-                    return
-                # fi
-                x = str(round(f1))      # Must be an integer as a string.
-                kl = None
-            # fi
-        else:
-            print_error("xpose has a problem.")
-            return
-        # fi
-    else:   # Only one argument -- key or number?
-        # Check if key, or a number.
-        if kl is None:
-            kl = vargs[0].lower()       # new key
-        # fi
-        if kl.lower() in key_sig:
-            x = '0'                     # shifting amount
-        else:       # is a number?
-            x = kl
-            kl = None
-            f1, type_error = is_float(x, is_float_number, False)
-            if type_error is not None:
-                print_error(f"xpose error#2 - {type_error}")
-                return
-            # fi
-            if f1 is None:
-                print_error(f"voice does not have xpose argument {kl} as a number or key.")
-                return
-            # fi
-            x = str(round(f1)) # Must be an integer as a string..
-        # fi
-        vs = '{1}..{len(volume)}'       # all voices
-    # fi
-    if type(kl) is str:
-        if kl not in key_sig:
-            print_error(f"no key '{kl}' in key_sig({key_sig})")
-            return
-        # fi
+    if len(vargs) != 2:
+        print_error(f"xpose does not have at 2 arguments (has {len(vargs)})")
+        return None
     # fi
 
-    f1, type_error = is_float(x, is_float_number, False)
+    vn = separate_args(str(vargs[0]))   # Allow voice numbers.
+    if not vn or len(vn) < 1:
+        print_error("no voice arguments on xpose line")
+        return
+    # fi
+    
+    # xpose number.
+    xp = vargs[1]
+    f1, type_error = is_float(xp, is_float_number, False)
     if type_error is not None:
-        print_error(f"xpose error#3 - {type_error}")
+        print_error(f"xpose number {xp} error - {type_error}")
         return
     # fi
     if f1 is None:
-        print_error(f"voice does not have xpose argument {x} as a number.")
+        print_error(f"xpose number {xp} is not a number.")
         return
     # fi
-    x = round(f1)              # Must be an integer.
+    xp = round(f1)
 
-    # kl is used in getnote via xpose_new_key (musicomp text)
-    # kl is None means to use current key for voice.
-
-    mn = separate_args(str(vs))   # Allow voice numbers.
-    if not mn or len(mn) < 1:
-        print_error("no voice arguments on xpose")
-        return
-    # fi
-    # If kl is None, use key_default.
-    if args.vertical or args.horizontal:
-        kprint_lc = key_default                 # printing and used in xpose are the same.
-    else:
-        kprint_lc = key_sig_int[key_default]    # Key name extracted.
-    # fi
-    for w in mn:
-        f1, type_error = is_float(w, is_float_number, False)
+    for v in vn:
+        f1, type_error = is_float(v, is_float_number, False)
         if type_error is not None:
-            print_error(f"xpose error#4 - {type_error}")
+            print_error(f"xpose voice {v} error - {type_error}")
             return
         # fi
         if f1 is None:
-            print_error(f"voice {w} is not a number.")
+            print_error(f"xpose voice {v} is not a number.")
             return
         # fi
         f1 = round(f1)
-        if kl is None:
-            if f1 in key_voice and measure_on in key_voice[f1]:
-                xpose_new_key[f1] = key_voice[f1][measure_on]   # Use current key for voice
-            else:
-                xpose_new_key[f1] = kprint_lc
-            # fi
-        else:
-            xpose_new_key[f1] = kl
-        # fi
-        xpose[f1] = x
+        xpose_voice[f1] = xp
     # rof
     return
 # End of do_xpose
