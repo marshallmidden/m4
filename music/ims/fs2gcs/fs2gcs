@@ -37,13 +37,19 @@ calculate.cexp_parser()                     # initialize parser
 # ============================================================================
 global errors_happened              # Count of number of errors that occurred.
 errors_happened = 0
+global warnings_happened            # Count of number of warnings that occurred.
+warnings_happened = 0
+global line                         # For printing errors, the line to print.
+line = ''
+global line_from_file               # For printing errors, where the line came from.
+line_from_file = ''
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-global which_file_in                # Input file name (default to stdin).
-which_file_in = 'stdin'
+global which_file_input             # Input file name (default to stdin).
+which_file_input = 'stdin'
 global linecount                    # Line number from input file
 linecount = 0
-global which_file_out               # Output file name (default to stdout).
-which_file_out = 'stdout'
+global which_file_output            # Output file name (default to stdout).
+which_file_output = 'stdout'
 global which_file_hint              # Hint file name.
 which_file_hint = 'None'
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
@@ -66,17 +72,32 @@ def print_debug(strg, end="\n"):
 # End of print_debug
 
 # ----------------------------------------------------------------------------
-def print_error(strg, end="\n"):
+def print_error(strg):
     global errors_happened          # Count of number of errors that occurred.
+    global line_from_file
+    global line
+    global linecount
 
     errors_happened = errors_happened + 1
-    print_stderr('ERROR - ' + strg, end=end)
+    print_stderr(f'ERROR - {strg}')
+    if line is not None:
+        print_stderr(f'    {line_from_file}:{linecount} line={line}')
+    # fi
     return
 # End of print_error
 
 # ----------------------------------------------------------------------------
-def print_warning(strg, end="\n"):
-    print_stderr('WARNING - ' + strg, end=end)
+def print_warning(strg):
+    global warnings_happened        # Count of number of warnings that occurred.
+    global line_from_file
+    global line
+    global linecount
+
+    warnings_happened = warnings_happened + 1
+    print_stderr('WARNING - ' + strg)
+    if line is not None:
+        print_stderr(f'    {line_from_file}:{linecount} line={line}')
+    # fi
     return
 # End of print_warning
 
@@ -140,10 +161,12 @@ comments_clicks = []
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global key                          # key[voice] = ... .
 key = {}
-key[0] = 'c'                        # A default
+key[0] = [ 'c' ]                    # A default
 global key_clicks                   # key_clicks = running_time.
 key_clicks = {}
-key_clicks[0] = 0                   # Default start of it.
+key_clicks[0] = [ 0 ]               # Default start of it.
+global measures_key                 # Dictionary of voices: dictionary of measures [1-...]: key
+measures_key = {}                   # measures_key[voice][measure] = key
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global instrument                   # Indexed by voice number.
 instrument = {}                     # Array by voice of: (bank, number, running_time)
@@ -344,11 +367,12 @@ def set_keys_if_not_specified():
     global key
     global key_clicks
     global voices
+    global measures_key     # Dictionary of voices: dictionary of measures [1-...]: key
 
     # Set keys if not specified. NOTE: This may be an error.
     for k in key:
         if k == 0:
-            for v in range(1, voices):
+            for v in range(0, voices):
                 if v not in key:
                     key[v] = key[0]
                     key_clicks[v] = key_clicks[0]
@@ -357,6 +381,40 @@ def set_keys_if_not_specified():
             break
         # fi
     # rof
+
+    for v in range(0, voices):
+        if v not in measures_key:
+            measures_key[v] = {}
+        # fi
+        k = 0
+        if v in key:
+            last_k = key[v][k]
+            last_kc = key_clicks[v][k]
+        else:
+            last_k = 'c'
+            last_kc = 0
+        # fi
+        if v in key_voice_measures_hint and 1 in key_voice_measures_hint[v]:
+            last_k = key_voice_measures_hint[v][1]
+            last_kc = measures_clicks_start[1]
+        # fi
+        for m in range(1, last_measure+1):
+            if (last_kc >= measures_clicks_start[m] and
+                last_kc < measures_clicks_start[m] + measures_clicks_length[m]):
+                last_k = key[v][k]
+                last_kc = key_clicks[v][k]
+                if k < len(key[v]) -1:
+                    k = k + 1
+                # fi
+            # fi
+            if v in key_voice_measures_hint and m in key_voice_measures_hint[v]:
+                last_k = key_voice_measures_hint[v][m]
+            # fi
+            measures_key[v][m] = last_k
+        # rof
+    # rof
+    return
+
 # End of set_keys_if_not_specified
 
 # ----------------------------------------------------------------------------
@@ -383,7 +441,6 @@ def figure_out_measure_locations():
     global meters_measures_hint         # hint file text for meter, dictionary by measures.
     global meters_values_hint           # hint file value for meter, dictionary by measures.
 
-
     working_time = first_note_time
     lm = 1                              # Start measure at number 1.
     last_inc = meter_fractions[0]
@@ -395,7 +452,7 @@ def figure_out_measure_locations():
                 last_inc = meters_values_hint[lm] * MIDICLICKSPERQUARTER * 4    # value
                 last_meter = meters_measures_hint[lm]                           # text
             # fi
-            measures_clicks_start[lm] = working_time
+            measures_clicks_start[lm] = round(working_time)
             measures_clicks_length[lm] = last_inc
             measures_meter[lm] = last_meter
             working_time = working_time + last_inc
@@ -416,7 +473,7 @@ def figure_out_measure_locations():
             last_inc = meters_values_hint[lm] * MIDICLICKSPERQUARTER * 4    # value
             last_meter = meters_measures_hint[lm]                           # text
         # fi
-        measures_clicks_start[lm] = working_time
+        measures_clicks_start[lm] = round(working_time)
         measures_clicks_length[lm] = last_inc
         measures_meter[lm] = last_meter
         working_time = working_time + last_inc
@@ -527,9 +584,12 @@ def process_echo_lines(q):
             return
         # fi
         key_previous = q
-        if v not in key or key[v] != a[0]:
-            key[v] = a[0]
-            key_clicks[v] = running_time
+        if v not in key:
+            key[v] = [ a[0].lower() ]
+            key_clicks[v] = [ running_time ]
+        elif key[v] != a[0]:
+            key[v].append(a[0].lower())
+            key_clicks[v].append(running_time)
         # fi
         return
     # fi
@@ -706,6 +766,18 @@ def process_noteon(r):
         # fi
         if v in instrument:
             instrument[voices] = instrument[v]
+            if voices not in instrument_voice_measures_hint:
+                instrument_voice_measures_hint[voices] = {}
+            # fi
+            instrument_voice_measures_hint[voices] = instrument_voice_measures_hint[v]
+            if voices not in clef_voice_measures_hint:
+                clef_voice_measures_hint[voices] = {}
+            # fi
+            clef_voice_measures_hint[voices] = clef_voice_measures_hint[v]
+            if voices not in key_voice_measures_hint:
+                key_voice_measures_hint[voices] = {}
+            # fi
+            key_voice_measures_hint[voices] = key_voice_measures_hint[v]
         # fi
         v2s = voices
         print_debug(f'process_noteon - New Voice-CHORD: v2s={v2s}  bufs_notes_voices[v]={bufs_notes_voices[v]}')
@@ -901,36 +973,39 @@ def process_line(original_line):
 
 def read_next_line():
     global args
+    global line
     global linecount
     global input_file                   # File to read for input (default is use tty - stdin).
     global output_file                  # File to print to (default is sys.stdout).
     global errors_happened
+    global warnings_happened
 
     try:
         if input_file is not None:
-            line = input_file.readline()
+            rline = input_file.readline()
         else:
             if sys.stdin.isatty():
                 if sys.platform == 'darwin':
                     input('input> ')
-                    line = readline.get_line_buffer()
+                    rline = readline.get_line_buffer()
                 else:
-                    line = input('input> ')
+                    rline = input('input> ')
                 # fi
             else:
-                line = sys.stdin.readline()
+                rline = sys.stdin.readline()
             # fi
         # fi
-        if line is None or line == '':
-            if errors_happened != 0:
-                print_stderr(f'exiting with errors_happened={errors_happened}')
+        if rline is None or rline == '':
+            if errors_happened != 0 or warnings_happened != 0:
+                print_stderr(f'exiting with errors_happened={errors_happened}  warnings_happened={warnings_happened}')
             # fi
             sys.exit(errors_happened)
         # fi
         linecount = linecount + 1
-        if line:
-            line = line.rstrip()                # trailing spaces gone.
-            return line
+        if rline:
+            rline = rline.rstrip()                # trailing spaces gone.
+            line = rline
+            return rline
         # fi
     except EOFError:
         pass            # print('Read gave EOF', file=sys.stderr, flush=True)
@@ -942,6 +1017,7 @@ def read_next_line():
         print_error('Read got a processing error')
         print_stderr('    ' + sys.exc_info()[0] + sys.exc_info)
     # yrt
+    line = None
     return None
 # End of read_next_line
 
@@ -1000,7 +1076,7 @@ def print_debug_internal_1(stg):
     global comments_clicks
     global titles
 
-    print_stderr(f'\n{stg}:')
+    print_stderr(f'\n{stg}: first_note_time={first_note_time}')
     j = int(last_measure / 10) * 10
     for i in range(1, j + 1, 10):
         print_debug(f'{i:4} - measures_clicks_start: {measures_clicks_start[i]:7} {measures_clicks_start[i + 1]:7} {measures_clicks_start[i + 2]:7} {measures_clicks_start[i + 3]:7} {measures_clicks_start[i + 4]:7} {measures_clicks_start[i + 5]:7} {measures_clicks_start[i + 6]:7} {measures_clicks_start[i + 7]:7} {measures_clicks_start[i + 8]:7} {measures_clicks_start[i + 9]:7}')
@@ -1039,15 +1115,17 @@ def print_debug_internal_1(stg):
 # b) Print titles[].
 # c) Print comments[] & comments_clicks = [].
 
-    print_stderr(f'\n{stg}:')
-    for v in range(0, voices+1):
-        if v in key:
-            print_debug(f'{v:4} - key={key[v]}  key_clicks={key_clicks[v]}')
-        # fi
+    print_stderr(f'\n{stg}: key')
+    for m in range(1, last_measure+1):
+        print_stderr(f'  measure={m}:', end='')
+        for v in range(0, voices):
+            print_stderr(f' {measures_key[v][m]}', end='')
+        # rof
+        print_stderr(f'')
     # rof
 
     print_stderr(f'\n{stg}:')
-    for v in range(0, voices+1):
+    for v in range(0, voices):
         if v in instrument:
             for i in range(0,len(instrument[v])):
                 print_debug(f'{v:4} - instrument bank={instrument[v][i][0]} number={instrument[v][i][1]} clicks={instrument[v][i][2]}')
@@ -1056,7 +1134,7 @@ def print_debug_internal_1(stg):
     # rof
 
     print_stderr(f'\n{stg}:')
-    for v in range(0,voices+1):        # Voices if multiple turned on, run to alternative.
+    for v in range(0,voices):        # Voices if multiple turned on, run to alternative.
         print_debug(f'bufs_notes_voices[{v}]={bufs_notes_voices[v]}')
         print_debug(f'  note vel   clicks-on/off cc7= on/off cc10= on/off cc11= on/off cc64= on/off cc65= on/off cc91= on/off')
         for n in range(0, len(bufs_notes[v])):
@@ -1077,38 +1155,38 @@ def print_debug_hints():
 
 #--     print_debug(f'pages_measures_hint={pages_measures_hint}')
     for b in pages_measures_hint:
-        print_debug(f'pages: measure {b} = {pages_measures_hint[b]}')
+        print_debug(f'page hint: measure {b} = {pages_measures_hint[b]}')
     # rof
 
 #--     print_debug(f'bars_measures_hint={bars_measures}')
     for b in bars_measures_hint:
-        print_debug(f'bars: measure {b} = {bars_measures_hint[b]}')
+        print_debug(f'bar hint: measure {b} = {bars_measures_hint[b]}')
     # rof
 
 #--     print_debug(f'clef_voice_measures_hint={clef_voice_measures_hint}')
     for v in clef_voice_measures_hint:
         for m in clef_voice_measures_hint[v]:
-            print_debug(f'clefs: voice {v} measure {m} = {clef_voice_measures_hint[v][m]}')
+            print_debug(f'clef hint: voice {v} measure {m} = {clef_voice_measures_hint[v][m]}')
         # rof
     # rof
 
 #--     print_debug(f'instrument_voice_measures_hint={instrument_voice_measures_hint}')
     for v in instrument_voice_measures_hint:
         for m in instrument_voice_measures_hint[v]:
-            print_debug(f'instruments: voice {v} measure {m} = {instrument_voice_measures_hint[v][m]}')
+            print_debug(f'instrument hint: voice {v} measure {m} = {instrument_voice_measures_hint[v][m]}')
         # rof
     # rof
 
 #--     print_debug(f'key_voice_measures_hint={key_voice_measures_hint}')
     for v in key_voice_measures_hint:
         for m in key_voice_measures_hint[v]:
-            print_debug(f'keys: voice {v} measure {m} = {key_voice_measures_hint[v][m]}')
+            print_debug(f'key hint: voice {v} measure {m} = {key_voice_measures_hint[v][m]}')
         # rof
     # rof
 
 #--     print_debug(f'meters_measures_hint={meters_measures_hint}')
     for m in meters_measures_hint:
-        print_debug(f'meters: measure {m} = {meters_measures_hint[m]} ... {meters_values_hint[m]}')
+        print_debug(f'meter hint: measure {m} = {meters_measures_hint[m]} ... {meters_values_hint[m]}')
     # rof
     return
 # End of print_debug_hints
@@ -2715,7 +2793,6 @@ def process_hint_line(original_line):
             print_error(f"Not found processing routine for command '{command}' '{delimiter}' '{t_args}'")
             print_stderr("    " + sys.exc_info()[0] + sys.exc_info)
         # yrt
-        print_debug(f'command="{command}" delimiter="{delimiter}" t_args="{t_args}"')
         r(t_args)
     else:
         print_error(f"Unexpected line in hint file: '{command}' '{t_args}'")
@@ -2729,31 +2806,33 @@ def process_hint_line(original_line):
 #   commentdollardollar - The $$ or # comment, with the two dollar signs or #.
 
 def read_next_hint_line():
+    global line
     global linecount
     global args
     global hint_file
     global errors_happened
 
     if hint_file is None:
+        line = None
         return None, None
     # fi
     full_line = ''
     while True:
         try:
-            line = hint_file.readline()
-            if line is None or line == '':
+            rline = hint_file.readline()
+            if rline is None or rline == '':
                 sys.exit(errors_happened)
             # fi
             linecount = linecount + 1
-            if line:
-                line = line.rstrip()                # trailing spaces gone.
-                if line and line[-1] == '\\':       # if continued on next line
-                    line = line[:-1]
-                    line = line.rstrip()            # trailing spaces gone.
-                    full_line += line
+            if rline:
+                rline = rline.rstrip()                # trailing spaces gone.
+                if rline and rline[-1] == '\\':       # if continued on next line
+                    rline = rline[:-1]
+                    rline = rline.rstrip()            # trailing spaces gone.
+                    full_line += rline
                     continue
                 # fi
-                full_line += line
+                full_line += rline
                 commentdollardollar = ''
                 if '$$' in full_line:
                     # delete anything from $$ onwards.
@@ -2768,15 +2847,18 @@ def read_next_hint_line():
                     full_line = re.sub(r'[#].*$', '', full_line)
                 # fi
 #-- need to know continued line ... 8 spaces or start with a tab.
+                line = full_line
                 return full_line, commentdollardollar
             # fi
         except EOFError:
             if full_line != '':
+                line = full_line
                 return full_line, commentdollardollar
             # fi
             pass            # print("Read gave EOF", file=sys.stderr, flush=True)
         except SystemExit:
             if full_line != '':
+                line = full_line
                 return full_line, commentdollardollar
             # fi
             pass            # print("Read gave system exit", file=sys.stderr, flush=True)
@@ -2784,6 +2866,7 @@ def read_next_hint_line():
             print_error("Read got keyboard interrupt")
         except:
             if full_line != '':
+                line = full_line
                 return full_line, commentdollardollar
             # fi
             print_error("Read got a processing error")
@@ -2791,6 +2874,7 @@ def read_next_hint_line():
         # yrt
         break
     # elihw
+    line = None
     return None, None
 # End of read_next_hint_line
 
@@ -2823,28 +2907,77 @@ def readhintfile():
 # End of readhintfile
 
 # ----------------------------------------------------------------------------
-# NOTDONEYET - gcs output.
-#--     global array_of_gcs
-#-- 
-#-- # TO DO: below is wrong.
-#--     if len(array_of_gcs) > 0:
-#--         last = array_of_gcs[-1]
-#--         if last[0:6] == 'sleep ' and strg[0:6] == 'sleep ':
-#--             new_time1 = float(last[6:])
-#--             new_time2 = float(strg[6:])
-#--             array_of_gcs[-1] = f'sleep {(new_time1 + new_time2):.3f}'
-#--             return
-#--         elif last == strg:                          # Delete duplicates.
-#--             return
-#--         # fi
-#--     # fi
-#--     array_of_gcs.append(strg)
-#--     return
-
 def printout_gcs():
+    global which_file_output
+
     print_stderr('\n')
     print_error('NOTDONEYET - printout_gcs')
-    pass
+
+    last_page = ''
+    last_bar = ''
+    last_meter = ''
+
+    last_clef = {}
+    last_instrument = {}
+
+    print_output(f'* Start of file {which_file_output}')
+    print_output(f'* ----------------------------------------------------------------------------')
+    for t in titles:
+        print_output(f'title   {t}')
+    # rof
+    if middle_c != 39:
+        print_output(f'middlec {middle_c}')
+    # fi
+
+    print_output(f'* ----------------------------------------------------------------------------')
+    print_output(f'voice   {voices}')
+
+    for m in range(1, last_measure+1):
+        print_output(f'* ----------------------------------------------------------------------------')
+        print_output(f'measure {m}')
+        if m in pages_measures_hint:
+            if pages_measures_hint[m] != last_page:
+                print_output(f'page    {pages_measures_hint[m]}')
+                last_page = pages_measures_hint[m]
+            # fi
+        # fi
+        if m in bars_measures_hint:
+            if bars_measures_hint[m] != last_bar:
+                print_output(f'bars    {bars_measures_hint[m]}')
+                last_bar = bars_measures_hint[m]
+            # fi
+        # fi
+        if m in meters_measures_hint:
+            if meters_measures_hint[m] != last_meter:
+                print_output(f'meter   {meters_measures_hint[m]}')
+                last_meter = meters_measures_hint[m]
+            # fi
+        # fi
+
+        for v in range(0, voices):
+            if v in clef_voice_measures_hint and m in clef_voice_measures_hint[v]:
+                if v not in last_clef or clef_voice_measures_hint[v][m] != last_clef[v]:
+                    print_output(f'clef    {v+1} {clef_voice_measures_hint[v][m]}')
+                    last_clef[v] = clef_voice_measures_hint[v][m]
+                # fi
+            # fi
+        # rof
+        for v in range(0, voices):
+            if v in instrument_voice_measures_hint and m in instrument_voice_measures_hint[v]:
+                if v not in last_instrument or instrument_voice_measures_hint[v][m] != last_instrument[v]:
+                    print_output(f'instrument {v+1} {instrument_voice_measures_hint[v][m]}')
+                    last_instrument[v] = instrument_voice_measures_hint[v][m]
+                # fi
+            # fi
+        # rof
+
+        for v in range(0, voices):
+            print_output(f'v{v+1}:  NOTDONEYET')
+        # rof
+
+    # rof
+    print_output(f'* ----------------------------------------------------------------------------')
+    print_output(f'* End of file {which_file_output}')
 # End of printout_gcs
 
 # ----------------------------------------------------------------------------
@@ -2854,15 +2987,23 @@ def main():
     global input_file                   # File to read for input (default is use tty - stdin).
     global output_file                  # File to print to (default is sys.stdout).
     global hint_file                    # File to print to (default is None).
+    global which_file_input
+    global which_file_output
+    global which_file_hint
+    global line_from_file
+    global line
+    global linecount
+    global errors_happened
+    global warnings_happened
     global array_of_original_lines
 
     if args.rest:
         if len(args.rest) >= 1:             # Input.
-            which_file_in = args.rest[0]
-            input_file = open(which_file_in, 'r')
+            which_file_input = args.rest[0]
+            input_file = open(which_file_input, 'r')
         # fi
         if len(args.rest) >= 2:             # Output.
-            which_file_out = args.rest[1]
+            which_file_output = args.rest[1]
             output_file = open(args.rest[1], 'w')
         # fi
         if len(args.rest) >= 3:             # Hint.
@@ -2872,24 +3013,31 @@ def main():
         if len(args.rest) > 3:              # Too many.
             print_error(f'Too many arguments, input, output, hint only. {args.rest}')
             if errors_happened != 0:
-                print_stderr(f'exiting with errors_happened={errors_happened}')
+                print_stderr(f'exiting with errors_happened={errors_happened}  warnings_happened={warnings_happened}')
             # fi
             sys.exit(1)
         # fi
     # fi
 
+    linecount = 0
+    line_from_file = which_file_hint
     readhintfile()
     print_debug_hints()
 
+    linecount = 0
+    line = None
     readthefile()                       # Parse the input fs file into arrays/dictionaries/etc.
 
+    linecount = 0
+    line_from_file = which_file_input
+    line = None
     figure_out_measure_locations()      # Where are the starts of measures - from meter clicks and tempos.
 
     set_keys_if_not_specified()         # Set a default key.
 
-    notes_fitted_into_measures()
+    notes_fitted_into_measures()        # NOTDONEYET
 
-    printable_measures()
+    printable_measures()                # NOTDONEYET
 
     print_debug_internal_1('DONE')
 
@@ -2897,7 +3045,7 @@ def main():
 #--         print_output(i)
 #--     # rof
 
-    printout_gcs()
+    printout_gcs()                      # NOTDONEYET
 
     return
 # End of main
@@ -2908,7 +3056,7 @@ if __name__ == '__main__':
 # fi
 # ----------------------------------------------------------------------------
 if errors_happened != 0:
-    print_stderr(f'exiting with errors_happened={errors_happened}')
+    print_stderr(f'exiting with errors_happened={errors_happened}  warnings_happened={warnings_happened}')
 # fi
 sys.exit(errors_happened)
 # ----------------------------------------------------------------------------
