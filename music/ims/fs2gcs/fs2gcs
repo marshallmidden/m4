@@ -567,11 +567,13 @@ def set_instrument_measures():
         for m in range(1, last_measure+1):
             if (last_ic >= measures_clicks_start[m] and
                 last_ic < measures_clicks_start[m] + measures_clicks_length[m]):
-                last_i = check_instr(instrument[v][i][1], instrument[v][i][0])
+                if v in instrument and i in instrument[v]:
+                    last_i = check_instr(instrument[v][i][1], instrument[v][i][0])
 #--                 print_debug(f'H# set_instrument_measures - last_i={last_i}')
-                last_ic = instrument[v][i][2]
-                if i < len(instrument[v]) -1:
-                    i = i + 1
+                    last_ic = instrument[v][i][2]
+                    if i < len(instrument[v]) -1:
+                        i = i + 1
+                    # fi
                 # fi
             # fi
             if v in instrument_voice_measures_hint and m in instrument_voice_measures_hint[v]:
@@ -644,16 +646,7 @@ def set_keys_if_not_specified():
 
 # ----------------------------------------------------------------------------
 def figure_out_measure_locations():
-    global no_notes_yet
     global voices
-    global bufs_notes_voices
-    global bufs_notes
-    global bufs_notes_start
-    global bufs_notes_end
-    global bufs_notes_velocity
-    global bufs_cc_start
-    global bufs_cc_end
-
     global running_time
     global first_note_time
     global meter                        # Array of printable meter (text).
@@ -942,6 +935,8 @@ def get_time_for_note(v4):
 # End of get_time_for_note
 
 # -----------------------------------------------------------------------------
+# r is the arguments to the 12th
+
 def process_noteon(r):
     global voices
     global running_time
@@ -985,12 +980,18 @@ def process_noteon(r):
     # determine which real voice to use... if chords.
     flag = False
     for v2s in bufs_notes_voices[v]:
+        # Check if any note is already playing ... if so, then it is chord time.
         if v2s in bufs_notes_end and len(bufs_notes_end[v2s]) > 0 and bufs_notes_end[v2s][-1] == 0:
+            if bufs_notes[v2s][-1] == n:
+                print_debug(f'noteon v={v} n={n} i={i} v2s={v2s} NOTE ALREADY ON! linecount={linecount}')
+                return
+            # fi
             continue
         # fi
         flag = v2s
         break
     # rof
+
     if flag is False:                                   # Need a new voice for chord.
         voices = voices + 1
         bufs_notes_voices[v].append(voices)
@@ -1023,6 +1024,16 @@ def process_noteon(r):
 #--         print_debug(f'process_noteon - New Voice-CHORD: v2s={v2s}  bufs_notes_voices[v]={bufs_notes_voices[v]}')
     # fi
 
+    print_debug(f'noteon v={v} n={n} i={i} v2s={v2s} running_time={running_time} linecount={linecount}')
+    if 0 in bufs_notes:
+        print_debug(f'       len(bufs_notes[0])={len(bufs_notes[0])}')
+    if 1 in bufs_notes:
+        print_debug(f'       len(bufs_notes[1])={len(bufs_notes[1])}')
+    if 2 in bufs_notes:
+        print_debug(f'       len(bufs_notes[2])={len(bufs_notes[2])}')
+    if 3 in bufs_notes:
+        print_debug(f'       len(bufs_notes[3])={len(bufs_notes[3])}')
+
     bufs_notes[v2s].append(n)
     bufs_notes_start[v2s].append(running_time)          # Starting time for note.
     bufs_notes_end[v2s].append(0)                       # No ending time note.
@@ -1035,6 +1046,8 @@ def process_noteon(r):
 # End of process_noteon
 
 # -----------------------------------------------------------------------------
+# r is the arguments to the noteoff line.
+
 def process_noteoff(r):
     global voices
     global running_time
@@ -1070,14 +1083,30 @@ def process_noteoff(r):
     # determine which real voice to use... if chords.
     flag = False
     for v2s in bufs_notes_voices[v]:
-        if n == bufs_notes[v2s][-1]:
-            flag = v2s
-            break
+        if v2s in bufs_notes and len(bufs_notes[v2s]) > 0 and bufs_notes[v2s][-1] == n:
+            # Check if note is already playing ... last note, then did last note end yet?
+            if v2s in bufs_notes_end and len(bufs_notes_end[v2s]) > 0 and bufs_notes_end[v2s][-1] == 0:
+                flag = v2s
+                break
+            # fi
+        # fi
     # rof
     if flag is False:                                   # Need a new voice for chord.
         print_error(f'noteoff line for voice not already playing.')
+        print_debug_internal_1(f'PROBLEM_process_noteoff')
+        a = abc[-1]
         return
     # fi
+
+    print_debug(f'noteoff v={v} n={n} i={i} v2s={v2s} running_time={running_time} linecount={linecount}')
+    if 0 in bufs_notes:
+        print_debug(f'       len(bufs_notes[0])={len(bufs_notes[0])}')
+    if 1 in bufs_notes:
+        print_debug(f'       len(bufs_notes[1])={len(bufs_notes[1])}')
+    if 2 in bufs_notes:
+        print_debug(f'       len(bufs_notes[2])={len(bufs_notes[2])}')
+    if 3 in bufs_notes:
+        print_debug(f'       len(bufs_notes[3])={len(bufs_notes[3])}')
 
     bufs_notes_end[v2s][-1] = running_time
     for cc in range(0, 127):
@@ -1087,6 +1116,8 @@ def process_noteoff(r):
 # End of process_noteoff
 
 # -----------------------------------------------------------------------------
+# r is the arguments to the sleep line.
+
 def process_sleep(r):
     global tempo_s
     global tempo_l
@@ -1101,6 +1132,8 @@ def process_sleep(r):
 # End of process_sleep
 
 # -----------------------------------------------------------------------------
+# r is the arguments to the cc line.
+
 def process_cc(r):
     global last_cc                      # If doing a note, the last_cc. NOTE: defaults for 7,10,11,64,68,91.
     global bufs_notes_voices            # Voices for chords on this voice.
@@ -1326,30 +1359,32 @@ def print_debug_internal_1(stg):
     global titles
 
     print_stderr(f'\n{stg}: first_note_time={first_note_time}')
-    j = int(last_measure / 10) * 10
-    for i in range(1, j + 1, 10):
-        print_debug(f'{i:4} - measures_clicks_start: {measures_clicks_start[i]:7} {measures_clicks_start[i + 1]:7} {measures_clicks_start[i + 2]:7} {measures_clicks_start[i + 3]:7} {measures_clicks_start[i + 4]:7} {measures_clicks_start[i + 5]:7} {measures_clicks_start[i + 6]:7} {measures_clicks_start[i + 7]:7} {measures_clicks_start[i + 8]:7} {measures_clicks_start[i + 9]:7}')
-        print_debug(f'{i:4} - measures_clicks_length:{measures_clicks_length[i]:7} {measures_clicks_length[i + 1]:7} {measures_clicks_length[i + 2]:7} {measures_clicks_length[i + 3]:7} {measures_clicks_length[i + 4]:7} {measures_clicks_length[i + 5]:7} {measures_clicks_length[i + 6]:7} {measures_clicks_length[i + 7]:7} {measures_clicks_length[i + 8]:7} {measures_clicks_length[i + 9]:7}')
-        print_debug(f'{i:4} - measures_meter        :{measures_meter[i]:>7} {measures_meter[i + 1]:>7} {measures_meter[i + 2]:>7} {measures_meter[i + 3]:>7} {measures_meter[i + 4]:>7} {measures_meter[i + 5]:>7} {measures_meter[i + 6]:>7} {measures_meter[i + 7]:>7} {measures_meter[i + 8]:>7} {measures_meter[i + 9]:>7}')
-        print_stderr('')
-    # rof
-    if last_measure - j != 0:
-        i = j + 1
-        print_debug(f'{i:4} - measures_clicks_start:', end='')
-        for k in range(i, last_measure + 1):
-            print(f' {measures_clicks_start[k]:7}', file=sys.stderr, end='')
+    if last_measure is not None:
+        j = int(last_measure / 10) * 10
+        for i in range(1, j + 1, 10):
+            print_debug(f'{i:4} - measures_clicks_start: {measures_clicks_start[i]:7} {measures_clicks_start[i + 1]:7} {measures_clicks_start[i + 2]:7} {measures_clicks_start[i + 3]:7} {measures_clicks_start[i + 4]:7} {measures_clicks_start[i + 5]:7} {measures_clicks_start[i + 6]:7} {measures_clicks_start[i + 7]:7} {measures_clicks_start[i + 8]:7} {measures_clicks_start[i + 9]:7}')
+            print_debug(f'{i:4} - measures_clicks_length:{measures_clicks_length[i]:7} {measures_clicks_length[i + 1]:7} {measures_clicks_length[i + 2]:7} {measures_clicks_length[i + 3]:7} {measures_clicks_length[i + 4]:7} {measures_clicks_length[i + 5]:7} {measures_clicks_length[i + 6]:7} {measures_clicks_length[i + 7]:7} {measures_clicks_length[i + 8]:7} {measures_clicks_length[i + 9]:7}')
+            print_debug(f'{i:4} - measures_meter        :{measures_meter[i]:>7} {measures_meter[i + 1]:>7} {measures_meter[i + 2]:>7} {measures_meter[i + 3]:>7} {measures_meter[i + 4]:>7} {measures_meter[i + 5]:>7} {measures_meter[i + 6]:>7} {measures_meter[i + 7]:>7} {measures_meter[i + 8]:>7} {measures_meter[i + 9]:>7}')
+            print_stderr('')
         # rof
-        print('', file=sys.stderr)
-        print_debug(f'{i:4} - measures_clicks_length:', end='')
-        for k in range(i, last_measure + 1):
-            print(f'{measures_clicks_length[k]:7} ', file=sys.stderr, end='')
-        # rof
-        print('', file=sys.stderr)
-        print_debug(f'{i:4} - measures_meter        :', end='')
-        for k in range(i, last_measure + 1):
-            print(f'{measures_meter[k]:>7} ', file=sys.stderr, end='')
-        # rof
-        print('', file=sys.stderr)
+        if last_measure - j != 0:
+            i = j + 1
+            print_debug(f'{i:4} - measures_clicks_start:', end='')
+            for k in range(i, last_measure + 1):
+                print(f' {measures_clicks_start[k]:7}', file=sys.stderr, end='')
+            # rof
+            print('', file=sys.stderr)
+            print_debug(f'{i:4} - measures_clicks_length:', end='')
+            for k in range(i, last_measure + 1):
+                print(f'{measures_clicks_length[k]:7} ', file=sys.stderr, end='')
+            # rof
+            print('', file=sys.stderr)
+            print_debug(f'{i:4} - measures_meter        :', end='')
+            for k in range(i, last_measure + 1):
+                print(f'{measures_meter[k]:>7} ', file=sys.stderr, end='')
+            # rof
+            print('', file=sys.stderr)
+        # fi
     # fi
 
 #--     print_stderr(f'\n{stg}: Title - ')
@@ -3177,11 +3212,9 @@ def main():
 
     linecount = 0
     line = None
+    line_from_file = which_file_input
     readthefile()                       # Parse the input fs file into arrays/dictionaries/etc.
 
-    linecount = 0
-    line_from_file = which_file_input
-    line = None
     figure_out_measure_locations()      # Where are the starts of measures - from meter clicks and tempos.
 
     set_keys_if_not_specified()         # Set a default key.
