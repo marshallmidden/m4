@@ -1761,7 +1761,7 @@ def get_line():
             print('Read got keyboard interrupt', file=sys.stderr)
         except:
             print('Read got a processing error', file=sys.stderr)
-            print('   ', sys.exc_info()[0], sys.exc_info, file=sys.stderr)
+            print('   ', sys.exc_info()[0], sys.exc_info, file=sys.stderr, flush=True)
         # yrt
         break
     # elihw
