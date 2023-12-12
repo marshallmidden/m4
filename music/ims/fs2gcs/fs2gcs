@@ -274,13 +274,15 @@ xpose_voice = {}
 #-- # rof
 #--
 # ----------------------------------------------------------------------------
-#--         MIDICLICKSPERQUARTER = int(r[1])
 global midi_2_note_lengths
 midi_2_note_lengths = {}
+global CLICKS_SLOP
+CLICKS_SLOP = 8589934592
 
 def do_note_length_calculate():
     global MIDICLICKSPERQUARTER
     global midi_2_note_lengths
+    global CLICKS_SLOP
 
     for nl in (1,2,4,8,16,32,64,128):
         # note length.
@@ -292,6 +294,9 @@ def do_note_length_calculate():
             if m == 0:
                 print_debug(f'Note length {nl} gives midi click value of 0')
             else:
+                if m < CLICKS_SLOP:
+                    CLICKS_SLOP = m - 1
+                # fi
                 midi_2_note_lengths[m] = ( str(nl), 1.0 / nl )
             # fi
         # fi
@@ -305,6 +310,9 @@ def do_note_length_calculate():
                 print_debug(f'Note length {nl} gives midi click value of 0')
             elif md not in midi_2_note_lengths:
                 midi_2_note_lengths[md] = ( str(nl) + 'd', (1.0/nl)*1.5 )
+                if md < CLICKS_SLOP:
+                    CLICKS_SLOP = md - 1
+                # fi
             else:
                 print_debug(f'Note length {nl}d has clicks {md} already in array as {midi_2_note_lengths[md]}')
             # fi
@@ -320,11 +328,15 @@ def do_note_length_calculate():
                 print_debug(f'Note length {nl} gives midi click value of 0')
             elif mdd not in midi_2_note_lengths:
                 midi_2_note_lengths[mdd] = ( str(nl) + 'd' + 'd', (1.0/nl)*1.5*1.5 )
+                if mdd < CLICKS_SLOP:
+                    CLICKS_SLOP = mdd - 1
+                # fi
             else:
                 print_debug(f'Note length {nl}dd has clicks {mdd} already in array as {midi_2_note_lengths[mdd]}')
             # fi
         # fi
     # rof
+    return
 # End of do_note_length_calculate
 
 # ----------------------------------------------------------------------------
@@ -418,6 +430,7 @@ def short_note_and_split_it(v, n, note_ends_here, lth_first_note):
     print_debug(f'{v}:{n} {bufs_notes[v][n]:2} {bufs_notes_velocity[v][n]:3} {bufs_notes_start[v][n]:7} {bufs_notes_end[v][n]:7} cc7={bufs_cc_start[v][7][n]:3}-{bufs_cc_end[v][7][n]:3} cc10={bufs_cc_start[v][10][n]:3}-{bufs_cc_end[v][10][n]:3} cc11={bufs_cc_start[v][11][n]:3}-{bufs_cc_end[v][11][n]:3} cc64={bufs_cc_start[v][64][n]:3}-{bufs_cc_end[v][64][n]:3} cc65={bufs_cc_start[v][65][n]:3}-{bufs_cc_end[v][65][n]:3} cc91={bufs_cc_start[v][91][n]:3}-{bufs_cc_end[v][91][n]:3} {bufs_suffix[v][n]}')
     n = n+1
     print_debug(f'{v}:{n} {bufs_notes[v][n]:2} {bufs_notes_velocity[v][n]:3} {bufs_notes_start[v][n]:7} {bufs_notes_end[v][n]:7} cc7={bufs_cc_start[v][7][n]:3}-{bufs_cc_end[v][7][n]:3} cc10={bufs_cc_start[v][10][n]:3}-{bufs_cc_end[v][10][n]:3} cc11={bufs_cc_start[v][11][n]:3}-{bufs_cc_end[v][11][n]:3} cc64={bufs_cc_start[v][64][n]:3}-{bufs_cc_end[v][64][n]:3} cc65={bufs_cc_start[v][65][n]:3}-{bufs_cc_end[v][65][n]:3} cc91={bufs_cc_start[v][91][n]:3}-{bufs_cc_end[v][91][n]:3} {bufs_suffix[v][n]}')
+    return
 # End of short_note_and_split_it
 
 # ----------------------------------------------------------------------------
@@ -430,6 +443,7 @@ def notes_fit_into_measures():
     global measures_clicks_start
     global measures_clicks_length
     global running_time
+    global CLICKS_SLOP
 
     for v in range(0, voices + 1):
         if len(bufs_notes[v]) is None or len(bufs_notes[v]) <= 0:
@@ -443,9 +457,11 @@ def notes_fit_into_measures():
             print_debug(f'notes_fit_into_measures - v={v} m={m} n={n} where_we_are={where_we_are} measures_clicks_start={measures_clicks_start[m]} measures_clicks_length={measures_clicks_length[m]}')
             print_debug(f'  {bufs_notes[v][n]:2} {bufs_notes_velocity[v][n]:3} {bufs_notes_start[v][n]:7} {bufs_notes_end[v][n]:7} cc7={bufs_cc_start[v][7][n]:3}-{bufs_cc_end[v][7][n]:3} cc10={bufs_cc_start[v][10][n]:3}-{bufs_cc_end[v][10][n]:3} cc11={bufs_cc_start[v][11][n]:3}-{bufs_cc_end[v][11][n]:3} cc64={bufs_cc_start[v][64][n]:3}-{bufs_cc_end[v][64][n]:3} cc65={bufs_cc_start[v][65][n]:3}-{bufs_cc_end[v][65][n]:3} cc91={bufs_cc_start[v][91][n]:3}-{bufs_cc_end[v][91][n]:3} {bufs_suffix[v][n]}')
             note_start = bufs_notes_start[v][n]
+            if abs(where_we_are - note_start) <= CLICKS_SLOP:
+                note_start = where_we_are
+                bufs_notes_start[v][n] = where_we_are
+            # fi
             note_end = bufs_notes_end[v][n]
-
-            print_debug(f'nfim - note_start={note_start} note_end={note_end}')
             if where_we_are < measures_clicks_start[m]:
                 print_debug(f'nfim B - where_we_are < measures_clicks_start[m]')
                 insert_rest(v, n, where_we_are, measures_clicks_start[m])
@@ -462,8 +478,35 @@ def notes_fit_into_measures():
             if note_end < measures_clicks_start[m]:
                 print_error(f'note_end ({note_end}) < measure_clicks_start[{m}] ({measures_clicks_start[m]})')
                 return
-            if note_end < measure_click_end:            # Note plays.
-                n = n + 1                               # To next note.
+            # fi
+            if abs(measure_click_end - note_end) <= CLICKS_SLOP:
+                note_end = measure_click_end
+                bufs_notes_end[v][n] = measure_click_end
+            # fi
+            print_debug(f'nfim - note_start={note_start} note_end={note_end}')
+
+            if note_end < measure_click_end or note_start == note_end:            # Note plays.
+                if note_start != note_end:
+                    n = n + 1                               # To next note.
+                else:
+                    bufs_notes[v].pop(n)                    # Remove zero length note.
+                    bufs_notes_velocity[v].pop(n)
+                    bufs_notes_start[v].pop(n)
+                    bufs_notes_end[v].pop(n)
+                    bufs_cc_start[v][7].pop(n)
+                    bufs_cc_end[v][7].pop(n)
+                    bufs_cc_start[v][10].pop(n)
+                    bufs_cc_end[v][10].pop(n)
+                    bufs_cc_start[v][11].pop(n)
+                    bufs_cc_end[v][11].pop(n)
+                    bufs_cc_start[v][64].pop(n)
+                    bufs_cc_end[v][64].pop(n)
+                    bufs_cc_start[v][65].pop(n)
+                    bufs_cc_end[v][65].pop(n)
+                    bufs_cc_start[v][91].pop(n)
+                    bufs_cc_end[v][91].pop(n)
+                    bufs_suffix[v].pop(n)
+                # fi
                 where_we_are += (note_end - note_start)
                 if n >= len(bufs_notes[v]):
                     if where_we_are >= running_time:    # At end of song.
@@ -499,11 +542,12 @@ def notes_fit_into_measures():
 # End of notes_fit_into_measures
 
 # ----------------------------------------------------------------------------
-# How to put in CLICK_SLOP +/- for clicks checking?
+# How to put in abs(CLICKS_SLOP) +/- for clicks checking?
 
 def get_rid_of_small_click_values():
     print_stderr('\n')
     print_error('NOTDONEYET - get_rid_of_small_click_values')
+    return
 # End of get_rid_of_small_click_values
 
 # ----------------------------------------------------------------------------
@@ -522,7 +566,7 @@ def get_rid_of_small_click_values():
 def printable_measures():
     print_stderr('\n')
     print_error('NOTDONEYET - printable_measures')
-    pass
+    return
 # End of printable_measures
 
 # ----------------------------------------------------------------------------
@@ -1014,6 +1058,7 @@ def process_noteon(r):
         bufs_cc_end[v2s][cc].append(0)
     # rof
     bufs_suffix[v2s].append('')                         # No suffixes yet.
+    return
 # End of process_noteon
 
 # -----------------------------------------------------------------------------
@@ -1074,6 +1119,7 @@ def process_noteoff(r):
         bufs_cc_end[v2s][cc][-1] = last_cc[v][cc]
     # rof
     # bufs_suffix[v2s].append('') -- already set with noteon. # No suffixes yet.
+    return
 # End of process_noteoff
 
 # -----------------------------------------------------------------------------
@@ -1090,6 +1136,7 @@ def process_sleep(r):
     v3 = v2 * ((tempo_s / 60) * (tempo_l * 4))
     v4 = v3 / 1000
     running_time = running_time + math.ceil(v4)
+    return
 # End of process_sleep
 
 # -----------------------------------------------------------------------------
@@ -1109,8 +1156,13 @@ def process_cc(r):
     i = int(a[2])
 
     for v2s in bufs_notes_voices[v]:    # Do all voices for possible chords.
-        last_cc[v2s][c] = i
+        if c not in ( 7, 10, 11, 64, 65, 91):
+            last_cc[v2s][c] = i
+        else:
+            print_error(f'cc {c} for voice {v2s} is unexpected.')
+        # fi
     # rof
+    return
 # End of process_cc
 
 # -----------------------------------------------------------------------------
@@ -1154,6 +1206,7 @@ def process_note_lines(q):
     else:
         print_error(f'NOTDONEYET - Unexpected command ({q}) in FS input')
     # fi
+    return
 # End of process_note_lines
 
 # ----------------------------------------------------------------------------
@@ -1385,6 +1438,7 @@ def print_debug_internal_1(stg):
             print_debug(f'  {bufs_notes[v][n]:2} {bufs_notes_velocity[v][n]:3} {bufs_notes_start[v][n]:7} {bufs_notes_end[v][n]:7} cc7={bufs_cc_start[v][7][n]:3}-{bufs_cc_end[v][7][n]:3} cc10={bufs_cc_start[v][10][n]:3}-{bufs_cc_end[v][10][n]:3} cc11={bufs_cc_start[v][11][n]:3}-{bufs_cc_end[v][11][n]:3} cc64={bufs_cc_start[v][64][n]:3}-{bufs_cc_end[v][64][n]:3} cc65={bufs_cc_start[v][65][n]:3}-{bufs_cc_end[v][65][n]:3} cc91={bufs_cc_start[v][91][n]:3}-{bufs_cc_end[v][91][n]:3} {bufs_suffix[v][n]}')
         # rof
     # rof
+    return
 # End of print_debug_internal_1
 
 # ============================================================================
@@ -2922,6 +2976,7 @@ def process_hint_line(original_line):
     else:
         print_error(f"Unexpected line in hint file: '{command}' '{t_args}'")
     # fi
+    return
 # End of process_hint_line
 
 # ----------------------------------------------------------------------------
@@ -3111,9 +3166,9 @@ def printout_gcs():
         # rof
         # Meters are calculated, unlike hints.
         if m in measures_meter:
-            if meters_measures[m] != last_meter:
-                print_output(f'meter   {meters_measures[m]}')
-                last_meter = meters_measures[m]
+            if measures_meter[m] != last_meter:
+                print_output(f'meter   {measures_meter[m]}')
+                last_meter = measures_meter[m]
             # fi
         # fi
 
@@ -3124,6 +3179,7 @@ def printout_gcs():
     # rof
     print_output(f'* ----------------------------------------------------------------------------')
     print_output(f'* End of file {which_file_output}')
+    return
 # End of printout_gcs
 
 # ----------------------------------------------------------------------------
@@ -3189,7 +3245,7 @@ def main():
 
     printable_measures()                # NOTDONEYET
 
-#--     print_debug_internal_1('DONE')
+    print_debug_internal_1('NEARLY-DONE')
 
     printout_gcs()                      # NOTDONEYET
 
