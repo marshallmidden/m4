@@ -206,6 +206,11 @@ global last_cc                      # If doing a note, the last_cc. NOTE: defaul
 last_cc = {}
 global bufs_suffix
 bufs_suffix = {}
+global bufs_gcs_length
+bufs_gcs_length = {}
+global bufs_gcs_note
+bufs_gcs_note = {}
+
 for v in range(0,MAXVOICES):        # Voices if multiple turned on, run to alternative.
     bufs_notes_voices[v] = [v]      # Start with 1:1 voice to chord voice. Note: voices global set with Header -> max.
     bufs_notes[v] = []              # No notes yet.
@@ -215,6 +220,8 @@ for v in range(0,MAXVOICES):        # Voices if multiple turned on, run to alter
     bufs_cc_start[v] = []           # No starting cc values.
     bufs_cc_end[v] = []             # No ending cc values.
     bufs_suffix[v] = []             # No suffixes yet.
+    bufs_gcs_length[v] = []         # GCS note length.
+    bufs_gcs_note[v] = []           # GCS note.
     last_cc[v] = []
     for cc in range(0, 127):
         bufs_cc_start[v].append([]) # No starting cc's.
@@ -274,7 +281,7 @@ xpose_voice = {}
 #-- # rof
 #--
 # ----------------------------------------------------------------------------
-global midi_2_note_lengths
+global midi_2_note_lengths                  # clicks => ( '4', 1.0 / 4 )
 midi_2_note_lengths = {}
 global CLICKS_SLOP
 CLICKS_SLOP = 8589934592
@@ -336,6 +343,9 @@ def do_note_length_calculate():
             # fi
         # fi
     # rof
+
+    # Do the reverse now.
+
     return
 # End of do_note_length_calculate
 
@@ -347,6 +357,8 @@ def insert_rest(v, n, start, end):
     global bufs_notes_velocity          # The intensity of note start. (Typically the total volume. *sigh*)
     global bufs_cc_start                # [voice][cc#]      time in clicks when CC occurred.
     global bufs_cc_end                  # [voice][cc#]      CC when note stops occurred.
+    global bufs_gcs_length
+    global bufs_gcs_note
     global bufs_suffix                  # No suffixes yet.
 
 #--     print_debug(f'insert_rest - v={v} n={n} start={start} end={end}')
@@ -370,6 +382,8 @@ def insert_rest(v, n, start, end):
         bufs_cc_end[v][65].append(0)
         bufs_cc_start[v][91].append(0)
         bufs_cc_end[v][91].append(0)
+        bufs_gcs_length[v].append('')
+        bufs_gcs_note[v].append('')
         bufs_suffix[v].append('')
         return
     # fi
@@ -389,6 +403,8 @@ def insert_rest(v, n, start, end):
     bufs_cc_end[v][65].insert(n, 0)
     bufs_cc_start[v][91].insert(n, 0)
     bufs_cc_end[v][91].insert(n, 0)
+    bufs_gcs_length[v].insert(n, '')
+    bufs_gcs_note[v].insert(n, '')
     bufs_suffix[v].insert(n, '')
     return
 # End of insert_rest
@@ -401,15 +417,17 @@ def short_note_and_split_it(v, n, note_ends_here, lth_first_note):
     global bufs_notes_velocity          # The intensity of note start. (Typically the total volume. *sigh*)
     global bufs_cc_start                # [voice][cc#]      time in clicks when CC occurred.
     global bufs_cc_end                  # [voice][cc#]      CC when note stops occurred.
+    global bufs_gcs_length
+    global bufs_gcs_note
     global bufs_suffix                  # No suffixes yet.
-
-#--     print_debug(f'short_note_and_split_it - v={v} n={n} note_ends_here={note_ends_here} lth_first_note={lth_first_note}')
 
     bufs_notes_start[v].insert(n, bufs_notes_start[v][n])
     bufs_notes_start[v][n+1] = bufs_notes_start[v][n+1] + lth_first_note
     bufs_notes_end[v].insert(n, note_ends_here)
     bufs_notes[v].insert(n, bufs_notes[v][n])
     bufs_notes_velocity[v].insert(n, bufs_notes_velocity[v][n])
+    bufs_gcs_length[v].insert(n, '')
+    bufs_gcs_note[v].insert(n, '')
     bufs_cc_start[v][7].insert(n, bufs_cc_start[v][7][n])
     bufs_cc_end[v][7].insert(n, bufs_cc_end[v][7][n])
     bufs_cc_start[v][10].insert(n, bufs_cc_start[v][10][n])
@@ -427,9 +445,7 @@ def short_note_and_split_it(v, n, note_ends_here, lth_first_note):
     else:
         bufs_suffix[v].insert(n, '')
     # fi
-#--     print_debug(f'{v}:{n} {bufs_notes[v][n]:2} {bufs_notes_velocity[v][n]:3} {bufs_notes_start[v][n]:7} {bufs_notes_end[v][n]:7} cc7={bufs_cc_start[v][7][n]:3}-{bufs_cc_end[v][7][n]:3} cc10={bufs_cc_start[v][10][n]:3}-{bufs_cc_end[v][10][n]:3} cc11={bufs_cc_start[v][11][n]:3}-{bufs_cc_end[v][11][n]:3} cc64={bufs_cc_start[v][64][n]:3}-{bufs_cc_end[v][64][n]:3} cc65={bufs_cc_start[v][65][n]:3}-{bufs_cc_end[v][65][n]:3} cc91={bufs_cc_start[v][91][n]:3}-{bufs_cc_end[v][91][n]:3} {bufs_suffix[v][n]}')
     n = n+1
-#--     print_debug(f'{v}:{n} {bufs_notes[v][n]:2} {bufs_notes_velocity[v][n]:3} {bufs_notes_start[v][n]:7} {bufs_notes_end[v][n]:7} cc7={bufs_cc_start[v][7][n]:3}-{bufs_cc_end[v][7][n]:3} cc10={bufs_cc_start[v][10][n]:3}-{bufs_cc_end[v][10][n]:3} cc11={bufs_cc_start[v][11][n]:3}-{bufs_cc_end[v][11][n]:3} cc64={bufs_cc_start[v][64][n]:3}-{bufs_cc_end[v][64][n]:3} cc65={bufs_cc_start[v][65][n]:3}-{bufs_cc_end[v][65][n]:3} cc91={bufs_cc_start[v][91][n]:3}-{bufs_cc_end[v][91][n]:3} {bufs_suffix[v][n]}')
     return
 # End of short_note_and_split_it
 
@@ -440,6 +456,8 @@ def notes_fit_into_measures():
     global bufs_notes
     global bufs_notes_start
     global bufs_notes_end
+    global bufs_gcs_length
+    global bufs_gcs_note
     global measures_clicks_start
     global measures_clicks_length
     global running_time
@@ -453,9 +471,6 @@ def notes_fit_into_measures():
         n = 0                           # first note in bufs_notes[v]
         where_we_are = first_note_time  # first measure should be this value too.
         while m <= last_measure:
-#--             print_stderr('')
-#--             print_debug(f'notes_fit_into_measures - v={v} m={m} n={n} where_we_are={where_we_are} measures_clicks_start={measures_clicks_start[m]} measures_clicks_length={measures_clicks_length[m]}')
-#--             print_debug(f'  {bufs_notes[v][n]:2} {bufs_notes_velocity[v][n]:3} {bufs_notes_start[v][n]:7} {bufs_notes_end[v][n]:7} cc7={bufs_cc_start[v][7][n]:3}-{bufs_cc_end[v][7][n]:3} cc10={bufs_cc_start[v][10][n]:3}-{bufs_cc_end[v][10][n]:3} cc11={bufs_cc_start[v][11][n]:3}-{bufs_cc_end[v][11][n]:3} cc64={bufs_cc_start[v][64][n]:3}-{bufs_cc_end[v][64][n]:3} cc65={bufs_cc_start[v][65][n]:3}-{bufs_cc_end[v][65][n]:3} cc91={bufs_cc_start[v][91][n]:3}-{bufs_cc_end[v][91][n]:3} {bufs_suffix[v][n]}')
             note_start = bufs_notes_start[v][n]
             if abs(where_we_are - note_start) <= CLICKS_SLOP:
                 note_start = where_we_are
@@ -463,12 +478,10 @@ def notes_fit_into_measures():
             # fi
             note_end = bufs_notes_end[v][n]
             if where_we_are < measures_clicks_start[m]:
-#--                 print_debug(f'nfim B - where_we_are < measures_clicks_start[m]')
                 insert_rest(v, n, where_we_are, measures_clicks_start[m])
                 continue
             # fi
             if where_we_are < note_start:
-#--                 print_debug(f'nfim C - where_we_are < note_start')
                 insert_rest(v, n, where_we_are, note_start)
                 continue
             # fi
@@ -483,7 +496,6 @@ def notes_fit_into_measures():
                 note_end = measure_click_end
                 bufs_notes_end[v][n] = measure_click_end
             # fi
-#--             print_debug(f'nfim - note_start={note_start} note_end={note_end}')
 
             if note_end < measure_click_end or note_start == note_end:            # Note plays.
                 if note_start != note_end:
@@ -493,6 +505,8 @@ def notes_fit_into_measures():
                     bufs_notes_velocity[v].pop(n)
                     bufs_notes_start[v].pop(n)
                     bufs_notes_end[v].pop(n)
+                    bufs_gcs_length[v].pop(n)
+                    bufs_gcs_note[v].pop(n)
                     bufs_cc_start[v][7].pop(n)
                     bufs_cc_end[v][7].pop(n)
                     bufs_cc_start[v][10].pop(n)
@@ -513,42 +527,130 @@ def notes_fit_into_measures():
                         break
                     # fi
                     # insert rest to end of song.
-#--                     print_debug(f'nfim D - insert rest to end of song')
                     insert_rest(v, n, where_we_are, running_time)
                     continue
                 # fi
                 if where_we_are >= measure_click_end or note_end == measure_click_end:
                     m = m + 1
-#--                     print_debug(f'nfim E - to next measure')
                 # fi
-#--                 print_debug(f'nfim F - to start of while')
                 continue
             # fi
             # Note: note_end > measure_click_end
             # Note is too long, insert short note before, with tie, and shorten next note by this length.
             # End of new note is at measure_click_end, and length of this note is last arg, and shorten by that.
-#--             print_debug(f'nfim G - splitting note')
             short_note_and_split_it(v, n, measure_click_end, measure_click_end - note_start)
             n = n + 1
             where_we_are += (measure_click_end - note_start)
             if where_we_are >= measure_click_end or note_end == measure_click_end:
                 m = m + 1
-#--                 print_debug(f'nfim H - to next measure')
             # fi
             continue
         # elihw
+        if len(bufs_notes_start[v]) > 0:
+            note_start = bufs_notes_start[v][-1]
+            note_end = bufs_notes_end[v][-1]
+            if note_start == note_end:
+                bufs_notes[v].pop(n)                    # Remove zero length note.
+                bufs_notes_velocity[v].pop(n)
+                bufs_notes_start[v].pop(n)
+                bufs_notes_end[v].pop(n)
+                bufs_gcs_length[v].pop(n)
+                bufs_gcs_note[v].pop(n)
+                bufs_cc_start[v][7].pop(n)
+                bufs_cc_end[v][7].pop(n)
+                bufs_cc_start[v][10].pop(n)
+                bufs_cc_end[v][10].pop(n)
+                bufs_cc_start[v][11].pop(n)
+                bufs_cc_end[v][11].pop(n)
+                bufs_cc_start[v][64].pop(n)
+                bufs_cc_end[v][64].pop(n)
+                bufs_cc_start[v][65].pop(n)
+                bufs_cc_end[v][65].pop(n)
+                bufs_cc_start[v][91].pop(n)
+                bufs_cc_end[v][91].pop(n)
+                bufs_suffix[v].pop(n)
+            # fi
+        # fi
     # rof
     return
 # End of notes_fit_into_measures
 
 # ----------------------------------------------------------------------------
+def check_contiguous_notes():
+    global voices
+    global bufs_notes
+    global first_note_time
+    global bufs_notes_start
+    global bufs_notes_end
+
+    for v in range(0, voices + 1):
+        if len(bufs_notes[v]) is None or len(bufs_notes[v]) <= 0:
+            continue
+        # fi
+        prev_end = first_note_time
+        for n in range(0, len(bufs_notes[v])):
+            note_start = bufs_notes_start[v][n]
+            if prev_end != note_start:
+                print_error(f'check_contiguous_notes - voice={v} measure={m} n={n} - note_start({note_start}) != prev_end ({prev_end})')
+                die('something wrong.')
+            # fi
+            note_end = bufs_notes_end[v][n]
+            if note_start >= note_end:
+                print_error(f'check_contiguous_notes - voice={v} measure={m} n={n} - note_start({note_start}) >= note_end({note_end})')
+                die('something wrong.')
+            # fi
+            prev_end = note_end
+        # rof
+    # rof
+    return
+# End of check_contiguous_notes
+
+# ----------------------------------------------------------------------------
 # How to put in abs(CLICKS_SLOP) +/- for clicks checking?
+# Figure out what bufs_gcs_length[v][n] is like "4" = 1/4 note.
 
 def determine_note_gcs_lengths():
+    global bufs_gcs_length
+    global voices
+    global bufs_notes
+    global first_note_time
+    global bufs_notes_start
+    global bufs_notes_end
+
+    print_stderr(f'midi_2_note_lengths={midi_2_note_lengths}')
+#--     print_stderr(f'midi_2_note_lengths[m] = ( str(nl), 1.0 / nl )
+    for v in range(0, voices + 1):
+        if len(bufs_notes[v]) is None or len(bufs_notes[v]) <= 0:
+            continue
+        # fi
+        for n in range(0, len(bufs_notes[v])):
+            note_start = bufs_notes_start[v][n]
+            note_end = bufs_notes_end[v][n]
+            lth = note_end - note_start
+            if lth in midi_2_note_lengths:
+                bufs_gcs_length[v][n] = midi_2_note_lengths[lth][0]
+            else:
+                print_error(f'determine_note_gcs_lengths - lth={lth} not in midi_2_note_lengths={midi_2_note_lengths}')
+            # fi
+        # rof
+    # rof
+
     print_stderr('\n')
     print_error('NOTDONEYET - determine_note_gcs_lengths')
     return
 # End of determine_note_gcs_lengths
+
+# ----------------------------------------------------------------------------
+# Figure out what bufs_gcs_notes[v][n] is "4c" (c, 4th octave).
+# NOTE: key for voice and previous +/-/n business.
+
+def determine_note_gcs_notes():
+    global bufs_gcs_length
+
+    print_stderr('\n')
+    print_error('NOTDONEYET - determine_note_gcs_notes')
+    return
+# End of determine_note_gcs_notes
 
 # ----------------------------------------------------------------------------
 #   a) Change note time into: get_time_for_note(XXX) -
@@ -579,6 +681,7 @@ def set_instrument_measures():
     global measures_clicks_start
     global measures_clicks_length
     global instrument_voice_measures_hint
+    global last_measure
 
     for v in range(0, voices + 1):
         if v not in measures_instrument:
@@ -977,6 +1080,8 @@ def process_noteon(r):
     global bufs_notes_velocity          # The intensity of note start. (Typically the total volume. *sigh*)
     global bufs_cc_start                # [voice][cc#]      time in clicks when CC occurred.
     global bufs_cc_end                  # [voice][cc#]      CC when note stops occurred.
+    global bufs_gcs_length
+    global bufs_gcs_note
     global bufs_suffix                  # No suffixes yet.
     global last_cc                      # If doing a note, the last_cc. NOTE: defaults for 7,10,11,64,68,91.
 
@@ -1057,6 +1162,8 @@ def process_noteon(r):
         bufs_cc_start[v2s][cc].append(last_cc[v][cc])
         bufs_cc_end[v2s][cc].append(0)
     # rof
+    bufs_gcs_length[v2s].append('')
+    bufs_gcs_note[v2s].append('')
     bufs_suffix[v2s].append('')                         # No suffixes yet.
     return
 # End of process_noteon
@@ -3237,11 +3344,17 @@ def main():
 
     set_instrument_measures()           # Using instrument_voice_measures_hint and instruments[]
 
-#--     print_debug_internal_1('DEBUG_B4_FITTED')
-
     notes_fit_into_measures()           # NOTDONEYET
 
-    determine_note_gcs_lengths()        # NOTDONEYET
+    print_debug_internal_1('Notes_fitted')
+
+    check_contiguous_notes()            # Check that start->end-> next_start is okay.
+
+#... NEXT - NOTDONEYET
+    determine_note_gcs_lengths()        # Figure out what bufs_gcs_length[v][n] is like "4" = 1/4 note.
+
+    determine_note_gcs_notes()          # Figure out what bufs_gcs_notes[v][n] is "4c" (c, 4th octave).
+                                        # NOTE: key for voice and previous +/-/n business.
 
     printable_measures()                # NOTDONEYET
 
