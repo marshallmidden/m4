@@ -283,12 +283,18 @@ xpose_voice = {}
 # ----------------------------------------------------------------------------
 global midi_2_note_lengths                  # clicks => ( '4', 1.0 / 4 )
 midi_2_note_lengths = {}
+global midi_2_note_lengths_dotted           # clicks => ( '4', 1.0 / 4 )
+midi_2_note_lengths_dotted = {}
+global midi_2_note_lengths_double_dotted    # clicks => ( '4', 1.0 / 4 )
+midi_2_note_lengths_double_dotted = {}
 global CLICKS_SLOP
 CLICKS_SLOP = 8589934592
 
 def do_note_length_calculate():
     global MIDICLICKSPERQUARTER
     global midi_2_note_lengths
+    global midi_2_note_lengths_dotted
+    global midi_2_note_lengths_double_dotted
     global CLICKS_SLOP
 
     for nl in (1,2,4,8,16,32,64,128):
@@ -307,6 +313,8 @@ def do_note_length_calculate():
                 midi_2_note_lengths[m] = ( str(nl), 1.0 / nl )
             # fi
         # fi
+    # rof
+    for nl in (1,2,4,8,16,32,64,128):
         # Dotted note lengths.
         md = ((MIDICLICKSPERQUARTER / 0.25) / nl) * 1.5
         if int(md * 1000) != int(md)*1000:
@@ -316,7 +324,7 @@ def do_note_length_calculate():
             if md == 0:
                 print_debug(f'Note length {nl} gives midi click value of 0')
             elif md not in midi_2_note_lengths:
-                midi_2_note_lengths[md] = ( str(nl) + 'd', (1.0/nl)*1.5 )
+                midi_2_note_lengths_dotted[md] = ( str(nl) + 'd', (1.0/nl)*1.5 )
                 if md < CLICKS_SLOP:
                     CLICKS_SLOP = md - 1
                 # fi
@@ -324,7 +332,9 @@ def do_note_length_calculate():
                 print_debug(f'Note length {nl}d has clicks {md} already in array as {midi_2_note_lengths[md]}')
             # fi
         # fi
+    # rof
 
+    for nl in (1,2,4,8,16,32,64,128):
         # double dotted note lengths.
         mdd = ((MIDICLICKSPERQUARTER / 0.25) / nl) * 1.5 * 1.5
         if int(mdd * 1000) != int(mdd)*1000:
@@ -333,13 +343,14 @@ def do_note_length_calculate():
             mdd = int(mdd)
             if mdd == 0:
                 print_debug(f'Note length {nl} gives midi click value of 0')
-            elif mdd not in midi_2_note_lengths:
-                midi_2_note_lengths[mdd] = ( str(nl) + 'd' + 'd', (1.0/nl)*1.5*1.5 )
+            elif mdd not in midi_2_note_lengths and mdd not in midi_2_note_lengths_dotted:
+                midi_2_note_lengths_double_dotted[mdd] = ( str(nl) + 'd' + 'd', (1.0/nl)*1.5*1.5 )
                 if mdd < CLICKS_SLOP:
                     CLICKS_SLOP = mdd - 1
                 # fi
             else:
                 print_debug(f'Note length {nl}dd has clicks {mdd} already in array as {midi_2_note_lengths[mdd]}')
+                print_debug(f'or in dotted array {midi_2_note_lengths_dotted[mdd]}')
             # fi
         # fi
     # rof
@@ -608,21 +619,47 @@ def check_contiguous_notes():
 # ----------------------------------------------------------------------------
 # Returns which_q_single (index into midi_2_note_lengths), closest_single = abs(diffs).
 def check_single_note_lth(v, n):
+    global bufs_notes_start
+    global bufs_notes_end
+    global midi_2_note_lengths
+    global midi_2_note_lengths_dotted
+    global midi_2_note_lengths_double_dotted
+
     note_start = bufs_notes_start[v][n]
     note_end = bufs_notes_end[v][n]
     lth = note_end - note_start
     closest_single = 8589934592
+    which_q_ptr = None
     which_q_single = None
     for q in midi_2_note_lengths:
 #--         print_stderr(f'q={q} midi_2_note_lengths[q]={midi_2_note_lengths[q]}')
         c = abs(lth - q)
         if c < closest_single:
+            which_q_ptr = midi_2_note_lengths
             closest_single = c
             which_q_single = q
         # fi
     # rof
-#--     print_stderr(f'check_single_note_lth - v={v} n={n} return={which_q_single},{closest_single}')
-    return which_q_single, closest_single
+    for q in midi_2_note_lengths_dotted:
+#--         print_stderr(f'q={q} midi_2_note_lengths[q]={midi_2_note_lengths_dotted[q]}')
+        c = abs(lth - q)
+        if c < closest_single:
+            which_q_ptr = midi_2_note_lengths_dotted
+            closest_single = c
+            which_q_single = q
+        # fi
+    # rof
+    for q in midi_2_note_lengths_double_dotted:
+#--         print_stderr(f'q={q} midi_2_note_lengths[q]={midi_2_note_lengths_double_dotted[q]}')
+        c = abs(lth - q)
+        if c < closest_single:
+            which_q_ptr = midi_2_note_lengths_double_dotted
+            closest_single = c
+            which_q_single = q
+        # fi
+    # rof
+    print_stderr(f'check_single_note_lth - v={v} n={n} return={which_q_single},{closest_single}')
+    return which_q_ptr, which_q_single, closest_single
 # End of check_single_note_lth
 
 # ----------------------------------------------------------------------------
@@ -653,7 +690,11 @@ def determine_note_gcs_lengths():
     global bufs_notes_start
     global bufs_notes_end
 
+    global bufs_gcs_length
+
     print_stderr(f'midi_2_note_lengths={midi_2_note_lengths}')
+    print_stderr(f'midi_2_note_lengths_dotted={midi_2_note_lengths_dotted}')
+    print_stderr(f'midi_2_note_lengths_double_dotted={midi_2_note_lengths_double_dotted}')
     for v in range(0, voices + 1):
         if len(bufs_notes[v]) is None or len(bufs_notes[v]) <= 0:
             continue
@@ -661,52 +702,53 @@ def determine_note_gcs_lengths():
         n = 0
         while n < len(bufs_notes[v]):
             # NOTDONEYET - note + following rest => length + staccato.
-            which_q_single, closest_single = check_single_note_lth(v, n)
+            which_q_ptr, which_q_single, closest_single = check_single_note_lth(v, n)
             if closest_single > 1:
+                print_stderr(f'calling check_triplets - which_q_single={which_q_single} closest_single={closest_single}')
                 which_triplet, closest_triplet = check_triplets(v, n)
             else:
                 which_triplet = None
                 closest_triplet = 8589934592
             # fi
             # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-            if which_q_single is not None:
-                print_stderr(f'string="{midi_2_note_lengths[which_q_single][0]}"')
-            # fi
+#--             if which_q_single is not None:
+#--                 print_stderr(f'string="{midi_2_note_lengths[which_q_single][0]}"')
+#--             # fi
             # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
             if which_q_single is not None:
-                if v not in bufs_gcs_length:
-                    bufs_gcs_length[v] = {}
-                # fi
+#--                 if v not in bufs_gcs_length:
+#--                     bufs_gcs_length[v] = {}
+#--                 # fi
                 if which_triplet is not None:
                     if closest_single < CLICKS_SLOP:
                         if closest_triplet < CLICKS_SLOP:
                             if closest_single < closest_triplet:
-                                bufs_gcs_length[v].append(which_q_single)
+                                bufs_gcs_length[v][n] = which_q_ptr[which_q_single][0]
                                 n = n + 1
                             else:
-                                bufs_gcs_length[v].append(which_triplet)
+                                bufs_gcs_length[v][n] = which_triplet
                                 n = n + 3
                             # fi
                         else:
-                            bufs_gcs_length[v].append(which_q_single)
+                            bufs_gcs_length[v][n] = which_q_ptr[which_q_single][0]
                             n = n + 1
                         # fi
                         continue
                     elif closest_triplet < CLICKS_SLOP:
-                        bufs_gcs_length[v].append(which_triplet)
+                        bufs_gcs_length[v][n] = which_triplet
                         n = n + 3
                         continue
                     # fi
                     # Try multiple notes.
                 elif closest_single < CLICKS_SLOP:
-                    bufs_gcs_length[v].append(which_q_single)
+                    bufs_gcs_length[v][n] = which_q_ptr[which_q_single][0]
                     n = n + 1
                     continue
                 # fi
                 # Try multiple notes.
             elif which_triplet is not None:
                 if closest_triplet < CLICKS_SLOP:
-                    bufs_gcs_length[v].append(which_triplet)
+                    bufs_gcs_length[v][n] = which_triplet
                     n = n + 3
                     continue
                 # fi
@@ -720,6 +762,9 @@ def determine_note_gcs_lengths():
             n = n + 1
             continue
         # elihw
+
+#--         print_stderr(f'bufs_gcs_length[{v}]={bufs_gcs_length[v]}')
+
     # rof
     return
 # End of determine_note_gcs_lengths
@@ -1111,45 +1156,45 @@ def process_header_lines(q):
 # End of process_header_lines
 
 # ----------------------------------------------------------------------------
-def get_time_for_note(v4):
-    global midi_2_note_lengths
-
-    t = round(v4)
-    ml = list(midi_2_note_lengths.keys())
-    if t in midi_2_note_lengths:
-        print_debug(f'get_time_for_note - {t} is length {midi_2_note_lengths[t]}')
-    else:
-        ml = list(midi_2_note_lengths.keys())
-        ml.sort()
-        flagless = None
-        foundit = False
-        for n in ml:
-            if t < n:
-                if flagless is None:
-                    print_warning(f'get_time_for_note - {t}:[{v4}] less than smallest value {n}->{midi_2_note_lengths[n]}')
-                else:
-#--                     print_warning(f'get_time_for_note - {flagless}->{midi_2_note_lengths[flagless]} < {t}:[{v4}] < {n}->{midi_2_note_lengths[n]}')
-                    low = t - flagless
-                    high = n - t
-                    if low < high:
-                        print_warning(f'#A get_time_for_note - {flagless}->{midi_2_note_lengths[flagless]} less than {t}:[{v4}] by {low}')
-                        t = flagless
-                    else:
-                        print_warning(f'#B get_time_for_note - {n}->{midi_2_note_lengths[n]} greater than {t}:[{v4}] by {high}')
-                        t = n
-                    # fi
-                # fi
-                foundit = True
-                break
-            # fi
-            flagless = n
-        # rof
-        if not foundit:
-            print_warning(f'get_time_for_note - {t}:[{v3}] > largest value {flagless}->{midi_2_note_lengths[flagless]}')
-        # fi
-    # fi
-    return t
-# End of get_time_for_note
+#-- def get_time_for_note(v4):
+#--     global midi_2_note_lengths
+#-- 
+#--     t = round(v4)
+#--     ml = list(midi_2_note_lengths.keys())
+#--     if t in midi_2_note_lengths:
+#--         print_debug(f'get_time_for_note - {t} is length {midi_2_note_lengths[t]}')
+#--     else:
+#--         ml = list(midi_2_note_lengths.keys())
+#--         ml.sort()
+#--         flagless = None
+#--         foundit = False
+#--         for n in ml:
+#--             if t < n:
+#--                 if flagless is None:
+#--                     print_warning(f'get_time_for_note - {t}:[{v4}] less than smallest value {n}->{midi_2_note_lengths[n]}')
+#--                 else:
+#-- #--                     print_warning(f'get_time_for_note - {flagless}->{midi_2_note_lengths[flagless]} < {t}:[{v4}] < {n}->{midi_2_note_lengths[n]}')
+#--                     low = t - flagless
+#--                     high = n - t
+#--                     if low < high:
+#--                         print_warning(f'#A get_time_for_note - {flagless}->{midi_2_note_lengths[flagless]} less than {t}:[{v4}] by {low}')
+#--                         t = flagless
+#--                     else:
+#--                         print_warning(f'#B get_time_for_note - {n}->{midi_2_note_lengths[n]} greater than {t}:[{v4}] by {high}')
+#--                         t = n
+#--                     # fi
+#--                 # fi
+#--                 foundit = True
+#--                 break
+#--             # fi
+#--             flagless = n
+#--         # rof
+#--         if not foundit:
+#--             print_warning(f'get_time_for_note - {t}:[{v3}] > largest value {flagless}->{midi_2_note_lengths[flagless]}')
+#--         # fi
+#--     # fi
+#--     return t
+#-- # End of get_time_for_note
 
 # -----------------------------------------------------------------------------
 # r is the arguments to the 12th
@@ -1558,6 +1603,8 @@ def print_debug_internal_1(stg):
     global bufs_cc_end
     global bufs_suffix
 
+    global bufs_gcs_length
+
 #--     global comments
 #--     global comments_clicks
 #--     global titles
@@ -1626,7 +1673,7 @@ def print_debug_internal_1(stg):
         print_debug(f'bufs_notes_voices[{v}]={bufs_notes_voices[v]}')
         print_debug(f'  note vel   clicks-on/off cc7= on/off cc10= on/off cc11= on/off cc64= on/off cc65= on/off cc91= on/off')
         for n in range(0, len(bufs_notes[v])):
-            print_debug(f'  {bufs_notes[v][n]:2} {bufs_notes_velocity[v][n]:3} {bufs_notes_start[v][n]:7} {bufs_notes_end[v][n]:7} cc7={bufs_cc_start[v][7][n]:3}-{bufs_cc_end[v][7][n]:3} cc10={bufs_cc_start[v][10][n]:3}-{bufs_cc_end[v][10][n]:3} cc11={bufs_cc_start[v][11][n]:3}-{bufs_cc_end[v][11][n]:3} cc64={bufs_cc_start[v][64][n]:3}-{bufs_cc_end[v][64][n]:3} cc65={bufs_cc_start[v][65][n]:3}-{bufs_cc_end[v][65][n]:3} cc91={bufs_cc_start[v][91][n]:3}-{bufs_cc_end[v][91][n]:3} {bufs_suffix[v][n]}')
+            print_debug(f'  {bufs_notes[v][n]:2} {bufs_notes_velocity[v][n]:3} {bufs_gcs_length[v][n]:3} {bufs_notes_start[v][n]:7} {bufs_notes_end[v][n]:7} cc7={bufs_cc_start[v][7][n]:3}-{bufs_cc_end[v][7][n]:3} cc10={bufs_cc_start[v][10][n]:3}-{bufs_cc_end[v][10][n]:3} cc11={bufs_cc_start[v][11][n]:3}-{bufs_cc_end[v][11][n]:3} cc64={bufs_cc_start[v][64][n]:3}-{bufs_cc_end[v][64][n]:3} cc65={bufs_cc_start[v][65][n]:3}-{bufs_cc_end[v][65][n]:3} cc91={bufs_cc_start[v][91][n]:3}-{bufs_cc_end[v][91][n]:3} {bufs_suffix[v][n]}')
         # rof
     # rof
     return
