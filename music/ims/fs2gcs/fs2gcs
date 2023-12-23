@@ -281,27 +281,36 @@ xpose_voice = {}
 #-- # rof
 #--
 # ----------------------------------------------------------------------------
-global midi_2_note_lengths                  # clicks => ( '4', 1.0 / 4 )
+global midi_2_note_lengths                          # clicks => ( '4', 1.0 / 4 )
 midi_2_note_lengths = {}
-global midi_2_note_lengths_dotted           # clicks => ( '4', 1.0 / 4 )
+global midi_2_note_lengths_sorted_keys
+midi_2_note_lengths_sorted_keys = []
+global midi_2_note_lengths_dotted                   # clicks => ( '4', 1.0 / 4 )
 midi_2_note_lengths_dotted = {}
-global midi_2_note_lengths_double_dotted    # clicks => ( '4', 1.0 / 4 )
+global midi_2_note_lengths_dotted_sorted_keys
+midi_2_note_lengths_dotted_sorted_keys = []
+global midi_2_note_lengths_double_dotted            # clicks => ( '4', 1.0 / 4 )
 midi_2_note_lengths_double_dotted = {}
+global midi_2_note_lengths_double_dotted_sorted_keys
+midi_2_note_lengths_double_dotted_sorted_keys = []
 global CLICKS_SLOP
 CLICKS_SLOP = 8589934592
 
 def do_note_length_calculate():
     global MIDICLICKSPERQUARTER
     global midi_2_note_lengths
+    global midi_2_note_lengths_sorted_keys
     global midi_2_note_lengths_dotted
+    global midi_2_note_lengths_dotted_sorted_keys
     global midi_2_note_lengths_double_dotted
+    global midi_2_note_lengths_double_dotted_sorted_keys
     global CLICKS_SLOP
 
     for nl in (1,2,4,8,16,32,64,128):
         # note length.
         m = (MIDICLICKSPERQUARTER / 0.25) / nl
         if int(m * 1000) != int(m)*1000:
-            pass
+            print_debug(f'Note length {nl} gives fraction {m} - ignoring.')
         else:
             m = int(m)
             if m == 0:
@@ -310,6 +319,7 @@ def do_note_length_calculate():
                 if m < CLICKS_SLOP:
                     CLICKS_SLOP = m - 1
                 # fi
+                midi_2_note_lengths_sorted_keys.append(m)
                 midi_2_note_lengths[m] = ( str(nl), 1.0 / nl )
             # fi
         # fi
@@ -318,12 +328,13 @@ def do_note_length_calculate():
         # Dotted note lengths.
         md = ((MIDICLICKSPERQUARTER / 0.25) / nl) * 1.5
         if int(md * 1000) != int(md)*1000:
-            pass
+            print_debug(f'Note length {nl} dotted gives fraction {md} - ignoring.')
         else:
             md = int(md)
             if md == 0:
                 print_debug(f'Note length {nl} gives midi click value of 0')
             elif md not in midi_2_note_lengths:
+                midi_2_note_lengths_dotted_sorted_keys.append(md)
                 midi_2_note_lengths_dotted[md] = ( str(nl) + 'd', (1.0/nl)*1.5 )
                 if md < CLICKS_SLOP:
                     CLICKS_SLOP = md - 1
@@ -338,12 +349,13 @@ def do_note_length_calculate():
         # double dotted note lengths.
         mdd = ((MIDICLICKSPERQUARTER / 0.25) / nl) * 1.5 * 1.5
         if int(mdd * 1000) != int(mdd)*1000:
-            pass
+            print_debug(f'Note length {nl} double dotted gives fraction {mdd} - ignoring.')
         else:
             mdd = int(mdd)
             if mdd == 0:
                 print_debug(f'Note length {nl} gives midi click value of 0')
             elif mdd not in midi_2_note_lengths and mdd not in midi_2_note_lengths_dotted:
+                midi_2_note_lengths_double_dotted_sorted_keys.append(mdd)
                 midi_2_note_lengths_double_dotted[mdd] = ( str(nl) + 'd' + 'd', (1.0/nl)*1.5*1.5 )
                 if mdd < CLICKS_SLOP:
                     CLICKS_SLOP = mdd - 1
@@ -354,9 +366,6 @@ def do_note_length_calculate():
             # fi
         # fi
     # rof
-
-    # Do the reverse now.
-
     return
 # End of do_note_length_calculate
 
@@ -624,6 +633,9 @@ def check_single_note_lth(v, n):
     global midi_2_note_lengths
     global midi_2_note_lengths_dotted
     global midi_2_note_lengths_double_dotted
+    global midi_2_note_lengths_sorted_keys
+    global midi_2_note_lengths_dotted_sorted_keys
+    global midi_2_note_lengths_double_dotted_sorted_keys
 
     note_start = bufs_notes_start[v][n]
     note_end = bufs_notes_end[v][n]
@@ -631,7 +643,7 @@ def check_single_note_lth(v, n):
     closest_single = 8589934592
     which_q_ptr = None
     which_q_single = None
-    for q in midi_2_note_lengths:
+    for q in midi_2_note_lengths_sorted_keys:
 #--         print_stderr(f'q={q} midi_2_note_lengths[q]={midi_2_note_lengths[q]}')
         c = abs(lth - q)
         if c < closest_single:
@@ -640,7 +652,7 @@ def check_single_note_lth(v, n):
             which_q_single = q
         # fi
     # rof
-    for q in midi_2_note_lengths_dotted:
+    for q in midi_2_note_lengths_dotted_sorted_keys:
 #--         print_stderr(f'q={q} midi_2_note_lengths[q]={midi_2_note_lengths_dotted[q]}')
         c = abs(lth - q)
         if c < closest_single:
@@ -649,7 +661,7 @@ def check_single_note_lth(v, n):
             which_q_single = q
         # fi
     # rof
-    for q in midi_2_note_lengths_double_dotted:
+    for q in midi_2_note_lengths_double_dotted_sorted_keys:
 #--         print_stderr(f'q={q} midi_2_note_lengths[q]={midi_2_note_lengths_double_dotted[q]}')
         c = abs(lth - q)
         if c < closest_single:
@@ -1615,24 +1627,24 @@ def print_debug_internal_1(stg):
     if last_measure is not None:
         j = int(last_measure / 10) * 10
         for i in range(1, j + 1, 10):
-            print_debug(f'{i:4} - measures_clicks_start: {measures_clicks_start[i]:7} {measures_clicks_start[i + 1]:7} {measures_clicks_start[i + 2]:7} {measures_clicks_start[i + 3]:7} {measures_clicks_start[i + 4]:7} {measures_clicks_start[i + 5]:7} {measures_clicks_start[i + 6]:7} {measures_clicks_start[i + 7]:7} {measures_clicks_start[i + 8]:7} {measures_clicks_start[i + 9]:7}')
-            print_debug(f'{i:4} - measures_clicks_length:{measures_clicks_length[i]:7} {measures_clicks_length[i + 1]:7} {measures_clicks_length[i + 2]:7} {measures_clicks_length[i + 3]:7} {measures_clicks_length[i + 4]:7} {measures_clicks_length[i + 5]:7} {measures_clicks_length[i + 6]:7} {measures_clicks_length[i + 7]:7} {measures_clicks_length[i + 8]:7} {measures_clicks_length[i + 9]:7}')
-            print_debug(f'{i:4} - measures_meter        :{measures_meter[i]:>7} {measures_meter[i + 1]:>7} {measures_meter[i + 2]:>7} {measures_meter[i + 3]:>7} {measures_meter[i + 4]:>7} {measures_meter[i + 5]:>7} {measures_meter[i + 6]:>7} {measures_meter[i + 7]:>7} {measures_meter[i + 8]:>7} {measures_meter[i + 9]:>7}')
+            print_stderr(f'{i:4} - measures_clicks_start: {measures_clicks_start[i]:7} {measures_clicks_start[i + 1]:7} {measures_clicks_start[i + 2]:7} {measures_clicks_start[i + 3]:7} {measures_clicks_start[i + 4]:7} {measures_clicks_start[i + 5]:7} {measures_clicks_start[i + 6]:7} {measures_clicks_start[i + 7]:7} {measures_clicks_start[i + 8]:7} {measures_clicks_start[i + 9]:7}')
+            print_stderr(f'{i:4} - measures_clicks_length:{measures_clicks_length[i]:7} {measures_clicks_length[i + 1]:7} {measures_clicks_length[i + 2]:7} {measures_clicks_length[i + 3]:7} {measures_clicks_length[i + 4]:7} {measures_clicks_length[i + 5]:7} {measures_clicks_length[i + 6]:7} {measures_clicks_length[i + 7]:7} {measures_clicks_length[i + 8]:7} {measures_clicks_length[i + 9]:7}')
+            print_stderr(f'{i:4} - measures_meter        :{measures_meter[i]:>7} {measures_meter[i + 1]:>7} {measures_meter[i + 2]:>7} {measures_meter[i + 3]:>7} {measures_meter[i + 4]:>7} {measures_meter[i + 5]:>7} {measures_meter[i + 6]:>7} {measures_meter[i + 7]:>7} {measures_meter[i + 8]:>7} {measures_meter[i + 9]:>7}')
             print_stderr('')
         # rof
         if last_measure - j != 0:
             i = j + 1
-            print_debug(f'{i:4} - measures_clicks_start:', end='')
+            print_stderr(f'{i:4} - measures_clicks_start:', end='')
             for k in range(i, last_measure + 1):
                 print(f' {measures_clicks_start[k]:7}', file=sys.stderr, end='')
             # rof
             print('', file=sys.stderr)
-            print_debug(f'{i:4} - measures_clicks_length:', end='')
+            print_stderr(f'{i:4} - measures_clicks_length:', end='')
             for k in range(i, last_measure + 1):
                 print(f'{measures_clicks_length[k]:7} ', file=sys.stderr, end='')
             # rof
             print('', file=sys.stderr)
-            print_debug(f'{i:4} - measures_meter        :', end='')
+            print_stderr(f'{i:4} - measures_meter        :', end='')
             for k in range(i, last_measure + 1):
                 print(f'{measures_meter[k]:>7} ', file=sys.stderr, end='')
             # rof
@@ -1642,12 +1654,12 @@ def print_debug_internal_1(stg):
 
 #--     print_stderr(f'\n{stg}: Title - ')
 #--     for t in range(0, len(titles)):
-#--         print_debug(f'    "{titles[t]}"')
+#--         print_stderr(f'    "{titles[t]}"')
 #--     # rof
 #--
 #--     print_stderr(f'\n{stg}: Comments - ')
 #--     for c in range(0, len(comments)):
-#--         print_debug(f'    comments_clicks={comments_clicks[c]} - "{comments[c]}"')
+#--         print_stderr(f'    comments_clicks={comments_clicks[c]} - "{comments[c]}"')
 #--     # rof
 
 #--     print_stderr(f'\n{stg}: key')
@@ -1663,17 +1675,17 @@ def print_debug_internal_1(stg):
 #--     for v in range(0, voices + 1):
 #--         if v in instrument:
 #--             for i in range(0,len(instrument[v])):
-#--                 print_debug(f'{v:4} - instrument bank={instrument[v][i][0]} number={instrument[v][i][1]} clicks={instrument[v][i][2]}')
+#--                 print_stderr(f'{v:4} - instrument bank={instrument[v][i][0]} number={instrument[v][i][1]} clicks={instrument[v][i][2]}')
 #--             # rof
 #--         # fi
 #--     # rof
 
     print_stderr(f'\n{stg}:')
     for v in range(0,voices + 1):     # Voices if multiple turned on, run to alternative.
-        print_debug(f'bufs_notes_voices[{v}]={bufs_notes_voices[v]}')
-        print_debug(f'  note vel   clicks-on/off cc7= on/off cc10= on/off cc11= on/off cc64= on/off cc65= on/off cc91= on/off')
+        print_stderr(f'bufs_notes_voices[{v}]={bufs_notes_voices[v]}')
+        print_stderr(f'note vel lth   clicks-on/off cc7= on/off cc10= on/off cc11= on/off cc64= on/off cc65= on/off cc91= on/off suffix')
         for n in range(0, len(bufs_notes[v])):
-            print_debug(f'  {bufs_notes[v][n]:2} {bufs_notes_velocity[v][n]:3} {bufs_gcs_length[v][n]:3} {bufs_notes_start[v][n]:7} {bufs_notes_end[v][n]:7} cc7={bufs_cc_start[v][7][n]:3}-{bufs_cc_end[v][7][n]:3} cc10={bufs_cc_start[v][10][n]:3}-{bufs_cc_end[v][10][n]:3} cc11={bufs_cc_start[v][11][n]:3}-{bufs_cc_end[v][11][n]:3} cc64={bufs_cc_start[v][64][n]:3}-{bufs_cc_end[v][64][n]:3} cc65={bufs_cc_start[v][65][n]:3}-{bufs_cc_end[v][65][n]:3} cc91={bufs_cc_start[v][91][n]:3}-{bufs_cc_end[v][91][n]:3} {bufs_suffix[v][n]}')
+            print_stderr(f'  {bufs_notes[v][n]:2} {bufs_notes_velocity[v][n]:3} {bufs_gcs_length[v][n]:3} {bufs_notes_start[v][n]:7} {bufs_notes_end[v][n]:7} cc7={bufs_cc_start[v][7][n]:3}-{bufs_cc_end[v][7][n]:3} cc10={bufs_cc_start[v][10][n]:3}-{bufs_cc_end[v][10][n]:3} cc11={bufs_cc_start[v][11][n]:3}-{bufs_cc_end[v][11][n]:3} cc64={bufs_cc_start[v][64][n]:3}-{bufs_cc_end[v][64][n]:3} cc65={bufs_cc_start[v][65][n]:3}-{bufs_cc_end[v][65][n]:3} cc91={bufs_cc_start[v][91][n]:3}-{bufs_cc_end[v][91][n]:3} {bufs_suffix[v][n]}')
         # rof
     # rof
     return
