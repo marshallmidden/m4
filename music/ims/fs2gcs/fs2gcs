@@ -626,10 +626,7 @@ def check_contiguous_notes():
 # End of check_contiguous_notes
 
 # ----------------------------------------------------------------------------
-# Returns which_q_single (index into midi_2_note_lengths), closest_single = abs(diffs).
-def check_single_note_lth(v, n):
-    global bufs_notes_start
-    global bufs_notes_end
+def check_note_lth(lth):
     global midi_2_note_lengths
     global midi_2_note_lengths_dotted
     global midi_2_note_lengths_double_dotted
@@ -637,14 +634,10 @@ def check_single_note_lth(v, n):
     global midi_2_note_lengths_dotted_sorted_keys
     global midi_2_note_lengths_double_dotted_sorted_keys
 
-    note_start = bufs_notes_start[v][n]
-    note_end = bufs_notes_end[v][n]
-    lth = note_end - note_start
     closest_single = 8589934592
     which_q_ptr = None
     which_q_single = None
     for q in midi_2_note_lengths_sorted_keys:
-#--         print_stderr(f'q={q} midi_2_note_lengths[q]={midi_2_note_lengths[q]}')
         c = abs(lth - q)
         if c < closest_single:
             which_q_ptr = midi_2_note_lengths
@@ -653,7 +646,6 @@ def check_single_note_lth(v, n):
         # fi
     # rof
     for q in midi_2_note_lengths_dotted_sorted_keys:
-#--         print_stderr(f'q={q} midi_2_note_lengths[q]={midi_2_note_lengths_dotted[q]}')
         c = abs(lth - q)
         if c < closest_single:
             which_q_ptr = midi_2_note_lengths_dotted
@@ -662,7 +654,6 @@ def check_single_note_lth(v, n):
         # fi
     # rof
     for q in midi_2_note_lengths_double_dotted_sorted_keys:
-#--         print_stderr(f'q={q} midi_2_note_lengths[q]={midi_2_note_lengths_double_dotted[q]}')
         c = abs(lth - q)
         if c < closest_single:
             which_q_ptr = midi_2_note_lengths_double_dotted
@@ -670,22 +661,59 @@ def check_single_note_lth(v, n):
             which_q_single = q
         # fi
     # rof
-    print_stderr(f'check_single_note_lth - v={v} n={n} return={which_q_single},{closest_single}')
+    return which_q_ptr, which_q_single, closest_single
+# End of check_note_lth
+
+# ----------------------------------------------------------------------------
+# Returns which_q_single (index into midi_2_note_lengths), closest_single = abs(diffs).
+def check_single_note_lth(v, n):
+    global bufs_notes_start
+    global bufs_notes_end
+
+    note_start = bufs_notes_start[v][n]
+    note_end = bufs_notes_end[v][n]
+    lth = note_end - note_start
+    which_q_ptr, which_q_single, closest_single = check_note_lth(lth)
+    print_stderr(f'check_single_note_lth - v={v} n={n} - return which_q_single={which_q_single} closest_single={closest_single}')
     return which_q_ptr, which_q_single, closest_single
 # End of check_single_note_lth
 
 # ----------------------------------------------------------------------------
-def check_triplets(v, n):
-    print_stderr(f'check_triplets - v={v} n={n}')
+def check_triplets(v, n, m):
+    global bufs_notes_start
+    global bufs_notes_end
+    global measures_clicks_start
+    global measures_clicks_length
+
     #      1       2       3          4          5         6         7        8         9        10.
     # Single, double, triple, quadruple, quintuple, sextuple, septuple, octuple, nontuple, dectuple.
-    return None, None
+    if n+2 >= len(bufs_notes_end[v]):
+        print_stderr(f'check_triplets - v={v} n={n} m={m} - return None, None, None')
+        return None, None, None
+    # fi
+    note_start_3 = bufs_notes_start[v][n+2]
+    note_end_3 = bufs_notes_end[v][n+2]
+    if note_end_3 > measures_clicks_start[m] + measures_clicks_length[m]:
+        print_stderr(f'check_triplets - v={v} n={n} m={m} - return None, None, None')
+        return None, None, None
+    # fi 
+    note_start_1 = bufs_notes_start[v][n]
+    note_end_1 = bufs_notes_end[v][n]
+    lth1 = note_end_1 - note_start_1
+    note_start_2 = bufs_notes_start[v][n+1]
+    note_end_2 = bufs_notes_end[v][n+1]
+    lth2 = note_end_2 - note_start_2
+    lth3 = note_end_3 - note_start_3
+    if (lth1 >> 1) != (lth2 >> 1) or (lth1 >> 1) != (lth3 >> 1):
+        return None, None, None
+    # fi 
+    which_q_ptr, which_q_single, closest_single = check_note_lth(lth1 + lth2 + lth3)
+    print_stderr(f'check_triplets - v={v} n={n} m={m} - return which_q_single={which_q_single} closest_single={closest_single}')
+    return which_q_ptr, which_q_single, closest_single
 # End of check_triplets
 
 # ----------------------------------------------------------------------------
 def multiple_note_split(v, n):
-    #      1       2       3          4          5         6         7        8         9        10.
-    # Single, double, triple, quadruple, quintuple, sextuple, septuple, octuple, nontuple, dectuple.
     print_stderr(f'multiple_note_split - v={v} n={n}')
     return None, None
 # End of multiple_note_split
@@ -704,41 +732,41 @@ def determine_note_gcs_lengths():
 
     global bufs_gcs_length
 
-    print_stderr(f'midi_2_note_lengths={midi_2_note_lengths}')
-    print_stderr(f'midi_2_note_lengths_dotted={midi_2_note_lengths_dotted}')
-    print_stderr(f'midi_2_note_lengths_double_dotted={midi_2_note_lengths_double_dotted}')
+    print_stderr(f'CLICKS_SLOP={CLICKS_SLOP}')
+#--     print_stderr(f'midi_2_note_lengths={midi_2_note_lengths}')
+#--     print_stderr(f'midi_2_note_lengths_dotted={midi_2_note_lengths_dotted}')
+#--     print_stderr(f'midi_2_note_lengths_double_dotted={midi_2_note_lengths_double_dotted}')
     for v in range(0, voices + 1):
         if len(bufs_notes[v]) is None or len(bufs_notes[v]) <= 0:
             continue
         # fi
-        n = 0
+        m = 1                           # measure number 1
+        n = 0                           # first note in bufs_notes[v]
         while n < len(bufs_notes[v]):
+            # Need measure for checking staccato or triplets.
+            while m+1 in measures_clicks_start and measures_clicks_start[m+1] < bufs_notes[v][n]:
+                m = m+1
+            # elihw
             # NOTDONEYET - note + following rest => length + staccato.
             which_q_ptr, which_q_single, closest_single = check_single_note_lth(v, n)
             if closest_single > 1:
-                print_stderr(f'calling check_triplets - which_q_single={which_q_single} closest_single={closest_single}')
-                which_triplet, closest_triplet = check_triplets(v, n)
+#--                 print_stderr(f'calling check_triplets - which_q_single={which_q_single} closest_single={closest_single}')
+                which_q_ptr_3, which_q_3, closest_3 = check_triplets(v, n, m)
             else:
-                which_triplet = None
-                closest_triplet = 8589934592
+                which_q_ptr_3 = None
+                which_q_3 = None
+                closest_3 = 8589934592
             # fi
             # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-#--             if which_q_single is not None:
-#--                 print_stderr(f'string="{midi_2_note_lengths[which_q_single][0]}"')
-#--             # fi
-            # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
             if which_q_single is not None:
-#--                 if v not in bufs_gcs_length:
-#--                     bufs_gcs_length[v] = {}
-#--                 # fi
-                if which_triplet is not None:
+                if which_q_3 is not None:
                     if closest_single < CLICKS_SLOP:
-                        if closest_triplet < CLICKS_SLOP:
-                            if closest_single < closest_triplet:
+                        if closest_3 < CLICKS_SLOP:
+                            if closest_single < closest_3:
                                 bufs_gcs_length[v][n] = which_q_ptr[which_q_single][0]
                                 n = n + 1
                             else:
-                                bufs_gcs_length[v][n] = which_triplet
+                                bufs_gcs_length[v][n] = str(which_q_3) + '/3'
                                 n = n + 3
                             # fi
                         else:
@@ -746,8 +774,8 @@ def determine_note_gcs_lengths():
                             n = n + 1
                         # fi
                         continue
-                    elif closest_triplet < CLICKS_SLOP:
-                        bufs_gcs_length[v][n] = which_triplet
+                    elif closest_3 < CLICKS_SLOP:
+                        bufs_gcs_length[v][n] = str(which_q_ptr_3[which_q_3][0]) + '/3'
                         n = n + 3
                         continue
                     # fi
@@ -758,17 +786,18 @@ def determine_note_gcs_lengths():
                     continue
                 # fi
                 # Try multiple notes.
-            elif which_triplet is not None:
-                if closest_triplet < CLICKS_SLOP:
-                    bufs_gcs_length[v][n] = which_triplet
+            elif which_q_3 is not None:
+                if closest_3 < CLICKS_SLOP:
+                    bufs_gcs_length[v][n] = str(which_q_ptr_3[which_q_3][0]) + '/3'
                     n = n + 3
                     continue
                 # fi
                 # Try multiple notes.
-            else:
-                # Try multiple notes.
-                pass
+            #-- else:
+                #-- # Try multiple notes.
+                #-- pass
             # fi
+            # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
             # Subtract largest note and make another from rest. Split note.
             multiple_note_split(v, n)
             n = n + 1
