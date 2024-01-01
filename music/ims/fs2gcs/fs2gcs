@@ -282,7 +282,18 @@ global midi_2_note_lengths_double_dotted_sorted_keys
 midi_2_note_lengths_double_dotted_sorted_keys = []
 global CLICKS_SLOP
 CLICKS_SLOP = 8589934592
-
+# ----------------------------------------------------------------------------
+global acc_v_init_v_or_h            # Last accidental on a note in measure.
+acc_v_init_v_or_h = { '0c':'', '0d':'', '0e':'', '0f':'', '0g':'', '0a':'', '0b':'',
+                      '1c':'', '1d':'', '1e':'', '1f':'', '1g':'', '1a':'', '1b':'',
+                      '2c':'', '2d':'', '2e':'', '2f':'', '2g':'', '2a':'', '2b':'',
+                      '3c':'', '3d':'', '3e':'', '3f':'', '3g':'', '3a':'', '3b':'',
+                      '4c':'', '4d':'', '4e':'', '4f':'', '4g':'', '4a':'', '4b':'',
+                      '5c':'', '5d':'', '5e':'', '5f':'', '5g':'', '5a':'', '5b':'',
+                      '6c':'', '6d':'', '6e':'', '6f':'', '6g':'', '6a':'', '6b':'',
+                      '7c':'', '7d':'', '7e':'', '7f':'', '7g':'', '7a':'', '7b':'',
+                      '8c':'', '8d':'', '8e':'', '8f':'', '8g':'', '8a':'', '8b':''}
+# ----------------------------------------------------------------------------
 def do_note_length_calculate():
     global MIDICLICKSPERQUARTER
     global midi_2_note_lengths
@@ -1017,16 +1028,30 @@ def determine_note_gcs_notes():
         # fi
         m = 1                           # measure number 1
         n = 0                           # first note in bufs_notes[v]
+        acc_m = {}
+        for i in acc_v_init_v_or_h:
+            acc_m[i] = acc_v_init_v_or_h[i]
+        # rof
+        acc_last_suffix_tie = ''
         while n < len(bufs_notes[v]):
             # Need measure for checking staccato or triplets.
             while m + 1 in measures_clicks_start and measures_clicks_start[m + 1] < bufs_notes[v][n]:
                 m = m + 1
+                for i in acc_v_init_v_or_h:
+                    if acc_last_suffix_tie != i:
+                        acc_m[i] = acc_v_init_v_or_h[i]
+                    # fi
+                # rof
+                acc_last_suffix_tie = ''
             # elihw
             # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
             # Determine note name from midi note number.
             midi_note=bufs_notes[v][n]
             if midi_note == 0:
                 lkj = 'r'
+                playing_on = 'r'
+                playing_a = ''
+                acc_last_suffix_tie = ''
             else:
                 # Current key for measure:
                 k = measures_key[v][m]
@@ -1038,9 +1063,34 @@ def determine_note_gcs_notes():
                 else:                                       # If sharps's on staff for key.
                     lkj = midi_value_to_note_sharp_39[midi_note]
                 # fi
+                playing_on = lkj[0:2]
+                playing_a = lkj[2:]
+                # See if this note in measure already has +/-/n.
+                acc = acc_m[playing_on]                     # if last note of this had acc already.
+                if acc != '':                               # This note already has sharp/flat/nature
+                    if playing_a == '':                     # Set to n.
+                        playing_a = acc = 'n'
+                    elif playing_a != '':
+                        acc = playing_a
+                    #else:
+                    #    pass
+                    # fi
+                else:
+                    if playing_a != '':
+                        acc = playing_a
+                    else:
+                        playing_a = acc
+                    # fi
+                # fi
+                acc_m[playing_on] = acc
+                if 't' in bufs_suffix[v][n]:
+                    acc_last_suffix_tie = playing_on
+                else:
+                    acc_last_suffix_tie = ''
+                # fi
             # fi
-            bufs_gcs_note[v][n] = lkj
-#--             print_debug(f'key={k:2} midi_note={midi_note:3}  GCS v{v+1}: {bufs_gcs_note[v][n]}{bufs_gcs_length[v][n]}')
+            bufs_gcs_note[v][n] = playing_on + playing_a
+#--             print_debug(f'key={k:2} midi_note={midi_note:3}  GCS v{v+1}: {bufs_gcs_note[v][n]}{bufs_gcs_length[v][n]} lkj={lkj} playing_on={playing_on} playing_a={playing_a} acc={acc} acc_last_suffix_tie={acc_last_suffix_tie}')
             # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
             n = n + 1
         # elihw
@@ -1132,7 +1182,7 @@ def set_keys_if_not_specified():
     # Set keys if not specified. NOTE: This may be an error.
     for k in key:
         if k == 0:
-            for v in range(0, voices + 1):
+            for v in range(0, voices):
                 if v not in key:
                     key[v] = key[0]
                     key_clicks[v] = key_clicks[0]
@@ -1142,7 +1192,7 @@ def set_keys_if_not_specified():
         # fi
     # rof
 
-    for v in range(0, voices + 1):
+    for v in range(0, voices):
         if v not in measures_key:
             measures_key[v] = {}
         # fi
@@ -1327,7 +1377,6 @@ def process_echo_lines(q):
         vs = q[5:].split(' ', 1)
         v = int(vs[0])
         a = vs[1].split(None)
-        print_debug(f'key - q={q} vs={vs} v={v} a={a}')
         if len(a) < 2 or len(a) > 4:
             print_error(f'key line expects key followed by "major" not {a}')
             return
@@ -1340,14 +1389,18 @@ def process_echo_lines(q):
             key[v] = []
             key_clicks[v] = []
         # fi
-        if key[v] != a[0]:                      # Do not repeat the key.
+#--        if key[v] != a[0]:                      # Do not repeat the key.
+        if len(key_clicks[v]) > 0 and key_clicks[v][-1] == running_time:
+            key[v][-1] = a[0].lower()
+        else:
             key[v].append(a[0].lower())
             key_clicks[v].append(running_time)
         # fi
+        # fi
+#--         print_debug(f'key ... q={q} vs={vs} v={v} a={a} key_previous={key_previous} key[{v}]={key[v]} key_clicks[v]={key_clicks[v]}')
         return
     # fi
     a = q.split()
-    print_debug(f'a - q={q} a={a}')
     if len(a) == 3 and len(a[1]) > 8 and a[1][0:8] == 'tempo_s=':
 # DEBUG - process_echo_lines - q=""tempo_s=150 tempo_l=0.25""
         if q[-1] != '"':
@@ -1362,7 +1415,6 @@ def process_echo_lines(q):
         # fi
         l = a[2][8:len(a[2]) - 1]
         tempo_l = float(l)
-        print_debug(f'tempo_s={tempo_s} tempo_l={tempo_l}')
         return
     # fi
     comments.append(q)
@@ -1888,7 +1940,7 @@ def print_debug_keys_1(stg):
     print_stderr(f'\n{stg}: key')
     for m in range(1, last_measure + 1):
         print_stderr(f'  measure={m:3}:', end='')
-        for v in range(0, voices + 1):
+        for v in range(0, voices):
             print_stderr(f' {measures_key[v][m]}', end='')
         # rof
         print_stderr(f'')
@@ -1925,7 +1977,7 @@ def print_debug_notes_1(stg):
     global bufs_suffix
 
     print_stderr(f'\n{stg}:')
-    for v in range(0,voices + 1):     # Voices if multiple turned on, run to alternative.
+    for v in range(0,voices):           # Voices if multiple turned on, run to alternative.
         print_stderr(f'bufs_notes_voices[{v}]={bufs_notes_voices[v]}')
         print_stderr(f'gcs note vel lth   clicks-on/off cc7= on/off cc10= on/off cc11= on/off cc64= on/off cc65= on/off cc91= on/off suffix')
         for n in range(0, len(bufs_notes[v])):
@@ -1945,7 +1997,7 @@ def print_debug_internal_1(stg):
 
 #--     print_debug_title_1(stg)
 #--     print_debug_comments_1(stg)
-#--     print_debug_keys_1(stg)
+    print_debug_keys_1(stg)
 #--     print_debug_instruments_1(stg)
 
     print_debug_notes_1(stg)
@@ -3649,6 +3701,7 @@ def printout_gcs():
         # rof
     # rof
     print_output(f'* ----------------------------------------------------------------------------')
+    print_output('cstop*')
     print_output(f'* End of file {which_file_output}')
     return
 # End of printout_gcs

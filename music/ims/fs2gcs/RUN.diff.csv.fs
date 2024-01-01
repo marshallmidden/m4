@@ -10,4 +10,4 @@ rm -f t.fs TTT u.csv u.fs UUU ZZZ
 ./fs2gcs u.fs u.gcs 2>&1 | tee UUU
 
 diff -u TTT UUU  >ZZZ || true
-vi ZZZ
+#-- vi ZZZ
