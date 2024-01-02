@@ -83,7 +83,9 @@ global linecount
 linecount = 0
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global voices                       # Number of voices
-voices = 1
+voices = None
+global voices_2_channel             # For voice #7, array of channels.
+voices_2_channel = {}
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global file_name                    # None = use tty.
 global output_name                  # File to print to (default is sys.stdout).
@@ -188,15 +190,15 @@ def process_fs_check(what, lth, min_next, vtlines, tempo_s, tempo_l):
     global fs_other_echo
     global key_sig_int
     global voices
+    global voices_2_channel                 # ??
     global MIDICLICKSPERQUARTER
 
     for voice, lines in vtlines.items():
-        v = int(voice)
-        if this_time[v] >= len(lines):
+        if this_time[voice] >= len(lines):
             continue
         # fi
 
-        t = lines[this_time[v]].split(' ', 1) # 2 elements
+        t = lines[this_time[voice]].split(' ', 1) # 2 elements
         t[0].strip()
         time = float(t[0])
         while time <= min_next:
@@ -262,6 +264,9 @@ def process_fs_check(what, lth, min_next, vtlines, tempo_s, tempo_l):
                 # "0, 0, Header, 1, {}, {}".format(len(volume)+1, round(10*MIDICLICKSPERQUARTER)))
                 h = strg[7:].split(', ')
                 voices = int(h[1])
+                for v in range(1, voices + 1):
+                    voices_2_channel[v] = []                   # No channels for voice yet.
+                # rof
                 MIDICLICKSPERQUARTER = int(h[2])
                 print_fs(f'echo "Header {voices} {MIDICLICKSPERQUARTER}"')
             elif strg[0:3] == 'cc ':
@@ -277,11 +282,11 @@ def process_fs_check(what, lth, min_next, vtlines, tempo_s, tempo_l):
 #--                error_now = error_now + 1               # DIE NOW!
 #--                break
             # fi
-            this_time[v] += 1
-            if this_time[v] >= len(lines):
+            this_time[voice] += 1
+            if this_time[voice] >= len(lines):
                 break
             # fi
-            t = lines[this_time[v]].split(' ', 1) # 2 elements
+            t = lines[this_time[voice]].split(' ', 1) # 2 elements
             time = float(t[0])
         # elihw
     # rof
@@ -302,6 +307,8 @@ def print_out_fluidsynth():
     global array_of_lines
     global this_time
     global default_little_time
+    global voices
+    global voices_2_channel
 
     change_name = {
         'Text_t': 'echo',
@@ -345,8 +352,9 @@ def print_out_fluidsynth():
             t.append('')
         # fi
         t[0] = t[0].strip()
-        if t[0] not in v_t_lines:
-            v_t_lines[t[0]] = []
+        thevoicenumber = int(t[0])
+        if thevoicenumber not in v_t_lines:
+            v_t_lines[thevoicenumber] = []
         # fi
 
         if 2 > len(t) or t[2] == "Start_track":
@@ -361,12 +369,37 @@ def print_out_fluidsynth():
                 t[3] = t[3].replace(',', '').strip()
             # fi
             if t[2] == 'echo key':
-                t.insert(3, str(t[0]))
+                if thevoicenumber == 'ALL' or thevoicenumber not in voices_2_channel:
+                    y = thevoicenumber
+                else:
+                    z = len(voices_2_channel[thevoicenumber])
+                    if z == 0:
+#--                         print_error_no_line(f'echo key - with no channel specified yet.')
+                        y = 'ALL'               # This means to apply to all voices (later).
+                    elif z == 1:
+                        y = voices_2_channel[thevoicenumber][0]
+                    else:
+                        print_error_no_line(f'echo key - with more than 1 channel specified yet ({voices_2_channel[thevoicenumber]}).')
+                        y = voices_2_channel[thevoicenumber][0]
+                    # fi
+                # fi
+                t.insert(3, str(y))
             # fi
             if t[2] == 'noteon':
                 h = t[3].split(' ')
                 if h[2] == '0':
                     t[2] = 'noteoff'
+                # fi
+                q = h[0].strip(',')
+                if q not in voices_2_channel[thevoicenumber]:
+                    voices_2_channel[thevoicenumber].append(q)
+                # fi
+            # fi
+            if t[2] == 'pitch_bend' or t[2] == 'cc':
+                h = t[3].split(' ')
+                q = h[0].strip(',')
+                if q not in voices_2_channel[thevoicenumber]:
+                    voices_2_channel[thevoicenumber].append(q)
                 # fi
             # fi
         elif t[2] in ignore_these:
@@ -377,10 +410,6 @@ def print_out_fluidsynth():
                 continue
             # fi
             pass
-#--         elif t[2] == 'FS':
-#--             t[3] = t[3].strip()
-#--             t[2] = t[3]
-#--             t[3] = ''
         elif t[2] == 'Program_c':
 # select chan sfont bank prog
             t[2] = 'select'
@@ -396,6 +425,9 @@ def print_out_fluidsynth():
                 t[3] = f'{s[0]} 1 128 0'
             # fi
             t[2] = 'select'
+            if s[0] not in voices_2_channel[thevoicenumber]:
+                voices_2_channel[thevoicenumber].append(s[0])
+            # fi
         elif t[2] == 'End_track':
             if max_midi_time < float(t[1]):
                 max_midi_time = float(t[1])
@@ -404,8 +436,22 @@ def print_out_fluidsynth():
         else:
             print_error_no_line(f"Unexpected midi command - t='{t}'")
         # fi
-        if voices < int(t[0]):
-            voices = int(t[0])
+        if thevoicenumber == 0:
+            pass
+        elif voices == 0:
+            for z in range (1, thevoicenumber + 1):
+                if z not in voices_2_channel:
+                    voices_2_channel[z] = []
+                # fi
+            # rof
+            voices = thevoicenumber
+        elif voices < thevoicenumber:
+            for z in range (voices, thevoicenumber + 1):
+                if z not in voices_2_channel:
+                    voices_2_channel[z] = []
+                # fi
+            # rof
+            voices = thevoicenumber
         # fi
         if t[2] == '' and t[3] == '':
             xxx = t[1]
@@ -414,8 +460,11 @@ def print_out_fluidsynth():
         else:
             xxx = ' '.join(t[1:])
         # fi
-        v_t_lines[t[0]].append(xxx)
+        v_t_lines[thevoicenumber].append(xxx)
     # rof
+
+    # Not figure out order of printing by time.
+
     current_time = -1
     this_time = []
     for v in range(0, voices+1):
@@ -425,13 +474,12 @@ def print_out_fluidsynth():
         # Find smallest time difference.
         min_next = max_midi_time + 1
         for voice, lines in v_t_lines.items():
-            v = int(voice)
-            if this_time[v] >= len(lines):
+            if this_time[voice] >= len(lines):
                 continue
             # fi
-            t = lines[this_time[v]].split(' ', 1) # 2 elements
+            t = lines[this_time[voice]].split(' ', 1) # 2 elements
             time = float(t[0])
-            if min_next > time:
+            if min_next > time and voice > 0:
                 min_next = time
             # fi
         # rof
