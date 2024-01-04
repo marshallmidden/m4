@@ -132,10 +132,12 @@ def parse_args():
 parse_args()
 
 # ----------------------------------------------------------------------------
-global voices                       # Number of voices
-voices = 0
+global channels                     # Number of channels (instruments).
+channels = None
+global new_channels
+new_channels = None
 # ----------------------------------------------------------------------------
-MAXVOICES = 256
+MAXCHANNELS = 256
 # ----------------------------------------------------------------------------
 global MIDICLICKSPERQUARTER
 MIDICLICKSPERQUARTER = 480.0
@@ -159,19 +161,19 @@ comments = []
 global comments_clicks
 comments_clicks = []
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-global key                          # key[voice] = ... .
+global key                          # key[channel] = ... .
 key = {}
 key['ALL'] = [ 'c' ]                # A default
 global key_clicks                   # key_clicks = running_time.
 key_clicks = {}
-key_clicks['ALL'] = [ 0 ]               # Default start of it.
-global measures_key                 # Dictionary of voices: dictionary of measures [1-...]: key
-measures_key = {}                   # measures_key[voice][measure] = key
-global measures_instrument          # Dictionary of voices: dictionary of measures [1-...]: key
-measures_instrument = {}            # measures_instrument[voice][measure] = instrument
+key_clicks['ALL'] = [ 0 ]           # Default start of it.
+global measures_key                 # Dictionary of measures [1-...]: key
+measures_key = {}                   # measures_key[channel][measure] = key
+global measures_instrument          # Dictionary of measures [1-...]: instruments
+measures_instrument = {}            # measures_instrument[channel][measure] = instrument
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-global instrument                   # Indexed by voice number.
-instrument = {}                     # Array by voice of: (bank, number, running_time)
+global instrument                   # Indexed by channel number.
+instrument = {}                     # Array by channel: [bank, number, running_time]
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global meter                        # Printable meter (text).
 meter = []
@@ -185,22 +187,22 @@ global measures_clicks_start        # Dictionary of clicks for when measure star
 measures_clicks_start = {}
 global measures_clicks_length       # Dictionary of clicks in each measure.
 measures_clicks_length = {}
-global measures_meter               # Dictionary of meters for when measure starts.
+global measures_meter               # Dictionary of meter_string for when measure starts.
 measures_meter = {}
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-global bufs_notes_voices            # Array of Voices for chords on this voice.
-bufs_notes_voices = {}
-global bufs_notes                   # Midi note number. An array indexed by voice.
-bufs_notes = {}                     # bufs_notes[v] = []             Midi note number.
-global bufs_notes_start             # calculated clicks to start of each note for a voice.
+global bufs_notes_channel           # Array of notes for chords on this channel.
+bufs_notes_channel = {}
+global bufs_notes                   # Midi note number. An array indexed by channel.
+bufs_notes = {}                     # bufs_notes[ch] = []            Midi note number.
+global bufs_notes_start             # calculated clicks to start of each note for a channel.
 bufs_notes_start = {}
-global bufs_notes_end               # calculated clicks to end of each note for a voice.
+global bufs_notes_end               # calculated clicks to end of each note for a channel.
 bufs_notes_end = {}                 #   Used to recognize 'chords'.
 global bufs_notes_velocity          # The intensity of note start. (Typically the total volume. *sigh*)
 bufs_notes_velocity = {}
-global bufs_cc_start                # [voice][cc#]      time in clicks when CC occurred.
+global bufs_cc_start                # [channel][cc#]      time in clicks when CC occurred.
 bufs_cc_start = {}
-global bufs_cc_end                  # [voice][cc#]      time in clicks when CC occurred.
+global bufs_cc_end                  # [channel][cc#]      time in clicks when CC occurred.
 bufs_cc_end = {}
 global last_cc                      # If doing a note, the last_cc. NOTE: defaults for 7,10,11,64,68,91.
 last_cc = {}
@@ -211,36 +213,37 @@ bufs_gcs_length = {}
 global bufs_gcs_note
 bufs_gcs_note = {}
 
-for v in range(0,MAXVOICES):        # Voices if multiple turned on, run to alternative.
-    bufs_notes_voices[v] = [v]      # Start with 1:1 voice to chord voice. Note: voices global set with Header -> max.
-    bufs_notes[v] = []              # No notes yet.
-    bufs_notes_start[v] = []        # No starting time click time for notes.
-    bufs_notes_end[v] = []          # No ending time click time for notes.
-    bufs_notes_velocity[v] = []     # No note start intensity volume levels.
-    bufs_cc_start[v] = []           # No starting cc values.
-    bufs_cc_end[v] = []             # No ending cc values.
-    bufs_suffix[v] = []             # No suffixes yet.
-    bufs_gcs_length[v] = []         # GCS note length.
-    bufs_gcs_note[v] = []           # GCS note.
-    last_cc[v] = []
+for ch in range(0, MAXCHANNELS):    # Channels if multiple-notes turned on, use to alternative(s).
+#--     bufs_notes_channel[ch] = [ch]           # Start with 1:1 channel to chord channel. Note: channels global set with Header -> max.
+    bufs_notes_channel[ch] = []     # Start with 1:1 channel to chord channel. Note: channels global set with Header -> max.
+    bufs_notes[ch] = []             # No notes yet.
+    bufs_notes_start[ch] = []       # No starting time click time for notes.
+    bufs_notes_end[ch] = []         # No ending time click time for notes.
+    bufs_notes_velocity[ch] = []    # No note start intensity volume levels.
+    bufs_cc_start[ch] = []          # No starting cc values.
+    bufs_cc_end[ch] = []            # No ending cc values.
+    bufs_suffix[ch] = []            # No suffixes yet.
+    bufs_gcs_length[ch] = []        # GCS note length.
+    bufs_gcs_note[ch] = []          # GCS note.
+    last_cc[ch] = []
     for cc in range(0, 127):
-        bufs_cc_start[v].append([]) # No starting cc's.
-        bufs_cc_end[v].append([])   # No ending cc's.
-        last_cc[v].append(0)        # No previous cc's.
+        bufs_cc_start[ch].append([]) # No starting cc's.
+        bufs_cc_end[ch].append([])  # No ending cc's.
+        last_cc[ch].append(0)       # No previous cc's.
         if cc == 7:
-            last_cc[v][cc] = 100    # default_volume variable.
+            last_cc[ch][cc] = 100   # default_volume variable.
         elif cc == 10:
-            last_cc[v][cc] = 64     # default_pan variable.
+            last_cc[ch][cc] = 64    # default_pan variable.
         elif cc == 11:
-            last_cc[v][cc] = 100    # default_intensity variable.
+            last_cc[ch][cc] = 100   # default_intensity variable.
         elif cc == 64:
-            last_cc[v][cc] = 0      # damper off.
+            last_cc[ch][cc] = 0     # damper off.
         elif cc == 68:
-            last_cc[v][cc] = 0      # legato off.
+            last_cc[ch][cc] = 0     # legato off.
         elif cc == 91:
-            last_cc[v][cc] = 0      # reverb none.
+            last_cc[ch][cc] = 0     # reverb none.
         else:
-            last_cc[v][cc] = 0      # Otherwise intialize to 0.
+            last_cc[ch][cc] = 0     # Otherwise intialize to 0.
         # fi
     # rof
 # rof
@@ -251,20 +254,20 @@ array_of_original_lines = []
 # These are from the Hints file, and are for printing out the GCS source.
 global bars_measures_hint           # hint number of bars per measure.
 bars_measures_hint = {}
-global pages_measures_hint          # hint number of pages per measure.
-pages_measures_hint = {}
-global meters_measures_hint         # hint text for meters.
+global clef_channel_measures_hint   # hint clefs by ChannelNumber and measure.
+clef_channel_measures_hint = {}
+global instrument_channel_measures_hint # hint instrument by ChannelNumber and measure.
+instrument_channel_measures_hint = {}
+global key_channel_measures_hint    # hint key by ChannelNumber and measure.
+key_channel_measures_hint = {}
+global meters_measures_hint         # hint text for meters by measures.
 meters_measures_hint = {}
-global meters_values_hint           # hint value for meters.
+global meters_values_hint           # hint value for meters by measures.
 meters_values_hint = {}
-global clef_voice_measures_hint     # hint clefs by voice and measure.
-clef_voice_measures_hint = {}
-global instrument_voice_measures_hint   # hint instrument by voice and measure.
-instrument_voice_measures_hint = {}
-global key_voice_measures_hint      # hint key by voice and measure.
-key_voice_measures_hint = {}
-global xpose_voice                  # Transpose voice up/down this many semi-tones.
-xpose_voice = {}
+global pages_measures_hint          # hint number of pages by measures.
+pages_measures_hint = {}
+global xpose_channel                # Transpose ChannelNumber up/down this many semi-tones.
+xpose_channel = {}
 # ----------------------------------------------------------------------------
 global midi_2_note_lengths                          # clicks => ( '4', 1.0 / 4 )
 midi_2_note_lengths = {}
@@ -376,107 +379,107 @@ def do_note_length_calculate():
 # End of do_note_length_calculate
 
 # ----------------------------------------------------------------------------
-def insert_rest(v, n, start, end):
-    global bufs_notes                   # Midi note number. An array indexed by measure, voice.
-    global bufs_notes_start             # calculated clicks to start of each note for a voice.
-    global bufs_notes_end               # calculated clicks to end of each note for a voice.
+# Insert a rest @ entry n, channel ch, starting note time, ending time.
+
+def insert_rest(ch, n, start, end):
+    global bufs_notes                   # Midi note number. An array indexed by measure, channels.
+    global bufs_notes_start             # calculated clicks to start of each note for a channel.
+    global bufs_notes_end               # calculated clicks to end of each note for a channel.
     global bufs_notes_velocity          # The intensity of note start. (Typically the total volume. *sigh*)
-    global bufs_cc_start                # [voice][cc#]      time in clicks when CC occurred.
-    global bufs_cc_end                  # [voice][cc#]      CC when note stops occurred.
+    global bufs_cc_start                # [channel][cc#]    time in clicks when CC occurred.
+    global bufs_cc_end                  # [channel][cc#]    CC when note stops occurred.
     global bufs_gcs_length
     global bufs_gcs_note
     global bufs_suffix                  # No suffixes yet.
 
-#--     print_debug(f'insert_rest - v={v} n={n} start={start} end={end}')
-
     note_start = start
     note_end = end
-    if n > len(bufs_notes[v]):
-        bufs_notes_start[v].append(start)
-        bufs_notes_end[v].append(end)
-        bufs_notes[v].append(0)
-        bufs_notes_velocity[v].append(0)
-        bufs_cc_start[v][7].append(0)
-        bufs_cc_end[v][7].append(0)
-        bufs_cc_start[v][10].append(0)
-        bufs_cc_end[v][10].append(0)
-        bufs_cc_start[v][11].append(0)
-        bufs_cc_end[v][11].append(0)
-        bufs_cc_start[v][64].append(0)
-        bufs_cc_end[v][64].append(0)
-        bufs_cc_start[v][65].append(0)
-        bufs_cc_end[v][65].append(0)
-        bufs_cc_start[v][91].append(0)
-        bufs_cc_end[v][91].append(0)
-        bufs_gcs_length[v].append('')
-        bufs_gcs_note[v].append('')
-        bufs_suffix[v].append('')
+    if n > len(bufs_notes[ch]):
+        bufs_notes_start[ch].append(start)
+        bufs_notes_end[ch].append(end)
+        bufs_notes[ch].append(0)
+        bufs_notes_velocity[ch].append(0)
+        bufs_cc_start[ch][7].append(0)
+        bufs_cc_end[ch][7].append(0)
+        bufs_cc_start[ch][10].append(0)
+        bufs_cc_end[ch][10].append(0)
+        bufs_cc_start[ch][11].append(0)
+        bufs_cc_end[ch][11].append(0)
+        bufs_cc_start[ch][64].append(0)
+        bufs_cc_end[ch][64].append(0)
+        bufs_cc_start[ch][65].append(0)
+        bufs_cc_end[ch][65].append(0)
+        bufs_cc_start[ch][91].append(0)
+        bufs_cc_end[ch][91].append(0)
+        bufs_gcs_length[ch].append('')
+        bufs_gcs_note[ch].append('')
+        bufs_suffix[ch].append('')
         return
     # fi
-    bufs_notes_start[v].insert(n, start)
-    bufs_notes_end[v].insert(n, end)
-    bufs_notes[v].insert(n, 0)
-    bufs_notes_velocity[v].insert(n, 0)
-    bufs_cc_start[v][7].insert(n, 0)
-    bufs_cc_end[v][7].insert(n, 0)
-    bufs_cc_start[v][10].insert(n, 0)
-    bufs_cc_end[v][10].insert(n, 0)
-    bufs_cc_start[v][11].insert(n, 0)
-    bufs_cc_end[v][11].insert(n, 0)
-    bufs_cc_start[v][64].insert(n, 0)
-    bufs_cc_end[v][64].insert(n, 0)
-    bufs_cc_start[v][65].insert(n, 0)
-    bufs_cc_end[v][65].insert(n, 0)
-    bufs_cc_start[v][91].insert(n, 0)
-    bufs_cc_end[v][91].insert(n, 0)
-    bufs_gcs_length[v].insert(n, '')
-    bufs_gcs_note[v].insert(n, '')
-    bufs_suffix[v].insert(n, '')
+    bufs_notes_start[ch].insert(n, start)
+    bufs_notes_end[ch].insert(n, end)
+    bufs_notes[ch].insert(n, 0)
+    bufs_notes_velocity[ch].insert(n, 0)
+    bufs_cc_start[ch][7].insert(n, 0)
+    bufs_cc_end[ch][7].insert(n, 0)
+    bufs_cc_start[ch][10].insert(n, 0)
+    bufs_cc_end[ch][10].insert(n, 0)
+    bufs_cc_start[ch][11].insert(n, 0)
+    bufs_cc_end[ch][11].insert(n, 0)
+    bufs_cc_start[ch][64].insert(n, 0)
+    bufs_cc_end[ch][64].insert(n, 0)
+    bufs_cc_start[ch][65].insert(n, 0)
+    bufs_cc_end[ch][65].insert(n, 0)
+    bufs_cc_start[ch][91].insert(n, 0)
+    bufs_cc_end[ch][91].insert(n, 0)
+    bufs_gcs_length[ch].insert(n, '')
+    bufs_gcs_note[ch].insert(n, '')
+    bufs_suffix[ch].insert(n, '')
     return
 # End of insert_rest
 
 # ----------------------------------------------------------------------------
-def short_note_and_split_it(v, n, note_ends_here, lth_first_note):
-    global bufs_notes                   # Midi note number. An array indexed by measure, voice.
-    global bufs_notes_start             # calculated clicks to start of each note for a voice.
-    global bufs_notes_end               # calculated clicks to end of each note for a voice.
+def short_note_and_split_it(ch, n, note_ends_here, lth_first_note):
+    global bufs_notes                   # Midi note number. An array indexed by measure, channel.
+    global bufs_notes_start             # calculated clicks to start of each note for a channel.
+    global bufs_notes_end               # calculated clicks to end of each note for a channel.
     global bufs_notes_velocity          # The intensity of note start. (Typically the total volume. *sigh*)
-    global bufs_cc_start                # [voice][cc#]      time in clicks when CC occurred.
-    global bufs_cc_end                  # [voice][cc#]      CC when note stops occurred.
+    global bufs_cc_start                # [channel][cc#]      time in clicks when CC occurred.
+    global bufs_cc_end                  # [channel][cc#]      CC when note stops occurred.
     global bufs_gcs_length
     global bufs_gcs_note
     global bufs_suffix                  # No suffixes yet.
 
-    bufs_notes_start[v].insert(n, bufs_notes_start[v][n])
-    bufs_notes_start[v][n + 1] = bufs_notes_start[v][n + 1] + lth_first_note
-    bufs_notes_end[v].insert(n, note_ends_here)
-    bufs_notes[v].insert(n, bufs_notes[v][n])
-    bufs_notes_velocity[v].insert(n, bufs_notes_velocity[v][n])
-    bufs_gcs_length[v].insert(n, '')
-    bufs_gcs_note[v].insert(n, '')
-    bufs_cc_start[v][7].insert(n, bufs_cc_start[v][7][n])
-    bufs_cc_end[v][7].insert(n, bufs_cc_end[v][7][n])
-    bufs_cc_start[v][10].insert(n, bufs_cc_start[v][10][n])
-    bufs_cc_end[v][10].insert(n, bufs_cc_end[v][10][n])
-    bufs_cc_start[v][11].insert(n, bufs_cc_start[v][11][n])
-    bufs_cc_end[v][11].insert(n, bufs_cc_end[v][11][n])
-    bufs_cc_start[v][64].insert(n, bufs_cc_start[v][64][n])
-    bufs_cc_end[v][64].insert(n, bufs_cc_end[v][64][n])
-    bufs_cc_start[v][65].insert(n, bufs_cc_start[v][65][n])
-    bufs_cc_end[v][65].insert(n, bufs_cc_end[v][65][n])
-    bufs_cc_start[v][91].insert(n, bufs_cc_start[v][91][n])
-    bufs_cc_end[v][91].insert(n, bufs_cc_end[v][91][n])
-    if bufs_notes[v][n] != 0:
-        bufs_suffix[v].insert(n, 't')
+    bufs_notes_start[ch].insert(n, bufs_notes_start[ch][n])
+    bufs_notes_start[ch][n + 1] = bufs_notes_start[ch][n + 1] + lth_first_note
+    bufs_notes_end[ch].insert(n, note_ends_here)
+    bufs_notes[ch].insert(n, bufs_notes[ch][n])
+    bufs_notes_velocity[ch].insert(n, bufs_notes_velocity[ch][n])
+    bufs_gcs_length[ch].insert(n, '')
+    bufs_gcs_note[ch].insert(n, '')
+    bufs_cc_start[ch][7].insert(n, bufs_cc_start[ch][7][n])
+    bufs_cc_end[ch][7].insert(n, bufs_cc_end[ch][7][n])
+    bufs_cc_start[ch][10].insert(n, bufs_cc_start[ch][10][n])
+    bufs_cc_end[ch][10].insert(n, bufs_cc_end[ch][10][n])
+    bufs_cc_start[ch][11].insert(n, bufs_cc_start[ch][11][n])
+    bufs_cc_end[ch][11].insert(n, bufs_cc_end[ch][11][n])
+    bufs_cc_start[ch][64].insert(n, bufs_cc_start[ch][64][n])
+    bufs_cc_end[ch][64].insert(n, bufs_cc_end[ch][64][n])
+    bufs_cc_start[ch][65].insert(n, bufs_cc_start[ch][65][n])
+    bufs_cc_end[ch][65].insert(n, bufs_cc_end[ch][65][n])
+    bufs_cc_start[ch][91].insert(n, bufs_cc_start[ch][91][n])
+    bufs_cc_end[ch][91].insert(n, bufs_cc_end[ch][91][n])
+    if bufs_notes[ch][n] != 0:
+        bufs_suffix[ch].insert(n, 't')
     else:
-        bufs_suffix[v].insert(n, '')
+        bufs_suffix[ch].insert(n, '')
     # fi
     return
 # End of short_note_and_split_it
 
 # ----------------------------------------------------------------------------
 def notes_fit_into_measures():
-    global voices
+    global channels
     global last_measure
     global bufs_notes
     global bufs_notes_start
@@ -488,26 +491,28 @@ def notes_fit_into_measures():
     global running_time
     global CLICKS_SLOP
 
-    for v in range(0, voices + 1):
-        if len(bufs_notes[v]) is None or len(bufs_notes[v]) <= 0:
+    ch = 0
+    while ch <= channels:
+        if len(bufs_notes[ch]) is None or len(bufs_notes[ch]) <= 0:
+            ch = ch + 1
             continue
         # fi
         m = 1                           # measure number 1
-        n = 0                           # first note in bufs_notes[v]
+        n = 0                           # first note in bufs_notes[ch]
         where_we_are = first_note_time  # first measure should be this value too.
         while m <= last_measure:
-            note_start = bufs_notes_start[v][n]
+            note_start = bufs_notes_start[ch][n]
             if abs(where_we_are - note_start) <= CLICKS_SLOP:
                 note_start = where_we_are
-                bufs_notes_start[v][n] = where_we_are
+                bufs_notes_start[ch][n] = where_we_are
             # fi
-            note_end = bufs_notes_end[v][n]
+            note_end = bufs_notes_end[ch][n]
             if where_we_are < measures_clicks_start[m]:
-                insert_rest(v, n, where_we_are, measures_clicks_start[m])
+                insert_rest(ch, n, where_we_are, measures_clicks_start[m])
                 continue
             # fi
             if where_we_are < note_start:
-                insert_rest(v, n, where_we_are, note_start)
+                insert_rest(ch, n, where_we_are, note_start)
                 continue
             # fi
             measure_click_end = measures_clicks_start[m] + measures_clicks_length[m]
@@ -519,40 +524,40 @@ def notes_fit_into_measures():
             # fi
             if abs(measure_click_end - note_end) <= CLICKS_SLOP:
                 note_end = measure_click_end
-                bufs_notes_end[v][n] = measure_click_end
+                bufs_notes_end[ch][n] = measure_click_end
             # fi
 
             if note_end < measure_click_end or note_start == note_end:            # Note plays.
                 if note_start != note_end:
                     n = n + 1                               # To next note.
                 else:
-                    bufs_notes[v].pop(n)                    # Remove zero length note.
-                    bufs_notes_velocity[v].pop(n)
-                    bufs_notes_start[v].pop(n)
-                    bufs_notes_end[v].pop(n)
-                    bufs_gcs_length[v].pop(n)
-                    bufs_gcs_note[v].pop(n)
-                    bufs_cc_start[v][7].pop(n)
-                    bufs_cc_end[v][7].pop(n)
-                    bufs_cc_start[v][10].pop(n)
-                    bufs_cc_end[v][10].pop(n)
-                    bufs_cc_start[v][11].pop(n)
-                    bufs_cc_end[v][11].pop(n)
-                    bufs_cc_start[v][64].pop(n)
-                    bufs_cc_end[v][64].pop(n)
-                    bufs_cc_start[v][65].pop(n)
-                    bufs_cc_end[v][65].pop(n)
-                    bufs_cc_start[v][91].pop(n)
-                    bufs_cc_end[v][91].pop(n)
-                    bufs_suffix[v].pop(n)
+                    bufs_notes[ch].pop(n)                   # Remove zero length note.
+                    bufs_notes_velocity[ch].pop(n)
+                    bufs_notes_start[ch].pop(n)
+                    bufs_notes_end[ch].pop(n)
+                    bufs_gcs_length[ch].pop(n)
+                    bufs_gcs_note[ch].pop(n)
+                    bufs_cc_start[ch][7].pop(n)
+                    bufs_cc_end[ch][7].pop(n)
+                    bufs_cc_start[ch][10].pop(n)
+                    bufs_cc_end[ch][10].pop(n)
+                    bufs_cc_start[ch][11].pop(n)
+                    bufs_cc_end[ch][11].pop(n)
+                    bufs_cc_start[ch][64].pop(n)
+                    bufs_cc_end[ch][64].pop(n)
+                    bufs_cc_start[ch][65].pop(n)
+                    bufs_cc_end[ch][65].pop(n)
+                    bufs_cc_start[ch][91].pop(n)
+                    bufs_cc_end[ch][91].pop(n)
+                    bufs_suffix[ch].pop(n)
                 # fi
                 where_we_are += (note_end - note_start)
-                if n >= len(bufs_notes[v]):
+                if n >= len(bufs_notes[ch]):
                     if where_we_are >= running_time:    # At end of song.
                         break
                     # fi
                     # insert rest to end of song.
-                    insert_rest(v, n, where_we_are, running_time)
+                    insert_rest(ch, n, where_we_are, running_time)
                     continue
                 # fi
                 if where_we_are >= measure_click_end or note_end == measure_click_end:
@@ -563,7 +568,7 @@ def notes_fit_into_measures():
             # Note: note_end > measure_click_end
             # Note is too long, insert short note before, with tie, and shorten next note by this length.
             # End of new note is at measure_click_end, and length of this note is last arg, and shorten by that.
-            short_note_and_split_it(v, n, measure_click_end, measure_click_end - note_start)
+            short_note_and_split_it(ch, n, measure_click_end, measure_click_end - note_start)
             n = n + 1
             where_we_are += (measure_click_end - note_start)
             if where_we_are >= measure_click_end or note_end == measure_click_end:
@@ -571,62 +576,66 @@ def notes_fit_into_measures():
             # fi
             continue
         # elihw
-        if len(bufs_notes_start[v]) > 0:
-            note_start = bufs_notes_start[v][-1]
-            note_end = bufs_notes_end[v][-1]
+        if len(bufs_notes_start[ch]) > 0:
+            note_start = bufs_notes_start[ch][-1]
+            note_end = bufs_notes_end[ch][-1]
             if note_start == note_end:
-                bufs_notes[v].pop(n)                    # Remove zero length note.
-                bufs_notes_velocity[v].pop(n)
-                bufs_notes_start[v].pop(n)
-                bufs_notes_end[v].pop(n)
-                bufs_gcs_length[v].pop(n)
-                bufs_gcs_note[v].pop(n)
-                bufs_cc_start[v][7].pop(n)
-                bufs_cc_end[v][7].pop(n)
-                bufs_cc_start[v][10].pop(n)
-                bufs_cc_end[v][10].pop(n)
-                bufs_cc_start[v][11].pop(n)
-                bufs_cc_end[v][11].pop(n)
-                bufs_cc_start[v][64].pop(n)
-                bufs_cc_end[v][64].pop(n)
-                bufs_cc_start[v][65].pop(n)
-                bufs_cc_end[v][65].pop(n)
-                bufs_cc_start[v][91].pop(n)
-                bufs_cc_end[v][91].pop(n)
-                bufs_suffix[v].pop(n)
+                bufs_notes[ch].pop(n)                    # Remove zero length note.
+                bufs_notes_velocity[ch].pop(n)
+                bufs_notes_start[ch].pop(n)
+                bufs_notes_end[ch].pop(n)
+                bufs_gcs_length[ch].pop(n)
+                bufs_gcs_note[ch].pop(n)
+                bufs_cc_start[ch][7].pop(n)
+                bufs_cc_end[ch][7].pop(n)
+                bufs_cc_start[ch][10].pop(n)
+                bufs_cc_end[ch][10].pop(n)
+                bufs_cc_start[ch][11].pop(n)
+                bufs_cc_end[ch][11].pop(n)
+                bufs_cc_start[ch][64].pop(n)
+                bufs_cc_end[ch][64].pop(n)
+                bufs_cc_start[ch][65].pop(n)
+                bufs_cc_end[ch][65].pop(n)
+                bufs_cc_start[ch][91].pop(n)
+                bufs_cc_end[ch][91].pop(n)
+                bufs_suffix[ch].pop(n)
             # fi
         # fi
-    # rof
+        ch = ch + 1
+    # while
     return
 # End of notes_fit_into_measures
 
 # ----------------------------------------------------------------------------
 def check_contiguous_notes():
-    global voices
+    global channels
     global bufs_notes
     global first_note_time
     global bufs_notes_start
     global bufs_notes_end
 
-    for v in range(0, voices + 1):
-        if len(bufs_notes[v]) is None or len(bufs_notes[v]) <= 0:
+    ch = channels
+    while ch <= channels:
+        if len(bufs_notes[ch]) is None or len(bufs_notes[ch]) <= 0:
+            ch = ch + 1
             continue
         # fi
         prev_end = first_note_time
-        for n in range(0, len(bufs_notes[v])):
-            note_start = bufs_notes_start[v][n]
+        for n in range(0, len(bufs_notes[ch])):
+            note_start = bufs_notes_start[ch][n]
             if prev_end != note_start:
-                print_error(f'check_contiguous_notes - voice={v} measure={m} n={n} - note_start({note_start}) != prev_end ({prev_end})')
+                print_error(f'check_contiguous_notes - channel={ch} measure={m} n={n} - note_start({note_start}) != prev_end ({prev_end})')
                 die('something wrong.')
             # fi
-            note_end = bufs_notes_end[v][n]
+            note_end = bufs_notes_end[ch][n]
             if note_start >= note_end:
-                print_error(f'check_contiguous_notes - voice={v} measure={m} n={n} - note_start({note_start}) >= note_end({note_end})')
+                print_error(f'check_contiguous_notes - channel={ch} measure={m} n={n} - note_start({note_start}) >= note_end({note_end})')
                 die('something wrong.')
             # fi
             prev_end = note_end
         # rof
-    # rof
+        ch = ch + 1
+    # elihw
     return
 # End of check_contiguous_notes
 
@@ -671,20 +680,20 @@ def check_note_lth(lth):
 
 # ----------------------------------------------------------------------------
 # Returns which_q_single (index into midi_2_note_lengths), closest_single = abs(diffs).
-def check_single_note_lth(v, n):
+def check_single_note_lth(ch, n):
     global bufs_notes_start
     global bufs_notes_end
 
-    note_start = bufs_notes_start[v][n]
-    note_end = bufs_notes_end[v][n]
+    note_start = bufs_notes_start[ch][n]
+    note_end = bufs_notes_end[ch][n]
     lth = note_end - note_start
     which_q_ptr, which_q_single, closest_single = check_note_lth(lth)
-#--     print_stderr(f'check_single_note_lth - v={v} n={n} - return which_q_single={which_q_single} closest_single={closest_single}')
+#--     print_stderr(f'check_single_note_lth - ch={ch} n={n} - return which_q_single={which_q_single} closest_single={closest_single}')
     return which_q_ptr, which_q_single, closest_single
 # End of check_single_note_lth
 
 # ----------------------------------------------------------------------------
-def check_triplets(v, n, m):
+def check_triplets(ch, n, m):
     global bufs_notes_start
     global bufs_notes_end
     global measures_clicks_start
@@ -692,117 +701,117 @@ def check_triplets(v, n, m):
 
     #      1       2       3          4          5         6         7        8         9        10.
     # Single, double, triple, quadruple, quintuple, sextuple, septuple, octuple, nontuple, dectuple.
-    if n + 2 >= len(bufs_notes_end[v]):
-#--         print_stderr(f'#1 check_triplets - v={v} n={n} m={m} - return None, None, 8589934592')
+    if n + 2 >= len(bufs_notes_end[ch]):
+#--         print_stderr(f'#1 check_triplets - ch={ch} n={n} m={m} - return None, None, 8589934592')
         return None, None, 8589934592
     # fi
-    note_start_3 = bufs_notes_start[v][n + 2]
-    note_end_3 = bufs_notes_end[v][n + 2]
+    note_start_3 = bufs_notes_start[ch][n + 2]
+    note_end_3 = bufs_notes_end[ch][n + 2]
     if note_end_3 > measures_clicks_start[m] + measures_clicks_length[m]:
-#--         print_stderr(f'#2 check_triplets - v={v} n={n} m={m} - return None, None, 8589934592')
+#--         print_stderr(f'#2 check_triplets - ch={ch} n={n} m={m} - return None, None, 8589934592')
         return None, None, 8589934592
     # fi
-    note_start_1 = bufs_notes_start[v][n]
-    note_end_1 = bufs_notes_end[v][n]
+    note_start_1 = bufs_notes_start[ch][n]
+    note_end_1 = bufs_notes_end[ch][n]
     lth1 = note_end_1 - note_start_1
-    note_start_2 = bufs_notes_start[v][n + 1]
-    note_end_2 = bufs_notes_end[v][n + 1]
+    note_start_2 = bufs_notes_start[ch][n + 1]
+    note_end_2 = bufs_notes_end[ch][n + 1]
     lth2 = note_end_2 - note_start_2
     lth3 = note_end_3 - note_start_3
     if (lth1 >> 1) != (lth2 >> 1) or (lth1 >> 1) != (lth3 >> 1):
-#--         print_stderr(f'#3 check_triplets - v={v} n={n} m={m} - return None, None, 8589934592')
+#--         print_stderr(f'#3 check_triplets - ch={ch} n={n} m={m} - return None, None, 8589934592')
         return None, None, 8589934592
     # fi
     which_q_ptr, which_q_single, closest_single = check_note_lth(lth1 + lth2 + lth3)
-#--     print_stderr(f'check_triplets - v={v} n={n} m={m} - return which_q_single={which_q_single} closest_single={closest_single}')
+#--     print_stderr(f'check_triplets - ch={ch} n={n} m={m} - return which_q_single={which_q_single} closest_single={closest_single}')
     return which_q_ptr, which_q_single, closest_single
 # End of check_triplets
 
 # ----------------------------------------------------------------------------
-#--                check_staccatto(v, n, m, which_q_single*2, which_q_ptr)
-def check_staccatto(v, n, m, newlth, which_q_ptr):
+#--                check_staccatto(ch, n, m, which_q_single*2, which_q_ptr)
+def check_staccatto(ch, n, m, newlth, which_q_ptr):
     global bufs_notes_start
     global bufs_notes_end
 
     # Note followed by something...
-    if n + 1 >= len(bufs_notes_end[v]):
+    if n + 1 >= len(bufs_notes_end[ch]):
         return
     # fi
     # Note followed by rest.
-    if bufs_notes[v][n] == 0 or bufs_notes[v][n + 1] != 0:
+    if bufs_notes[ch][n] == 0 or bufs_notes[ch][n + 1] != 0:
         return
     # fi
     # Following note must be in same measure.
-    note_end_2 = bufs_notes_end[v][n + 1]
+    note_end_2 = bufs_notes_end[ch][n + 1]
     if note_end_2 > measures_clicks_start[m] + measures_clicks_length[m]:
         return
     # fi
 
-    note_start_1 = bufs_notes_start[v][n]
-    note_end_1 = bufs_notes_end[v][n]
+    note_start_1 = bufs_notes_start[ch][n]
+    note_end_1 = bufs_notes_end[ch][n]
     lth1 = note_end_1 - note_start_1
-    note_start_2 = bufs_notes_start[v][n + 1]
+    note_start_2 = bufs_notes_start[ch][n + 1]
     lth2 = note_end_2 - note_start_2
     # The lengths of the note and rest must be about the same.
     if (lth1 >> 1) != (lth2 >> 1):
         return
     # fi
     # Add staccato and delete following rest.
-    bufs_suffix[v][n] = bufs_suffix[v][n] + 's'
+    bufs_suffix[ch][n] = bufs_suffix[ch][n] + 's'
     # New note end.
-    bufs_notes_end[v][n] = bufs_notes_end[v][n + 1]
+    bufs_notes_end[ch][n] = bufs_notes_end[ch][n + 1]
     if newlth not in which_q_ptr:
         print_error(f'check_staccatto - newlth={newlth} not in which_q_ptr={list(which_q_ptr.keys())}')
         return
     # fi
-    bufs_gcs_length[v][n] = which_q_ptr[newlth][0]
+    bufs_gcs_length[ch][n] = which_q_ptr[newlth][0]
 
     # Delete rest.
-    del bufs_notes_end[v][n + 1]
-    del bufs_notes_start[v][n + 1]
+    del bufs_notes_end[ch][n + 1]
+    del bufs_notes_start[ch][n + 1]
 
-    del bufs_notes[v][n + 1]
-    del bufs_notes_velocity[v][n + 1]
+    del bufs_notes[ch][n + 1]
+    del bufs_notes_velocity[ch][n + 1]
 
-    del bufs_gcs_length[v][n + 1]
-    del bufs_gcs_note[v][n + 1]
+    del bufs_gcs_length[ch][n + 1]
+    del bufs_gcs_note[ch][n + 1]
 
-    del bufs_cc_start[v][7][n + 1]
-    del bufs_cc_end[v][7][n + 1]
+    del bufs_cc_start[ch][7][n + 1]
+    del bufs_cc_end[ch][7][n + 1]
 
-    del bufs_cc_start[v][10][n + 1]
-    del bufs_cc_end[v][10][n + 1]
+    del bufs_cc_start[ch][10][n + 1]
+    del bufs_cc_end[ch][10][n + 1]
 
-    del bufs_cc_start[v][11][n + 1]
-    del bufs_cc_end[v][11][n + 1]
+    del bufs_cc_start[ch][11][n + 1]
+    del bufs_cc_end[ch][11][n + 1]
 
-    del bufs_cc_start[v][64][n + 1]
-    del bufs_cc_end[v][64][n + 1]
+    del bufs_cc_start[ch][64][n + 1]
+    del bufs_cc_end[ch][64][n + 1]
 
-    del bufs_cc_start[v][65][n + 1]
-    del bufs_cc_end[v][65][n + 1]
+    del bufs_cc_start[ch][65][n + 1]
+    del bufs_cc_end[ch][65][n + 1]
 
-    del bufs_cc_start[v][91][n + 1]
-    del bufs_cc_end[v][91][n + 1]
+    del bufs_cc_start[ch][91][n + 1]
+    del bufs_cc_end[ch][91][n + 1]
 
     return
 # End of check_staccatto
 
 # ----------------------------------------------------------------------------
-def multiple_note_split(v, n, m, closest_vals):
+def multiple_note_split(ch, n, m, closest_vals):
     global bufs_notes_start
     global bufs_notes_end
     global midi_2_note_lengths
     global midi_2_note_lengths_nl
 
-#--     print_stderr(f'multiple_note_split - v={v} n={n}')
-    note_start_1 = bufs_notes_start[v][n]
-    note_end_1 = bufs_notes_end[v][n]
+#--     print_stderr(f'multiple_note_split - ch={ch} n={n}')
+    note_start_1 = bufs_notes_start[ch][n]
+    note_end_1 = bufs_notes_end[ch][n]
     lth = note_end_1 - note_start_1
 #--     print_stderr(f'lth={lth} midi_2_note_lengths={midi_2_note_lengths}')
 #--     print_stderr(f'lth={lth} midi_2_note_lengths_nl={midi_2_note_lengths_nl}')
     if lth > (2 * midi_2_note_lengths_nl[1]):      # Cannot be more than two whole notes.
-        print_error(f'multiple_note_split - v={v} n={n} m={m} Cannot have note length greater than 2 whole notes. Fix tempo/meter/Header.')
+        print_error(f'multiple_note_split - ch={ch} n={n} m={m} Cannot have note length greater than 2 whole notes. Fix tempo/meter/Header.')
         return None, None, 8589934592
     # fi
 
@@ -885,19 +894,19 @@ def multiple_note_split(v, n, m, closest_vals):
 
 # ----------------------------------------------------------------------------
 # How to put in abs(CLICKS_SLOP) +/- for clicks checking.
-# Figure out what bufs_gcs_length[v][n] is like "4" = 1/4 note.
+# Figure out what bufs_gcs_length[ch][n] is like "4" = 1/4 note.
 
 def determine_note_gcs_lengths():
     global bufs_gcs_length
-    global voices
+    global channels
     global bufs_notes
     global first_note_time
     global bufs_notes_start
     global bufs_notes_end
     global bufs_gcs_length
     global bufs_notes_velocity          # The intensity of note start. (Typically the total volume. *sigh*)
-    global bufs_cc_start                # [voice][cc#]      time in clicks when CC occurred.
-    global bufs_cc_end                  # [voice][cc#]      CC when note stops occurred.
+    global bufs_cc_start                # [channel][cc#]    time in clicks when CC occurred.
+    global bufs_cc_end                  # [channel][cc#]    CC when note stops occurred.
     global bufs_gcs_note
     global bufs_suffix                  # No suffixes yet.
 
@@ -905,15 +914,17 @@ def determine_note_gcs_lengths():
 #--     print_stderr(f'midi_2_note_lengths={midi_2_note_lengths}')
 #--     print_stderr(f'midi_2_note_lengths_dotted={midi_2_note_lengths_dotted}')
 #--     print_stderr(f'midi_2_note_lengths_double_dotted={midi_2_note_lengths_double_dotted}')
-    for v in range(0, voices + 1):
-        if len(bufs_notes[v]) is None or len(bufs_notes[v]) <= 0:
+    ch = channels
+    while ch <= channels:
+        if len(bufs_notes[ch]) is None or len(bufs_notes[ch]) <= 0:
+            ch = ch + 1
             continue
         # fi
         m = 1                           # measure number 1
-        n = 0                           # first note in bufs_notes[v]
-        while n < len(bufs_notes[v]):
+        n = 0                           # first note in bufs_notes[ch]
+        while n < len(bufs_notes[ch]):
             # Need measure for checking staccato or triplets.
-            while m + 1 in measures_clicks_start and measures_clicks_start[m + 1] < bufs_notes[v][n]:
+            while m + 1 in measures_clicks_start and measures_clicks_start[m + 1] < bufs_notes[ch][n]:
                 m = m + 1
             # elihw
             #
@@ -921,57 +932,57 @@ def determine_note_gcs_lengths():
             which_q_3 = None
             closest_3 = 8589934592
             #
-            which_q_ptr, which_q_single, closest_single = check_single_note_lth(v, n)
+            which_q_ptr, which_q_single, closest_single = check_single_note_lth(ch, n)
             if closest_single > 0:
-                which_q_ptr_3, which_q_3, closest_3 = check_triplets(v, n, m)
+                which_q_ptr_3, which_q_3, closest_3 = check_triplets(ch, n, m)
                 if closest_3 is None or closest_3 > 0:
                     # Subtract largest note and make another from rest. Split note.
-                    which_indexes, which_ptrs, closest_mult = multiple_note_split(v, n, m, min(closest_3, closest_single))
+                    which_indexes, which_ptrs, closest_mult = multiple_note_split(ch, n, m, min(closest_3, closest_single))
                     if closest_mult < min(closest_3, closest_single):
                         if closest_mult > CLICKS_SLOP:
                             print_error(f'determine_note_gcs_lengths: multiple_note_split - ({which_indexes[0]}, {which_indexes[1]}), PTR, closest_mult={closest_mult}')
                         # fi
-                        bufs_notes_start[v].insert(n + 1, bufs_notes_start[v][n] + which_indexes[0])
-                        bufs_notes_end[v].insert(n + 1, bufs_notes_end[v][n])
-                        bufs_notes_end[v][n] = bufs_notes_start[v][n + 1]
-                        bufs_notes[v].insert(n + 1, bufs_notes[v][n])
-                        bufs_notes_velocity[v].insert(n + 1, bufs_notes_velocity[v][n])
+                        bufs_notes_start[ch].insert(n + 1, bufs_notes_start[ch][n] + which_indexes[0])
+                        bufs_notes_end[ch].insert(n + 1, bufs_notes_end[ch][n])
+                        bufs_notes_end[ch][n] = bufs_notes_start[ch][n + 1]
+                        bufs_notes[ch].insert(n + 1, bufs_notes[ch][n])
+                        bufs_notes_velocity[ch].insert(n + 1, bufs_notes_velocity[ch][n])
 
-                        bufs_gcs_length[v].insert(n + 1, '')
-                        bufs_gcs_length[v][n] = which_ptrs[0][which_indexes[0]][0]
-                        bufs_gcs_length[v][n + 1] = which_ptrs[1][which_indexes[1]][0]
+                        bufs_gcs_length[ch].insert(n + 1, '')
+                        bufs_gcs_length[ch][n] = which_ptrs[0][which_indexes[0]][0]
+                        bufs_gcs_length[ch][n + 1] = which_ptrs[1][which_indexes[1]][0]
 
-                        bufs_gcs_note[v].insert(n + 1, '')
+                        bufs_gcs_note[ch].insert(n + 1, '')
 
-                        bufs_cc_start[v][7].insert(n + 1, bufs_cc_start[v][7][n] + which_indexes[0])
-                        bufs_cc_end[v][7].insert(n + 1, bufs_cc_end[v][7][n])
-                        bufs_cc_end[v][7][n] = bufs_cc_start[v][7][n + 1]
+                        bufs_cc_start[ch][7].insert(n + 1, bufs_cc_start[ch][7][n] + which_indexes[0])
+                        bufs_cc_end[ch][7].insert(n + 1, bufs_cc_end[ch][7][n])
+                        bufs_cc_end[ch][7][n] = bufs_cc_start[ch][7][n + 1]
 
-                        bufs_cc_start[v][10].insert(n + 1, bufs_cc_start[v][10][n] + which_indexes[0])
-                        bufs_cc_end[v][10].insert(n + 1, bufs_cc_end[v][10][n])
-                        bufs_cc_end[v][10][n] = bufs_cc_start[v][10][n + 1]
+                        bufs_cc_start[ch][10].insert(n + 1, bufs_cc_start[ch][10][n] + which_indexes[0])
+                        bufs_cc_end[ch][10].insert(n + 1, bufs_cc_end[ch][10][n])
+                        bufs_cc_end[ch][10][n] = bufs_cc_start[ch][10][n + 1]
 
-                        bufs_cc_start[v][11].insert(n + 1, bufs_cc_start[v][11][n] + which_indexes[0])
-                        bufs_cc_end[v][11].insert(n + 1, bufs_cc_end[v][11][n])
-                        bufs_cc_end[v][11][n] = bufs_cc_start[v][11][n + 1]
+                        bufs_cc_start[ch][11].insert(n + 1, bufs_cc_start[ch][11][n] + which_indexes[0])
+                        bufs_cc_end[ch][11].insert(n + 1, bufs_cc_end[ch][11][n])
+                        bufs_cc_end[ch][11][n] = bufs_cc_start[ch][11][n + 1]
 
-                        bufs_cc_start[v][64].insert(n + 1, bufs_cc_start[v][64][n] + which_indexes[0])
-                        bufs_cc_end[v][64].insert(n + 1, bufs_cc_end[v][64][n])
-                        bufs_cc_end[v][64][n] = bufs_cc_start[v][64][n + 1]
+                        bufs_cc_start[ch][64].insert(n + 1, bufs_cc_start[ch][64][n] + which_indexes[0])
+                        bufs_cc_end[ch][64].insert(n + 1, bufs_cc_end[ch][64][n])
+                        bufs_cc_end[ch][64][n] = bufs_cc_start[ch][64][n + 1]
 
-                        bufs_cc_start[v][65].insert(n + 1, bufs_cc_start[v][65][n] + which_indexes[0])
-                        bufs_cc_end[v][65].insert(n + 1, bufs_cc_end[v][65][n])
-                        bufs_cc_end[v][65][n] = bufs_cc_start[v][65][n + 1]
+                        bufs_cc_start[ch][65].insert(n + 1, bufs_cc_start[ch][65][n] + which_indexes[0])
+                        bufs_cc_end[ch][65].insert(n + 1, bufs_cc_end[ch][65][n])
+                        bufs_cc_end[ch][65][n] = bufs_cc_start[ch][65][n + 1]
 
-                        bufs_cc_start[v][91].insert(n + 1, bufs_cc_start[v][91][n] + which_indexes[0])
-                        bufs_cc_end[v][91].insert(n + 1, bufs_cc_end[v][91][n])
-                        bufs_cc_end[v][91][n] = bufs_cc_start[v][91][n + 1]
+                        bufs_cc_start[ch][91].insert(n + 1, bufs_cc_start[ch][91][n] + which_indexes[0])
+                        bufs_cc_end[ch][91].insert(n + 1, bufs_cc_end[ch][91][n])
+                        bufs_cc_end[ch][91][n] = bufs_cc_start[ch][91][n + 1]
 
                         # This moves a tie that is broken into two ... so that both are ties. :)
-                        if bufs_notes[v][n] != 0:
-                            bufs_suffix[v].insert(n, 't')
+                        if bufs_notes[ch][n] != 0:
+                            bufs_suffix[ch].insert(n, 't')
                         else:
-                            bufs_suffix[v].insert(n, '')
+                            bufs_suffix[ch].insert(n, '')
                         # fi
                         n = n + 2
                         continue
@@ -984,55 +995,58 @@ def determine_note_gcs_lengths():
             if which_q_single is not None:
                 if which_q_3 is not None:
                     if closest_single > closest_3:
-                        bufs_gcs_length[v][n] = str(which_q_3) + '/3'
-                        print_stderr(f'determine_note_gcs_lengths: #2 bufs_gcs_length[{v}][{n}]={bufs_gcs_length[v][n]} closest_3={closest_3}')
+                        bufs_gcs_length[ch][n] = str(which_q_3) + '/3'
+                        print_stderr(f'determine_note_gcs_lengths: #2 bufs_gcs_length[{ch}][{n}]={bufs_gcs_length[ch][n]} closest_3={closest_3}')
                         n = n + 3
                         continue
                     # fi
                 # fi
-                bufs_gcs_length[v][n] = which_q_ptr[which_q_single][0]
-                check_staccatto(v, n, m, which_q_single*2, which_q_ptr)
+                bufs_gcs_length[ch][n] = which_q_ptr[which_q_single][0]
+                check_staccatto(ch, n, m, which_q_single*2, which_q_ptr)
                 n = n + 1
                 continue
             else:
-                bufs_gcs_length[v][n] = str(which_q_ptr_3[which_q_3][0]) + '/3'
-                print_stderr(f'determine_note_gcs_lengths: #4 bufs_gcs_length[{v}][{n}]={bufs_gcs_length[v][n]} closest_3={closest_3}')
+                bufs_gcs_length[ch][n] = str(which_q_ptr_3[which_q_3][0]) + '/3'
+                print_stderr(f'determine_note_gcs_lengths: #4 bufs_gcs_length[{ch}][{n}]={bufs_gcs_length[ch][n]} closest_3={closest_3}')
                 n = n + 3
                 continue
             # fi
         # elihw
-    # rof
+        ch = ch + 1
+    # elihw
     return
 # End of determine_note_gcs_lengths
 
 # ----------------------------------------------------------------------------
-# Figure out what bufs_gcs_notes[v][n] is "4c" (c, 4th octave).
-# NOTE: key for voice and previous +/-/n business.
+# Figure out what bufs_gcs_notes[ch][n] is "4c" (c, 4th octave).
+# NOTE: key for channel and previous +/-/n business.
 
 def determine_note_gcs_notes():
     global bufs_gcs_length
     global midi_value_to_note_sharp_39
     global midi_value_to_note_flat_39
     global bufs_notes
-    global voices
+    global channels
     global measures_clicks_start
     global measures_key
     global key_sig
 
-    for v in range(0, voices + 1):
-        if len(bufs_notes[v]) is None or len(bufs_notes[v]) <= 0:
+    ch = channels
+    while ch <= channels:
+        if len(bufs_notes[ch]) is None or len(bufs_notes[ch]) <= 0:
+            ch = ch + 1
             continue
         # fi
         m = 1                           # measure number 1
-        n = 0                           # first note in bufs_notes[v]
+        n = 0                           # first note in bufs_notes[ch]
         acc_m = {}
         for i in acc_v_init_v_or_h:
             acc_m[i] = acc_v_init_v_or_h[i]
         # rof
         acc_last_suffix_tie = ''
-        while n < len(bufs_notes[v]):
+        while n < len(bufs_notes[ch]):
             # Need measure for checking staccato or triplets.
-            while m + 1 in measures_clicks_start and measures_clicks_start[m + 1] < bufs_notes[v][n]:
+            while m + 1 in measures_clicks_start and measures_clicks_start[m + 1] < bufs_notes[ch][n]:
                 m = m + 1
                 for i in acc_v_init_v_or_h:
                     if acc_last_suffix_tie != i:
@@ -1043,7 +1057,7 @@ def determine_note_gcs_notes():
             # elihw
             # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
             # Determine note name from midi note number.
-            midi_note=bufs_notes[v][n]
+            midi_note=bufs_notes[ch][n]
             if midi_note == 0:
                 lkj = 'r'
                 playing_on = 'r'
@@ -1051,7 +1065,7 @@ def determine_note_gcs_notes():
                 acc_last_suffix_tie = ''
             else:
                 # Current key for measure:
-                k = measures_key[v][m]
+                k = measures_key[ch][m]
                 nksxnk = key_sig[k]
                 if k == 'cn':                             # Special case "cn" to mean use sharps. 'c' uses flats.
                     lkj = midi_value_to_note_sharp_39[midi_note]
@@ -1067,31 +1081,30 @@ def determine_note_gcs_notes():
                 if acc != '':                               # This note already has sharp/flat/nature
                     if playing_a == '':                     # Set to n.
                         playing_a = acc = 'n'
-                    elif playing_a != '':
+                    else:
                         acc = playing_a
-                    #else:
-                    #    pass
                     # fi
                 else:
-                    if playing_a != '':
-                        acc = playing_a
+                    if key_convert[k][playing_on] == lkj:
+                        playing_a = acc = ''
                     else:
-                        playing_a = acc
+                        acc = playing_a
                     # fi
                 # fi
                 acc_m[playing_on] = acc
-                if 't' in bufs_suffix[v][n]:
+                if 't' in bufs_suffix[ch][n]:
                     acc_last_suffix_tie = playing_on
                 else:
                     acc_last_suffix_tie = ''
                 # fi
             # fi
-            bufs_gcs_note[v][n] = playing_on + playing_a
-#--             print_debug(f'key={k:2} midi_note={midi_note:3}  GCS v{v+1}: {bufs_gcs_note[v][n]}{bufs_gcs_length[v][n]} lkj={lkj} playing_on={playing_on} playing_a={playing_a} acc={acc} acc_last_suffix_tie={acc_last_suffix_tie}')
+            bufs_gcs_note[ch][n] = playing_on + playing_a
+#--             print_debug(f'key={k:2} midi_note={midi_note:3}  GCS ch{ch+1}: {bufs_gcs_note[ch][n]}{bufs_gcs_length[ch][n]} lkj={lkj} playing_on={playing_on} playing_a={playing_a} acc={acc} acc_last_suffix_tie={acc_last_suffix_tie}')
             # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
             n = n + 1
         # elihw
-    # rof
+        ch = ch + 1
+    # elihw
     return
 # End of determine_note_gcs_notes
 
@@ -1114,56 +1127,58 @@ def printable_measures():
     print_debug('NOTDONEYET - printable_measures')
 
     # Fix to printable strings ... triplets to 's3(note1, note2, note3)lth'.
-#--    bufs_gcs_length[v][n] = str(which_q_ptr_3[which_q_3][0]) + '/3'
+#--    bufs_gcs_length[ch][n] = str(which_q_ptr_3[which_q_3][0]) + '/3'
     return
 # End of printable_measures
 
 # ----------------------------------------------------------------------------
-# Use instrument_voice_measures_hint and instruments[] to determine when/where.
+# Use instrument_channel_measures_hint and instruments[] to determine when/where.
 
 def set_instrument_measures():
-    global instrument               # Array by voice of: (bank, number, running_time)
-    global voices
-    global measures_instrument     # Dictionary of voices: dictionary of measures [1-...]: instrument
+    global instrument               # Array by channel of: (bank, number, running_time)
+    global channels
+    global measures_instrument     # Dictionary of measures [1-...]: instrument
     global measures_clicks_start
     global measures_clicks_length
-    global instrument_voice_measures_hint
+    global instrument_channel_measures_hint
     global last_measure
 
-    for v in range(0, voices + 1):
-        if v not in measures_instrument:
-            measures_instrument[v] = {}
+    cn = channels
+    while cn <= channels:
+        if cn not in measures_instrument:
+            measures_instrument[cn] = {}
         # fi
         i = 0
-        if v in instrument:
-            last_i = check_instr(instrument[v][i][1], instrument[v][i][0])
-            last_ic = instrument[v][i][2]
+        if cn in instrument:
+            last_i = check_instr(instrument[cn][i][1], instrument[cn][i][0])
+            last_ic = instrument[cn][i][2]
         else:
             last_i = 0
             last_ic = 0
         # fi
-        if v in instrument_voice_measures_hint and 1 in instrument_voice_measures_hint[v]:
-            last_i = instrument_voice_measures_hint[v][1]
+        if cn in instrument_channel_measures_hint and 1 in instrument_channel_measures_hint[cn]:
+            last_i = instrument_channel_measures_hint[cn][1]
             last_ic = measures_clicks_start[1]
         # fi
         for m in range(1, last_measure + 1):
             if (last_ic >= measures_clicks_start[m] and
                 last_ic < measures_clicks_start[m] + measures_clicks_length[m]):
                 # Move to start of measure.
-                if v in instrument and i in instrument[v]:
-                    last_i = check_instr(instrument[v][i][1], instrument[v][i][0])
-                    last_ic = instrument[v][i][2]
-                    if i < len(instrument[v]) - 1:
+                if cn in instrument and i in instrument[cn]:
+                    last_i = check_instr(instrument[cn][i][1], instrument[cn][i][0])
+                    last_ic = instrument[cn][i][2]
+                    if i < len(instrument[cn]) - 1:
                         i = i + 1
                     # fi
                 # fi
             # fi
-            if v in instrument_voice_measures_hint and m in instrument_voice_measures_hint[v]:
-                last_i = instrument_voice_measures_hint[v][m]
+            if cn in instrument_channel_measures_hint and m in instrument_channel_measures_hint[cn]:
+                last_i = instrument_channel_measures_hint[cn][m]
             # fi
-            measures_instrument[v][m] = last_i
+            measures_instrument[cn][m] = last_i
         # rof
-    # rof
+        cn = cn + 1
+    # elihw
     return
 # End of set_instrument_measures
 
@@ -1171,9 +1186,9 @@ def set_instrument_measures():
 def set_keys_if_not_specified():
     global key
     global key_clicks
-    global voices
+    global channels
     global measures_key
-    global key_voice_measures_hint
+    global key_channel_measures_hint
     global measures_clicks_start
     global measures_clicks_length
 
@@ -1182,59 +1197,66 @@ def set_keys_if_not_specified():
     # Set keys if not specified. NOTE: This may be an error.
     for k in key:
         if k == 'ALL':
-            for v in range(0, voices + 1):
-                if v not in key:
-                    key[v] = key['ALL']
-                    key_clicks[v] = key_clicks['ALL']
+            cn = 0
+            while cn <= channels:
+                if cn not in key:
+                    key[cn] = key['ALL']
+                    key_clicks[cn] = key_clicks['ALL']
                 # fi
-            # rof
+                cn = cn + 1
+            # elihw
             break
         # fi
     # rof
 
-#--     print_debug(f'#C set_keys_if_not_specified - measures_key={measures_key}')
-    for v in range(0, voices + 1):
-        if v not in measures_key:
-            measures_key[v] = {}
+    print_debug(f'#C set_keys_if_not_specified - measures_key={measures_key}')
+    print_debug(f'#D set_keys_if_not_specified - key={key}')
+    print_debug(f'#E set_keys_if_not_specified - key_clicks={key_clicks}')
+    print_debug(f'#F set_keys_if_not_specified - key_channel_measures_hint={key_channel_measures_hint}')
+    print_debug(f'#F set_keys_if_not_specified - measures_clicks_start={measures_clicks_start}')
+    cn = 0
+    while cn <= channels:
+        if cn not in measures_key:
+            measures_key[cn] = {}
         # fi
         k = 0
-        if v in key:
-            last_k = key[v][k]
-            last_kc = key_clicks[v][k]
+        if cn in key:
+            last_k = key[cn][k]
+            last_kc = key_clicks[cn][k]
         else:
             last_k = 'c'
             last_kc = 0
         # fi
-        if v in key_voice_measures_hint and 1 in key_voice_measures_hint[v]:
-            last_k = key_voice_measures_hint[v][1]
+        if cn in key_channel_measures_hint and 1 in key_channel_measures_hint[cn]:
+            last_k = key_channel_measures_hint[cn][1]
             last_kc = measures_clicks_start[1]
         # fi
         for m in range(1, last_measure + 1):
             if (last_kc >= measures_clicks_start[m] and
                 last_kc < measures_clicks_start[m] + measures_clicks_length[m]):
-                if v in key_clicks:
+                if cn in key_clicks:
                     # Move to start of measure.     -- Doesn't matter. :)
-                    key_clicks[v][k] = measures_clicks_start[m]
-                    last_k = key[v][k]
-                    last_kc = key_clicks[v][k]
-                    if k < len(key[v]) - 1:
+                    key_clicks[cn][k] = measures_clicks_start[m]
+                    last_k = key[cn][k]
+                    last_kc = key_clicks[cn][k]
+                    if k < len(key[cn]) - 1:
                         k = k + 1
                     # fi
                 # fi
             # fi
-            if v in key_voice_measures_hint and m in key_voice_measures_hint[v]:
-                last_k = key_voice_measures_hint[v][m]
+            if cn in key_channel_measures_hint and m in key_channel_measures_hint[cn]:
+                last_k = key_channel_measures_hint[cn][m]
             # fi
-            measures_key[v][m] = last_k
+            measures_key[cn][m] = last_k
         # rof
-    # rof
-#--     print_debug(f'#D set_keys_if_not_specified - measures_key={measures_key}')
+        cn = cn + 1
+    # elihw
+#--     print_debug(f'#Z set_keys_if_not_specified - measures_key={measures_key}')
     return
 # End of set_keys_if_not_specified
 
 # ----------------------------------------------------------------------------
 def figure_out_measure_locations():
-    global voices
     global running_time
     global first_note_time
     global meter                        # Array of printable meter (text).
@@ -1323,7 +1345,8 @@ def meter_readable(strg1, strg2):
 
 # ----------------------------------------------------------------------------
 def process_echo_lines(q):
-    global voices
+#--     global channels
+    global new_channels
     global MIDICLICKSPERQUARTER
     global titles
     global running_time
@@ -1343,7 +1366,8 @@ def process_echo_lines(q):
             return
         # fi
         r = q[8:-1].split()
-        voices = int(r[0]) - 1              # Remember 0 is the first one.
+        new_channels = int(r[0])                # Remember 0 is the first one.
+        print_debug(f'process_echo_lines - Header - new_channels={new_channels}')
         MIDICLICKSPERQUARTER = int(r[1])
         if meter == []:
             meter.append('4/4')
@@ -1354,7 +1378,7 @@ def process_echo_lines(q):
         return
     # fi
     if q[0:7] == '"Title ':
-        v = q[7:].split(' ', 1)
+#--        v = q[7:].split(' ', 1)
         titles.append(q[7:])
         return
     # fi
@@ -1405,7 +1429,6 @@ def process_echo_lines(q):
             key[v].append(a[0].lower())
             key_clicks[v].append(running_time)
         # fi
-        # fi
 #--         print_debug(f'key ... q={q} vs={vs} v={v} a={a} key_previous={key_previous} key[{v}]={key[v]} key_clicks[v]={key_clicks[v]}')
         return
     # fi
@@ -1448,10 +1471,10 @@ def process_header_lines(q):
         process_sleep(q[1])
     elif q[0] == 'prog':
         a = q[1].split()
-        ibank = int(a[0])
+        cn = int(a[0])
         instr = int(a[1])
         if instrument == {}:
-            instrument[0] = [ [ibank, instr, running_time] ]
+            instrument[cn] = [ [0, instr, running_time] ]
         else:
             print_error(f"ignoring prog that isn't before select commands. {q}")
         # fi
@@ -1461,25 +1484,25 @@ def process_header_lines(q):
             print_error(f'select line wants 4 arguments not {len(a)} - {q[1]}')
             return
         # fi
-        # a[0] = voice #
+        # a[0] = channel #
         # a[1] = timeclicks
         # a[2] = bank
         # a[3] = instrument
-        vn = int(a[0])
+        cn = int(a[0])
         ibank = int(a[2])
         instr = int(a[3])
-        if vn in instrument:
-            if instrument[vn][-1][0] == ibank and instrument[vn][-1][1] == instr:
+        if cn in instrument:
+            if instrument[cn][-1][0] == ibank and instrument[cn][-1][1] == instr:
                 pass
             else:
-                if instrument[vn][-1][0] == ibank and instrument[vn][-1][2] == running_time:
-                    instrument[vn][-1] = [ibank, instr, running_time]
+                if instrument[cn][-1][0] == ibank and instrument[cn][-1][2] == running_time:
+                    instrument[cn][-1] = [ibank, instr, running_time]
                 else:
-                    instrument[vn].append( [ibank, instr, running_time] )
+                    instrument[cn].append( [ibank, instr, running_time] )
                 # fi
             # fi
         else:
-            instrument[vn] = [ [ibank, instr, running_time] ]
+            instrument[cn] = [ [ibank, instr, running_time] ]
         # fi
     elif q[0] == 'cc':
         process_cc(q[1])
@@ -1493,104 +1516,115 @@ def process_header_lines(q):
 # r is the arguments to the 12th
 
 def process_noteon(r):
-    global voices
+    global channels
+    global new_channels
     global running_time
-    global bufs_notes_voices            # Voices for chords on this voice.
-    global bufs_notes                   # Midi note number. An array indexed by measure, voice.
-    global bufs_notes_start             # calculated clicks to start of each note for a voice.
-    global bufs_notes_end               # calculated clicks to end of each note for a voice.
+    global bufs_notes_channel           # Notes for chords on this channel.
+    global bufs_notes                   # Midi note number. An array indexed by measure, channel.
+    global bufs_notes_start             # calculated clicks to start of each note for a channel.
+    global bufs_notes_end               # calculated clicks to end of each note for a channel.
     global bufs_notes_velocity          # The intensity of note start. (Typically the total volume. *sigh*)
-    global bufs_cc_start                # [voice][cc#]      time in clicks when CC occurred.
-    global bufs_cc_end                  # [voice][cc#]      CC when note stops occurred.
+    global bufs_cc_start                # [channel][cc#]      time in clicks when CC occurred.
+    global bufs_cc_end                  # [channel][cc#]      CC when note stops occurred.
     global bufs_gcs_length
     global bufs_gcs_note
     global bufs_suffix                  # No suffixes yet.
     global last_cc                      # If doing a note, the last_cc. NOTE: defaults for 7,10,11,64,68,91.
 
-    global key                          # key[voice] = ... .
+    global key                          # key[channel] = ... .
     global key_clicks                   # key_clicks = running_time.
-    global instrument                   # Indexed by voice number.
+    global instrument                   # Indexed by channel number.
 
     a = r.split()
     if len(a) != 3:
         print_error(f'noteon line needs 3 arguments, not {len(a)} - {r}.')
         return
     # fi
-    v = int(a[0])
+    cn = int(a[0])
     n = int(a[1])
     i = int(a[2])
     if i == 0:
         process_noteoff(r)
         return
     # fi
-    if v > voices:
-        voices = v
+    if channels is None or cn > channels:
+        if new_channels is None or cn > new_channels:
+            new_channels = cn
+        # fi
+        channels = cn
+        print_debug(f'process_noteon - new_channels={new_channels} channels={channels}')
     # fi
 
     # Do transpose.
-    if v in xpose_voice:
-        n = n + xpose_voice[v]
+    if cn in xpose_channel:
+        n = n + xpose_channel[cn]
     # fi
 
-    # Okay, we have the voice and the note, and calculated the current 'running_time'.
+    # Okay, we have the channel and the note, and calculated the current 'running_time'.
 
-    # determine which real voice to use... if chords.
+    # determine which real channel to use... if chords.
     flag = False
-    for v2s in bufs_notes_voices[v]:
+    for ch in bufs_notes_channel[cn]:
         # Check if any note is already playing ... if so, then it is chord time.
-        if v2s in bufs_notes_end and len(bufs_notes_end[v2s]) > 0 and bufs_notes_end[v2s][-1] == 0:
+        if ch in bufs_notes_end and len(bufs_notes_end[ch]) > 0 and bufs_notes_end[ch][-1] == 0:
             continue
         # fi
-        flag = v2s
+        flag = ch
         break
     # rof
 
-    if flag is False:                                   # Need a new voice for chord.
-        voices = voices + 1
-        bufs_notes_voices[v].append(voices)
-        if v in key:
-            key[voices] = key[v]
-            key_clicks[voices] = key_clicks[v]
+    if flag is False:                                   # Need a new channel for chord.
+        if cn < new_channels and bufs_notes_channel[cn] == []:
+            bufs_notes_channel[cn].append(cn)
+            ch = cn
+        else:
+            channels = new_channels = new_channels + 1
+            print_debug(f'process_noteon - flag is False -- chord? - channels={channels} new_channels={new_channels}')
+            bufs_notes_channel[cn].append(channels)
+            if cn in key:
+                key[channels] = key[cn]
+                key_clicks[channels] = key_clicks[cn]
+            # fi
+            if cn in instrument:
+                instrument[channels] = instrument[cn]
+                if channels not in instrument_channel_measures_hint:
+                    instrument_channel_measures_hint[channels] = {}
+                # fi
+                if cn in instrument_channel_measures_hint:
+                    instrument_channel_measures_hint[channels] = instrument_channel_measures_hint[cn]
+                # fi
+                if channels not in clef_channel_measures_hint:
+                    clef_channel_measures_hint[channels] = {}
+                # fi
+                if cn in clef_channel_measures_hint:
+                    clef_channel_measures_hint[channels] = clef_channel_measures_hint[cn]
+                # fi
+                if channels not in key_channel_measures_hint:
+                    key_channel_measures_hint[channels] = {}
+                # fi
+                if cn in key_channel_measures_hint:
+                    key_channel_measures_hint[channels] = key_channel_measures_hint[cn]
+                # fi
+            # fi
+            # Chord channels must be xposed too.
+            if cn in xpose_channel:
+                xpose_channel[channels] = xpose_channel[cn]
+            # fi
+            ch = channels
         # fi
-        if v in instrument:
-            instrument[voices] = instrument[v]
-            if voices not in instrument_voice_measures_hint:
-                instrument_voice_measures_hint[voices] = {}
-            # fi
-            if v in instrument_voice_measures_hint:
-                instrument_voice_measures_hint[voices] = instrument_voice_measures_hint[v]
-            # fi
-            if voices not in clef_voice_measures_hint:
-                clef_voice_measures_hint[voices] = {}
-            # fi
-            if v in clef_voice_measures_hint:
-                clef_voice_measures_hint[voices] = clef_voice_measures_hint[v]
-            # fi
-            if voices not in key_voice_measures_hint:
-                key_voice_measures_hint[voices] = {}
-            # fi
-            if v in key_voice_measures_hint:
-                key_voice_measures_hint[voices] = key_voice_measures_hint[v]
-            # fi
-        # fi
-        # Chord voices must be xposed too.
-        if v in xpose_voice:
-            xpose_voice[voices] = xpose_voice[v]
-        # fi
-        v2s = voices
     # fi
 
-    bufs_notes[v2s].append(n)
-    bufs_notes_start[v2s].append(running_time)          # Starting time for note.
-    bufs_notes_end[v2s].append(0)                       # No ending time note.
-    bufs_notes_velocity[v2s].append(i)                  # Note start intensity volume level.
+    bufs_notes[ch].append(n)
+    bufs_notes_start[ch].append(running_time)           # Starting time for note.
+    bufs_notes_end[ch].append(0)                        # No ending time note.
+    bufs_notes_velocity[ch].append(i)                   # Note start intensity volume level.
     for cc in range(0, 127):
-        bufs_cc_start[v2s][cc].append(last_cc[v][cc])
-        bufs_cc_end[v2s][cc].append(0)
+        bufs_cc_start[ch][cc].append(last_cc[ch][cc])
+        bufs_cc_end[ch][cc].append(0)
     # rof
-    bufs_gcs_length[v2s].append('')
-    bufs_gcs_note[v2s].append('')
-    bufs_suffix[v2s].append('')                         # No suffixes yet.
+    bufs_gcs_length[ch].append('')
+    bufs_gcs_note[ch].append('')
+    bufs_suffix[ch].append('')                          # No suffixes yet.
     return
 # End of process_noteon
 
@@ -1598,9 +1632,9 @@ def process_noteon(r):
 # r is the arguments to the noteoff line.
 
 def process_noteoff(r):
-    global voices
+    global channels
     global running_time
-    global bufs_notes_voices
+    global bufs_notes_channel
     global bufs_note
     global bufs_note_end
     global bufs_cc_end
@@ -1611,47 +1645,48 @@ def process_noteoff(r):
         print_error(f'noteoff line needs 3 arguments, not {len(a)} - {r}.')
         return
     # fi
-    v = int(a[0])
+    cn = int(a[0])
     n = int(a[1])
     i = int(a[2])
-    if v > voices:
-        print_error(f'noteoff line for voice not already turned on/defined.')
+    if cn > channels:
+        print_debug(f'process_noteoff - note not defined for noteoff? - channels={channels}')
+        print_error(f'noteoff line for channel not already turned on/defined.')
         return
     # fi
     if i != 0:
-        print_error(f'noteoff line for voice does not turn off note.')
+        print_error(f'noteoff line for channel does not turn off note.')
         return
     # fi
 
     # Do transpose.
-    if v in xpose_voice:
-        n = n + xpose_voice[v]
+    if cn in xpose_channel:
+        n = n + xpose_channel[cn]
     # fi
 
-    # Okay, we have the voice and the note, and calculated the current 'running_time'.
-    # determine which real voice to use... if chords.
+    # Okay, we have the channel and the note, and calculated the current 'running_time'.
+    # determine which real channel to use... if chords.
     flag = False
-    for v2s in bufs_notes_voices[v]:
-        if v2s in bufs_notes and len(bufs_notes[v2s]) > 0 and bufs_notes[v2s][-1] == n:
+    for ch in bufs_notes_channel[cn]:
+        if ch in bufs_notes and len(bufs_notes[ch]) > 0 and bufs_notes[ch][-1] == n:
             # Check if note is already playing ... last note, then did last note end yet ...
-            if v2s in bufs_notes_end and len(bufs_notes_end[v2s]) > 0 and bufs_notes_end[v2s][-1] == 0:
-                flag = v2s
+            if ch in bufs_notes_end and len(bufs_notes_end[ch]) > 0 and bufs_notes_end[ch][-1] == 0:
+                flag = ch
                 break
             # fi
         # fi
     # rof
-    if flag is False:                                   # Need a new voice for chord.
-        print_error(f'noteoff line for voice not already playing.')
+    if flag is False:                                   # Need a new channel for chord.
+        print_error(f'noteoff line for channel not already playing.')
         print_debug_internal_1(f'PROBLEM_process_noteoff')
         a = abc[-1]
         return
     # fi
 
-    bufs_notes_end[v2s][-1] = running_time
+    bufs_notes_end[ch][-1] = running_time
     for cc in range(0, 127):
-        bufs_cc_end[v2s][cc][-1] = last_cc[v][cc]
+        bufs_cc_end[ch][cc][-1] = last_cc[cn][cc]
     # rof
-    # bufs_suffix[v2s].append('') -- already set with noteon. # No suffixes yet.
+    # bufs_suffix[ch].append('') -- already set with noteon. # No suffixes yet.
     return
 # End of process_noteoff
 
@@ -1676,25 +1711,25 @@ def process_sleep(r):
 # r is the arguments to the cc line.
 
 def process_cc(r):
-    global last_cc                      # If doing a note, the last_cc. NOTE: defaults for 7,10,11,64,68,91.
-    global bufs_notes_voices            # Voices for chords on this voice.
+    global last_cc
+    global bufs_notes_channel
 
     a = r.split()
     if len(a) != 3:
         print_error(f'cc line needs 3 arguments, not {len(a)} - {r}.')
         return
     # fi
-    v = int(a[0])
-    c = int(a[1])
-    i = int(a[2])
+    cn = int(a[0])
+    ctrl = int(a[1])
+    value = int(a[2])
 
-    for v2s in bufs_notes_voices[v]:    # Do all voices for possible chords.
-        if c in ( 7, 10, 11, 64, 65, 91):
-            last_cc[v2s][c] = i
-        elif c in (0, 5, 32, 68, 121):
+    for cns in bufs_notes_channel[cn]:  # Do all channels for possible chords.
+        if ctrl in ( 7, 10, 11, 64, 65, 91):
+            last_cc[cns][ctrl] = value
+        elif ctrl in (0, 5, 32, 68, 121):
             pass
         else:
-            print_error(f'cc {c} for voice {v2s} is unexpected.')
+            print_error(f'cc {ctrl} for channel {cns} value {value} is unexpected.')
         # fi
     # rof
     return
@@ -1702,7 +1737,6 @@ def process_cc(r):
 
 # -----------------------------------------------------------------------------
 def process_note_lines(q):
-    global voices                       # Number of voices
     global running_time
     global instrument
 
@@ -1726,17 +1760,17 @@ def process_note_lines(q):
         # a[1] = timeclicks
         # a[2] = bank
         # a[3] = instrument
-        vn = int(a[0])
+        ch = int(a[0])
         ibank = int(a[2])
         instr = int(a[3])
         if vn in instrument:
-            if instrument[vn][-1][0] == ibank and instrument[vn][-1][1] == instr:
+            if instrument[cn][-1][0] == ibank and instrument[cn][-1][1] == instr:
                 pass
             else:
-                instrument[vn].append( (ibank, instr, running_time) )
+                instrument[cn].append( (ibank, instr, running_time) )
             # fi
         else:
-            instrument[vn] = (ibank, instr, running_time)
+            instrument[cn] = (ibank, instr, running_time)
         # fi
     else:
         print_error(f'NOTDONEYET - Unexpected command ({q}) in FS input')
@@ -1747,7 +1781,7 @@ def process_note_lines(q):
 # ----------------------------------------------------------------------------
 # Parse and process line.
 #
-# Need: # voices used.
+# Need: # channels used.
 #   'cc'                # Maximum = total.
 #   'select'            # Maximum = total.
 #   'prog' decoding.    # Maximum = total.
@@ -1944,14 +1978,20 @@ def print_debug_comments_1(stg):
 def print_debug_keys_1(stg):
     global last_measure                 # Number of last measure - set when figuring out measure lengths.
     global measures_key
-    global voices
+    global channels
 
-    print_stderr(f'\n{stg}: key')
+    if measures_key == {}:
+        return
+    # fi
+    print_stderr(f'\n{stg}: key -- channels={channels}')
+    print_stderr(f'\n{stg}: key -- measures_key={measures_key}')
     for m in range(1, last_measure + 1):
         print_stderr(f'  measure={m:3}:', end='')
-        for v in range(0, voices + 1):
-            print_stderr(f' {measures_key[v][m]}', end='')
-        # rof
+        ch = 0
+        while ch <= channels:
+            print_stderr(f' {measures_key[ch][m]}', end='')
+            ch = ch + 1
+        # elihw
         print_stderr(f'')
     # rof
     return
@@ -1959,23 +1999,25 @@ def print_debug_keys_1(stg):
 
 # ----------------------------------------------------------------------------
 def print_debug_instruments_1(stg):
-    global voices
+    global channels
     global instrument
 
-    print_stderr(f'\n{stg}:')
-    for v in range(0, voices + 1):
-        if v in instrument:
-            for i in range(0,len(instrument[v])):
-                print_stderr(f'{v:4} - instrument bank={instrument[v][i][0]} number={instrument[v][i][1]} clicks={instrument[v][i][2]}')
+    print_stderr(f'\n{stg} -- channels={channels}:')
+    ch = channels
+    while ch <= channels:
+        if ch in instrument:
+            for i in range(0,len(instrument[ch])):
+                print_stderr(f'{ch:4} - instrument bank={instrument[ch][i][0]} number={instrument[ch][i][1]} clicks={instrument[ch][i][2]}')
             # rof
         # fi
-    # rof
+        ch = ch + 1
+    # elihw
 # End of print_debug_instruments_1
 
 # ----------------------------------------------------------------------------
 def print_debug_notes_1(stg):
-    global voices
-    global bufs_notes_voices
+    global channels
+    global bufs_notes_channel
     global bufs_notes
     global bufs_notes_velocity
     global bufs_gcs_length
@@ -1985,14 +2027,16 @@ def print_debug_notes_1(stg):
     global bufs_cc_end
     global bufs_suffix
 
-    print_stderr(f'\n{stg}:')
-    for v in range(0,voices + 1):           # Voices if multiple turned on, run to alternative.
-        print_stderr(f'bufs_notes_voices[{v}]={bufs_notes_voices[v]}')
+    print_stderr(f'\n{stg} -- channels={channels}:')
+    ch = channels
+    while ch <= channels:
+        print_stderr(f'bufs_notes_channel[{ch}]={bufs_notes_channel[ch]}')
         print_stderr(f'gcs note vel lth   clicks-on/off cc7= on/off cc10= on/off cc11= on/off cc64= on/off cc65= on/off cc91= on/off suffix')
-        for n in range(0, len(bufs_notes[v])):
-            print_stderr(f'  {bufs_gcs_note[v][n]:3} {bufs_notes[v][n]:2} {bufs_notes_velocity[v][n]:3} {bufs_gcs_length[v][n]:3} {bufs_notes_start[v][n]:7} {bufs_notes_end[v][n]:7} cc7={bufs_cc_start[v][7][n]:3}-{bufs_cc_end[v][7][n]:3} cc10={bufs_cc_start[v][10][n]:3}-{bufs_cc_end[v][10][n]:3} cc11={bufs_cc_start[v][11][n]:3}-{bufs_cc_end[v][11][n]:3} cc64={bufs_cc_start[v][64][n]:3}-{bufs_cc_end[v][64][n]:3} cc65={bufs_cc_start[v][65][n]:3}-{bufs_cc_end[v][65][n]:3} cc91={bufs_cc_start[v][91][n]:3}-{bufs_cc_end[v][91][n]:3} {bufs_suffix[v][n]}')
+        for n in range(0, len(bufs_notes[ch])):
+            print_stderr(f'  {bufs_gcs_note[ch][n]:3} {bufs_notes[ch][n]:2} {bufs_notes_velocity[ch][n]:3} {bufs_gcs_length[ch][n]:3} {bufs_notes_start[ch][n]:7} {bufs_notes_end[ch][n]:7} cc7={bufs_cc_start[ch][7][n]:3}-{bufs_cc_end[ch][7][n]:3} cc10={bufs_cc_start[ch][10][n]:3}-{bufs_cc_end[ch][10][n]:3} cc11={bufs_cc_start[ch][11][n]:3}-{bufs_cc_end[ch][11][n]:3} cc64={bufs_cc_start[ch][64][n]:3}-{bufs_cc_end[ch][64][n]:3} cc65={bufs_cc_start[ch][65][n]:3}-{bufs_cc_end[ch][65][n]:3} cc91={bufs_cc_start[ch][91][n]:3}-{bufs_cc_end[ch][91][n]:3} {bufs_suffix[ch][n]}')
         # rof
-    # rof
+        ch = ch + 1
+    # elihw
     return
 # End of print_debug_notes_1
 
@@ -2017,9 +2061,9 @@ def print_debug_internal_1(stg):
 #-- def print_debug_hints():
 #--     global pages_measures_hint
 #--     global bars_measures_hint
-#--     global clef_voice_measures_hints
-#--     global instrument_voice_measures_hint
-#--     global key_voice_measures_hint
+#--     global clef_channel_measures_hints
+#--     global instrument_channel_measures_hint
+#--     global key_channel_measures_hint
 #--     global meters_measures_hint
 #--     global meters_values_hint
 #--
@@ -2033,24 +2077,24 @@ def print_debug_internal_1(stg):
 #--         print_debug(f'bar hint: measure {b} = {bars_measures_hint[b]}')
 #--     # rof
 #--
-#-- #--     print_debug(f'clef_voice_measures_hint={clef_voice_measures_hint}')
-#--     for v in clef_voice_measures_hint:
-#--         for m in clef_voice_measures_hint[v]:
-#--             print_debug(f'clef hint: voice {v} measure {m} = {clef_voice_measures_hint[v][m]}')
+#-- #--     print_debug(f'clef_channel_measures_hint={clef_channel_measures_hint}')
+#--     for ch in clef_channel_measures_hint:
+#--         for m in clef_channel_measures_hint[ch]:
+#--             print_debug(f'clef hint: channel {ch} measure {m} = {clef_channel_measures_hint[ch][m]}')
 #--         # rof
 #--     # rof
 #--
-#-- #--     print_debug(f'instrument_voice_measures_hint={instrument_voice_measures_hint}')
-#--     for v in instrument_voice_measures_hint:
-#--         for m in instrument_voice_measures_hint[v]:
-#--             print_debug(f'instrument hint: voice {v} measure {m} = {instrument_voice_measures_hint[v][m]}')
+#-- #--     print_debug(f'instrument_channel_measures_hint={instrument_channel_measures_hint}')
+#--     for ch in instrument_channel_measures_hint:
+#--         for m in instrument_channel_measures_hint[ch]:
+#--             print_debug(f'instrument hint: channel {ch} measure {m} = {instrument_channel_measures_hint[ch][m]}')
 #--         # rof
 #--     # rof
 #--
-#-- #--     print_debug(f'key_voice_measures_hint={key_voice_measures_hint}')
-#--     for v in key_voice_measures_hint:
-#--         for m in key_voice_measures_hint[v]:
-#--             print_debug(f'key hint: voice {v} measure {m} = {key_voice_measures_hint[v][m]}')
+#-- #--     print_debug(f'key_channel_measures_hint={key_channel_measures_hint}')
+#--     for ch in key_channel_measures_hint:
+#--         for m in key_channel_measures_hint[ch]:
+#--             print_debug(f'key hint: channel {ch} measure {m} = {key_channel_measures_hint[ch][m]}')
 #--         # rof
 #--     # rof
 #--
@@ -2699,7 +2743,7 @@ def do_bars(t_args):
         return
     # fi
 
-    vargs = get_voice_measure_other(t_args, 'bars')
+    vargs = get_channel_measure_other(t_args, 'bars')
     if vargs is None:
         return
     # fi
@@ -2733,11 +2777,11 @@ def do_bars(t_args):
     for w in mn:
         f2, type_error = is_float(w, is_float_number, False)
         if type_error is not None:
-            print_error(f"bars voice {w} error - {type_error}")
+            print_error(f"bars channel {w} error - {type_error}")
             return
         # fi
         if f2 is None:
-            print_error(f"bars voice {w} is not a number.")
+            print_error(f"bars channel {w} is not a number.")
             return
         # fi
         f2 = round(f2)
@@ -2747,13 +2791,13 @@ def do_bars(t_args):
 # End of do_bars
 
 # ----------------------------------------------------------------------------
-# clef 1,2,3 1,10,22,50 treble  # voices 1,2,3 in measures 1,10,22,50 to treble .
-# clef 4                alto    # voice 4 to alto
+# clef 1,2,3 1,10,22,50 treble  # channels 1,2,3 in measures 1,10,22,50 to treble .
+# clef 4                alto    # channel 4 to alto
 
 def do_clef(t_args):
-    global clef_voice_measures_hint
+    global clef_channel_measures_hint
 
-    vargs = get_voice_measure_other(t_args, 'clef')
+    vargs = get_channel_measure_other(t_args, 'clef')
     if vargs is None:
         return
     # fi
@@ -2762,13 +2806,13 @@ def do_clef(t_args):
         return None
     # fi
     if len(vargs) > 3:
-        print_error(f"clef has more than 3 arguments (voices measures clef) - has {len(vargs)}")
+        print_error(f"clef has more than 3 arguments (channels measures clef) - has {len(vargs)}")
         return None
     # fi
 
-    vn = separate_args(str(vargs[0]))   # Allow voice numbers.
-    if not vn or len(vn) < 1:
-        print_error("no voice arguments on clef line")
+    chn = separate_args(str(vargs[0]))  # Allow channel numbers.
+    if not chn or len(chn) < 1:
+        print_error("no channel arguments on clef line")
         return
     # fi
 
@@ -2785,14 +2829,14 @@ def do_clef(t_args):
         clf = vargs[1]
     # fi
 
-    for v in vn:
-        f1, type_error = is_float(v, is_float_number, False)
+    for ch in chn:
+        f1, type_error = is_float(ch, is_float_number, False)
         if type_error is not None:
-            print_error(f"clef voice {v} error - {type_error}")
+            print_error(f"clef channel {ch} error - {type_error}")
             return
         # fi
         if f1 is None:
-            print_error(f"clef voice {v} is not a number.")
+            print_error(f"clef channel {ch} is not a number.")
             return
         # fi
         f1 = round(f1)
@@ -2807,19 +2851,19 @@ def do_clef(t_args):
                 return
             # fi
             f2 = round(f2)
-            if f1 not in clef_voice_measures_hint:
-                clef_voice_measures_hint[f1] = {}
+            if f1 not in clef_channel_measures_hint:
+                clef_channel_measures_hint[f1] = {}
             # fi
-            clef_voice_measures_hint[f1][f2] = clf
+            clef_channel_measures_hint[f1][f2] = clf
         # rof
     # rof
     return
 # End of do_clef
 
 # ----------------------------------------------------------------------------
-# Get t_args of voice numbers, followed by optional measures, then next.
+# Get t_args of channel numbers, followed by optional measures, then next.
 
-def get_voice_measure_other(t_args, command):
+def get_channel_measure_other(t_args, command):
     if t_args is None or t_args == '':
         print_error(f"{command} command does not have any arguments")
         return None
@@ -2827,23 +2871,23 @@ def get_voice_measure_other(t_args, command):
 
     targs = re.sub(r'\s*,\s*', ',', t_args)
     targs = re.sub(r'\s*\.\.\s*', '..', targs)
-    # Voice numbers (optional), followed by key name, with major/minor (optional).
+    # channel numbers (optional), followed by key name, with major/minor (optional).
     vargs = targs.split()
     return vargs
-# End of get_voice_measure_other
+# End of get_channel_measure_other
 
 # ----------------------------------------------------------------------------
 #       key     1..5           g-       $$ six flats, measure 1 onwards.
 #       key     1,2            f        $$ one flat, measure 1 onwards.
-#       key     1   10,20,30   c        $$ no flats or sharps, voice 1, measures 10,20,30.
+#       key     1   10,20,30   c        $$ no flats or sharps, channel 1, measures 10,20,30.
 #       key     1              c        $$ Measure 1 onwards.
 # Changes at start of a measure.
 
 def do_key(t_args):
-    global key_voice_measures_hint
+    global key_channel_measures_hint
     global key_sig
 
-    vargs = get_voice_measure_other(t_args, 'key')
+    vargs = get_channel_measure_other(t_args, 'key')
     if vargs is None:
         return
     # fi
@@ -2852,13 +2896,13 @@ def do_key(t_args):
         return None
     # fi
     if len(vargs) > 3:
-        print_error(f"key has more than 3 arguments (voices measures key) - has {len(vargs)}")
+        print_error(f"key has more than 3 arguments (channels measures key) - has {len(vargs)}")
         return None
     # fi
 
-    vn = separate_args(str(vargs[0]))   # Allow voice numbers.
-    if not vn or len(vn) < 1:
-        print_error("no voice arguments on key line")
+    channelnumbers = separate_args(str(vargs[0]))   # Allow channel numbers.
+    if not channelnumbers or len(channelnumbers) < 1:
+        print_error("no channel arguments on key line")
         return
     # fi
 
@@ -2881,14 +2925,14 @@ def do_key(t_args):
         return
     # fi
 
-    for v in vn:
-        f1, type_error = is_float(v, is_float_number, False)
+    for ch in channelnumbers:
+        f1, type_error = is_float(ch, is_float_number, False)
         if type_error is not None:
-            print_error(f"key voice {v} error - {type_error}")
+            print_error(f"key channel {ch} error - {type_error}")
             return
         # fi
         if f1 is None:
-            print_error(f"key voice {v} is not a number.")
+            print_error(f"key channel {ch} is not a number.")
             return
         # fi
         f1 = round(f1)
@@ -2903,10 +2947,10 @@ def do_key(t_args):
                 return
             # fi
             f2 = round(f2)
-            if f1 not in key_voice_measures_hint:
-                key_voice_measures_hint[f1] = {}
+            if f1 not in key_channel_measures_hint:
+                key_channel_measures_hint[f1] = {}
             # fi
-            key_voice_measures_hint[f1][f2] = ky
+            key_channel_measures_hint[f1][f2] = ky
         # rof
     # rof
     return
@@ -2947,14 +2991,14 @@ def check_instr(instr, bank):
 # End of check_instr
 
 # ----------------------------------------------------------------------------
-#   instrument 1,2 flute                $$ voices for an instrument.
-#   instrument 1,2 20,30,50 flute       $$ voices, measures for an instrument.
+#   instrument 1,2 flute                $$ channels for an instrument.
+#   instrument 1,2 20,30,50 flute       $$ channels, measures for an instrument.
 # See source for list of all instruments.
 
 def do_instrument(t_args):
-    global instrument_voice_measures_hint
+    global instrument_channel_measures_hint
 
-    vargs = get_voice_measure_other(t_args, 'instrument')
+    vargs = get_channel_measure_other(t_args, 'instrument')
     if vargs is None:
         return
     # fi
@@ -2962,7 +3006,7 @@ def do_instrument(t_args):
         print_error(f"instrument does not have at least 2 arguments (has {len(vargs)})")
         return None
     # fi
-    vn = vargs[0]
+    chn = vargs[0]
     if len(vargs) > 3:
         instr = check_instr(' '.join(vargs[2:]), 0)
         mn = vargs[1]
@@ -2983,9 +3027,9 @@ def do_instrument(t_args):
         return
     # fi
 
-    vn = separate_args(str(vn))         # The voice numbers.
-    if not vn or len(vn) < 1:
-        print_error("no voice arguments on instrument line")
+    chn = separate_args(str(chn))       # The channel numbers.
+    if not chn or len(chn) < 1:
+        print_error("no channel arguments on instrument line")
         return
     # fi
 
@@ -2995,14 +3039,14 @@ def do_instrument(t_args):
         return
     # fi
 
-    for v in vn:
-        f1, type_error = is_float(v, is_float_number, False)
+    for ch in chn:
+        f1, type_error = is_float(ch, is_float_number, False)
         if type_error is not None:
-            print_error(f"instrument voice {v} error - {type_error}")
+            print_error(f"instrument channel {ch} error - {type_error}")
             return
         # fi
         if f1 is None:
-            print_error(f"instrument voice {v} is not a number.")
+            print_error(f"instrument channel {ch} is not a number.")
             return
         # fi
         f1 = round(f1)
@@ -3017,10 +3061,10 @@ def do_instrument(t_args):
                 return
             # fi
             f2 = round(f2)
-            if f1 not in instrument_voice_measures_hint:
-                instrument_voice_measures_hint[f1] = {}
+            if f1 not in instrument_channel_measures_hint:
+                instrument_channel_measures_hint[f1] = {}
             # fi
-            instrument_voice_measures_hint[f1][f2] = instr
+            instrument_channel_measures_hint[f1][f2] = instr
         # rof
     # rof
     return
@@ -3042,7 +3086,7 @@ def do_meter(t_args):
         return
     # fi
 
-    vargs = get_voice_measure_other(t_args, 'meter')
+    vargs = get_channel_measure_other(t_args, 'meter')
     if vargs is None:
         return
     # fi
@@ -3075,11 +3119,11 @@ def do_meter(t_args):
     for w in mn:
         f1, type_error = is_float(w, is_float_number, False)
         if type_error is not None:
-            print_error(f"bars voice {w} error - {type_error}")
+            print_error(f"meter measure {w} error - {type_error}")
             return
         # fi
         if f1 is None:
-            print_error(f"bars voice {w} is not a number.")
+            print_error(f"meter measure {w} is not a number.")
             return
         # fi
         f1 = round(f1)
@@ -3145,7 +3189,7 @@ def do_page(t_args):
         return
     # fi
 
-    vargs = get_voice_measure_other(t_args, 'page')
+    vargs = get_channel_measure_other(t_args, 'page')
     if vargs is None:
         return
     # fi
@@ -3179,11 +3223,11 @@ def do_page(t_args):
     for w in mn:
         f2, type_error = is_float(w, is_float_number, False)
         if type_error is not None:
-            print_error(f"page voice {w} error - {type_error}")
+            print_error(f"page channel {w} error - {type_error}")
             return
         # fi
         if f2 is None:
-            print_error(f"page voice {w} is not a number.")
+            print_error(f"page channel {w} is not a number.")
             return
         # fi
         f2 = round(f2)
@@ -3216,9 +3260,9 @@ def do_title(t_args):
 #       xpose   1,3..5,7 +2
 
 def do_xpose(t_args):
-    global xpose_voice
+    global xpose_channel
 
-    vargs = get_voice_measure_other(t_args, 'xpose')
+    vargs = get_channel_measure_other(t_args, 'xpose')
     if vargs is None:
         return
     # fi
@@ -3227,9 +3271,9 @@ def do_xpose(t_args):
         return None
     # fi
 
-    vn = separate_args(str(vargs[0]))   # Allow voice numbers.
-    if not vn or len(vn) < 1:
-        print_error("no voice arguments on xpose line")
+    chn = separate_args(str(vargs[0]))  # Allow channel numbers.
+    if not chn or len(chn) < 1:
+        print_error("no channel arguments on xpose line")
         return
     # fi
 
@@ -3246,18 +3290,18 @@ def do_xpose(t_args):
     # fi
     xp = round(f1)
 
-    for v in vn:
-        f1, type_error = is_float(v, is_float_number, False)
+    for ch in chn:
+        f1, type_error = is_float(ch, is_float_number, False)
         if type_error is not None:
-            print_error(f"xpose voice {v} error - {type_error}")
+            print_error(f"xpose channel {ch} error - {type_error}")
             return
         # fi
         if f1 is None:
-            print_error(f"xpose voice {v} is not a number.")
+            print_error(f"xpose channel {ch} is not a number.")
             return
         # fi
         f1 = round(f1)
-        xpose_voice[f1] = xp
+        xpose_channel[f1] = xp
     # rof
     return
 # End of do_xpose
@@ -3596,13 +3640,13 @@ def printout_gcs():
     global which_file_output
     global titles
     global middle_c
-    global xpose_voice
+    global xpose_channel
     global last_measure
     global pages_measures_hint
     global bars_measures_hint
     global meters_measures_hint
-    global voices
-    global clef_voice_measures_hint
+    global channels
+    global clef_channel_measures_hint
     global measures_instrument
 
     global bufs_notes
@@ -3611,9 +3655,6 @@ def printout_gcs():
     global measures_clicks_length
     global bufs_gcs_note
     global bufs_gcs_length
-
-#--     print_stderr('\n')
-#--     print_error('NOTDONEYET - printout_gcs')
 
     last_page = ''
     last_bar = ''
@@ -3633,15 +3674,17 @@ def printout_gcs():
     # fi
 
     print_output(f'* ----------------------------------------------------------------------------')
-    print_output(f'voice   {voices+1}')
+    print_output(f'voice   {channels}')
     print_output(f'* ----------------------------------------------------------------------------')
-    for x in xpose_voice:
-        print_output(f'xpose   {x} {0 - xpose_voice[x]}')
+    for x in xpose_channel:
+        print_output(f'xpose   {x} {0 - xpose_channel[x]}')
     # rof
 
     last_voice_n = {}
-    for v in range(0, voices + 1):
-        last_voice_n[v] = 0
+    cn = channels
+    while cn <= channels:
+        last_voice_n[cn] = 0
+        cn = cn + 1
     # rof
 
     for m in range(1, last_measure + 1):
@@ -3662,26 +3705,30 @@ def printout_gcs():
             # fi
         # fi
         # Clefs are in hints file only.
-        for v in range(0, voices + 1):
-            if v in clef_voice_measures_hint and m in clef_voice_measures_hint[v]:
-                if v not in last_clef or clef_voice_measures_hint[v][m] != last_clef[v]:
-                    print_output(f'clef    {v + 1} {clef_voice_measures_hint[v][m]}')
-                    last_clef[v] = clef_voice_measures_hint[v][m]
+        cn = channels
+        while cn <= channels:
+            if cn in clef_channel_measures_hint and m in clef_channel_measures_hint[cn]:
+                if cn not in last_clef or clef_channel_measures_hint[cn][m] != last_clef[cn]:
+                    print_output(f'clef    {cn + 1} {clef_channel_measures_hint[cn][m]}')
+                    last_clef[cn] = clef_channel_measures_hint[cn][m]
                 # fi
             # fi
-        # rof
+            cn = cn + 1
+        # elihw
 
         # Keys are calculated, unlike hints.
-        for v in range(0, voices + 1):
-            if v in measures_key and m in measures_key[v]:
-                if v not in last_key or measures_key[v][m] != last_key[v]:
-                    if measures_key[v][m] != 0:
-                        print_output(f'key {v + 1} {measures_key[v][m]}')
+        cn = channels
+        while cn <= channels:
+            if cn in measures_key and m in measures_key[cn]:
+                if cn not in last_key or measures_key[cn][m] != last_key[cn]:
+                    if measures_key[cn][m] != 0:
+                        print_output(f'key {cn + 1} {measures_key[cn][m]}')
                     # fi
-                    last_key[v] = measures_key[v][m]
+                    last_key[cn] = measures_key[cn][m]
                 # fi
             # fi
-        # rof
+            cn = cn + 1
+        # elihw
 
         # Meters are calculated, unlike hints.
         if m in measures_meter:
@@ -3691,30 +3738,33 @@ def printout_gcs():
             # fi
         # fi
 
-        for v in range(0, voices + 1):
-            n = last_voice_n[v]
-            strg = f'v{v + 1}: '
+        cn = channels
+        while cn <= channels:
+            n = last_voice_n[cn]
+            strg = f'v{cn + 1}: '
             totalline = ''
             flag = False
-            while n < len(bufs_notes[v]) and bufs_notes_start[v][n] < measures_clicks_start[m] + measures_clicks_length[m]:
+            while n < len(bufs_notes[cn]) and bufs_notes_start[cn][n] < measures_clicks_start[m] + measures_clicks_length[m]:
                 if len(strg) > 80 - 6 + 24:
                     totalline = totalline + strg + '\n'
-                    strg = f'v{v + 1}: '
+                    strg = f'v{cn + 1}: '
                     flag = False
                 # fi
                 if flag:
                     strg = strg + ','
                 # fi
+# NOTDONEYET
 #   v2: r4, 3c4/3, 3d?, 3e?, 3f4     -> r4, s3(3c,3d,3e)4, 3f4
-                strg = strg + f' {bufs_gcs_note[v][n]}{bufs_gcs_length[v][n]}'
+                strg = strg + f' {bufs_gcs_note[cn][n]}{bufs_gcs_length[cn][n]}'
                 n = n + 1
                 flag = True
             # elihw
-            last_voice_n[v] = n
+            last_voice_n[cn] = n
             if totalline != '' or flag:
                 print_output(totalline + strg)
             # fi
-        # rof
+            cn = cn + 1
+        # elihw
     # rof
     print_output(f'* ----------------------------------------------------------------------------')
     print_output('cstop*')
@@ -3776,24 +3826,36 @@ def main():
 
     figure_out_measure_locations()      # Where are the starts of measures - from meter clicks and tempos.
 
+    print_debug_internal_1('measures determined')
+
     set_keys_if_not_specified()         # Set a default key.
 
-    set_instrument_measures()           # Using instrument_voice_measures_hint and instruments[]
+    print_debug_internal_1('keys determined')
+
+    set_instrument_measures()           # Using instrument_channel_measures_hint and instruments[]
+
+    print_debug_internal_1('instruments determined')
 
     notes_fit_into_measures()           # Create ties if notes go over measures. Put in rests.
 
+    print_debug_internal_1('notes fit into measures determined')
+
     check_contiguous_notes()            # Check that start->end-> next_start is okay.
 
-    determine_note_gcs_lengths()        # Figure out what bufs_gcs_length[v][n] is like "4" = 1/4 note.
+    print_debug_internal_1('after check_contiguous_notes')
 
-#--     print_debug_internal_1('Notes_fitted - lengths determined ')
+    determine_note_gcs_lengths()        # Figure out what bufs_gcs_length[ch][n] is like "4" = 1/4 note.
 
-    determine_note_gcs_notes()          # Figure out what bufs_gcs_notes[v][n] is "4c" (c, 4th octave).
-                                        # NOTE: key for voice and previous +/-/n business.
+    print_debug_internal_1('notes lengths determined')
+
+    determine_note_gcs_notes()          # Figure out what bufs_gcs_notes[ch][n] is "4c" (c, 4th octave).
+                                        # NOTE: key for channel and previous +/-/n business.
+
+    print_debug_internal_1('printable notes determined')
 
     printable_measures()                # NOTDONEYET
 
-#--     print_debug_internal_1('NEARLY-DONE')
+    print_debug_internal_1('NEARLY-DONE')
 
     printout_gcs()                      # Create the gcs file.
 

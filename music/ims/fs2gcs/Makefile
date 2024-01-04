@@ -32,6 +32,7 @@ clean:
 	rm -f test.abc                test.pdf test.ps        tmp_test.gcs
 	rm -f t.abc             t.fs  t.pdf    t.ps    t.gcs  tmp_t.gcs
 	rm -f u.abc    u.csv    u.fs  u.pdf    u.ps    u.gcs  tmp_u.gcs
+	rm -f typescript
 #-----------------------------------------------------------------------------
 .PHONY: tags ctags
 tags ctags:
