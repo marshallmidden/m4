@@ -39,44 +39,44 @@ tags ctags:
 	ctags --language-force=python ${FS2CSV}
 #-----------------------------------------------------------------------------
 # Test a whole bunch of stuff!
-testing: test.pdf t.pdf u.pdf
+testing: test.pdf  t.pdf u.pdf   t.gcs u.gcs
 #-----------------------------------------------------------------------------
 tmp_test.gcs: HEADER.gcs test.gcs
 	cat HEADER.gcs test.gcs > tmp_test.gcs
 test.abc: tmp_test.gcs
 	${IMSCOMP} ${MC_ARGS} --abc $< $@
-test.pdf: test.ps
-	${PS2PDF} $< $@
 test.ps: test.abc
 	(${ABCM2PS} -l -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@)
+test.pdf: test.ps
+	${PS2PDF} $< $@
 #-----------------------------------------------------------------------------
-t.fs: tmp_test.gcs
-	${IMSCOMP} ${MC_ARGS} --fs $< $@
-# ............................................................................
 tmp_t.gcs: HEADER.gcs t.gcs
 	cat HEADER.gcs t.gcs > tmp_t.gcs
 t.abc: tmp_t.gcs
 	${IMSCOMP} ${MC_ARGS} --abc $< $@
-t.pdf: t.ps
-	${PS2PDF} $< $@
 t.ps: t.abc
 	(${ABCM2PS} -l -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@)
+t.pdf: t.ps
+	${PS2PDF} $< $@
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+t.fs: tmp_test.gcs
+	${IMSCOMP} ${MC_ARGS} --fs $< $@
 t.gcs:	t.fs
 	./fs2gcs t.fs t.gcs
 #-----------------------------------------------------------------------------
-u.csv:	tmp_test.gcs
-	${IMSCOMP} ${MC_ARGS} --csv $< $@
-# ............................................................................
 tmp_u.gcs: HEADER.gcs u.gcs
 	cat HEADER.gcs u.gcs > tmp_u.gcs
 u.abc: tmp_u.gcs
 	${IMSCOMP} ${MC_ARGS} --abc $< $@
+u.ps: u.abc
+	(${ABCM2PS} -l -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@)
+u.pdf: u.ps
+	${PS2PDF} $< $@
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+u.csv:	tmp_test.gcs
+	${IMSCOMP} ${MC_ARGS} --csv $< $@
 u.fs:	u.csv
 	${CSV2FS} u.csv u.fs
 u.gcs:	u.fs
 	./fs2gcs u.fs u.gcs
-u.pdf: u.ps
-	${PS2PDF} $< $@
-u.ps: u.abc
-	(${ABCM2PS} -l -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@)
 #-----------------------------------------------------------------------------
