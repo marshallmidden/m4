@@ -1428,7 +1428,7 @@ def parse_args():
                         help='For --fluidsynth, "128/2,50" intensity offset @ 64 + 50% of volume level.')
 
     parser.add_argument('rest', nargs='*',
-                        help='Optional command to execute')
+                        help='Optionals: input_file(stdin) output_file(stdout)')
     args = parser.parse_args()
 
 #--    if args.offset is not None:
@@ -3885,7 +3885,7 @@ def print_out_midi1csv_tempo(m, voiceon, lthworkingmeasure, t, l):
 # End of print_out_midi1csv_tempo
 
 # ----------------------------------------------------------------------------
-def print_out_midi1csv_keysignature(m, voiceon, lthworkingmeasure, last_keysig):
+def print_out_midi1csv_keysignature(m, voiceon, lthworkingmeasure, last_keysig, chan):
     global key_default
     global key_voice
 
@@ -3894,14 +3894,14 @@ def print_out_midi1csv_keysignature(m, voiceon, lthworkingmeasure, last_keysig):
             key_default = 0
         # fi
         last_keysig = key_default
-        print_output('{}, {}, Key_signature, {}, "major"'.format(voiceon+1, lthworkingmeasure, last_keysig))
+        print_output(f'{voiceon+1}, {lthworkingmeasure}, Key_signature, {last_keysig}, "major {chan}"')
     else:
         if voiceon in key_voice and m in key_voice[voiceon] and last_keysig != key_voice[voiceon][m]:
             if key_voice[voiceon][m] is None or key_voice[voiceon][m] == 'atonal':
                 key_voice[voiceon][m] = 0
             # fi
             last_keysig = key_voice[voiceon][m]
-            print_output('{}, {}, Key_signature, {}, "major"'.format(voiceon+1, lthworkingmeasure, last_keysig))
+            print_output(f'{voiceon+1}, {lthworkingmeasure}, Key_signature, {last_keysig}, "major {chan}"')
         # fi
     # fi
     return  last_keysig
@@ -3958,7 +3958,7 @@ def print_header():
         # rof
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     # 1, 0, Key_signature, -2, "major"
-        last_keysig = print_out_midi1csv_keysignature('' , 0, 0, '')
+        last_keysig = print_out_midi1csv_keysignature('' , 0, 0, '', 'ALL')
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
         # Get the voice with the most notes.
         # Does not do goto's, but that's okay enough -- all voices should be filled.
@@ -4075,6 +4075,7 @@ def print_header():
         print_output('0, 0, FS, set synth.chorus.depth 8')
 
         print_output("0, 0, FS, prog 00 000")
+        print_output(f'0, 0, Text_t, "Header {len(volume)+1} {round(MIDICLICKSPERQUARTER)}"')
 
         for t in header:
             print_output('0, 0, FS, echo {}'.format(t))
@@ -4267,7 +4268,7 @@ def print_out_midi1csv_notes():
 
         l_instrument, channel, chan = print_out_midi1csv_instrument(meas[m_number], voice, lthworkingmeasures, l_instrument, channel, chan)
         lastmeter = print_out_midi1csv_ts(meas[m_number], voice, lthworkingmeasures, lastmeter)
-        last_keysig = print_out_midi1csv_keysignature(meas[m_number], voice, lthworkingmeasures, last_keysig)
+        last_keysig = print_out_midi1csv_keysignature(meas[m_number], voice, lthworkingmeasures, last_keysig, chan)
         lt, ll = print_out_midi1csv_tempo(meas[m_number], voice, lthworkingmeasures, lt, ll)
 
 #       A comment as to which musicomp measure being done.
@@ -4341,13 +4342,14 @@ def print_out_midi1csv_notes():
                         # fi
                     # fi
                     lthworkingmeasures = lthworkingmeasures + last_note_length
+#--                     print_debug(f'lthworkingmeasures={lthworkingmeasures}  last_note_length={last_note_length}')
                 # fi
 
                 # If this note is first in measure:
                 if nn == 0:
                     l_instrument, channel, chan = print_out_midi1csv_instrument(m, voice, lthworkingmeasures, l_instrument, channel, chan)
                     lastmeter = print_out_midi1csv_ts(m, voice, lthworkingmeasures, lastmeter)
-                    last_keysig = print_out_midi1csv_keysignature(m, voice, lthworkingmeasures, last_keysig)
+                    last_keysig = print_out_midi1csv_keysignature(m, voice, lthworkingmeasures, last_keysig, chan)
                     lt, ll = print_out_midi1csv_tempo(m, voice, lthworkingmeasures, lt, ll)
                 # fi
 
@@ -4633,11 +4635,25 @@ def process_fs_check(what, lth, min_next, vtlines, tempo_s, tempo_l):
                         x = strg1[9:]
                         y = x.split(' ', 1)          # Key number.
                         x = y[1]
+                        z = v
+                        if x[0:7] == "'major ":
+                            zz = x[7:]
+                            x = "'major'"
+                            if zz[len(zz)-1] == "'":
+                                zz = zz[0:(len(zz)-1)]
+                            # fi
+                            if zz.isnumeric():
+                                z = zz
+                            # fi
+                            x = "'major'"
+                        # fi
                         y = int(y[0].replace(',', '').strip())
                         if y in key_sig_int:
                             y = key_sig_int[y].upper()
+                        else:
+                            print_debug(f'echo key - value y={y} -- unknown.')
                         # fi
-                        really_print_output(f'echo "key {y} {x}"')
+                        really_print_output(f'echo "key {z} {y} {x}"')
                     elif strg1[0:13] == 'echo Title_t ':
                         really_print_output(f'echo "Title {strg1[13]}"')
                     elif strg != fs_other_echo:
@@ -4670,6 +4686,7 @@ def process_fs_check(what, lth, min_next, vtlines, tempo_s, tempo_l):
                 else:
                     tempo_s, tempo_l = strg[6:].split()
                 # fi
+                really_print_output(f'echo "0 tempo_s={tempo_s} tempo_l={tempo_l}"')
             elif strg[0:3] == 'cc ':
                 break
             elif strg[0:8] == 'noteoff ':
@@ -4752,6 +4769,7 @@ def print_out_fluidsynth():
             if t[2] != 'echo':
                 t[3] = t[3].replace(',', '').strip()
             # fi
+# NOTDONEYET - need to have channels here.
         elif t[2] == 'FS':
             t[3] = t[3].strip()
             t[2] = t[3]
@@ -8498,7 +8516,7 @@ def set_var_string(variable, strng, original_line):
         return
     # fi
     return
-# fi
+# End of set_var_string
 
 # ----------------------------------------------------------------------------
 #   encode  A=hi there; after,hi; upto,re
@@ -17118,5 +17136,5 @@ sys.exit(errors_happened)
 #     126 Mono Operation
 #     127 Poly Mode
 # ----------------------------------------------------------------------------
-# End of file musicomp2abc
+# End of file imscomp
 # ----------------------------------------------------------------------------
