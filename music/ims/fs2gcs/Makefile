@@ -26,8 +26,8 @@ all ${FS}: ${FS}.gcs
 .PHONY: phase2
 phase2: phase2.fs phase2.pdf
 #-----------------------------------------------------------------------------
-phase2.gcs: ${FS}.gcs HEADER.gcs
-	cat HEADER.gcs ${FS}.gcs > $@
+phase2.gcs: ${FS}.gcs phase2-header
+	cat phase2-header ${FS}.gcs > $@
 phase2.fs: phase2.gcs
 	${IMSCOMP} ${MC_ARGS} --fs $< $@
 phase2.abc: phase2.gcs
@@ -48,7 +48,7 @@ clean:
 	rm -f u.{abc,csv,fs,pdf,ps,gcs}
 	rm -f tmp_{test,t,u}.gcs
 	rm -f typescript
-	rm -f phase2.{fs,csv,abc,ps,pdf}
+	rm -f phase2.{fs,csv,abc,ps,pdf,gcs}
 #-----------------------------------------------------------------------------
 .PHONY: tags ctags
 tags ctags:
