@@ -20,8 +20,22 @@ help:
 	@echo "  tags      - Create tags file for python sources for ${FS2CSV}."
 	@echo "  testing   - csv2fs, fs2gcs, and imscomp --fs / --csv / --abc"
 #-----------------------------------------------------------------------------
-.PHONY: all
-all: ${FS}.gcs
+.PHONY: all ${FS}
+all ${FS}: ${FS}.gcs
+#-----------------------------------------------------------------------------
+.PHONY: phase2
+phase2: phase2.fs phase2.pdf
+#-----------------------------------------------------------------------------
+phase2.gcs: ${FS}.gcs HEADER.gcs
+	cat HEADER.gcs ${FS}.gcs > $@
+phase2.fs: phase2.gcs
+	${IMSCOMP} ${MC_ARGS} --fs $< $@
+phase2.abc: phase2.gcs
+	${IMSCOMP} ${MC_ARGS} --abc $< $@
+phase2.ps: phase2.abc
+	(${ABCM2PS} -l -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps phase2.ps)
+phase2.pdf: phase2.ps
+	${PS2PDF} $< $@
 #-----------------------------------------------------------------------------
 ${FS}.gcs:  ${FS}.fs ${FS}.hints
 	${FS2CSV} ${FS}.fs ${FS}.gcs ${FS}.hints
@@ -29,10 +43,12 @@ ${FS}.gcs:  ${FS}.fs ${FS}.hints
 .PHONY: clean
 clean:
 	rm -f ${FS}.gcs
-	rm -f test.abc                test.pdf test.ps        tmp_test.gcs
-	rm -f t.abc             t.fs  t.pdf    t.ps    t.gcs  tmp_t.gcs
-	rm -f u.abc    u.csv    u.fs  u.pdf    u.ps    u.gcs  tmp_u.gcs
+	rm -f test.{abc,csv,fs,pdf,ps}
+	rm -f t.{abc,csv,fs,pdf,ps,gcs}
+	rm -f u.{abc,csv,fs,pdf,ps,gcs}
+	rm -f tmp_{test,t,u}.gcs
 	rm -f typescript
+	rm -f phase2.{fs,csv,abc,ps,pdf}
 #-----------------------------------------------------------------------------
 .PHONY: tags ctags
 tags ctags:

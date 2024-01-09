@@ -1143,39 +1143,51 @@ def set_instrument_measures():
     global instrument_channel_measures_hint
     global last_measure
 
-    cn = channels
+    cn = 0
     while cn <= channels:
         if cn not in measures_instrument:
             measures_instrument[cn] = {}
         # fi
         i = 0
         if cn in instrument:
-            last_i = check_instr(instrument[cn][i][1], instrument[cn][i][0])
+#--             print_debug(f'#0 set_instrument_measures - cn={cn} instrument[{cn}]={instrument[cn]}')
+            last_i_name = check_instr(instrument[cn][i][1], instrument[cn][i][0])
             last_ic = instrument[cn][i][2]
+#--             print_debug(f'#A set_instrument_measures - cn={cn} last_ic={last_ic} last_i_name={last_i_name}')
         else:
-            last_i = 0
+            last_i_name = 0
             last_ic = 0
+#--             print_debug(f'#B set_instrument_measures - cn={cn} last_ic={last_ic} last_i_name={last_i_name}')
         # fi
         if cn in instrument_channel_measures_hint and 1 in instrument_channel_measures_hint[cn]:
-            last_i = instrument_channel_measures_hint[cn][1]
+            last_i_name = instrument_channel_measures_hint[cn][1]
             last_ic = measures_clicks_start[1]
+#--             print_debug(f'#C set_instrument_measures - cn={cn} last_ic={last_ic} last_i_name={last_i_name}')
         # fi
         for m in range(1, last_measure + 1):
-            if (last_ic >= measures_clicks_start[m] and
-                last_ic < measures_clicks_start[m] + measures_clicks_length[m]):
+#--             print_debug(f'#D set_instrument_measures - cn={cn} m={m} i={i} last_ic={last_ic} last_i_name={last_i_name}')
+#--             print_debug(f'#2                      - measures_clicks_start={measures_clicks_start[m]} measures_clicks_length={measures_clicks_length[m]}')
+            if last_ic <= measures_clicks_start[m]:
+#--             and last_ic < measures_clicks_start[m] + measures_clicks_length[m]):
                 # Move to start of measure.
-                if cn in instrument and i in instrument[cn]:
-                    last_i = check_instr(instrument[cn][i][1], instrument[cn][i][0])
-                    last_ic = instrument[cn][i][2]
-                    if i < len(instrument[cn]) - 1:
+#--                 print_debug(f'#3                      - cn={cn} m={m} i={i} last_ic={last_ic}')
+                if cn in instrument and i < len(instrument[cn]) - 1:
+#--                     print_debug(f'#4                      - cn={cn} i={i}')
+                    if instrument[cn][i+1][2] < measures_clicks_start[m] + measures_clicks_length[m]:
                         i = i + 1
+                        last_i_name = check_instr(instrument[cn][i][1], instrument[cn][i][0])
+                        last_ic = instrument[cn][i][2]
+#--                         print_debug(f'#5                      - i={i} len(instrument[cn])={len(instrument[cn])} last_ic={last_ic} last_i_name={last_i_name}')
                     # fi
                 # fi
             # fi
+#--             last_ic = measures_clicks_start[m]
             if cn in instrument_channel_measures_hint and m in instrument_channel_measures_hint[cn]:
-                last_i = instrument_channel_measures_hint[cn][m]
+                last_i_name = instrument_channel_measures_hint[cn][m]
+                last_ic = measures_clicks_start[m]
             # fi
-            measures_instrument[cn][m] = last_i
+            measures_instrument[cn][m] = last_i_name
+#--             print_debug(f'#6                      - measures_instrument[{cn}][{m}]={last_i_name}')
         # rof
         cn = cn + 1
     # elihw
@@ -1183,6 +1195,8 @@ def set_instrument_measures():
 # End of set_instrument_measures
 
 # ----------------------------------------------------------------------------
+# NOTDONEYET? set_keys_if_not_specified - possibly need to redo to match set_instrument_measures loop methodology.
+
 def set_keys_if_not_specified():
     global echo_key
     global echo_key_clicks
@@ -1472,40 +1486,9 @@ def process_header_lines(q):
     elif q[0] == 'sleep':
         process_sleep(q[1])
     elif q[0] == 'prog':
-        a = q[1].split()
-        cn = int(a[0])
-        instr = int(a[1])
-        if instrument == {}:
-            instrument[cn] = [ [0, instr, running_time] ]
-        else:
-            print_error(f"ignoring prog that isn't before select commands. {q}")
-        # fi
+        process_prog(q[1])
     elif q[0] == 'select':
-        a = q[1].split()
-        if len(a) < 1 or len(a) > 4:
-            print_error(f'select line wants 4 arguments not {len(a)} - {q[1]}')
-            return
-        # fi
-        # a[0] = channel #
-        # a[1] = timeclicks
-        # a[2] = bank
-        # a[3] = instrument
-        cn = int(a[0])
-        ibank = int(a[2])
-        instr = int(a[3])
-        if cn in instrument:
-            if instrument[cn][-1][0] == ibank and instrument[cn][-1][1] == instr:
-                pass
-            else:
-                if instrument[cn][-1][0] == ibank and instrument[cn][-1][2] == running_time:
-                    instrument[cn][-1] = [ibank, instr, running_time]
-                else:
-                    instrument[cn].append( [ibank, instr, running_time] )
-                # fi
-            # fi
-        else:
-            instrument[cn] = [ [ibank, instr, running_time] ]
-        # fi
+        process_select(q[1])
     elif q[0] == 'cc':
         process_cc(q[1])
     else:
@@ -1515,8 +1498,50 @@ def process_header_lines(q):
 # End of process_header_lines
 
 # ----------------------------------------------------------------------------
-# r is the arguments to the 12th
+def process_prog(r):
+    a = r.split()
+    cn = int(a[0])
+    instr = int(a[1])
+    if instrument == {}:
+        instrument[cn] = [ [0, instr, running_time] ]
+    else:
+        print_error(f"ignoring prog that isn't before select commands. {r}")
+    # fi
+#--     print_debug(f'process_prog - instrument[{cn}]={instrument[cn]}')
+# End of process_prog
 
+# ----------------------------------------------------------------------------
+def process_select(r):
+    a = r.split()
+    if len(a) < 1 or len(a) > 4:
+        print_error(f'select line wants 4 arguments not {len(a)} - {r}')
+        return
+    # fi
+    # a[0] = channel #
+    # a[1] = timeclicks
+    # a[2] = bank
+    # a[3] = instrument
+    cn = int(a[0])
+    ibank = int(a[2])
+    instr = int(a[3])
+    if cn in instrument:
+        if instrument[cn][-1][0] == ibank and instrument[cn][-1][1] == instr:
+            pass
+        else:
+            if instrument[cn][-1][0] == ibank and instrument[cn][-1][2] == running_time:
+                instrument[cn][-1] = [ibank, instr, running_time]
+            else:
+                instrument[cn].append( [ibank, instr, running_time] )
+            # fi
+        # fi
+    else:
+        instrument[cn] = [ [ibank, instr, running_time] ]
+    # fi
+#--     print_debug(f'process_select - instrument[{cn}]={instrument[cn]}')
+    return
+# End of process_select
+
+# ----------------------------------------------------------------------------
 def process_noteon(r):
     global channels
     global new_channels
@@ -1755,27 +1780,7 @@ def process_note_lines(q):
     elif q[0] == 'cc':
         process_cc(q[1])
     elif q[0] == 'select':
-        a = q[1].split()
-        if len(a) < 1 or len(a) > 4:
-            print_error(f'select line wants 4 arguments not {len(a)} - {q[1]}')
-            return
-        # fi
-        # a[0] = voice #
-        # a[1] = timeclicks
-        # a[2] = bank
-        # a[3] = instrument
-        ch = int(a[0])
-        ibank = int(a[2])
-        instr = int(a[3])
-        if ch in instrument:
-            if instrument[ch][-1][0] == ibank and instrument[ch][-1][1] == instr:
-                pass
-            else:
-                instrument[ch].append( (ibank, instr, running_time) )
-            # fi
-        else:
-            instrument[ch] = (ibank, instr, running_time)
-        # fi
+        process_select(q[1])
     else:
         print_error(f'NOTDONEYET - Unexpected command ({q}) in FS input')
     # fi
@@ -2006,12 +2011,29 @@ def print_debug_instruments_1(stg):
     global channels
     global instrument
 
-    print_stderr(f'\n{stg} -- channels={channels}:')
+    print_stderr(f'\n{stg} -- instruments - channels={channels}:')
     ch = 0
     while ch <= channels:
         if ch in instrument:
             for i in range(0,len(instrument[ch])):
                 print_stderr(f'{ch:4} - instrument bank={instrument[ch][i][0]} number={instrument[ch][i][1]} clicks={instrument[ch][i][2]}')
+            # rof
+        # fi
+        ch = ch + 1
+    # elihw
+
+#--    measures_instrument[cn][m] = last_i
+    ch = 0
+    while ch <= channels and measures_instrument != {}:
+#--         print_stderr(f'{stg} -- instruments in measures - channel={ch}:')
+#--         print_stderr(f'      measures_instrument[{ch}]={measures_instrument[ch]}')
+        if ch in measures_instrument:
+            last_i = -1
+            for m in range(1, last_measure + 1):
+                if last_i != measures_instrument[ch][m]:
+                    print_stderr(f'{ch:4} - measure {m} instrument={measures_instrument[ch][m]}')
+                    last_i = measures_instrument[ch][m]
+                # fi
             # rof
         # fi
         ch = ch + 1
@@ -2050,12 +2072,12 @@ def print_debug_internal_1(stg):
 
     print_stderr(f'\n{stg}: first_note_time={first_note_time}')
 
-#--     print_debug_measures_1(stg)
+    print_debug_measures_1(stg)
 
-#--     print_debug_title_1(stg)
-#--     print_debug_comments_1(stg)
+    print_debug_title_1(stg)
+    print_debug_comments_1(stg)
     print_debug_keys_1(stg)
-#--     print_debug_instruments_1(stg)
+    print_debug_instruments_1(stg)
 
     print_debug_notes_1(stg)
     return
@@ -2965,6 +2987,7 @@ def check_instr(instr, bank):
     global midi_instruments
     global drum_sounds
 
+#--     print_debug(f'check_instr - instr={instr} bank={bank}')
     if type(instr) is str:
         instr = instr.lower()
     else:
@@ -3742,6 +3765,20 @@ def printout_gcs():
             # fi
         # fi
 
+        # Instrument locations are positioned in measures.
+        cn = 0
+        while cn <= channels:
+            if cn in measures_instrument and m in measures_instrument[cn]:
+                if cn not in last_instrument or measures_instrument[cn][m] != last_instrument[cn]:
+                    if measures_instrument[cn][m] != 0:
+                        print_output(f'instrument {cn + 1} {measures_instrument[cn][m]}')
+                    # fi
+                    last_instrument[cn] = measures_instrument[cn][m]
+                # fi
+            # fi
+            cn = cn + 1
+        # elihw
+
         cn = 0
         while cn <= channels:
             n = last_voice_n[cn]
@@ -3829,7 +3866,6 @@ def main():
     line = None
 
     figure_out_measure_locations()      # Where are the starts of measures - from meter clicks and tempos.
-
 #--     print_debug_internal_1('measures determined')
 
     set_keys_if_not_specified()         # Set a default key.
@@ -3837,6 +3873,9 @@ def main():
 #--     print_debug_internal_1('keys determined')
 
     set_instrument_measures()           # Using instrument_channel_measures_hint and instruments[]
+
+#--     print_debug(f'main - measures_instrument={measures_instrument}')
+#--     print_debug(f'main - instrument={instrument}')
 
 #--     print_debug_internal_1('instruments determined')
 
