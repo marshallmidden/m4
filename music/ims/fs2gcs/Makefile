@@ -9,9 +9,6 @@ ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
 CSV2FS  = ../csv2fs/csv2fs
 #-----------------------------------------------------------------------------
-%.gcs:  %.fs
-	${FS2CSV} $< $@
-#-----------------------------------------------------------------------------
 .PHONY: help
 help:
 	@echo 'Targets:'
@@ -31,7 +28,7 @@ phase2.gcs: ${FS}.gcs phase2-header
 phase2.fs: phase2.gcs
 	${IMSCOMP} ${MC_ARGS} --fs $< $@
 phase2.abc: phase2.gcs
-	${IMSCOMP} ${MC_ARGS} --abc $< $@
+	${IMSCOMP} ${MC_ARGS} --abc $< $@ || true
 phase2.ps: phase2.abc
 	(${ABCM2PS} -l -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps phase2.ps)
 phase2.pdf: phase2.ps
@@ -60,7 +57,7 @@ testing: test.pdf  t.pdf u.pdf   t.gcs u.gcs
 tmp_test.gcs: HEADER.gcs test.gcs
 	cat HEADER.gcs test.gcs > tmp_test.gcs
 test.abc: tmp_test.gcs
-	${IMSCOMP} ${MC_ARGS} --abc $< $@
+	${IMSCOMP} ${MC_ARGS} --abc $< $@ || true
 test.ps: test.abc
 	(${ABCM2PS} -l -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@)
 test.pdf: test.ps
@@ -69,7 +66,7 @@ test.pdf: test.ps
 tmp_t.gcs: HEADER.gcs t.gcs
 	cat HEADER.gcs t.gcs > tmp_t.gcs
 t.abc: tmp_t.gcs
-	${IMSCOMP} ${MC_ARGS} --abc $< $@
+	${IMSCOMP} ${MC_ARGS} --abc $< $@ || true
 t.ps: t.abc
 	(${ABCM2PS} -l -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@)
 t.pdf: t.ps
@@ -83,7 +80,7 @@ t.gcs:	t.fs
 tmp_u.gcs: HEADER.gcs u.gcs
 	cat HEADER.gcs u.gcs > tmp_u.gcs
 u.abc: tmp_u.gcs
-	${IMSCOMP} ${MC_ARGS} --abc $< $@
+	${IMSCOMP} ${MC_ARGS} --abc $< $@ || true
 u.ps: u.abc
 	(${ABCM2PS} -l -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@)
 u.pdf: u.ps
