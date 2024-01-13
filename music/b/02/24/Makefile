@@ -1,109 +1,105 @@
-V            = v2-4
+V4           = v2-4
 #-----------------------------------------------------------------------------
-MCOMP        = ~/src/abc/mcomp/mcomp
-SEPARATE     = ./A.separate
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
-#-- YAPS         = yaps
+IMSCOMP = ~/ims/imscomp
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------
-CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
+# -b nn = starting bar number
+# -i = put red circle around errors.
+# -j nn = number every this many bars.
+# -l = landscape mode
+# -M = suppress lyrics
+# -N 2 = number pages in upper right.
+# -s nn = page scale to (default 0.75) = %%scale.
+ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 #-----------------------------------------------------------------------------
-.PRECIOUS: %.abc %.csv %.mid %.E %_m.ps %.fs
-.SUFFIXES: .mid .csv .ps .abc _m.ps .E .wav .fs .pdf
+CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
+MC_ARGS ?=
+#-- MC_ARGS ?= --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
+#-----------------------------------------------------------------------------
+.PRECIOUS: %.E
+.PRECIOUS: %.abc %.csv %_m.ps
+.PRECIOUS: %_2.abc %_2.csv %_m2.ps
+.SUFFIXES: .E
+.SUFFIXES: .abc _m.ps .fs .csv .mid .pdf
+.SUFFIXES: _2.abc _m2.ps _2.fs _2.csv _2.mid _2.pdf
 # output $@   -- input $<
-%.fs:  %.E
-	${MUSICOMP2ABC} --two --fluidsynth $< $@ \
-		|| (rm -f $@ ; exit 1)
+%.fs:   %.E
+	${MUSICOMP2ABC} ${MC_ARGS} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
+%_2.fs: %.E
+	${IMSCOMP} ${MC_ARGS} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
 %.csv:  %.E
-	${MUSICOMP2ABC} --midi1csv $< $@ \
-		|| (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --two --midi1csv $< $@ || (rm -f $@ ; exit 1)
+%_2.csv:        %.E
+	${IMSCOMP} ${MC_ARGS} --two --midi1csv $< $@ || (rm -f $@ ; exit 1)
 %.mid:  %.csv
-	csvmidi $< $@ \
-		|| (rm -f $@ ; exit 1)
+	csvmidi $< $@ || (rm -f $@ ; exit 1)
+%_2.mid:        %_2.csv
+	csvmidi $< $@ || (rm -f $@ ; exit 1)
+%.abc:  %.E
+	${MUSICOMP2ABC} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
+%_2.abc:        %.E
+	${IMSCOMP} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
+%_m.ps: %.abc
+	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) || (rm -f $@ ; exit 1)
+%_m2.ps:        %_2.abc
+	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) || (rm -f $@ ; exit 1)
+%.pdf:  %_m.ps
+	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
+%_2.pdf:        %_m2.ps
+	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
+%.E: %.gcs ../../instruments.include ${M} Makefile
+	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
+#-----------------------------------------------------------------------------
 %.wav:  %.mid
 	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser/GeneralUser.sf2 -K 128 $< \
 		|| (rm -f $@ ; exit 1)
-%.abc:  %.E
-	${MUSICOMP2ABC} --abc $< $@ \
-		|| (rm -f $@ ; exit 1)
-#-- %.ps:   %.abc
-#-- 	${YAPS} $< -o $@ -k \
-#-- 		|| (rm -f $@ ; exit 1)
-%_m.ps: %.abc
-	(${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@) \
-		|| (rm -f $@ ; exit 1)
-%.E: %.gcs ../../instruments.include
-	${CPP} $< -o $@ \
-		|| (rm -f $@ ; exit 1)
-#-----------------------------------------------------------------------------
-.PRECIOUS: %.A_abc
-.SUFFIXES: _A.ps .A_abc _m_A.ps
-# output $@   -- input $<
-%.A_abc:  %.E
-	${MUSICOMP2ABC} --abc $< $@
-#-- %_A.ps:   %.A_abc
-#-- 	${YAPS} $< -o $@ -k
-%_m_A.ps: %.A_abc
-	${ABCM2PS} -l -s 0.42 -M -b 1 $< -i -N 2 -j 1 ; mv Out.ps $@
-#-----------------------------------------------------------------------------
-As = 01 02 03 04 05 06 07 08 09 10 11 12
-w_A := ${words $(As)}
-s := $(shell seq 1 $(w_A))
-#-----------------------------------------------------------------------------
-define many_targets
-    help::
-	@echo "  a${word $1,${As}}    - Use '${SEPARATE} to create A.${word $1,${As}}, and yaps&abcm2ps for staff $1"
-    A.${word $1,${As}}: ${V}.E ${SEPARATE}
-	${SEPARATE}
-    .PHONY: a.${word $1,${As}}
-    a${word $1,${As}}: A.${word $1,${As}} a.${word $1,${As}}_A.ps a.${word $1,${As}}_m_A.ps
-	open a.${word $1,${As}}_A.ps a.${word $1,${As}}_m_A.ps
-    a.${word $1,${As}}.E: A.${word $1,${As}}
-	ln -sf A.${word $1,${As}} a.${word $1,${As}}.E
-endef
 #-----------------------------------------------------------------------------
 .PHONY: help
 help::
+	@echo "Example:"
+        @echo "  Use '${MUSICOMP2ABC} ${MC_ARGS} --midi1csv ${V4} to get ${V4}.abc."
+        @echo "  Use '${ABCM2PS} ${V4}.abc > ${V4}_m.ps'."
+        @echo "  Use '${PS2PDF} ${V4}_m.ps > ${V4}.pdf'."
+        @echo "  Use '${MUSICOMP2ABC} ${MC_ARGS} --fluidsynth ${V4} to get ${V4}.fs."
+	@echo ""
 	@echo "Targets:"
-	@echo "  clean  - Remove postscript (ps), csv, and mid files."
+	@echo "  all    - create music files for ${V4}."
+	@echo "  clean  - Remove postscript (ps), pdf, csv, and fs files."
 	@echo ""
-	@echo "  all    - create ${V}.abc from ${V} (via 'musicomp2abc')"
-	@echo "         - and ${V}.ps from ${V}.abc (via 'yaps')"
-	@echo "         - and Out.ps from ${V}.abc (via 'abcm2ps')"
-	@echo "         - and ${V}.mid from ${V} (via 'musicomp2abc --midicsv')"
-	@echo ""
+	@echo "  s1     - create ${V4}.abc, ${V4}_m.ps, and ${V4}.fs from ${V4}."
 #-----------------------------------------------------------------------------
 .PHONY: check
 check:
-	@echo "V=${V}"
-	@echo "MCOMP=${MCOMP}"
-	@echo "SEPARATE=${SEPARATE}"
+	@echo "V4=${V4}"
+	@echo "CPP=${CPP}"
 	@echo "MUSICOMP2ABC=${MUSICOMP2ABC}"
-#-- 	@echo "YAPS=${YAPS}"
+	@echo "IMSCOMP=${IMSCOMP}"
+	@echo "MC_ARGS=${MC_ARGS}"
 	@echo "ABCM2PS=${ABCM2PS}"
+	@echo "ABCM2PS_ARGS=${ABCM2PS_ARGS}"
+	@echo "PS2PDF=${PS2PDF}"
+#--	@echo "PAGES=${PAGES}"
+#--	@echo "MEASURES=${MEASURES}"
+#--	@echo "VOICES=${VOICES}"
+#--     @echo "WHICH=${WHICH}"
 #=============================================================================
-all: ${V}.mid ${V}.ps ${V}_m.ps ${V}.wav ${V}.fs
+#-- .PHONY: all         #-- There is a bug in gmake. I don't understand.
+all: s1
 #-----------------------------------------------------------------------------
-fs: ${V}.fs
-#=============================================================================
-#-- S21 = b21-orig
-#=============================================================================
-#-- s21:
-#-- 	${MCOMP} ${S21} vertical > s21
-#=============================================================================
+fs: ${V4}.fs ${V4}_2.fs
+#-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
-	rm -f *.csv *.mid *.fs
-	rm -f *.abc *.A_abc
-	rm -f *.wav
-	rm -f *.E
-	rm -f A.[0123]* B.[0123]* C.[0123]*
-	rm -f X X.v
+	rm -f ${V4}.{csv,mid,fs,pdf,abc,wav,E}
+	rm -f ${V4}_2.{csv,mid,fs,pdf,abc,wav,E}
 #-----------------------------------------------------------------------------
-$(foreach e,$(s),$(eval $(call many_targets,$(e))))
+.PHONY: s1
+s1: ${V4}.fs ${V4}.pdf      Makefile ${MUSICOMP2ABC}
+s1: ${V4}_2.fs ${V4}_2.pdf  Makefile ${IMSCOMP}
 #-----------------------------------------------------------------------------
 # End of Makefile
 #-----------------------------------------------------------------------------
