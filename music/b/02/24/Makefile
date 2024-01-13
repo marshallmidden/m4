@@ -59,10 +59,10 @@ MC_ARGS ?=
 .PHONY: help
 help::
 	@echo "Example:"
-        @echo "  Use '${MUSICOMP2ABC} ${MC_ARGS} --midi1csv ${V4} to get ${V4}.abc."
-        @echo "  Use '${ABCM2PS} ${V4}.abc > ${V4}_m.ps'."
-        @echo "  Use '${PS2PDF} ${V4}_m.ps > ${V4}.pdf'."
-        @echo "  Use '${MUSICOMP2ABC} ${MC_ARGS} --fluidsynth ${V4} to get ${V4}.fs."
+	@echo "  Use '${MUSICOMP2ABC} ${MC_ARGS} --midi1csv ${V4} to get ${V4}.abc."
+	@echo "  Use '${ABCM2PS} ${V4}.abc > ${V4}_m.ps'."
+	@echo "  Use '${PS2PDF} ${V4}_m.ps > ${V4}.pdf'."
+	@echo "  Use '${MUSICOMP2ABC} ${MC_ARGS} --fluidsynth ${V4} to get ${V4}.fs."
 	@echo ""
 	@echo "Targets:"
 	@echo "  all    - create music files for ${V4}."
