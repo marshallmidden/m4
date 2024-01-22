@@ -1,4 +1,13 @@
 #!/usr/bin/python3 -B
+# *--           "staff" in b2m4.hints --  "staff   10 violin1"        -- Parse.
+#       Need to loop through staves to get voices for STAFFNAME.
+# *-- new channel, set into staff_hint{STAFFNAME}.
+#
+# printout_gcs()        --  "staff   violin1:10,..."    -- loop
+#                           "clef    STAFFNAME xxx"     -- loop
+#                           "key     STAFFNAME xxx"     -- loop
+#                           "instrument STAFFNAME xxx"  -- loop
+#                           "STAFFNAME: 3c4, 3e4, ..."  -- loop first, then do chords.
 # ----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 # ----------------------------------------------------------------------------
@@ -136,6 +145,8 @@ global channels                     # Number of channels (instruments).
 channels = None
 global new_channels
 new_channels = None
+global last_fs_channel
+last_fs_channel = None
 # ----------------------------------------------------------------------------
 MAXCHANNELS = 256
 # ----------------------------------------------------------------------------
@@ -251,6 +262,8 @@ global array_of_original_lines      # For input, have an array of the original l
 array_of_original_lines = []
 # ----------------------------------------------------------------------------
 # These are from the Hints file, and are for printing out the GCS source.
+global staff_hint                   # hint staff name to channel number.
+staff_hint = {}
 global bars_measures_hint           # hint number of bars per measure.
 bars_measures_hint = {}
 global clef_channel_measures_hint   # hint clefs by ChannelNumber and measure.
@@ -1453,6 +1466,7 @@ def meter_readable(strg1, strg2):
 # ----------------------------------------------------------------------------
 def process_echo_lines(q):
     global new_channels
+    global last_fs_channel
     global MIDICLICKSPERQUARTER
     global titles
     global running_time
@@ -1472,7 +1486,7 @@ def process_echo_lines(q):
             return
         # fi
         r = q[8:-1].split()
-        new_channels = int(r[0])                # Remember 0 is the first one.
+        last_fs_channel = new_channels = int(r[0])                # Remember 0 is the first one.
         MIDICLICKSPERQUARTER = int(r[1])
         if meter == []:
             meter.append('4/4')
@@ -1629,6 +1643,7 @@ def process_noteon(r):
     global channels
     global new_channels
     global running_time
+    global staff_hint
     global bufs_notes_channel           # Notes for chords on this channel.
     global bufs_notes                   # Midi note number. An array indexed by measure, channel.
     global bufs_notes_start             # calculated clicks to start of each note for a channel.
@@ -1718,7 +1733,33 @@ def process_noteon(r):
             if cn in xpose_channel:
                 xpose_channel[channels] = xpose_channel[cn]
             # fi
-            ch = channels
+            ch = channels                               # New channel
+            flag_channel = False
+            flag_channel_s = None
+            flag_new = False
+            flag_new_s = None
+#--             print_debug(f'process_noteon - staff_hint={staff_hint}')
+            for s in staff_hint:
+#--                 print_debug(f'process_noteon - s={s}')
+                for v in staff_hint[s]:
+#--                     print_debug(f'process_noteon - v={v} type(v)={type(v)} type(ch)={type(ch)} type(cn)={type(cn)}')
+                    if v == cn:
+                        flag_channel = True
+                        flag_channel_s = s
+                    # fi
+                    if v == ch:
+                        flag_new = True
+                        flag_new_s = s
+                    # fi
+                # rof
+            # rof
+#--             print_debug(f'process_noteon - cn={cn} ch={ch} flag_channel={flag_channel} flag_channel_s={flag_channel_s} flag_new={flag_new} flag_new_s={flag_new_s}')
+            if flag_channel_s is not None:
+                staff_hint[flag_channel_s].append(ch)
+            # fi
+            if flag_new_s is not None:
+                staff_hint[flag_new_s].append(cn)
+            # fi
         # fi
     # fi
 
@@ -2159,46 +2200,51 @@ def print_debug_internal_1(stg):
 # End of print_debug_internal_1
 
 # ============================================================================
-#-- def print_debug_hints():
-#--     global pages_measures_hint
-#--     global bars_measures_hint
-#--     global clef_channel_measures_hints
-#--     global instrument_channel_measures_hint
-#--     global key_channel_measures_hint
-#--     global meters_measures_hint
-#--     global meters_values_hint
-#--
+def print_debug_hints():
+    global staff_hint
+    global pages_measures_hint
+    global bars_measures_hint
+    global clef_channel_measures_hints
+    global instrument_channel_measures_hint
+    global key_channel_measures_hint
+    global meters_measures_hint
+    global meters_values_hint
+
+    for s in staff_hint:
+        print_debug(f'staff hint: staff name {s} = {staff_hint[s]}')
+    # rof
+
 #--     for b in pages_measures_hint:
 #--         print_debug(f'page hint: measure {b} = {pages_measures_hint[b]}')
 #--     # rof
-#--
+#-- 
 #--     for b in bars_measures_hint:
 #--         print_debug(f'bar hint: measure {b} = {bars_measures_hint[b]}')
 #--     # rof
-#--
+#-- 
 #--     for ch in clef_channel_measures_hint:
 #--         for m in clef_channel_measures_hint[ch]:
 #--             print_debug(f'clef hint: channel {ch} measure {m} = {clef_channel_measures_hint[ch][m]}')
 #--         # rof
 #--     # rof
-#--
+#-- 
 #--     for ch in instrument_channel_measures_hint:
 #--         for m in instrument_channel_measures_hint[ch]:
 #--             print_debug(f'instrument hint: channel {ch} measure {m} = {instrument_channel_measures_hint[ch][m]}')
 #--         # rof
 #--     # rof
-#--
+#-- 
 #--     for ch in key_channel_measures_hint:
 #--         for m in key_channel_measures_hint[ch]:
 #--             print_debug(f'key hint: channel {ch} measure {m} = {key_channel_measures_hint[ch][m]}')
 #--         # rof
 #--     # rof
-#--
+#-- 
 #--     for m in meters_measures_hint:
 #--         print_debug(f'meter hint: measure {m} = {meters_measures_hint[m]} ... {meters_values_hint[m]}')
 #--     # rof
-#--     return
-#-- # End of print_debug_hints
+    return
+# End of print_debug_hints
 
 # ============================================================================
 is_float_number = 0
@@ -2825,6 +2871,48 @@ drum_sounds = {
     'Mute Triangle'.lower(): 80,
     'Open Triangle'.lower(): 81,
 }
+
+# ----------------------------------------------------------------------------
+# staff   7 violin2         $$ Channel 7 is in a staff and named violin2.
+
+def do_staff(t_args):
+    global staff_hint
+
+    if t_args is None or t_args == '':
+        print_error("staff does not have an expression to process")
+        return
+    # fi
+
+    vargs = get_channel_measure_other(t_args, 'staff')
+    if vargs is None:
+        return
+    # fi
+    if len(vargs) > 2:
+        print_error("staff format is channel numbers followed by staff name")
+        return
+    # fi
+    chn = separate_args(str(vargs[0]))          # Get channel numbers.
+
+    n = vargs[1]                                # staff name
+    if n not in staff_hint:
+        staff_hint[n] = []
+    # fi
+
+    for ch in chn:
+        f1, type_error = is_float(ch, is_float_number, False)
+        if type_error is not None:
+            print_error(f"bars error - {type_error}")
+            return
+        # fi
+        if f1 is None:
+            print_error("bars argument as a calculation did not return a value")
+            return
+        # fi
+        f1 = round(f1)
+        staff_hint[n].append(f1)
+    # rof
+    return
+# End of do_staff
 
 # ----------------------------------------------------------------------------
 # bars    7                 $$ Group the next 7 bars on one staff line.
@@ -3469,6 +3557,7 @@ hint_commands = {
              'meter'      : do_meter,
              'middlec'    : do_middle_c,
              'page'       : do_page,
+             'staff'      : do_staff,
              'title'      : do_title,
              'transpose'  : do_xpose,
              'xpose'      : do_xpose,
@@ -3733,6 +3822,7 @@ def readhintfile():
 # ----------------------------------------------------------------------------
 def printout_gcs():
     global which_file_output
+    global staff_hint
     global titles
     global middle_c
     global xpose_channel
@@ -3741,6 +3831,7 @@ def printout_gcs():
     global bars_measures_hint
     global meters_measures_hint
     global channels
+    global last_fs_channel
     global clef_channel_measures_hint
     global measures_instrument
 
@@ -3771,6 +3862,18 @@ def printout_gcs():
     print_output(f'* ----------------------------------------------------------------------------')
     print_output(f'voice   {channels + 1}')
     print_output(f'* ----------------------------------------------------------------------------')
+    for s in staff_hint:
+        strg = ''
+        for cs in staff_hint[s]:
+            if strg != '':
+                strg = strg + ','
+            # fi
+            strg = strg + f'{cs}'
+        # rof
+        print_output(f'staff   {s}:{strg}')
+    # rof
+    print_output(f'* ----------------------------------------------------------------------------')
+    # NOTDONEYET - convert xpose to staff.
     for x in xpose_channel:
         print_output(f'xpose   {x+1} {0 - xpose_channel[x]}')
     # rof
@@ -3782,22 +3885,22 @@ def printout_gcs():
         cn = cn + 1
     # rof
 
-    cn = 0
-    while cn <= channels:
-        if cn in bufs_notes_channel:
-            sg = '('
-            for x in bufs_notes_channel[cn]:
-                if sg != '(':
-                    sg = sg + ' '
-                # fi
-                sg = sg + str(x + 1)
-            # rof
-            print_output(f'* v[{cn+1}]: {sg})')
-        else:
-            print_output('* cn={cn} not in bufs_notes_channel')
-        # fi
-        cn = cn + 1
-    # rof
+#--     cn = 0
+#--     while cn < last_fs_channel:
+#--         if cn in bufs_notes_channel:
+#--             sg = '('
+#--             for x in bufs_notes_channel[cn]:
+#--                 if sg != '(':
+#--                     sg = sg + ' '
+#--                 # fi
+#--                 sg = sg + str(x + 1)
+#--             # rof
+#--             print_output(f'* v[{cn+1}]: {sg})')
+#--         else:
+#--             print_output('* cn={cn} not in bufs_notes_channel')
+#--         # fi
+#--         cn = cn + 1
+#--     # elihw
 
     for m in range(1, last_measure + 1):
         print_output(f'* ----------------------------------------------------------------------------')
@@ -3818,7 +3921,7 @@ def printout_gcs():
         # fi
         # Clefs are in hints file only.
         cn = 0
-        while cn <= channels:
+        while cn <= channels:                   # NOTDONEYET - last_fs_channel
             if cn in clef_channel_measures_hint and m in clef_channel_measures_hint[cn]:
                 if cn not in last_clef or clef_channel_measures_hint[cn][m] != last_clef[cn]:
                     print_output(f'clef    {cn + 1} {clef_channel_measures_hint[cn][m]}')
@@ -3830,7 +3933,7 @@ def printout_gcs():
 
         # Keys are calculated, unlike hints.
         cn = 0
-        while cn <= channels:
+        while cn <= channels:                   # NOTDONEYET - last_fs_channel
             if cn in measures_key and m in measures_key[cn]:
                 if cn not in last_key or measures_key[cn][m] != last_key[cn]:
                     if measures_key[cn][m] != 0:
@@ -3852,7 +3955,7 @@ def printout_gcs():
 
         # Instrument locations are positioned in measures.
         cn = 0
-        while cn <= channels:
+        while cn <= channels:                   # NOTDONEYET - last_fs_channel
             if cn in measures_instrument and m in measures_instrument[cn]:
                 if cn not in last_instrument or measures_instrument[cn][m] != last_instrument[cn]:
                     if measures_instrument[cn][m] != 0:
@@ -3865,7 +3968,7 @@ def printout_gcs():
         # elihw
 
         cn = 0
-        while cn <= channels:
+        while cn <= channels:                   # NOTDONEYET - last_fs_channel
             n = last_voice_n[cn]
             strg = f'v{cn + 1}: '
             totalline = ''
@@ -3879,8 +3982,6 @@ def printout_gcs():
                 if flag:
                     strg = strg + ','
                 # fi
-# NOTDONEYET
-#   v2: r4, 3c4/3, 3d?, 3e?, 3f4     -> r4, s3(3c,3d,3e)4, 3f4
                 strg = strg + f' {bufs_gcs_note[cn][n]}{bufs_gcs_length[cn][n]}'
                 n = n + 1
                 flag = True
@@ -3940,6 +4041,7 @@ def main():
     linecount = 0
     line_from_file = which_file_hint
     readhintfile()
+
 #--     print_debug_hints()
 
     linecount = 0
@@ -3983,7 +4085,7 @@ def main():
 
 #--     print_debug_internal_1('NEARLY-DONE')
 
-    printable_measures()                # NOTDONEYET
+    printable_measures()                # Fix sequences to be printable - s3(3c,4c,5c)4
 
 #--     print_debug_internal_1('DONE')
 
