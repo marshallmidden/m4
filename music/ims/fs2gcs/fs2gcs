@@ -1,9 +1,11 @@
 #!/usr/bin/python3 -B
 # *--           "staff" in b2m4.hints --  "staff   10 violin1"        -- Parse.
-#       Need to loop through staves to get voices for STAFFNAME.
+# *--       Need to loop through staves to get voices for STAFFNAME.
 # *-- new channel, set into staff_hint{STAFFNAME}.
 #
-# printout_gcs()        --  "staff   violin1:10,..."    -- loop
+# printout_gcs() --
+# *                         "staff   violin1:10,..."    -- loop
+# *                         "xpose   STAFFNAME xxx"     -- loop
 #                           "clef    STAFFNAME xxx"     -- loop
 #                           "key     STAFFNAME xxx"     -- loop
 #                           "instrument STAFFNAME xxx"  -- loop
@@ -1755,10 +1757,10 @@ def process_noteon(r):
             # rof
 #--             print_debug(f'process_noteon - cn={cn} ch={ch} flag_channel={flag_channel} flag_channel_s={flag_channel_s} flag_new={flag_new} flag_new_s={flag_new_s}')
             if flag_channel_s is not None:
-                staff_hint[flag_channel_s].append(ch)
+                staff_hint[flag_channel_s][ch] = True
             # fi
             if flag_new_s is not None:
-                staff_hint[flag_new_s].append(cn)
+                staff_hint[flag_new_s][cn] = True
             # fi
         # fi
     # fi
@@ -2204,7 +2206,7 @@ def print_debug_hints():
     global staff_hint
     global pages_measures_hint
     global bars_measures_hint
-    global clef_channel_measures_hints
+    global clef_channel_measures_hint
     global instrument_channel_measures_hint
     global key_channel_measures_hint
     global meters_measures_hint
@@ -2895,7 +2897,7 @@ def do_staff(t_args):
 
     n = vargs[1]                                # staff name
     if n not in staff_hint:
-        staff_hint[n] = []
+        staff_hint[n] = {}
     # fi
 
     for ch in chn:
@@ -2909,7 +2911,7 @@ def do_staff(t_args):
             return
         # fi
         f1 = round(f1)
-        staff_hint[n].append(f1)
+        staff_hint[n][f1] = True
     # rof
     return
 # End of do_staff
@@ -3820,6 +3822,229 @@ def readhintfile():
 # End of readhintfile
 
 # ----------------------------------------------------------------------------
+def determine_which_staffs():
+    global staff_hint
+    global channels
+    global bufs_notes_channel
+
+#--     print_debug(f'determine_which_staffs - channels={channels} new_channels={new_channels} last_fs_channel={last_fs_channel}')
+#--     print_debug(f'determine_which_staffs - bufs_notes_channel={bufs_notes_channel}')
+
+    channels_needed = {}
+
+    cn = 0
+    while cn <= channels:
+        if cn in bufs_notes and bufs_notes[cn] != []:
+            channels_needed[cn] = True
+        # fi
+#--         print_debug(f'bufs_notes_channel[{cn}]={bufs_notes_channel[cn]}')
+        cn = cn + 1
+    # elihw
+
+#--     print_debug(f'#1 channels_needed={channels_needed}')
+
+#--         for bc in bufs_notes_channel[cn]:
+#--             channels_needed[bc] = True
+#--             print_debug(f'bc={bc}')
+#--         # rof
+
+#--     print_debug(f'#A staff_hint={staff_hint}')
+
+    for s in staff_hint:
+        for cn in staff_hint[s]:
+            if cn in channels_needed:
+                channels_needed[cn] = False         # Good, staff channel in channels_needed.
+            # fi
+        # rof
+    # rof
+
+#--     print_debug(f'#2 channels_needed={channels_needed}')
+
+    # Delete channel from staff_hint.
+
+    # See which channels are NOT in any staffs?
+#--     print_debug(f'determine_which_staffs - channels_needed={channels_needed}')
+    for cn in channels_needed:
+        if channels_needed[cn]:
+#--             print_stderr(f"determine_which_staffs - channel {cn} not in any staff, creating staff_{cn + 1}")
+#--             print_stderr(f"    - bufs_notes[{cn}]={bufs_notes[cn]}")
+            q = []
+            for bc in bufs_notes_channel[cn]:
+                q.append(bc)
+                channels_needed[bc] = False         # Good, staff channel in channels_needed.
+            # rof
+            staff_hint[f'staff_{cn + 1}'] = q
+        # fi
+    # elihw
+#--     print_debug(f'determine_which_staffs - staff_hint={staff_hint}')
+    return
+# End of determine_which_staffs
+
+# ----------------------------------------------------------------------------
+def output_staves():
+    global staff_hint
+
+    for s in staff_hint:
+        strg = ''
+        for cs in staff_hint[s]:
+            if strg != '':
+                strg = strg + ','
+            # fi
+            strg = strg + f'{cs}'
+        # rof
+        print_output(f'staff   {s}:{strg}')
+    # rof
+    return
+# End of output_staves
+
+# ----------------------------------------------------------------------------
+def output_xpose():
+    global staff_hint
+    global xpose_channel
+
+    for s in staff_hint:
+        count = 0
+        first = None
+        which = None
+        for cs in staff_hint[s]:
+            if cs in xpose_channel:
+                if first is None:
+                    first = cs
+                    which = xpose_channel[cs]
+                elif xpose_channel[cs] != which:
+                    print_error(f'xpose for staff {s} has different xpose for channel {cs} ({xpose_channel[cs]}) and {first} ({which})')
+                # fi
+                count = count + 1
+            elif which is not None:
+                print_error(f'xpose for staff {s} has no xpose for channel {cs} != channel {first} ({which})')
+            # fi
+        # rof
+        if count == 0:
+            pass
+        elif count != len(staff_hint[s]):
+            print_error(f'xpose for staff {s} does not have enough channels set: {staff_hint[s]} has only {count}')
+        elif which is not None:
+            print_output(f'xpose   {s} {which}')
+        #
+    # rof
+    return
+# End of output_xpose
+
+# ----------------------------------------------------------------------------
+def output_clefs(m):
+    global channels
+    global clef_channel_measures_hint
+    global last_clef
+    global staff_hint
+
+    for s in staff_hint:
+        count = 0
+        first = None
+        which = None
+        for cs in staff_hint[s]:
+            if cs in clef_channel_measures_hint and m in clef_channel_measures_hint[cs]:
+                if first is None:
+                    first = cs
+                    which = clef_channel_measures_hint[cs][m]
+                elif clef_channel_measures_hint[cs][m] != which:
+                    print_error(f'clef for staff {s} has different clef for channel {cs} measure {m} ({clef_channel_measures_hint[cs][m]}) and {first} ({which})')
+                # fi
+                count = count + 1
+            elif which is not None:
+                print_error(f'clef for staff {s} has no clef_channel_measures_hint for channel {cs} measure {m} != channel {first} ({which})')
+            # fi
+        # rof
+        if count == 0:
+            pass
+        elif count != len(staff_hint[s]):
+            print_error(f'clef for staff {s} does not have enough channels set: {staff_hint[s]} has only {count}')
+        elif which is not None:
+            if cs not in last_clef or which != last_clef[cs]:
+                print_output(f'clef    {s} {which}')
+            # fi
+            last_clef[cs] = which
+        #
+    # rof
+    return
+# End of output_clefs
+
+# ----------------------------------------------------------------------------
+def output_keys(m):
+    global channels
+    global measures_key
+    global last_key
+    global staff_hint
+
+    for s in staff_hint:
+        count = 0
+        first = None
+        which = None
+        for cs in staff_hint[s]:
+            if cs in measures_key and m in measures_key[cs]:
+                if first is None:
+                    first = cs
+                    which = measures_key[cs][m]
+                elif measures_key[cs][m] != which:
+                    print_error(f'key for staff {s} has different key for channel {cs} measure {m} ({measures_key[cs][m]}) and {first} ({which})')
+                # fi
+                count = count + 1
+            elif which is not None:
+                print_error(f'key for staff {s} has no measures_key for channel {cs} measure {m} != channel {first} ({which})')
+            # fi
+        # rof
+        if count == 0:
+            pass
+        elif count != len(staff_hint[s]):
+            print_error(f'key for staff {s} does not have enough channels set: {staff_hint[s]} has only {count}')
+        elif which is not None:
+            if cs not in last_key or which != last_key[cs]:
+                print_output(f'key     {s} {which}')
+            # fi
+            last_key[cs] = which
+        #
+    # rof
+    return
+# End of output_keys
+
+# ----------------------------------------------------------------------------
+def output_instruments(m):
+    global channels
+    global measures_instrument
+    global last_instrument
+    global staff_hint
+
+    for s in staff_hint:
+        count = 0
+        first = None
+        which = None
+        for cs in staff_hint[s]:
+            if cs in measures_instrument and m in measures_instrument[cs]:
+                if first is None:
+                    first = cs
+                    which = measures_instrument[cs][m]
+                elif measures_instrument[cs][m] != which:
+                    print_error(f'instrument for staff {s} has different instrument for channel {cs} measure {m} ({measures_instrument[cs][m]}) and {first} ({which})')
+                # fi
+                count = count + 1
+            elif which is not None:
+                print_error(f'instrument for staff {s} has no measures_instrument for channel {cs} measure {m} != channel {first} ({which})')
+            # fi
+        # rof
+        if count == 0:
+            pass
+        elif count != len(staff_hint[s]):
+            print_error(f'instrument for staff {s} does not have enough channels set: {staff_hint[s]} has only {count}')
+        elif which is not None:
+            if cs not in last_instrument or which != last_instrument[cs]:
+                print_output(f'instrument {s} {which}')
+            # fi
+            last_instrument[cs] = which
+        #
+    # rof
+    return
+# End of output_instruments
+
+# ----------------------------------------------------------------------------
 def printout_gcs():
     global which_file_output
     global staff_hint
@@ -3832,7 +4057,6 @@ def printout_gcs():
     global meters_measures_hint
     global channels
     global last_fs_channel
-    global clef_channel_measures_hint
     global measures_instrument
 
     global bufs_notes
@@ -3842,13 +4066,16 @@ def printout_gcs():
     global bufs_gcs_note
     global bufs_gcs_length
 
+    global last_clef
+    last_clef = {}
+    global last_key
+    last_key = {}
+    global last_instrument
+    last_instrument = {}
+
     last_page = ''
     last_bar = ''
     last_meter = ''
-
-    last_clef = {}
-    last_instrument = {}
-    last_key = {}
 
     print_output(f'* Start of file {which_file_output}')
     print_output(f'* ----------------------------------------------------------------------------')
@@ -3862,21 +4089,9 @@ def printout_gcs():
     print_output(f'* ----------------------------------------------------------------------------')
     print_output(f'voice   {channels + 1}')
     print_output(f'* ----------------------------------------------------------------------------')
-    for s in staff_hint:
-        strg = ''
-        for cs in staff_hint[s]:
-            if strg != '':
-                strg = strg + ','
-            # fi
-            strg = strg + f'{cs}'
-        # rof
-        print_output(f'staff   {s}:{strg}')
-    # rof
+    output_staves()
     print_output(f'* ----------------------------------------------------------------------------')
-    # NOTDONEYET - convert xpose to staff.
-    for x in xpose_channel:
-        print_output(f'xpose   {x+1} {0 - xpose_channel[x]}')
-    # rof
+    output_xpose()
 
     last_voice_n = {}
     cn = 0
@@ -3884,23 +4099,6 @@ def printout_gcs():
         last_voice_n[cn] = 0
         cn = cn + 1
     # rof
-
-#--     cn = 0
-#--     while cn < last_fs_channel:
-#--         if cn in bufs_notes_channel:
-#--             sg = '('
-#--             for x in bufs_notes_channel[cn]:
-#--                 if sg != '(':
-#--                     sg = sg + ' '
-#--                 # fi
-#--                 sg = sg + str(x + 1)
-#--             # rof
-#--             print_output(f'* v[{cn+1}]: {sg})')
-#--         else:
-#--             print_output('* cn={cn} not in bufs_notes_channel')
-#--         # fi
-#--         cn = cn + 1
-#--     # elihw
 
     for m in range(1, last_measure + 1):
         print_output(f'* ----------------------------------------------------------------------------')
@@ -3920,30 +4118,10 @@ def printout_gcs():
             # fi
         # fi
         # Clefs are in hints file only.
-        cn = 0
-        while cn <= channels:                   # NOTDONEYET - last_fs_channel
-            if cn in clef_channel_measures_hint and m in clef_channel_measures_hint[cn]:
-                if cn not in last_clef or clef_channel_measures_hint[cn][m] != last_clef[cn]:
-                    print_output(f'clef    {cn + 1} {clef_channel_measures_hint[cn][m]}')
-                    last_clef[cn] = clef_channel_measures_hint[cn][m]
-                # fi
-            # fi
-            cn = cn + 1
-        # elihw
+        output_clefs(m)
 
         # Keys are calculated, unlike hints.
-        cn = 0
-        while cn <= channels:                   # NOTDONEYET - last_fs_channel
-            if cn in measures_key and m in measures_key[cn]:
-                if cn not in last_key or measures_key[cn][m] != last_key[cn]:
-                    if measures_key[cn][m] != 0:
-                        print_output(f'key {cn + 1} {measures_key[cn][m]}')
-                    # fi
-                    last_key[cn] = measures_key[cn][m]
-                # fi
-            # fi
-            cn = cn + 1
-        # elihw
+        output_keys(m)
 
         # Meters are calculated, unlike hints.
         if m in measures_meter:
@@ -3954,44 +4132,38 @@ def printout_gcs():
         # fi
 
         # Instrument locations are positioned in measures.
-        cn = 0
-        while cn <= channels:                   # NOTDONEYET - last_fs_channel
-            if cn in measures_instrument and m in measures_instrument[cn]:
-                if cn not in last_instrument or measures_instrument[cn][m] != last_instrument[cn]:
-                    if measures_instrument[cn][m] != 0:
-                        print_output(f'instrument {cn + 1} {measures_instrument[cn][m]}')
-                    # fi
-                    last_instrument[cn] = measures_instrument[cn][m]
-                # fi
-            # fi
-            cn = cn + 1
-        # elihw
+        output_instruments(m)
 
-        cn = 0
-        while cn <= channels:                   # NOTDONEYET - last_fs_channel
-            n = last_voice_n[cn]
-            strg = f'v{cn + 1}: '
+        # NOTDONEYET - staves (staff) instead of channel loop.
+        for s in staff_hint:
             totalline = ''
-            flag = False
-            while n < len(bufs_notes[cn]) and bufs_notes_start[cn][n] < measures_clicks_start[m] + measures_clicks_length[m]:
-                if len(strg) > 80 - 6 + 24:
-                    totalline = totalline + strg + '\n'
-                    strg = f'v{cn + 1}: '
-                    flag = False
+            strg = ''
+            for cs in staff_hint[s]:
+                n = last_voice_n[cs]
+                flag = False
+                strg = f'  v{cs + 1}:'
+                while n < len(bufs_notes[cs]) and bufs_notes_start[cs][n] < measures_clicks_start[m] + measures_clicks_length[m]:
+                    if len(strg) > 80 - 8:
+                        totalline = totalline + strg + '\n'
+                        strg = f'  v{cs + 1}: '
+                        flag = False
+                    # fi
+                    if flag:
+                        strg = strg + ','
+                    # fi
+                    strg = strg + f' {bufs_gcs_note[cs][n]}{bufs_gcs_length[cs][n]}'
+                    n = n + 1
+                    flag = True
+                # elihw
+                last_voice_n[cs] = n
+                if strg != '':
+                    totalline = totalline + strg + "\n"
                 # fi
-                if flag:
-                    strg = strg + ','
-                # fi
-                strg = strg + f' {bufs_gcs_note[cn][n]}{bufs_gcs_length[cn][n]}'
-                n = n + 1
-                flag = True
-            # elihw
-            last_voice_n[cn] = n
+            # rof
             if totalline != '' or flag:
-                print_output(totalline + strg)
+                print_output(f'{s}:\n' + totalline)
             # fi
-            cn = cn + 1
-        # elihw
+        # rof
     # rof
     print_output(f'* ----------------------------------------------------------------------------')
     print_output('cstop*')
@@ -4015,6 +4187,7 @@ def main():
     global errors_happened
     global warnings_happened
     global array_of_original_lines
+    global staff_hint
 
     if args.rest:
         if len(args.rest) >= 1:             # Input.
@@ -4088,6 +4261,8 @@ def main():
     printable_measures()                # Fix sequences to be printable - s3(3c,4c,5c)4
 
 #--     print_debug_internal_1('DONE')
+    determine_which_staffs()
+
 
     printout_gcs()                      # Create the gcs file.
 
