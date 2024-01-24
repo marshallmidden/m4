@@ -4063,7 +4063,7 @@ def output_instruments(m):
 # End of output_instruments
 
 # ----------------------------------------------------------------------------
-def output_single_notes(s, cs, notes):
+def output_single_channel(s, cs, notes):
     global bufs_gcs_note
     global bufs_gcs_length
     global bufs_suffix
@@ -4089,7 +4089,117 @@ def output_single_notes(s, cs, notes):
     if totalline != '':
         print_output(totalline)
     # fi
-# End of output_single_notes
+# End of output_single_channel
+
+# ----------------------------------------------------------------------------
+# lth = get_length_fraction(bufs_gcs_length[ch][n])
+def get_length_fraction(strg):
+    global midi_2_note_lengths
+    global midi_2_note_lengths_dotted
+    global midi_2_note_lengths_double_dotted
+
+#--     print_debug(f'type(strg)={type(strg)} strg={strg}')
+#--     print_debug(f'midi_2_note_lengths={midi_2_note_lengths}')
+
+    for ml in midi_2_note_lengths:
+        if strg == midi_2_note_lengths[ml][0]:
+            return midi_2_note_lengths[ml][1]
+        # fi
+    # rof
+    for ml in midi_2_note_lengths_dotted:
+        if strg == midi_2_note_lengths_dotted[ml][0]:
+            return midi_2_note_lengths_dotted[ml][1]
+        # fi
+    # rof
+    for ml in midi_2_note_lengths_double_dotted:
+        if strg == midi_2_note_lengths_double_dotted[ml][0]:
+            return midi_2_note_lengths_double_dotted[ml][1]
+        # fi
+    # rof
+    print_debug(f'get_length_fraction - unexpected length of "{strg}"')
+    print_die(f'get_length_fraction - unexpected length of "{strg}"')
+# End of get_length_fraction
+
+# ----------------------------------------------------------------------------
+# s = staff
+# ch_with_notes is array of channels with notes in them (i.e. not all rests).
+# notes is array of indexes into bufs_notes(etc).
+
+def output_real_chords(s, ch_with_notes, notes):
+    global bufs_gcs_note
+    global bufs_gcs_length
+    global bufs_suffix
+
+    print_debug(f'output_real_chords - {s}: ch_with_notes={ch_with_notes} len(ch_with_notes)={len(ch_with_notes)}')
+    # Want to slowly go through ch_with_notes, finding shortest note(s) and outputting them.
+    # If only 1, then do not chord them (i.e. no [] around them).
+    # If two or more start at same time, then [] around them.
+    # Then increment rt (running_time) by shortest note just output, and repeat until none left.
+
+    first = ch_with_notes[0]
+    whereat = {}
+    for ch in ch_with_notes:
+        whereat[ch] = notes[ch][0]          # Next note for channel/voice to do.
+    # rof
+
+    rt = bufs_notes_start[first][0]         # Running time is that of first note.
+    strg = ''
+
+    while True:
+        # count notes at current time to start.
+        start_these = []
+        shortest_note = 8589934592
+        for ch in ch_with_notes:
+            if whereat[ch] <= rt:
+                start_these.append(ch)
+                n = whereat[ch]
+                l = bufs_notes_end[ch][n] - bufs_notes_start[ch][n]
+                if shortest_note < l:
+                    shortest_note = l
+                # fi
+            # fi
+        # rof
+        if len(start_these) == 0:
+            print_die('output_real_chords - did not find any starting')
+        # fi
+        if len(start_these) != 1:           # Start chord
+            strg = strg + '['
+            flag = False                    # No comma.
+        elif strg == '':
+            flag = False                    # No comma.
+        elif strg[-1] == ']':
+            flag = False                    # No comma.
+        else:
+            flag = True                     # comma.
+        # fi
+
+        for ch in start_these:
+            if flag:
+                strg = strg + ','
+            # fi
+            # A space if length is 4 or longer (quarter note).
+            n = whereat[ch]
+            print_debug(f'ch={ch} n={n} {bufs_gcs_note[ch][n]:2} {bufs_gcs_length[ch][n]:3}')
+            l = bufs_gcs_length[ch][n]
+            lth = get_length_fraction(l)
+            if lth >= 0.25:
+                strg = strg + ' '
+            # fi
+            strg = strg + f'{bufs_gcs_note[ch][n]}{bufs_gcs_length[ch][n]}{bufs_suffix[ch][n]}'
+            flag = True
+        # rof
+        if len(start_these) != 1:           # Start chord
+            strg = strg + ']'
+        # fi
+        print(f'output_real_chords - strg="{strg}"')
+        print_die('NOTDONEYET - increment time, and knowing when to quit.')
+    # elihw
+
+        for n in notes[ch]:
+            print_debug(f'     ch={ch:2} n={n:5} note={bufs_notes[ch][n]:2} start={bufs_notes_start[ch][n]:5} end={bufs_notes_end[ch][n]:5} velocity={bufs_notes_velocity[ch][n]:5} gcs - suffix={bufs_suffix[ch][n]:2} length={bufs_gcs_length[ch][n]:3} note={bufs_gcs_note[ch][n]:3}')
+        # rof
+    # rof
+# End of output_real_chords
 
 # ----------------------------------------------------------------------------
 def output_chords(m, s, notes):
@@ -4118,16 +4228,12 @@ def output_chords(m, s, notes):
         # rof
     # fi
     if len(ch_with_notes) == 1:               # no chord.
-        output_single_notes(s, ch_with_notes[0], notes)
+        output_single_channel(s, ch_with_notes[0], notes)
         return
     # fi
         
-    print_debug(f'output_chords - ch_with_notes={ch_with_notes} len(ch_with_notes)={len(ch_with_notes)}')
-    for ch in notes:
-        for n in notes[ch]:
-            print_debug(f'     ch={ch:2} n={n:5} note={bufs_notes[ch][n]:2} start={bufs_notes_start[ch][n]:5} end={bufs_notes_end[ch][n]:5} velocity={bufs_notes_velocity[ch][n]:5} gcs - suffix={bufs_suffix[ch][n]:2} length={bufs_gcs_length[ch][n]:3} note={bufs_gcs_note[ch][n]:3}')
-        # rof
-    # rof
+    # Do the voices/channels that are not all rests.
+    output_real_chords(s, ch_with_notes, notes)
 # End of output_chords
 
 # ----------------------------------------------------------------------------
