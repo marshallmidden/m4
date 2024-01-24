@@ -6,10 +6,11 @@
 # printout_gcs() --
 # *                         "staff   violin1:10,..."    -- loop
 # *                         "xpose   STAFFNAME xxx"     -- loop
-#                           "clef    STAFFNAME xxx"     -- loop
-#                           "key     STAFFNAME xxx"     -- loop
-#                           "instrument STAFFNAME xxx"  -- loop
+# *                         "clef    STAFFNAME xxx"     -- loop
+# *                         "key     STAFFNAME xxx"     -- loop
+# *                         "instrument STAFFNAME xxx"  -- loop
 #                           "STAFFNAME: 3c4, 3e4, ..."  -- loop first, then do chords.
+# 't', etc. in suffixes. Does 's' work? Does deleting a 'buf_note' move suffix correctly?
 # ----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 # ----------------------------------------------------------------------------
@@ -425,6 +426,7 @@ def insert_rest(ch, n, start, end):
         bufs_gcs_length[ch].append('')
         bufs_gcs_note[ch].append('')
         bufs_suffix[ch].append('')
+#--         print_debug(f'insert_rest - ch={ch} first note.')
         return
     # fi
     bufs_notes_start[ch].insert(n, start)
@@ -446,6 +448,7 @@ def insert_rest(ch, n, start, end):
     bufs_gcs_length[ch].insert(n, '')
     bufs_gcs_note[ch].insert(n, '')
     bufs_suffix[ch].insert(n, '')
+#--     print_debug(f'insert_rest - ch={ch} insert n={n}.')
     return
 # End of insert_rest
 
@@ -482,8 +485,10 @@ def short_note_and_split_it(ch, n, note_ends_here, lth_first_note):
     bufs_cc_end[ch][91].insert(n, bufs_cc_end[ch][91][n])
     if bufs_notes[ch][n] != 0:
         bufs_suffix[ch].insert(n, 't')
+#--         print_debug(f'short_note_and_split_it - ch={ch} n={n} bufs_suffix={bufs_suffix[ch][n]}')
     else:
         bufs_suffix[ch].insert(n, '')
+#--         print_debug(f'short_note_and_split_it - ch={ch} insert n={n}.')
     # fi
     return
 # End of short_note_and_split_it
@@ -560,7 +565,13 @@ def notes_fit_into_measures():
                     bufs_cc_end[ch][65].pop(n)
                     bufs_cc_start[ch][91].pop(n)
                     bufs_cc_end[ch][91].pop(n)
+                    if n > 0:
+                        # Tie to essentially a nothing note is tossed.
+                        bufs_suffix[ch][n-1] = bufs_suffix[ch][n]   # Move suffix backwards.
+#--                         print_debug(f'#A0 notes_fit_into_measures - move suffix ({bufs_suffix[ch][n-1]}) backwards')
+                    # fi
                     bufs_suffix[ch].pop(n)
+#--                     print_debug(f'#A1 notes_fit_into_measures - pop suffix ch={ch} n={n}')
                 # fi
                 where_we_are += (note_end - note_start)
                 if n >= len(bufs_notes[ch]):
@@ -610,6 +621,7 @@ def notes_fit_into_measures():
                 bufs_cc_start[ch][91].pop(n)
                 bufs_cc_end[ch][91].pop(n)
                 bufs_suffix[ch].pop(n)
+#--                 print_debug(f'#B notes_fit_into_measures - pop ch={ch} n={n}')
             # fi
         # fi
         ch = ch + 1
@@ -829,6 +841,7 @@ def check_staccatto(ch, n, m, newlth, which_q_ptr):
     # fi
     # Add staccato and delete following rest.
     bufs_suffix[ch][n] = bufs_suffix[ch][n] + 's'
+#--     print_debug(f'check_staccatto - add on staccato and delete rest, ch={ch} n={n} bufs_suffix={bufs_suffix[ch][n]}')
     # New note end.
     bufs_notes_end[ch][n] = bufs_notes_end[ch][n + 1]
     if newlth not in which_q_ptr:
@@ -849,6 +862,7 @@ def check_staccatto(ch, n, m, newlth, which_q_ptr):
 
     del bufs_gcs_length[ch][n + 1]
     del bufs_gcs_note[ch][n + 1]
+    del bufs_suffix[ch][n + 1]
 
     del bufs_cc_start[ch][7][n + 1]
     del bufs_cc_end[ch][7][n + 1]
@@ -1077,8 +1091,10 @@ def determine_note_gcs_lengths():
                     # This moves a tie that is broken into two ... so that both are ties. :)
                     if bufs_notes[ch][n] != 0:
                         bufs_suffix[ch].insert(n, 't')
+#--                         print_debug(f'#A determine_note_gcs_lengths - insert bufs_suffix={bufs_suffix[ch][n]}')
                     else:
                         bufs_suffix[ch].insert(n, '')
+#--                         print_debug(f'#B determine_note_gcs_lengths - insert bufs_suffix={bufs_suffix[ch][n]}')
                     # fi
                     n = n + 2
                     continue
@@ -1178,6 +1194,7 @@ def determine_note_gcs_notes():
                     # fi
                 # fi
                 acc_m[playing_on] = acc
+#--                 print_debug(f'determine_note_gcs_notes - checking for t ch={ch} n={n} bufs_suffix={bufs_suffix[ch][n]}')
                 if 't' in bufs_suffix[ch][n]:
                     acc_last_suffix_tie = playing_on
                 else:
@@ -1776,6 +1793,7 @@ def process_noteon(r):
     bufs_gcs_length[ch].append('')
     bufs_gcs_note[ch].append('')
     bufs_suffix[ch].append('')                          # No suffixes yet.
+#--     print_debug(f'process_noteon - bufs_suffix={bufs_suffix[ch][-1]}')
     return
 # End of process_noteon
 
@@ -4045,6 +4063,106 @@ def output_instruments(m):
 # End of output_instruments
 
 # ----------------------------------------------------------------------------
+def output_single_notes(s, cs, notes):
+    global bufs_gcs_note
+    global bufs_gcs_length
+    global bufs_suffix
+
+    strg = f'{s}: '
+    flag = False
+    totalline = ''
+    for n in notes[cs]:
+        if len(strg) > 80 - (len(s) + 4):
+            totalline = totalline + strg + '\n'
+            strg = f'{s}: '
+            flag = False
+        # fi
+        if flag:
+            strg = strg + ','
+        # fi
+        strg = strg + f' {bufs_gcs_note[cs][n]}{bufs_gcs_length[cs][n]}{bufs_suffix[cs][n]}'
+        flag = True
+    # rof
+    if flag:
+        totalline = totalline + strg
+    # fi
+    if totalline != '':
+        print_output(totalline)
+    # fi
+# End of output_single_notes
+
+# ----------------------------------------------------------------------------
+def output_chords(m, s, notes):
+    global bufs_notes                   # Midi note number. An array indexed by channel.
+    global bufs_notes_start             # calculated clicks to start of each note for a channel.
+    global bufs_notes_end               # calculated clicks to end of each note for a channel.
+    global bufs_notes_velocity          # The intensity of note start. (Typically the total volume. *sigh*)
+    global bufs_suffix
+    global bufs_gcs_length
+    global bufs_gcs_note
+
+    ch_with_notes = []
+    for ch in notes:
+        for n in notes[ch]:
+            if bufs_notes[ch][n] != 0:
+                ch_with_notes.append(ch)
+                break
+            # fi
+        # rof
+    # rof
+
+    if len(ch_with_notes) == 0:                 # no notes in measure for this staff.
+        for ch in notes:
+            ch_with_notes.append(ch)
+            break
+        # rof
+    # fi
+    if len(ch_with_notes) == 1:               # no chord.
+        output_single_notes(s, ch_with_notes[0], notes)
+        return
+    # fi
+        
+    print_debug(f'output_chords - ch_with_notes={ch_with_notes} len(ch_with_notes)={len(ch_with_notes)}')
+    for ch in notes:
+        for n in notes[ch]:
+            print_debug(f'     ch={ch:2} n={n:5} note={bufs_notes[ch][n]:2} start={bufs_notes_start[ch][n]:5} end={bufs_notes_end[ch][n]:5} velocity={bufs_notes_velocity[ch][n]:5} gcs - suffix={bufs_suffix[ch][n]:2} length={bufs_gcs_length[ch][n]:3} note={bufs_gcs_note[ch][n]:3}')
+        # rof
+    # rof
+# End of output_chords
+
+# ----------------------------------------------------------------------------
+def output_measure_notes(m):
+    global staff_hint
+    global last_voice_n
+    global bufs_notes
+    global bufs_notes_start
+    global measures_clicks_start
+    global measures_clicks_length
+    global bufs_gcs_note
+    global bufs_gcs_length
+
+    for s in staff_hint:
+        totalline = ''
+        strg = ''
+        notes = {}
+        notescount = 0
+        for cs in staff_hint[s]:
+            notes[cs] = []
+            n = last_voice_n[cs]
+            while n < len(bufs_notes[cs]) and bufs_notes_start[cs][n] < measures_clicks_start[m] + measures_clicks_length[m]:
+                notes[cs].append(n)
+                n = n + 1
+                notescount = notescount + 1
+            # elihw
+            last_voice_n[cs] = n
+        # rof
+        if notescount != 0:
+            output_chords(m, s, notes)
+        # fi
+    # rof
+# End of output_measure_notes
+
+# ----------------------------------------------------------------------------
 def printout_gcs():
     global which_file_output
     global staff_hint
@@ -4072,6 +4190,13 @@ def printout_gcs():
     last_key = {}
     global last_instrument
     last_instrument = {}
+    global last_voice_n
+    last_voice_n = {}
+    cn = 0
+    while cn < MAXCHANNELS:
+        last_voice_n[cn] = 0
+        cn = cn + 1
+    # rof
 
     last_page = ''
     last_bar = ''
@@ -4093,12 +4218,6 @@ def printout_gcs():
     print_output(f'* ----------------------------------------------------------------------------')
     output_xpose()
 
-    last_voice_n = {}
-    cn = 0
-    while cn <= channels:
-        last_voice_n[cn] = 0
-        cn = cn + 1
-    # rof
 
     for m in range(1, last_measure + 1):
         print_output(f'* ----------------------------------------------------------------------------')
@@ -4134,36 +4253,7 @@ def printout_gcs():
         # Instrument locations are positioned in measures.
         output_instruments(m)
 
-        # NOTDONEYET - staves (staff) instead of channel loop.
-        for s in staff_hint:
-            totalline = ''
-            strg = ''
-            for cs in staff_hint[s]:
-                n = last_voice_n[cs]
-                flag = False
-                strg = f'  v{cs + 1}:'
-                while n < len(bufs_notes[cs]) and bufs_notes_start[cs][n] < measures_clicks_start[m] + measures_clicks_length[m]:
-                    if len(strg) > 80 - 8:
-                        totalline = totalline + strg + '\n'
-                        strg = f'  v{cs + 1}: '
-                        flag = False
-                    # fi
-                    if flag:
-                        strg = strg + ','
-                    # fi
-                    strg = strg + f' {bufs_gcs_note[cs][n]}{bufs_gcs_length[cs][n]}'
-                    n = n + 1
-                    flag = True
-                # elihw
-                last_voice_n[cs] = n
-                if strg != '':
-                    totalline = totalline + strg + "\n"
-                # fi
-            # rof
-            if totalline != '' or flag:
-                print_output(f'{s}:\n' + totalline)
-            # fi
-        # rof
+        output_measure_notes(m)
     # rof
     print_output(f'* ----------------------------------------------------------------------------')
     print_output('cstop*')
@@ -4260,9 +4350,9 @@ def main():
 
     printable_measures()                # Fix sequences to be printable - s3(3c,4c,5c)4
 
-#--     print_debug_internal_1('DONE')
     determine_which_staffs()
 
+    print_debug_internal_1('DONE')
 
     printout_gcs()                      # Create the gcs file.
 
