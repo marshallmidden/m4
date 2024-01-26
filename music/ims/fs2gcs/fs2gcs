@@ -1,16 +1,10 @@
 #!/usr/bin/python3 -B
-# *--           "staff" in b2m4.hints --  "staff   10 violin1"        -- Parse.
-# *--       Need to loop through staves to get voices for STAFFNAME.
-# *-- new channel, set into staff_hint{STAFFNAME}.
-#
 # printout_gcs() --
-# *                         "staff   violin1:10,..."    -- loop
-# *                         "xpose   STAFFNAME xxx"     -- loop
-# *                         "clef    STAFFNAME xxx"     -- loop
-# *                         "key     STAFFNAME xxx"     -- loop
-# *                         "instrument STAFFNAME xxx"  -- loop
-#                           "STAFFNAME: 3c4, 3e4, ..."  -- loop first, then do chords.
 # 't', etc. in suffixes. Does 's' work? Does deleting a 'buf_note' move suffix correctly?
+# Need to sort voices/channels by highest midi note first.
+# The sort needs to happen if notes in starting of chord are the same length too.
+# i.e. sort by first note in channel/voice.
+#      If rest in channel, go forward to next note(s).
 # ----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 # ----------------------------------------------------------------------------
@@ -3846,6 +3840,7 @@ def determine_which_staffs():
     global staff_hint
     global channels
     global bufs_notes_channel
+    global last_fs_channel
 
 #--     print_debug(f'determine_which_staffs - channels={channels} new_channels={new_channels} last_fs_channel={last_fs_channel}')
 #--     print_debug(f'determine_which_staffs - bufs_notes_channel={bufs_notes_channel}')
@@ -4071,9 +4066,10 @@ def output_single_channel(m, s, cs, notes):
     global bufs_suffix
 
     print_debug(f'output_single_channel - m{m} {s}: cs={cs} notes={notes}')
-    strg = f'{s}:'
+    strg = f'{s}: '
     flag = False
     totalline = ''
+    space_flag = False
     for n in notes[cs]:
         if len(strg) > 80 - (len(s) + 4):
             totalline = totalline + strg + '\n'
@@ -4082,8 +4078,24 @@ def output_single_channel(m, s, cs, notes):
         # fi
         if flag:
             strg = strg + ','
+            if space_flag:
+                space_flag = False
+                strg = strg + ' '
+            # fi
         # fi
-        strg = strg + f' {bufs_gcs_note[cs][n]}{bufs_gcs_length[cs][n]}{bufs_suffix[cs][n]}'
+        l = bufs_gcs_length[cs][n]
+        if l != '':
+            lth = get_length_fraction(l)
+            if lth >= 0.25 and strg != '' and strg[-1] not in ('[', ']'):
+                if bufs_gcs_note[cs][n][-1] != ')':
+                    strg = strg + ' '
+                # fi
+                space_flag = True
+            else:
+                space_flag = False
+            # fi
+        # fi
+        strg = strg + f'{bufs_gcs_note[cs][n]}{l}{bufs_suffix[cs][n]}'
         flag = True
     # rof
     if flag:
@@ -4126,6 +4138,65 @@ def get_length_fraction(strg):
 # End of get_length_fraction
 
 # ----------------------------------------------------------------------------
+# Returns ch_with_notes = array of channels, sorted by highest note first.
+#   ch_with_notes - array of channels/voices with notes.
+#   notes         - dictionary of note indexes for this measure.
+# Cheat. Highest of all notes in a channel. This should be interesting.
+# The notes lining up in a chord should fix the trill situation.
+
+def sort_by_first_note(ch_with_notes, notes):
+    global bufs_notes
+
+    if len(ch_with_notes) <= 1:
+        return ch_with_notes, notes
+    # fi
+
+    print_debug(f'sort_by_first_note - ch_with_notes={ch_with_notes} notes={notes}')
+
+    max_midi_note_in_channel = {}
+    for ch in ch_with_notes:
+        max_midi_note_in_channel[ch] = 0
+        for n in notes[ch]:
+            print_debug(f'  bufs_notes[{ch}][{n}]={bufs_notes[ch][n]}')
+            if bufs_notes[ch][n] > max_midi_note_in_channel[ch]:
+                max_midi_note_in_channel[ch] = bufs_notes[ch][n]
+            # fi
+        # rof
+    # rof
+
+    new_ch_list = ch_with_notes.copy()
+    new_notes = notes.copy()
+
+    print_debug(f'  #A new_ch_list={new_ch_list} max_midi_note_in_channel={max_midi_note_in_channel} new_notes={new_notes}')
+
+    # Now sort list by value in max_midi_note_in_channel.
+    # Stupid simple bubble list, most are only 2 entries long. A few 3.
+    for i in range(0, len(ch_with_notes) - 1):      # One less.
+        ii = new_ch_list[i]
+        for j in range(i + 1, len(ch_with_notes)):
+            jj = new_ch_list[j]
+            if max_midi_note_in_channel[ii] < max_midi_note_in_channel[jj]: # First is less than latter.
+                tmp = new_ch_list[i]
+                tmp_max = max_midi_note_in_channel[ii]
+                tmp_notes = new_notes[ii]
+
+                new_ch_list[i] = new_ch_list[j]
+                max_midi_note_in_channel[ii] = max_midi_note_in_channel[jj]
+                new_notes[ii] = new_notes[jj]
+
+                new_ch_list[j] = tmp
+                max_midi_note_in_channel[j] = tmp_max
+                new_notes[jj] = tmp_notes
+                print_debug(f'sort_by_first_note - #B new_ch_list={new_ch_list} max_midi_note_in_channel={max_midi_note_in_channel}, new_notes={new_notes}')
+                ii = new_ch_list[i]
+            # fi
+        # rof
+    # rof
+    print_debug(f'sort_by_first_note - new_ch_list={new_ch_list}, max_midi_note_in_channel={max_midi_note_in_channel}, new_notes={new_notes}')
+    return new_ch_list, new_notes
+# End of sort_by_first_note
+
+# ----------------------------------------------------------------------------
 # s = staff
 # ch_with_notes is array of channels with notes in them (i.e. not all rests).
 # notes is array of indexes into bufs_notes(etc).
@@ -4141,17 +4212,22 @@ def output_real_chords(m, s, ch_with_notes, notes):
     # If two or more start at same time, then [] around them.
     # Then increment rt (running_time) by shortest note just output, and repeat until none left.
 
-    first = ch_with_notes[0]
+    # sort by first note, highest first.
+    ch_with_notes, notes = sort_by_first_note(ch_with_notes, notes)
+
+    # Set which notes are playing now. First of each.
     whereat = {}
     for ch in ch_with_notes:
         whereat[ch] = notes[ch][0]          # Next note for channel/voice to do.
     # rof
 
-    rt = bufs_notes_start[first][whereat[ch]]         # Running time is that of first note.
+    rt = bufs_notes_start[ch_with_notes[0]][whereat[ch]]         # Running time is that of first note.
     print_debug(f'whereat={whereat} rt={rt}')
     strg = ''
     total_line = ''
     first = True
+
+    space_flag = False
 
     while True:
         # count notes at current time to start.
@@ -4211,6 +4287,10 @@ def output_real_chords(m, s, ch_with_notes, notes):
 
         # Ready to print things out.
         if len(really_do_these) != 1:           # Start chord
+            if space_flag:
+                space_flag = False
+                strg = strg + ' '
+            # fi
             strg = strg + '['
             flag = False                    # No comma.
         elif strg == '':
@@ -4225,16 +4305,27 @@ def output_real_chords(m, s, ch_with_notes, notes):
             if flag:
                 strg = strg + ','
             # fi
+#--            if space_flag:
+#--                space_flag = False
+#--                strg = strg + ' '
+#--            # fi
             # A space if length is 4 or longer (quarter note).
             print_debug(f'#C output_real_chords - ch={ch} whereat={whereat}')
             n = whereat[ch]
             print_debug(f'#D ch={ch} n={n} {bufs_gcs_note[ch][n]:2} {bufs_gcs_length[ch][n]:3}')
             l = bufs_gcs_length[ch][n]
-            lth = get_length_fraction(l)
-            if lth >= 0.25 and strg != '' and strg[-1] not in ('[', ']'):
-                strg = strg + ' '
+            if l != '' and len(really_do_these) == 1:
+                lth = get_length_fraction(l)
+                if lth >= 0.25 and strg != '' and strg[-1] not in ('[', ']'):
+                    if bufs_gcs_note[ch][n][-1] != ')':
+                        strg = strg + ' '
+                    # fi
+                    space_flag = True
+                else:
+                    space_flag = False
+                # fi
             # fi
-            strg = strg + f'{bufs_gcs_note[ch][n]}{bufs_gcs_length[ch][n]}{bufs_suffix[ch][n]}'
+            strg = strg + f'{bufs_gcs_note[ch][n]}{l}{bufs_suffix[ch][n]}'
             flag = True
             if len(strg) > (80 - 8):
                 if total_line != '':
@@ -4272,7 +4363,6 @@ def output_chords(m, s, notes):
     global bufs_notes_end               # calculated clicks to end of each note for a channel.
     global bufs_notes_velocity          # The intensity of note start. (Typically the total volume. *sigh*)
     global bufs_suffix
-    global bufs_gcs_length
     global bufs_gcs_note
 
     print_debug(f'\noutput_chords - m{m} {s}: notes={notes}')
@@ -4314,7 +4404,6 @@ def output_measure_notes(m):
     global measures_clicks_start
     global measures_clicks_length
     global bufs_gcs_note
-    global bufs_gcs_length
 
     for s in staff_hint:
         totalline = ''
@@ -4341,24 +4430,13 @@ def output_measure_notes(m):
 # ----------------------------------------------------------------------------
 def printout_gcs():
     global which_file_output
-    global staff_hint
     global titles
     global middle_c
-    global xpose_channel
     global last_measure
     global pages_measures_hint
     global bars_measures_hint
-    global meters_measures_hint
     global channels
-    global last_fs_channel
     global measures_instrument
-
-    global bufs_notes
-    global bufs_notes_start
-    global measures_clicks_start
-    global measures_clicks_length
-    global bufs_gcs_note
-    global bufs_gcs_length
 
     global last_clef
     last_clef = {}
@@ -4453,7 +4531,6 @@ def main():
     global errors_happened
     global warnings_happened
     global array_of_original_lines
-    global staff_hint
 
     if args.rest:
         if len(args.rest) >= 1:             # Input.
