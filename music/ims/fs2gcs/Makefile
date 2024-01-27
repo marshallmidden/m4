@@ -43,15 +43,20 @@ t.gcs:  t.fs t.hints
 v2-4.gcs:  v2-4.fs v2-4.hints
 	${FS2CSV} v2-4.fs v2-4.gcs v2-4.hints
 #-----------------------------------------------------------------------------
+beets3m1.gcs:  beets3m1.fs beets3m1.hints
+	${FS2CSV} beets3m1.fs beets3m1.gcs beets3m1.hints
+#-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
 	rm -f ${FS}.gcs
-	rm -f test.{abc,csv,fs,pdf,ps}
-	rm -f t.{abc,csv,pdf,ps,gcs}
-	rm -f u.{abc,csv,fs,pdf,ps,gcs}
-	rm -f tmp_{test,t,u}.gcs
+#-- 	rm -f test.{abc,csv,fs,pdf,ps}
+#-- 	rm -f t.{abc,csv,pdf,ps,gcs}
+#-- 	rm -f u.{abc,csv,fs,pdf,ps,gcs}
+#-- 	rm -f tmp_{test,t,u}.gcs
 	rm -f typescript
-	rm -f phase2.{fs,csv,abc,ps,pdf,gcs}
+#-- 	rm -f phase2.{fs,csv,abc,ps,pdf,gcs}
+	rm -f v2-4.gcs
+	rm -f beets3m1.gcs
 #-----------------------------------------------------------------------------
 .PHONY: tags ctags
 tags ctags:
