@@ -40,6 +40,9 @@ ${FS}.gcs:  ${FS}.fs ${FS}.hints
 t.gcs:  t.fs t.hints
 	${FS2CSV} t.fs t.gcs t.hints
 #-----------------------------------------------------------------------------
+v2-4.gcs:  v2-4.fs v2-4.hints
+	${FS2CSV} v2-4.fs v2-4.gcs v2-4.hints
+#-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
 	rm -f ${FS}.gcs
