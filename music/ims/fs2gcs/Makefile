@@ -46,6 +46,9 @@ v2-4.gcs:  v2-4.fs v2-4.hints
 beets3m1.gcs:  beets3m1.fs beets3m1.hints
 	${FS2CSV} beets3m1.fs beets3m1.gcs beets3m1.hints
 #-----------------------------------------------------------------------------
+B.gcs:  B.fs B.hints
+	${FS2CSV} B.fs B.gcs B.hints
+#-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
 	rm -f ${FS}.gcs
