@@ -49,7 +49,7 @@ MC_ARGS ?=
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %_2.pdf:        %_m2.ps
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
-%.E: %.gcs ${M} Makefile
+%.E: %.gcs ${M} instruments.include Makefile
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 %.wav:  %.mid
