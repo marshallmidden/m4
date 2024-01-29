@@ -277,6 +277,8 @@ global pages_measures_hint          # hint number of pages by measures.
 pages_measures_hint = {}
 global xpose_channel                # Transpose ChannelNumber up/down this many semi-tones.
 xpose_channel = {}
+global skip_measure_hint            # Delete these measures during print_gcs.
+skip_measure_hint = {}
 # ----------------------------------------------------------------------------
 global midi_2_note_lengths                          # clicks => ( '4', 1.0 / 4 )
 midi_2_note_lengths = {}
@@ -2172,6 +2174,7 @@ def print_debug_hints():
     global staff_hint
     global pages_measures_hint
     global bars_measures_hint
+    global skip_measure_hint
     global clef_channel_measures_hint
     global instrument_channel_measures_hint
     global key_channel_measures_hint
@@ -2189,6 +2192,10 @@ def print_debug_hints():
 #--     for b in bars_measures_hint:
 #--         print_debug(f'bar hint: measure {b} = {bars_measures_hint[b]}')
 #--     # rof
+#-- 
+    for s in skip_measure_hint:
+        print_debug(f'skip measure hint: measure {s} = {skip_measure_hint[s]}')
+    # rof
 #-- 
 #--     for ch in clef_channel_measures_hint:
 #--         for m in clef_channel_measures_hint[ch]:
@@ -3388,6 +3395,49 @@ def do_page(t_args):
 # End of do_page
 
 # ----------------------------------------------------------------------------
+# skip_measures    7        $$ Do not printout measure 7, delete it, continue with 8 printed as 7.
+# skip_measures    156-302  $$ Delete measures 156 thru 302, continue with 303 printed as 156.
+
+def do_skip_measures(t_args):
+    global skip_measure_hint
+
+    if t_args is None or t_args == '':
+        print_error("skip_measure does not have an expression to process")
+        return
+    # fi
+
+    vargs = get_channel_measure_other(t_args, 'skip_measure')
+    if vargs is None:
+        return
+    # fi
+    if len(vargs) > 1:
+        print_error("skip_measure format is number measures to skip only.")
+        return
+    # fi
+
+    mn = separate_args(str(vargs[0]))     # The measure numbers.
+    # fi
+    if not mn or len(mn) < 1:
+        print_error("no measure argument(s) for skip_measure command")
+        return
+    # fi
+    for w in mn:
+        f2, type_error = is_float(w, is_float_number, False)
+        if type_error is not None:
+            print_error(f"skip_measure {w} error - {type_error}")
+            return
+        # fi
+        if f2 is None:
+            print_error(f"skip_measure {w} is not a number.")
+            return
+        # fi
+        f2 = round(f2)
+        skip_measure_hint[f2] = f2
+    # rof
+    return
+# End of do_skip_measures
+
+# ----------------------------------------------------------------------------
 # Give a title to a printed or played song (abcm2ps, or .mid).
 #       title   Inventio 15    by Bach
 #       title   for plato by Marshall Midden
@@ -3517,18 +3567,19 @@ for i in key_to_accidentals:
 # dictionary hint_commands : execute routine: globals()['do_cstopnow'](t_args, line)
 global hint_commands
 hint_commands = {
-#            Command         Routine
-             'bars'       : do_bars,
-             'clef'       : do_clef,
-             'instrument' : do_instrument,
-             'key'        : do_key,
-             'meter'      : do_meter,
-             'middlec'    : do_middle_c,
-             'page'       : do_page,
-             'staff'      : do_staff,
-             'title'      : do_title,
-             'transpose'  : do_xpose,
-             'xpose'      : do_xpose,
+#            Command           Routine
+             'bars'          : do_bars,
+             'clef'          : do_clef,
+             'instrument'    : do_instrument,
+             'key'           : do_key,
+             'meter'         : do_meter,
+             'middlec'       : do_middle_c,
+             'page'          : do_page,
+             'skip_measures' : do_skip_measures,
+             'staff'         : do_staff,
+             'title'         : do_title,
+             'transpose'     : do_xpose,
+             'xpose'         : do_xpose,
            }
 
 # ----------------------------------------------------------------------------
@@ -4290,6 +4341,28 @@ def output_chords(m, s, notes):
 # End of output_chords
 
 # ----------------------------------------------------------------------------
+def no_output_measure_notes(m):
+    global staff_hint
+    global last_voice_n
+    global bufs_notes
+    global bufs_notes_start
+    global measures_clicks_start
+    global measures_clicks_length
+    global bufs_gcs_note
+
+    for s in staff_hint:
+        for cs in staff_hint[s]:
+            n = last_voice_n[cs]
+            while n < len(bufs_notes[cs]) and bufs_notes_start[cs][n] < measures_clicks_start[m] + measures_clicks_length[m]:
+                n = n + 1
+            # elihw
+            last_voice_n[cs] = n
+        # rof
+    # rof
+    return
+# End of no_output_measure_notes
+
+# ----------------------------------------------------------------------------
 def output_measure_notes(m):
     global staff_hint
     global last_voice_n
@@ -4331,6 +4404,7 @@ def printout_gcs():
     global bars_measures_hint
     global channels
     global measures_instrument
+    global skip_measure_hint
 
     global last_clef
     last_clef = {}
@@ -4367,30 +4441,36 @@ def printout_gcs():
     output_xpose()
 
 
+    printing_measure = 1
     for m in range(1, last_measure + 1):
+        if m in skip_measure_hint:
+            no_output_measure_notes(m)
+            continue
+        # fi
         print_output(f'* ----------------------------------------------------------------------------')
-        print_output(f'measure {m}')
+        print_output(f'measure {printing_measure}')
         # Pages are in hints file only.
-        if m in pages_measures_hint:
-            if pages_measures_hint[m] != last_page:
-                print_output(f'page    {pages_measures_hint[m]}')
-                last_page = pages_measures_hint[m]
+        if printing_measure in pages_measures_hint:
+            if pages_measures_hint[printing_measure] != last_page:
+                print_output(f'page    {pages_measures_hint[printing_measure]}')
+                last_page = pages_measures_hint[printing_measure]
             # fi
         # fi
         # Bars are in hints file only.
-        if m in bars_measures_hint:
-            if bars_measures_hint[m] != last_bar:
-                print_output(f'bars    {bars_measures_hint[m]}')
-                last_bar = bars_measures_hint[m]
+        if printing_measure in bars_measures_hint:
+            if bars_measures_hint[printing_measure] != last_bar:
+                print_output(f'bars    {bars_measures_hint[printing_measure]}')
+                last_bar = bars_measures_hint[printing_measure]
             # fi
         # fi
         # Clefs are in hints file only.
-        output_clefs(m)
+        output_clefs(printing_measure)
 
         # Keys are calculated, unlike hints.
         output_keys(m)
 
         # Meters are calculated, unlike hints.
+        # This is kind of a problem - hints verses FS input.
         if m in measures_meter:
             if measures_meter[m] != last_meter:
                 print_output(f'meter   {measures_meter[m]}')
@@ -4398,10 +4478,13 @@ def printout_gcs():
             # fi
         # fi
 
+        # This is kind of a problem - hints verses FS input.
         # Instrument locations are positioned in measures.
         output_instruments(m)
 
         output_measure_notes(m)
+
+        printing_measure = printing_measure + 1
     # rof
     print_output(f'* ----------------------------------------------------------------------------')
     print_output('cstop*')
