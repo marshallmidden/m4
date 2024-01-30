@@ -1,0 +1,1347 @@
+diff --git a/include/scsi/scsi_host.h b/include/scsi/scsi_host.h
+--- a/include/scsi/scsi_host.h	2024-01-30 15:56:48.960216898 -0600
++++ b/include/scsi/scsi_host.h	2024-01-30 15:59:08.717724477 -0600
+@@ -560,7 +560,7 @@
+ 	struct completion     * eh_action; /* Wait for specific actions on the
+ 					      host. */
+ 	wait_queue_head_t       host_wait;
+-	const struct scsi_host_template *hostt;
++	struct scsi_host_template *hostt;
+ 	struct scsi_transport_template *transportt;
+
+ 	struct kref		tagset_refcnt;
+diff --git a/drivers/scsi/qla2xxx/qla_gbl.h b/drivers/scsi/qla2xxx/qla_gbl.h
+--- a/drivers/scsi/qla2xxx/qla_gbl.h
++++ b/drivers/scsi/qla2xxx/qla_gbl.h
+@@ -8,6 +8,20 @@
+ 
+ #include <linux/interrupt.h>
+ 
++// ---------------------------------------------------------------------------
++// Added for Parsec Labs 2017-11-28 -- kzalloc the tables/command/routines/etc. to use.
++#define NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
++// Added for Parsec Labs 2017-11-29 -- new option in /etc/modprobe.d/qla2xxx.conf.
++#define NEW_MATCH_WWPN
++
++// #define M4_DEBUG_PRINT
++#ifdef M4_DEBUG_PRINT
++  #define m4_debug(...)	pr_info(__VA_ARGS__)
++#else	// M4_DEBUG_PRINT
++  #define m4_debug(...)
++#endif	// M4_DEBUG_PRINT
++// ---------------------------------------------------------------------------
++
+ /*
+  * Global Function Prototypes in qla_init.c source file.
+  */
+diff --git a/drivers/scsi/qla2xxx/qla_init.c b/drivers/scsi/qla2xxx/qla_init.c
+--- a/drivers/scsi/qla2xxx/qla_init.c
++++ b/drivers/scsi/qla2xxx/qla_init.c
+@@ -40,6 +40,24 @@ static void qla24xx_handle_prli_done_event(struct scsi_qla_host *,
+     struct event_arg *);
+ static void __qla24xx_handle_gpdb_event(scsi_qla_host_t *, struct event_arg *);
+ 
++/* ----------------------------------------------------------------------------- */
++/* Forward definition (also used in other file(s)). */
++#if defined(M4_DEBUG_PRINT) || defined(NEW_MATCH_WWPN)
++void print_port_name_from_nv(scsi_qla_host_t *, const char *);
++u64 get_port_name_from_nv(scsi_qla_host_t *vha, const char *funct);
++#else	// M4_DEBUG_PRINT
++#define print_port_name_from_nv(a, b)
++#endif	//M4_DEBUG_PRINT
++
++/* External defined routine. */
++#ifdef NEW_MATCH_WWPN
++extern int find_slot_wwpn(struct scsi_qla_host *, u64, int, const char *);
++
++extern char *qlini_targets;
++#endif	// NEW_MATCH_WWPN
++
++/* ----------------------------------------------------------------------------- */
++
+ /* SRB Extensions ---------------------------------------------------------- */
+ 
+ void
+@@ -2665,6 +2683,86 @@ qla83xx_nic_core_fw_load(scsi_qla_host_t *vha)
+ 	return rval;
+ }
+ 
++/* ------------------------------------------------------------------------ */
++#if defined(M4_DEBUG_PRINT) || defined(NEW_MATCH_WWPN)
++u64 get_port_name_from_nv(scsi_qla_host_t *vha, const char *funct)
++{
++	uint32_t *dptr;
++	struct qla_hw_data *ha = vha->hw;
++	union {
++	    nvram_t nv_2x00;
++	    struct nvram_24xx nv_24xx;
++	    struct nvram_81xx nv_81xx;
++	} u;
++	uint32_t nvram_base;
++	uint32_t nvram_size;
++	struct device_reg_2xxx __iomem *reg_2xxx;
++
++	memset(&u, 0, sizeof(u));
++
++	if (ha == NULL)
++	{
++	    pr_info("%s:%u:from %s vha->hw ==NULL\n", __FILE__,__LINE__,funct);
++	    return 0ULL;
++	}
++
++	// Starting to determine type of system.
++        if (IS_QLA2100(ha) || IS_QLA2200(ha) || IS_QLA23XX(ha)) {
++	    nvram_base = 0;
++	    if (IS_QLA2100(ha) || IS_QLA2200(ha) || IS_QLA2300(ha)) {
++		reg_2xxx = &ha->iobase->isp;
++		if ((rd_reg_word(&reg_2xxx->ctrl_status) >> 14) == 1) {
++		    nvram_base = 0x80;
++		}
++	    }
++	    nvram_size = sizeof(u.nv_2x00);
++	    dptr = (uint32_t *)&u.nv_2x00;
++	    ha->isp_ops->read_nvram(vha, (uint8_t *)dptr, nvram_base, nvram_size);
++	    return (*(u64*)&u.nv_2x00.port_name);
++        }
++	if (IS_QLA24XX_TYPE(ha) || IS_QLA25XX(ha)) {
++	    /* Determine NVRAM starting address. */
++	    if (ha->port_no == 0) {
++		nvram_base = FA_NVRAM_FUNC0_ADDR;
++	    } else {
++		nvram_base = FA_NVRAM_FUNC1_ADDR;
++	    }
++	    nvram_size = sizeof(u.nv_24xx);
++	    dptr = (uint32_t *)&u.nv_24xx;
++	    ha->isp_ops->read_nvram(vha, (uint8_t *)dptr, nvram_base, nvram_size);
++	    return (*(u64*)&u.nv_24xx.port_name);
++        }
++	if (IS_QLA81XX(ha) || IS_QLA82XX(ha) || IS_QLA8044(ha) || \
++	           IS_QLA83XX(ha) || IS_QLA27XX(ha)) {
++	    nvram_base = ha->flt_region_nvram << 2;
++	    nvram_size = sizeof(u.nv_81xx);
++	    dptr = (uint32_t *)&u.nv_81xx;
++	    ha->isp_ops->read_optrom(vha, (uint8_t *)dptr, nvram_base, nvram_size);
++	    return (*(u64*)&u.nv_81xx.port_name);
++	}
++	pr_info("%s:%u:from %s unrecognized QLogic HQ type\n", __FILE__,__LINE__,funct);
++	return 0ULL;
++
++}
++#endif	// M4_DEBUG_PRINT || NEW_MATCH_WWPN
++
++/* ------------------------------------------------------------------------ */
++#if defined(M4_DEBUG_PRINT) || defined(NEW_MATCH_WWPN)
++void print_port_name_from_nv(scsi_qla_host_t *vha, const char *funct)
++{
++	u64 pn;
++
++	if (vha == NULL)
++	{
++	    m4_debug("%s:%u:from %s vha==NULL\n", __FILE__,__LINE__,funct);
++	    return;
++	}
++	pn = get_port_name_from_nv(vha, funct);
++	m4_debug("%s:%u:from %s nv.port_name=%llx\n", __FILE__,__LINE__,funct, swab64(pn));
++}
++#endif	// M4_DEBUG_PRINT || NEW_MATCH_WWPN
++
++/* ------------------------------------------------------------------------ */
+ /*
+ * qla2x00_initialize_adapter
+ *      Initialize board.
+@@ -2732,6 +2830,34 @@ qla2x00_initialize_adapter(scsi_qla_host_t *vha)
+ 		return rval;
+ 	}
+ 
++// ==============================================================================
++// WWPN available after this point.
++m4_debug("%s:%u:%s WWPN available now supported_mode(%d) active_mode(%d)\n", __FILE__,__LINE__,__func__, vha->host->hostt->supported_mode, vha->host->active_mode);
++print_port_name_from_nv(vha, __func__);
++#ifdef NEW_MATCH_WWPN
++	/* got port_name here. */
++	/* What we want here is if qlini_mode == disabled	-- do nothing. */
++	/*                      if qlini_mode == enabled	-- any qlini_targets? do nothing. */
++	if (QLA_TGT_MODE_ENABLED())
++	{
++	    ;
++	}
++	else if (*qlini_targets != '\0')	// If possible targets with 'enabled' -- see if this port.
++	{
++	    if (!find_slot_wwpn(vha, swab64(get_port_name_from_nv(vha, __func__)), -1, __func__))
++	    {
++		vha->host->active_mode = MODE_INITIATOR;
++		vha->host->hostt->supported_mode = MODE_INITIATOR;
++	    }
++	    else
++	    {
++		vha->qlini_mode = QLA2XXX_INI_MODE_DISABLED;	// 2019-04-25 M4: slot found in target list.
++	    }
++	}
++m4_debug("%s:%u:%s AFTER SETTING supported_mode(%d) active_mode(%d) port_name=%llx\n", __FILE__,__LINE__,__func__, vha->host->hostt->supported_mode, vha->host->active_mode, swab64(get_port_name_from_nv(vha, __func__)));
++#endif	/* NEW_MATCH_WWPN */
++// ==============================================================================
++
+ 	if (IS_QLA8044(ha)) {
+ 		qla8044_read_reset_template(vha);
+ 
+@@ -7948,6 +8074,63 @@ qla24xx_nvram_config(scsi_qla_host_t *vha)
+ 		rval = 1;
+ 	}
+ 
++//----------------------------------------------------------------------------
++m4_debug("%s:%u:%s MOVED nv->port_name=%llx\n", __FILE__,__LINE__,__func__, swab64(*(u64*)nv->port_name));
++m4_debug("%s:%u:%s reading SUPPORTED_MODE(%d) active_mode(%d)\n", __FILE__,__LINE__,__func__, vha->host->hostt->supported_mode, vha->host->active_mode);
++
++#ifdef NEW_MATCH_WWPN
++	if (QLA_TGT_MODE_ENABLED())		// if target mode for everything, nothing to do?
++	{
++m4_debug("%s:%u:%s QLA_TGT_MODE_ENABLED() - do nothing\n", __FILE__,__LINE__,__func__);
++		;
++	}
++	else if (*qlini_targets != '\0')	// initiator mode, unless IP's given.
++	{
++	    /* got port_name here. */
++	    if (find_slot_wwpn(vha, swab64(*(u64*)nv->port_name), -1, __func__))
++	    {
++m4_debug("%s:%u:%s slot found: supported_mode(%d) active_mode(%d)\n", __FILE__,__LINE__,__func__, vha->host->hostt->supported_mode, vha->host->active_mode);
++// 		if (vha->host->active_mode == 0)
++// 		    vha->host->hostt->supported_mode = MODE_TARGET;
++// m4_debug("%s:%u:%s After slot found if: supported_mode(%d) active_mode(%d)\n", __FILE__,__LINE__,__func__, vha->host->hostt->supported_mode, vha->host->active_mode);
++	    }
++	    else
++	    {
++m4_debug("%s:%u:%s slot not found\n", __FILE__,__LINE__,__func__);
++		if (vha->host->active_mode == 0)
++		{
++		    switch (ql2x_ini_mode)
++		    {
++			case QLA2XXX_INI_MODE_DISABLED:
++			    vha->host->hostt->supported_mode = MODE_TARGET;
++			    break;
++
++			case QLA2XXX_INI_MODE_ENABLED:
++			    vha->host->active_mode = MODE_INITIATOR;
++			    vha->host->hostt->supported_mode = MODE_INITIATOR;
++			    break;
++
++			case QLA2XXX_INI_MODE_EXCLUSIVE:
++			default:
++			    vha->host->hostt->supported_mode = MODE_TARGET | MODE_INITIATOR;
++			    break;
++		    }
++m4_debug("%s:%u:%s After setting: supported_mode(%d) active_mode(%d)\n", __FILE__,__LINE__,__func__, vha->host->hostt->supported_mode, vha->host->active_mode);
++		}
++		else
++		{
++m4_debug("%s:%u:%s Do not set, active mode already set! supported_mode(%d) active_mode(%d)\n", __FILE__,__LINE__,__func__, vha->host->hostt->supported_mode, vha->host->active_mode);
++		}
++	    }
++	}
++	else
++	{
++m4_debug("%s:%u:%s initiator mode and no wwpn specified - do nothing\n", __FILE__,__LINE__,__func__);
++	}
++#endif	/* NEW_MATCH_WWPN */
++// ==============================================================================
++m4_debug("%s:%u:%s #2 After HERE_2 SUPPORTED_MODE(%d) active_mode(%d) nv->port_name=%llx\n", __FILE__,__LINE__,__func__, vha->host->hostt->supported_mode, vha->host->active_mode, swab64(*(u64*)nv->port_name));
++
+ 	if (qla_tgt_mode_enabled(vha)) {
+ 		/* Don't enable full login after initial LIP */
+ 		nv->firmware_options_1 &= cpu_to_le32(~BIT_13);
+diff --git a/drivers/scsi/qla2xxx/qla_isr.c b/drivers/scsi/qla2xxx/qla_isr.c
+--- a/drivers/scsi/qla2xxx/qla_isr.c
++++ b/drivers/scsi/qla2xxx/qla_isr.c
+@@ -17,6 +17,9 @@
+ #include <scsi/fc/fc_fs.h>
+ #include <linux/nvme-fc-driver.h>
+ 
++extern int find_slot_wwpn(struct scsi_qla_host *, u64, int, const char *);
++extern u64 get_port_name_from_nv(scsi_qla_host_t *, const char *);
++
+ static void qla2x00_mbx_completion(scsi_qla_host_t *, uint16_t);
+ static void qla2x00_status_entry(scsi_qla_host_t *, struct rsp_que *, void *);
+ static void qla2x00_status_cont_entry(struct rsp_que *, sts_cont_entry_t *);
+@@ -48,6 +51,8 @@ qla27xx_process_purex_fpin(struct scsi_qla_host *vha, struct purex_item *item)
+ 	fc_host_fpin_rcv(vha->host, pkt_size, (char *)pkt, 0);
+ }
+ 
++extern char *qlini_targets;
++
+ const char *const port_state_str[] = {
+ 	[FCS_UNKNOWN]		= "Unknown",
+ 	[FCS_UNCONFIGURED]	= "UNCONFIGURED",
+@@ -2143,6 +2148,7 @@ qla2x00_mbx_iocb_entry(scsi_qla_host_t *vha, struct req_que *req,
+ 		break;
+ 	}
+ 
++#if 0
+ 	ql_log(ql_log_warn, vha, 0x5046,
+ 	    "Async-%s failed - hdl=%x portid=%02x%02x%02x status=%x "
+ 	    "mb0=%x mb1=%x mb2=%x mb6=%x mb7=%x.\n", type, sp->handle,
+@@ -2150,6 +2156,7 @@ qla2x00_mbx_iocb_entry(scsi_qla_host_t *vha, struct req_que *req,
+ 	    status, le16_to_cpu(mbx->mb0), le16_to_cpu(mbx->mb1),
+ 	    le16_to_cpu(mbx->mb2), le16_to_cpu(mbx->mb6),
+ 	    le16_to_cpu(mbx->mb7));
++#endif	/* 0  -- less messages */
+ 
+ logio_done:
+ 	sp->done(sp, 0);
+@@ -2619,6 +2626,7 @@ qla24xx_logio_entry(scsi_qla_host_t *vha, struct req_que *req,
+ 		break;
+ 	}
+ 
++#if 0
+ 	if (logit)
+ 		ql_log(ql_log_warn, sp->vha, 0x5037, "Async-%s failed: "
+ 		       "handle=%x pid=%06x wwpn=%8phC comp_status=%x iop0=%x iop1=%x\n",
+@@ -2633,6 +2641,7 @@ qla24xx_logio_entry(scsi_qla_host_t *vha, struct req_que *req,
+ 		       le16_to_cpu(logio->comp_status),
+ 		       le32_to_cpu(logio->io_parameter[0]),
+ 		       le32_to_cpu(logio->io_parameter[1]));
++#endif	/* 0  -- less messages */
+ 
+ logio_done:
+ 	sp->done(sp, 0);
+@@ -4530,8 +4539,10 @@ qla24xx_enable_msix(struct qla_hw_data *ha, struct rsp_que *rsp)
+ 		.pre_vectors = QLA_BASE_VECTORS,
+ 	};
+ 
+-	if (QLA_TGT_MODE_ENABLED() && (ql2xenablemsix != 0) &&
+-	    IS_ATIO_MSIX_CAPABLE(ha)) {
++	if ((QLA_TGT_MODE_ENABLED() && 			// Must check if in target list.
++	    (*qlini_targets &&
++	     find_slot_wwpn(vha, swab64(get_port_name_from_nv(vha,__func__)),-1,__func__))) &&
++	    (ql2xenablemsix != 0) && IS_ATIO_MSIX_CAPABLE(ha)) {
+ 		desc.pre_vectors++;
+ 		min_vecs++;
+ 	}
+@@ -4562,7 +4573,9 @@ qla24xx_enable_msix(struct qla_hw_data *ha, struct rsp_que *rsp)
+ 			ha->max_req_queues = ha->msix_count - 1;
+ 
+ 			/* ATIOQ needs 1 vector. That's 1 less QPair */
+-			if (QLA_TGT_MODE_ENABLED())
++			if (QLA_TGT_MODE_ENABLED() ||	// Must check if in target list.
++			    (*qlini_targets && find_slot_wwpn(vha,
++				  swab64(get_port_name_from_nv(vha,__func__)),-1,__func__)))
+ 				ha->max_req_queues--;
+ 
+ 			ha->max_rsp_queues = ha->max_req_queues;
+@@ -4619,8 +4632,13 @@ qla24xx_enable_msix(struct qla_hw_data *ha, struct rsp_que *rsp)
+ 	 * If target mode is enable, also request the vector for the ATIO
+ 	 * queue.
+ 	 */
++#ifndef NEW_MATCH_WWPN
+ 	if (QLA_TGT_MODE_ENABLED() && (ql2xenablemsix != 0) &&
+ 	    IS_ATIO_MSIX_CAPABLE(ha)) {
++#else  // NEW_MATCH_WWPN
++	if ((*qlini_targets != '\0' || QLA_TGT_MODE_ENABLED()) &&
++	    (ql2xenablemsix != 0) && IS_ATIO_MSIX_CAPABLE(ha)) {
++#endif	// NEW_MATCH_WWPN
+ 		qentry = &ha->msix_entries[QLA_ATIO_VECTOR];
+ 		rsp->msix = qentry;
+ 		qentry->handle = rsp;
+diff --git a/drivers/scsi/qla2xxx/qla_mid.c b/drivers/scsi/qla2xxx/qla_mid.c
+--- a/drivers/scsi/qla2xxx/qla_mid.c
++++ b/drivers/scsi/qla2xxx/qla_mid.c
+@@ -4,6 +4,7 @@ qla_mid.c
+  * Copyright (c)  2003-2014 QLogic Corporation
+  */
+ #include "qla_def.h"
++#include "qla_gbl.h"
+ #include "qla_target.h"
+ 
+ #include <linux/moduleparam.h>
+@@ -496,8 +496,20 @@ qla24xx_create_vhost(struct fc_vport *fc_vport)
+ 	scsi_qla_host_t *base_vha = shost_priv(fc_vport->shost);
+ 	struct qla_hw_data *ha = base_vha->hw;
+ 	scsi_qla_host_t *vha;
++#ifndef NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+	const struct scsi_host_template *sht = &qla2xxx_driver_template;
++#else	// NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
++	struct scsi_host_template *sht;
++#endif	// NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 	struct Scsi_Host *host;
++#ifdef NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
++	struct fc_function_template *transport_functions;
++
++// NOTDONEYET -- where to free this ??
++	sht = kzalloc(sizeof(qla2xxx_driver_template), GFP_KERNEL);
++	memcpy(sht, &qla2xxx_driver_template, sizeof(*sht));
++m4_debug("%s:%u:%s create vha from template -- ***supported_mode***=1=MODE_INITIATOR(%d)?\n", __FILE__,__LINE__,__func__, sht->supported_mode);
++#endif	// NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 
+ 	vha = qla2x00_create_host(sht, ha);
+ 	if (!vha) {
+@@ -549,7 +561,25 @@ qla24xx_create_vhost(struct fc_vport *fc_vport)
+ 	host->max_lun = ql2xmaxlun;
+ 	host->unique_id = host->host_no;
+ 	host->max_id = ha->max_fibre_devices;
++#ifndef NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 	host->transportt = qla2xxx_transport_vport_template;
++#else	// NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
++	transport_functions = kzalloc(sizeof(qla2xxx_transport_vport_functions), GFP_KERNEL);
++	if (!transport_functions)       /* Allocation failed */
++	{
++		ql_log(ql_log_fatal, vha, 0x003d,
++		    "Failed to allocate memory for transport_vport_functions(1), aborting.\n");
++		goto create_vhost_failed;
++	}
++	memcpy(transport_functions, &qla2xxx_transport_vport_functions, sizeof(*transport_functions));
++	host->transportt = fc_attach_transport(transport_functions);
++	if (!host->transportt)          /* Allocation failed */
++	{
++		ql_log(ql_log_fatal, vha, 0x003d,
++		    "Failed to allocate memory for transport_vport_functions(2), aborting.\n");
++		goto create_vhost_failed;
++	}
++#endif	// NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 
+ 	ql_dbg(ql_dbg_vport, vha, 0xa007,
+ 	    "Detect vport hba %ld at address = %p.\n",
+diff --git a/drivers/scsi/qla2xxx/qla_os.c b/drivers/scsi/qla2xxx/qla_os.c
+--- a/drivers/scsi/qla2xxx/qla_os.c
++++ b/drivers/scsi/qla2xxx/qla_os.c
+@@ -26,6 +26,56 @@
+ 
+ #include "qla_target.h"
+ 
++/* ------------------------------------------------------------------------ */
++/* Externally defined routines. */
++extern int find_slot_wwpn(struct scsi_qla_host *, u64, int, const char *);
++extern u64 get_port_name_from_nv(scsi_qla_host_t *, const char *);
++
++extern char *qlini_targets;
++/* ------------------------------------------------------------------------ */
++/* I need this from the kernel internal routine area! */
++/*
++ * Attribute counts pre object type...
++ * Increase these values if you add attributes
++ */
++#define FC_STARGET_NUM_ATTRS    3
++#define FC_RPORT_NUM_ATTRS      10
++#define FC_VPORT_NUM_ATTRS      9
++#define FC_HOST_NUM_ATTRS       29
++
++struct fc_internal {
++        struct scsi_transport_template t;
++        struct fc_function_template *f;
++
++        /*
++         * For attributes : each object has :
++         *   An array of the actual attributes structures
++         *   An array of null-terminated pointers to the attribute
++         *     structures - used for mid-layer interaction.
++         *
++         * The attribute containers for the starget and host are are
++         * part of the midlayer. As the remote port is specific to the
++         * fc transport, we must provide the attribute container.
++         */
++        struct device_attribute private_starget_attrs[
++                                                        FC_STARGET_NUM_ATTRS];
++        struct device_attribute *starget_attrs[FC_STARGET_NUM_ATTRS + 1];
++
++        struct device_attribute private_host_attrs[FC_HOST_NUM_ATTRS];
++        struct device_attribute *host_attrs[FC_HOST_NUM_ATTRS + 1];
++
++        struct transport_container rport_attr_cont;
++        struct device_attribute private_rport_attrs[FC_RPORT_NUM_ATTRS];
++        struct device_attribute *rport_attrs[FC_RPORT_NUM_ATTRS + 1];
++
++        struct transport_container vport_attr_cont;
++        struct device_attribute private_vport_attrs[FC_VPORT_NUM_ATTRS];
++        struct device_attribute *vport_attrs[FC_VPORT_NUM_ATTRS + 1];
++};
++
++#define to_fc_internal(tmpl)    container_of(tmpl, struct fc_internal, t)
++/* ------------------------------------------------------------------------ */
++
+ /*
+  * Driver version
+  */
+@@ -369,8 +419,10 @@ MODULE_PARM_DESC(ql2xnvme_queues,
+ 		  "0 - FC2 Target support is disabled. "
+ 		  "1 - FC2 Target support is enabled (default).");
+ 
++#ifndef NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ static struct scsi_transport_template *qla2xxx_transport_template = NULL;
+ struct scsi_transport_template *qla2xxx_transport_vport_template = NULL;
++#endif	// NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 
+ /* TODO Convert to inlines
+  *
+@@ -2226,7 +2278,11 @@ qla83xx_iospace_config(struct qla_hw_data *ha)
+ 			ha->max_req_queues = ha->msix_count - 1;
+ 
+ 			/* ATIOQ needs 1 vector. That's 1 less QPair */
++#ifndef NEW_MATCH_WWPN
+ 			if (QLA_TGT_MODE_ENABLED())
++#else  // NEW_MATCH_WWPN
++			if (*qlini_targets != '\0' || QLA_TGT_MODE_ENABLED())
++#endif // NEW_MATCH_WWPN
+ 				ha->max_req_queues--;
+ 
+ 			ha->max_rsp_queues = ha->max_req_queues;
+@@ -2925,9 +2981,15 @@ qla2x00_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
+ 	struct req_que *req = NULL;
+ 	struct rsp_que *rsp = NULL;
+ 	int i;
++#ifdef NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
++	struct fc_internal *fi;
++	struct fc_function_template *transport_functions;
++#endif	// NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 
+ 	bars = pci_select_bars(pdev, IORESOURCE_MEM | IORESOURCE_IO);
++#ifndef NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 	sht = &qla2xxx_driver_template;
++#endif	// NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 	if (pdev->device == PCI_DEVICE_ID_QLOGIC_ISP2422 ||
+ 	    pdev->device == PCI_DEVICE_ID_QLOGIC_ISP2432 ||
+ 	    pdev->device == PCI_DEVICE_ID_QLOGIC_ISP8432 ||
+@@ -3256,6 +3318,11 @@ qla2x00_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
+ 	if (ql2xmaxqdepth != 0 && ql2xmaxqdepth <= 0xffffU)
+ 		req->max_q_depth = ql2xmaxqdepth;
+ 
++#ifdef NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
++// NOTDONEYET -- where to free this ??
++	sht = kzalloc(sizeof(qla2xxx_driver_template), GFP_KERNEL);
++	memcpy(sht,&qla2xxx_driver_template, sizeof(*sht));
++#endif	// NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 
+ 	base_vha = qla2x00_create_host(sht, ha);
+ 	if (!base_vha) {
+@@ -3316,7 +3383,27 @@ qla2x00_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
+ 		host->max_lun = 0xffff;
+ 	else
+ 		host->max_lun = ql2xmaxlun;
++
++#ifndef NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 	host->transportt = qla2xxx_transport_template;
++#else //NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
++	transport_functions = kzalloc(sizeof(qla2xxx_transport_functions), GFP_KERNEL);
++	if (!transport_functions)       /* Allocation failed */
++	{
++		ql_log(ql_log_fatal, base_vha, 0x003d,
++		    "Failed to allocate memory for transport_functions(1), aborting.\n");
++		goto probe_failed;
++	}
++	memcpy(transport_functions, &qla2xxx_transport_functions, sizeof(*transport_functions));
++	host->transportt = fc_attach_transport(transport_functions);
++	if (!host->transportt)          /* Allocation failed */
++	{
++		ql_log(ql_log_fatal, base_vha, 0x003d,
++		    "Failed to allocate memory for transport_functions(2), aborting.\n");
++		goto probe_failed;
++	}
++#endif	//NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
++
+ 	sht->vendor_id = (SCSI_NL_VID_TYPE_PCI | PCI_VENDOR_ID_QLOGIC);
+ 
+ 	ql_dbg(ql_dbg_init, base_vha, 0x0033,
+@@ -3449,6 +3536,29 @@ qla2x00_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
+ 		ret = -ENODEV;
+ 		goto probe_failed;
+ 	}
++//============================================================================
++//WWPN available here.
++#ifdef NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
++	fi = to_fc_internal(host->transportt);
++        if (ql2x_ini_mode == QLA2XXX_INI_MODE_DISABLED)	// Target mode
++	{
++	    fi->f->disable_target_scan = 1;
++	}
++#ifdef NEW_MATCH_WWPN
++	else if (*qlini_targets &&
++	         find_slot_wwpn(base_vha, swab64(get_port_name_from_nv(base_vha,__func__)),-1,__func__))
++	{
++	    fi->f->disable_target_scan = 1;
++        }
++	else
++	{
++	    fi->f->disable_target_scan = 0;
++	    base_vha->host->active_mode = MODE_INITIATOR;
++	    base_vha->host->hostt->supported_mode = MODE_INITIATOR;
++	}
++#endif	// NEW_MATCH_WWPN
++#endif	// NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
++//============================================================================
+ 
+ 	if (IS_QLAFX00(ha))
+ 		host->can_queue = QLAFX00_MAX_CANQUEUE;
+@@ -3471,7 +3581,13 @@ qla2x00_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
+ 			startit = false;
+ 
+ 		if (ql2x_ini_mode == QLA2XXX_INI_MODE_ENABLED)
+-			startit = true;
++		{
++		    if (*qlini_targets &&
++		        find_slot_wwpn(base_vha, swab64(get_port_name_from_nv(base_vha,__func__)),-1,__func__))
++			    startit = false;
++		    else
++			    startit = true;
++		}
+ 
+ 		/* Create start of day qpairs for Block MQ */
+ 		for (i = 0; i < ha->max_qpairs; i++)
+@@ -8278,6 +8394,7 @@ qla2x00_module_init(void)
+ 	ret = qlt_init();
+ 	if (ret < 0) {
+ 		goto destroy_cache;
++#ifndef NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 	} else if (ret > 0) {
+ 		/*
+ 		 * If initiator mode is explictly disabled by qlt_init(),
+@@ -8286,6 +8403,7 @@ qla2x00_module_init(void)
+ 		 */
+ 		qla2xxx_transport_functions.disable_target_scan = 1;
+ 		qla2xxx_transport_vport_functions.disable_target_scan = 1;
++#endif // NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 	}
+ 
+ 	/* Derive version string. */
+@@ -8295,6 +8413,7 @@ qla2x00_module_init(void)
+ 	if (ql2xextended_error_logging == 1)
+ 		ql2xextended_error_logging = QL_DBG_DEFAULT1_MASK;
+ 
++#ifndef NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 	qla2xxx_transport_template =
+ 	    fc_attach_transport(&qla2xxx_transport_functions);
+ 	if (!qla2xxx_transport_template) {
+@@ -8303,6 +8422,7 @@ qla2x00_module_init(void)
+ 		ret = -ENODEV;
+ 		goto qlt_exit;
+ 	}
++#endif // NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 
+ 	apidev_major = register_chrdev(0, QLA2XXX_APIDEV, &apidev_fops);
+ 	if (apidev_major < 0) {
+@@ -8310,6 +8430,7 @@ qla2x00_module_init(void)
+ 		    "Unable to register char device %s.\n", QLA2XXX_APIDEV);
+ 	}
+ 
++#ifndef NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 	qla2xxx_transport_vport_template =
+ 	    fc_attach_transport(&qla2xxx_transport_vport_functions);
+ 	if (!qla2xxx_transport_vport_template) {
+@@ -8318,6 +8439,7 @@ qla2x00_module_init(void)
+ 		ret = -ENODEV;
+ 		goto unreg_chrdev;
+ 	}
++#endif // NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 	ql_log(ql_log_info, NULL, 0x0005,
+ 	    "QLogic Fibre Channel HBA Driver: %s.\n",
+ 	    qla2x00_version_str);
+@@ -8331,14 +8453,19 @@ qla2x00_module_init(void)
+ 	return ret;
+ 
+ release_vport_transport:
++#ifndef NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 	fc_release_transport(qla2xxx_transport_vport_template);
+ 
+ unreg_chrdev:
++#endif // NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
++// NOTDONEYET -- qla2xxx_transport - cannot release.
+ 	if (apidev_major >= 0)
+ 		unregister_chrdev(apidev_major, QLA2XXX_APIDEV);
++#ifndef NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 	fc_release_transport(qla2xxx_transport_template);
+ 
+ qlt_exit:
++#endif // NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 	qlt_exit();
+ 
+ destroy_cache:
+@@ -8357,10 +8484,16 @@ qla2x00_module_exit(void)
+ 	pci_unregister_driver(&qla2xxx_pci_driver);
+ 	qla2x00_release_firmware();
+ 	kmem_cache_destroy(ctx_cachep);
++#ifndef NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
++// NOTDONEYET -- qla2xxx_transport - cannot release.
+ 	fc_release_transport(qla2xxx_transport_vport_template);
++#endif // NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 	if (apidev_major >= 0)
+ 		unregister_chrdev(apidev_major, QLA2XXX_APIDEV);
++#ifndef NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
++// NOTDONEYET -- qla2xxx_transport - cannot release.
+ 	fc_release_transport(qla2xxx_transport_template);
++#endif // NEW_ALLOC_SCSI_TRANSPORT_TEMPLATE
+ 	qlt_exit();
+ 	kmem_cache_destroy(srb_cachep);
+	qla_trace_uninit();
+diff --git a/drivers/scsi/qla2xxx/qla_target.c b/drivers/scsi/qla2xxx/qla_target.c
+--- a/drivers/scsi/qla2xxx/qla_target.c
++++ b/drivers/scsi/qla2xxx/qla_target.c
+@@ -31,11 +31,46 @@
+ #include "qla_def.h"
+ #include "qla_target.h"
+ 
++/* ------------------------------------------------------------------------ */
++/* Forward definition (also used in other file(s). */
++int find_slot_wwpn(struct scsi_qla_host *, u64, int, const char *);
++
++/* Externally defined routines. */
++extern u64 get_port_name_from_nv(scsi_qla_host_t *, const char *);
++/* ------------------------------------------------------------------------ */
++static struct fc_port *qlt_make_local_sess(struct scsi_qla_host *vha,
++					   be_id_t s_id);
++/* ------------------------------------------------------------------------ */
++
+ static int ql2xtgt_tape_enable;
+ module_param(ql2xtgt_tape_enable, int, S_IRUGO|S_IWUSR);
+ MODULE_PARM_DESC(ql2xtgt_tape_enable,
+ 		"Enables Sequence level error recovery (aka FC Tape). Default is 0 - no SLER. 1 - Enable SLER.");
+ 
++#ifdef NEW_MATCH_WWPN
++/* No ports that default to target mode upon start. */
++char *qlini_targets = "";
++module_param(qlini_targets, charp, S_IRUGO);
++MODULE_PARM_DESC(qlini_targets,
++	"Determines which Physical slots (or WWPNs) will be set as target mode. "
++	"Value examples: "
++	" a) 2,4 -- physical slots 2 and 4 are target mode. "
++	" b) 21:00:00:24:ff:0f:b0:c5,21:00:00:24:ff:33:db:8e4 -- WWPNs.");
++enum ini_target_types {
++	qlini_physical_slot = 0,
++	qlini_wwpn          = 1,
++	qlini_error         = 2
++};
++struct ini_targets {
++	enum ini_target_types tt;
++	union {
++		int   physical_slot;
++		u64   wwpn;
++	} td;
++	struct ini_targets *next;
++} *ql2x_ini_targets = NULL;
++#endif	// NEW_MATCH_WWPN
++
+ static char *qlini_mode = QLA2XXX_INI_MODE_STR_ENABLED;
+ module_param(qlini_mode, charp, S_IRUGO);
+ MODULE_PARM_DESC(qlini_mode,
+@@ -668,8 +703,8 @@ void qla24xx_do_nack_work(struct scsi_qla_host *vha, struct qla_work_evt *e)
+ 		t = qlt_create_sess(vha, e->u.nack.fcport, 0);
+ 		mutex_unlock(&vha->vha_tgt.tgt_mutex);
+ 		if (t) {
+-			ql_log(ql_log_info, vha, 0xd034,
+-			    "%s create sess success %p", __func__, t);
++//			ql_log(ql_log_info, vha, 0xd034,
++//			    "%s create sess success %p", __func__, t);
+ 			/* create sess has an extra kref */
+ 			vha->hw->tgt.tgt_ops->put_sess(e->u.nack.fcport);
+ 		}
+@@ -4360,6 +4395,76 @@ static struct qla_tgt_cmd *qlt_get_tag(scsi_qla_host_t *vha,
+ 	return cmd;
+ }
+ 
++// static void qlt_create_sess_from_atio(struct work_struct *work)
++// {
++// 	struct qla_tgt_sess_op *op = container_of(work,
++// 					struct qla_tgt_sess_op, work);
++// 	scsi_qla_host_t *vha = op->vha;
++// 	struct qla_hw_data *ha = vha->hw;
++// 	struct fc_port *sess;
++// 	struct qla_tgt_cmd *cmd;
++// 	unsigned long flags;
++// 	be_id_t s_id = op->atio.u.isp24.fcp_hdr.s_id;
++// 
++// 	spin_lock_irqsave(&vha->cmd_list_lock, flags);
++// 	list_del(&op->cmd_list);
++// 	spin_unlock_irqrestore(&vha->cmd_list_lock, flags);
++// 
++// 	if (op->aborted) {
++// 		ql_dbg(ql_dbg_tgt_mgt, vha, 0xf083,
++// 		    "sess_op with tag %u is aborted\n",
++// 		    op->atio.u.isp24.exchange_addr);
++// 		goto out_term;
++// 	}
++// 
++// 	ql_dbg(ql_dbg_tgt_mgt, vha, 0xf022,
++// 	    "qla_target(%d): Unable to find wwn login"
++// 	    " (s_id %x:%x:%x), trying to create it manually\n",
++// 	    vha->vp_idx, s_id.domain, s_id.area, s_id.al_pa);
++// 
++// 	if (op->atio.u.raw.entry_count > 1) {
++// 		ql_dbg(ql_dbg_tgt_mgt, vha, 0xf023,
++// 		    "Dropping multy entry atio %p\n", &op->atio);
++// 		goto out_term;
++// 	}
++// 
++// 	sess = qlt_make_local_sess(vha, s_id);
++// 	/* sess has an extra creation ref. */
++// 
++// 	if (!sess)
++// 		goto out_term;
++// 	/*
++// 	 * Now obtain a pre-allocated session tag using the original op->atio
++// 	 * packet header, and dispatch into __qlt_do_work() using the existing
++// 	 * process context.
++// 	 */
++// 	cmd = qlt_get_tag(vha, sess, &op->atio);
++// 	if (!cmd) {
++// 		struct qla_qpair *qpair = ha->base_qpair;
++// 
++// 		spin_lock_irqsave(qpair->qp_lock_ptr, flags);
++// 		qlt_send_busy(qpair, &op->atio, SAM_STAT_BUSY);
++// 		spin_unlock_irqrestore(qpair->qp_lock_ptr, flags);
++// 
++// 		spin_lock_irqsave(&ha->tgt.sess_lock, flags);
++// 		ha->tgt.tgt_ops->put_sess(sess);
++// 		spin_unlock_irqrestore(&ha->tgt.sess_lock, flags);
++// 		kfree(op);
++// 		return;
++// 	}
++// 
++// 	/*
++// 	 * __qlt_do_work() will call qlt_put_sess() to release
++// 	 * the extra reference taken above by qlt_make_local_sess()
++// 	 */
++// 	__qlt_do_work(cmd);
++// 	kfree(op);
++// 	return;
++// out_term:
++// 	qlt_send_term_exchange(vha->hw->base_qpair, NULL, &op->atio, 0, 0);
++// 	kfree(op);
++// }
++
+ /* ha->hardware_lock supposed to be held on entry */
+ static int qlt_handle_cmd_for_atio(struct scsi_qla_host *vha,
+ 	struct atio_from_isp *atio)
+@@ -4384,6 +4489,23 @@ static int qlt_handle_cmd_for_atio(struct scsi_qla_host *vha,
+ 	sess = ha->tgt.tgt_ops->find_sess_by_s_id(vha, atio->u.isp24.fcp_hdr.s_id);
+ 	if (unlikely(!sess))
+ 		return -EFAULT;
++//	{
++//		struct qla_tgt_sess_op *op = kzalloc(sizeof(struct qla_tgt_sess_op),
++//						     GFP_ATOMIC);
++//		if (!op)
++//			return -ENOMEM;
++//
++//		memcpy(&op->atio, atio, sizeof(*atio));
++//		op->vha = vha;
++//
++//		spin_lock_irqsave(&vha->cmd_list_lock, flags);
++//		list_add_tail(&op->cmd_list, &vha->qla_sess_op_cmd_list);
++//		spin_unlock_irqrestore(&vha->cmd_list_lock, flags);
++//
++//		INIT_WORK(&op->work, qlt_create_sess_from_atio);
++//		queue_work(qla_tgt_wq, &op->work);
++//		return 0;
++//	}
+ 
+ 	/* Another WWN used to have our s_id. Our PLOGI scheduled its
+ 	 * session deletion, but it's still in sess_del_work wq */
+@@ -6356,15 +6478,80 @@ static void qlt_sess_work_fn(struct work_struct *work)
+ 	spin_unlock_irqrestore(&tgt->sess_work_lock, flags);
+ }
+ 
++#ifdef NEW_MATCH_WWPN
++/* Check if qla_host qlini_targets: physical slot or wwpn. */
++int find_slot_wwpn(struct scsi_qla_host *vha, u64 pn, int slt, const char *funct)
++{
++	int slot;
++	struct ini_targets *q;
++	fc_port_t *fcport;
++
++	if (vha == NULL)
++		return false;
++
++	q = ql2x_ini_targets;
++	if (vha->host == NULL)
++	    return false;
++
++	while (q != NULL)
++	{
++	    switch (q->tt)
++	    {
++		case qlini_physical_slot:
++		    if (q->td.physical_slot == slt)
++			return true;
++		    if (vha->hw == NULL || vha->hw->pdev == NULL || vha->hw->pdev->slot == NULL)
++			break;
++		    slot = vha->hw->pdev->slot->number;
++		    if (q->td.physical_slot == slot)
++			return true;
++		    break;
++		case qlini_wwpn:
++		    if (pn != 0 && pn == q->td.wwpn)
++			    return true;
++		    if ((struct fc_host_attrs *)(vha->host)->shost_data != NULL)
++			    if (fc_host_port_name(vha->host) == q->td.wwpn)
++				    return true;
++		    list_for_each_entry(fcport, &vha->vp_fcports, list) {
++			if (q->td.wwpn == *((u64*)&fcport->port_name))
++			    return true;
++		    }
++		    break;
++		default:
++		    break;
++	    }
++	    q = q->next;
++	}
++	return false;
++}
++#endif	// NEW_MATCH_WWPN
++
+ /* Must be called under tgt_host_action_mutex */
+ int qlt_add_target(struct qla_hw_data *ha, struct scsi_qla_host *base_vha)
+ {
+ 	struct qla_tgt *tgt;
+ 	int rc, i;
+ 	struct qla_qpair_hint *h;
++#ifdef NEW_MATCH_WWPN
++	int a_m;
++
++	if (ha == NULL)
++		a_m = find_slot_wwpn(base_vha, 0, -1, __func__);
++	else if (ha->pdev == NULL)
++		a_m = find_slot_wwpn(base_vha, 0, -1, __func__);
++	else if (ha->pdev->slot == NULL)
++		a_m = find_slot_wwpn(base_vha, 0, -1, __func__);
++	else
++		a_m = find_slot_wwpn(base_vha, 0, ha->pdev->slot->number, __func__);
++
++	if (!a_m)
++		if (!QLA_TGT_MODE_ENABLED())
++			return 0;
++#else	// NEW_MATCH_WWPN
+ 
+ 	if (!QLA_TGT_MODE_ENABLED())
+ 		return 0;
++#endif // NEW_MATCH_WWPN
+ 
+ 	if (!IS_TGT_MODE_CAPABLE(ha)) {
+ 		ql_log(ql_log_warn, base_vha, 0xe070,
+@@ -6593,6 +6780,7 @@ EXPORT_SYMBOL(qlt_lport_deregister);
+ /* Must be called under HW lock */
+ void qlt_set_mode(struct scsi_qla_host *vha)
+ {
++#ifndef NEW_MATCH_WWPN
+ 	switch (vha->qlini_mode) {
+ 	case QLA2XXX_INI_MODE_DISABLED:
+ 	case QLA2XXX_INI_MODE_EXCLUSIVE:
+@@ -6607,11 +6795,37 @@ void qlt_set_mode(struct scsi_qla_host *vha)
+ 	default:
+ 		break;
+ 	}
++
++#else	// NEW_MATCH_WWPN
++	int a_m;
++	a_m = find_slot_wwpn(vha, 0, -1, __func__);
++	if (a_m)
++	{
++		vha->host->active_mode = MODE_TARGET;
++		vha->qlini_mode = QLA2XXX_INI_MODE_DISABLED;
++	}
++	else
++		switch (ql2x_ini_mode) {
++		case QLA2XXX_INI_MODE_DISABLED:
++		case QLA2XXX_INI_MODE_EXCLUSIVE:
++			vha->host->active_mode = MODE_TARGET;
++			break;
++		case QLA2XXX_INI_MODE_ENABLED:
++			vha->host->active_mode = MODE_UNKNOWN;
++			break;
++		case QLA2XXX_INI_MODE_DUAL:
++			vha->host->active_mode = MODE_DUAL;
++			break;
++		default:
++			break;
++		}
++#endif	// NEW_MATCH_WWPN
+ }
+ 
+ /* Must be called under HW lock */
+ static void qlt_clear_mode(struct scsi_qla_host *vha)
+ {
++#ifndef NEW_MATCH_WWPN
+ 	switch (vha->qlini_mode) {
+ 	case QLA2XXX_INI_MODE_DISABLED:
+ 		vha->host->active_mode = MODE_UNKNOWN;
+@@ -6626,6 +6840,25 @@ static void qlt_clear_mode(struct scsi_qla_host *vha)
+ 	default:
+ 		break;
+ 	}
++#else 	// NEW_MATCH_WWPN
++	if (*qlini_targets != '\0')
++		vha->host->active_mode = MODE_UNKNOWN;
++	else
++		switch (ql2x_ini_mode) {
++		case QLA2XXX_INI_MODE_DISABLED:
++			vha->host->active_mode = MODE_UNKNOWN;
++			break;
++		case QLA2XXX_INI_MODE_EXCLUSIVE:
++			vha->host->active_mode = MODE_INITIATOR;
++			break;
++		case QLA2XXX_INI_MODE_ENABLED:
++		case QLA2XXX_INI_MODE_DUAL:
++			vha->host->active_mode = MODE_INITIATOR;
++			break;
++		default:
++			break;
++		}
++#endif	// NEW_MATCH_WWPN
+ }
+ 
+ /*
+@@ -6649,6 +6882,7 @@ qlt_enable_vha(struct scsi_qla_host *vha)
+ 		return;
+ 	}
+ 	if (vha->qlini_mode == QLA2XXX_INI_MODE_ENABLED)
++	    if (*qlini_targets == '\0' || !find_slot_wwpn(vha, 0, -1, __func__))
+ 		return;
+ 
+ 	if (ha->tgt.num_act_qpairs > ha->max_qpairs)
+@@ -6845,8 +7079,17 @@ qlt_24xx_config_rings(struct scsi_qla_host *vha)
+ 	struct qla_msix_entry *msix = &ha->msix_entries[2];
+ 	struct init_cb_24xx *icb = (struct init_cb_24xx *)ha->init_cb;
+ 
++#ifdef NEW_MATCH_WWPN
++	int a_m;
++
++	a_m = find_slot_wwpn(vha, 0, -1, __func__);
++	if (!a_m)
++	    if (!QLA_TGT_MODE_ENABLED())
++		return;
++#else	// NEW_MATCH_WWPN
+ 	if (!QLA_TGT_MODE_ENABLED())
+ 		return;
++#endif	// NEW_MATCH_WWPN
+ 
+ 	wrt_reg_dword(ISP_ATIO_Q_IN(vha), 0);
+ 	wrt_reg_dword(ISP_ATIO_Q_OUT(vha), 0);
+@@ -6878,6 +7121,7 @@ qlt_24xx_config_nvram_stage1(struct scsi_qla_host *vha, struct nvram_24xx *nv)
+ 	u32 tmp;
+ 
+ 	if (!QLA_TGT_MODE_ENABLED())
++	    if (!find_slot_wwpn(vha, swab64(get_port_name_from_nv(vha, __func__)), -1, __func__))
+ 		return;
+ 
+ 	if (qla_tgt_mode_enabled(vha) || qla_dual_mode_enabled(vha)) {
+@@ -6968,8 +7212,13 @@ qlt_24xx_config_nvram_stage2(struct scsi_qla_host *vha,
+ {
+ 	struct qla_hw_data *ha = vha->hw;
+ 
++#ifdef NEW_MATCH_WWPN
++	if (*qlini_targets == '\0' && !QLA_TGT_MODE_ENABLED())
++	    return;
++#else	// NEW_MATCH_WWPN
+ 	if (!QLA_TGT_MODE_ENABLED())
+ 		return;
++#endif	// NEW_MATCH_WWPN
+ 
+ 	if (ha->tgt.node_name_set) {
+ 		memcpy(icb->node_name, ha->tgt.tgt_node_name, WWN_SIZE);
+@@ -6983,8 +7232,19 @@ qlt_81xx_config_nvram_stage1(struct scsi_qla_host *vha, struct nvram_81xx *nv)
+ 	struct qla_hw_data *ha = vha->hw;
+ 	u32 tmp;
+ 
++#ifdef NEW_MATCH_WWPN
++	int a_m;
++	u64 nv_port_name;
++
++	nv_port_name = get_port_name_from_nv(vha, __func__);
++	a_m = find_slot_wwpn(vha, swab64(nv_port_name), -1, __func__);
++	if (!a_m)
++	    if (!QLA_TGT_MODE_ENABLED())
++		return;
++#else	// NEW_MATCH_WWPN
+ 	if (!QLA_TGT_MODE_ENABLED())
+ 		return;
++#endif	// NEW_MATCH_WWPN
+ 
+ 	if (qla_tgt_mode_enabled(vha) || qla_dual_mode_enabled(vha)) {
+ 		if (!ha->tgt.saved_set) {
+@@ -7071,8 +7331,20 @@ qlt_81xx_config_nvram_stage2(struct scsi_qla_host *vha,
+ {
+ 	struct qla_hw_data *ha = vha->hw;
+ 
++#ifdef NEW_MATCH_WWPN
++	int a_m;
++	u64 nv_port_name;
++
++	nv_port_name = get_port_name_from_nv(vha, __func__);
++	a_m = find_slot_wwpn(vha, swab64(nv_port_name), -1, __func__);
++	if (!a_m)
++	    if (!QLA_TGT_MODE_ENABLED())
++		return;
++#else	// NEW_MATCH_WWPN
++
+ 	if (!QLA_TGT_MODE_ENABLED())
+ 		return;
++#endif	// NEW_MATCH_WWPN
+ 
+ 	if (ha->tgt.node_name_set) {
+ 		memcpy(icb->node_name, ha->tgt.tgt_node_name, WWN_SIZE);
+@@ -7083,8 +7355,13 @@ qlt_81xx_config_nvram_stage2(struct scsi_qla_host *vha,
+ void
+ qlt_83xx_iospace_config(struct qla_hw_data *ha)
+ {
++#ifndef NEW_MATCH_WWPN
+ 	if (!QLA_TGT_MODE_ENABLED())
+ 		return;
++#else	// NEW_MATCH_WWPN
++	if (*qlini_targets == '\0' && !QLA_TGT_MODE_ENABLED())
++		return;
++#endif	// NEW_MATCH_WWPN
+ 
+ 	ha->msix_count += 1; /* For ATIO Q */
+ }
+@@ -7107,8 +7384,14 @@ void
+ qlt_probe_one_stage1(struct scsi_qla_host *base_vha, struct qla_hw_data *ha)
+ {
+ 	mutex_init(&base_vha->vha_tgt.tgt_mutex);
++#ifndef NEW_MATCH_WWPN
+ 	if (!QLA_TGT_MODE_ENABLED())
+ 		return;
++#else  // NEW_MATCH_WWPN
++	if (ql2x_ini_targets == NULL)
++	    if (!QLA_TGT_MODE_ENABLED())
++		return;
++#endif	// NEW_MATCH_WWPN
+ 
+ 	if  (ha->mqenable || IS_QLA83XX(ha) || IS_QLA27XX(ha) || IS_QLA28XX(ha)) {
+ 		ISP_ATIO_Q_IN(base_vha) = &ha->mqiobase->isp25mq.atio_q_in;
+@@ -7202,8 +7485,14 @@ qlt_handle_abts_recv(struct scsi_qla_host *vha, struct rsp_que *rsp,
+ int
+ qlt_mem_alloc(struct qla_hw_data *ha)
+ {
++#ifndef NEW_MATCH_WWPN
+ 	if (!QLA_TGT_MODE_ENABLED())
+ 		return 0;
++#else	// NEW_MATCH_WWPN
++	/* If no targets specified and initiator mode enabled, leave */
++	if (*qlini_targets == '\0' && !QLA_TGT_MODE_ENABLED())
++		return 0;
++#endif	// NEW_MATCH_WWPN
+ 
+ 	ha->tgt.atio_ring = dma_alloc_coherent(&ha->pdev->dev,
+ 	    (ha->tgt.atio_q_length + 1) * sizeof(struct atio_from_isp),
+@@ -7217,8 +7506,13 @@ qlt_mem_alloc(struct qla_hw_data *ha)
+ void
+ qlt_mem_free(struct qla_hw_data *ha)
+ {
++#ifndef NEW_MATCH_WWPN
+ 	if (!QLA_TGT_MODE_ENABLED())
+ 		return;
++#else	// NEW_MATCH_WWPN
++	if (*qlini_targets == '\0' && !QLA_TGT_MODE_ENABLED())
++		return;
++#endif	// NEW_MATCH_WWPN
+ 
+ 	if (ha->tgt.atio_ring) {
+ 		dma_free_coherent(&ha->pdev->dev, (ha->tgt.atio_q_length + 1) *
+
+@@ -7229,6 +7538,156 @@ void qlt_update_host_map(struct scsi_qla_host *vha, port_id_t id)
+ 	ha->tgt.atio_dma = 0;
+ }
+ 
++#ifdef NEW_MATCH_WWPN
++static void get_first(u64 *i, enum ini_target_types *flag, char **ptr)
++{
++    char *p = *ptr;
++    char c1;
++    char c2;
++    char c3;
++    int j;
++
++    *i = 0;             /* no number yet, initialize it. */
++    *flag = qlini_physical_slot;
++
++    c1 = *p;
++    if (c1 >= '0' && c1 <= '9')
++    {
++	*i = c1 - '0';
++    }
++    else if (c1 >='a' && c1 <= 'f')
++    {
++	*flag = qlini_wwpn;     /* it is for sure a wwn */
++	*i = c1 - 'a' + 10;
++    }
++    else
++    {
++	*flag = qlini_error;    /* Error */
++	pr_info("%s:%u:%s unknown character '%c'\n", __FILE__,__LINE__,__func__, c1);
++	return;
++    }
++
++    c2 = *++p;
++    if (c2 == ',' || c2 == '\0')
++    {
++	if (*flag == qlini_physical_slot)
++	{
++	    *ptr = p;
++	    return;
++	}
++	pr_info("%s:%u:%s #1 hex number followed by '%c' not allowed\n", __FILE__,__LINE__,__func__, c2);
++	*flag = qlini_error;    /* Error */
++	return;
++    }
++    else if (c2 >='a' && c2 <= 'f')
++    {
++	*flag = qlini_wwpn;     /* it is a hex number... */
++    }
++
++    c3 = *++p;
++    if (c3 == ',' || c3 == '\0')
++    {
++	if (*flag == qlini_physical_slot)       /* Two digit number! */
++	{
++	    *i = (10 * (*i)) + (c2 - '0');
++	    *ptr = p;
++	    return;
++	}
++	pr_info("%s:%u:%s #2 hex number followed by '%c' not allowed\n", __FILE__,__LINE__,__func__, c3);
++	*flag = qlini_error;    /* Error */
++	return;
++    }
++    if (c3 != ':')
++    {
++	pr_info("%s:%u:%s #3 hex numbers not followed by ':' not allowed ('%c')\n", __FILE__,__LINE__,__func__, c3);
++	*flag = qlini_error;    /* Error */
++	return;
++    }
++
++    *flag = qlini_wwpn;         /* It is for sure a wwn */
++#define hexdig(a)       ((a >= '0' && a <= '9') ? (a-'0') : (a - 'a' + 10))
++
++    /* -------------------------------------------------------------------- */
++    /* Got first byte. */
++    *i = (hexdig(c1) << 4) | hexdig(c2);
++
++    /* Get next 7 bytes. */
++    for (j = 1; j < 8; j++)
++    {
++	c1 = *++p;
++	if (!((c1 >= '0' && c1 <= '9') || (c1 >='a' && c1 <= 'f')))
++	{
++	    *flag = qlini_error;        /* Error */
++	    pr_info("%s:%u:%s #4 unknown character '%c'\n", __FILE__,__LINE__,__func__, c1);
++	}
++	c2 = *++p;
++	if (!((c2 >= '0' && c2 <= '9') || (c2 >='a' && c2 <= 'f')))
++	{
++	    *flag = qlini_error;        /* Error */
++	    pr_info("%s:%u:%s #5 unknown character '%c'\n", __FILE__,__LINE__,__func__, c2);
++	}
++	c3 = *++p;
++	if (j == 7)
++	{
++	    if (c3 != '\0' && c3 != ',')
++	    {
++		pr_info("%s:%u:%s #6 wwpn doesn't end with ',' or end of string ('%c')\n", __FILE__,__LINE__,__func__, c3);
++		*flag = qlini_error;    /* Error */
++		return;
++	    }
++	}
++	else if (c3 != ':')
++	{
++	    pr_info("%s:%u:%s #7 hex numbers not followed by ':' not allowed (%c)\n", __FILE__,__LINE__,__func__, c3);
++	    *flag = qlini_error;        /* Error */
++	    return;
++	}
++	*i = (*i << 8) | (hexdig(c1) << 4) | hexdig(c2);
++    }
++
++    /* Exit below. */
++    *ptr = p;
++}
++
++static int __init qlt_parse_ini_targets(void)
++{
++	struct ini_targets *new;
++	char *p = qlini_targets;
++	enum ini_target_types flag = qlini_error;
++	u64 i;
++
++	if (*p == '\0')
++	    return true;
++
++	while (*p != '\0')
++	{
++	    get_first(&i, &flag, &p);
++	    if (flag == qlini_error)
++		break;                  /* Error occurred */
++
++	    new = kzalloc(sizeof(*new), GFP_KERNEL);
++	    new->tt = flag;
++	    new->next = ql2x_ini_targets;
++	    switch (flag)
++	    {
++		case qlini_physical_slot:
++		    new->td.physical_slot = i;
++		    break;
++		case qlini_wwpn:
++		    new->td.wwpn = i;
++		    break;
++		default:
++		    break;
++	    }
++	    ql2x_ini_targets = new;
++	    if (*p == ',')              /* Go past comma between items. */
++		p++;
++	}
++
++	return flag != qlini_error;
++}
++#endif	// NEW_MATCH_WWPN
++
+ static int __init qlt_parse_ini_mode(void)
+ {
+ 	if (strcasecmp(qlini_mode, QLA2XXX_INI_MODE_STR_EXCLUSIVE) == 0)
+@@ -7252,14 +7711,27 @@ int __init qlt_init(void)
+ 	BUILD_BUG_ON(sizeof(struct ctio7_to_24xx) != 64);
+ 	BUILD_BUG_ON(sizeof(struct ctio_to_2xxx) != 64);
+ 
++#ifdef NEW_MATCH_WWPN
++	if (!qlt_parse_ini_targets()) {
++		ql_log(ql_log_fatal, NULL, 0xe06a,
++		"qlt_parse_ini_targets() failed\n");
++		return -EINVAL;
++	}
++#endif	// NEW_MATCH_WWPN
++
+ 	if (!qlt_parse_ini_mode()) {
+ 		ql_log(ql_log_fatal, NULL, 0xe06b,
+ 		    "qlt_parse_ini_mode() failed\n");
+ 		return -EINVAL;
+ 	}
+ 
++#ifndef NEW_MATCH_WWPN
+ 	if (!QLA_TGT_MODE_ENABLED())
+ 		return 0;
++#else	// NEW_MATCH_WWPN
++	if (*qlini_targets == '\0' && !QLA_TGT_MODE_ENABLED())
++		return 0;
++#endif	// NEW_MATCH_WWPN
+ 
+ 	qla_tgt_mgmt_cmd_cachep = kmem_cache_create("qla_tgt_mgmt_cmd_cachep",
+ 	    sizeof(struct qla_tgt_mgmt_cmd), __alignof__(struct
+@@ -7300,7 +7772,14 @@ int __init qlt_init(void)
+ 	/*
+ 	 * Return 1 to signal that initiator-mode is being disabled
+ 	 */
+-	return (ql2x_ini_mode == QLA2XXX_INI_MODE_DISABLED) ? 1 : 0;
++//	return (ql2x_ini_mode == QLA2XXX_INI_MODE_DISABLED) ? 1 : 0;
++#ifndef NEW_MATCH_WWPN
++	if (ql2x_ini_mode == QLA2XXX_INI_MODE_DISABLED)
++#else	// NEW_MATCH_WWPN
++	if (*qlini_targets != '\0' || QLA_TGT_MODE_ENABLED())
++#endif	// NEW_MATCH_WWPN
++		return 1;
++	return 0;
+ 
+ out_cmd_mempool:
+ 	mempool_destroy(qla_tgt_mgmt_cmd_mempool);
+@@ -7313,8 +7792,13 @@ int __init qlt_init(void)
+ 
+ void qlt_exit(void)
+ {
++#ifndef NEW_MATCH_WWPN
+ 	if (!QLA_TGT_MODE_ENABLED())
+ 		return;
++#else	// NEW_MATCH_WWPN
++	if (*qlini_targets == '\0' && !QLA_TGT_MODE_ENABLED())
++		return;
++#endif	// NEW_MATCH_WWPN
+ 
+ 	destroy_workqueue(qla_tgt_wq);
+ 	mempool_destroy(qla_tgt_mgmt_cmd_mempool);
