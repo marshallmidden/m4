@@ -1,0 +1,60 @@
+diff -Nrp -U 7 --strip-trailing-cr a/fs/smb/client/cifsglob.h b/fs/smb/client/cifsglob.h
+--- a/fs/smb/client/cifsglob.h	2024-02-12 15:07:46.000000000 -0600
++++ b/fs/smb/client/cifsglob.h	2024-02-12 15:44:01.134012839 -0600
+@@ -662,14 +662,15 @@ inc_rfc1001_len(void *buf, int count)
+ struct TCP_Server_Info {
+ 	struct list_head tcp_ses_list;
+ 	struct list_head smb_ses_list;
+ 	spinlock_t srv_lock;  /* protect anything here that is not protected */
+ 	__u64 conn_id; /* connection identifier (useful for debugging) */
+ 	int srv_count; /* reference counter */
+ 	/* 15 character server name + 0x20 16th byte indicating type = srv */
++	char *volUNC;
+ 	char server_RFC1001_name[RFC1001_NAME_LEN_WITH_NULL];
+ 	struct smb_version_operations	*ops;
+ 	struct smb_version_values	*vals;
+ 	/* updates to tcpStatus protected by cifs_tcp_ses_lock */
+ 	enum statusEnum tcpStatus; /* what we think the status is */
+ 	char *hostname; /* hostname portion of UNC string */
+ 	struct socket *ssocket;
+diff -Nrp -U 7 --strip-trailing-cr a/fs/smb/client/connect.c b/fs/smb/client/connect.c
+--- a/fs/smb/client/connect.c	2024-02-12 15:27:30.188574470 -0600
++++ b/fs/smb/client/connect.c	2024-02-12 15:44:01.135012835 -0600
+@@ -1514,16 +1514,20 @@ static int match_server(struct TCP_Serve
+ 	if (strcmp(ctx->vals->version_string, SMB3ANY_VERSION_STRING) == 0) {
+ 		if (server->vals->protocol_id < SMB30_PROT_ID)
+ 			return 0;
+ 	} else if (strcmp(ctx->vals->version_string,
+ 		   SMBDEFAULT_VERSION_STRING) == 0) {
+ 		if (server->vals->protocol_id < SMB21_PROT_ID)
+ 			return 0;
+-	} else if ((server->vals != ctx->vals) || (server->ops != ctx->ops))
++	} else if ((server->vals != ctx->vals) || (server->ops != ctx->ops)) {
+ 		return 0;
++	} else if (server->volUNC != ctx->UNC ) { /* intentional POINTER test */
++		return 0;
++	}
++
+ 
+ 	if (!net_eq(cifs_net_ns(server), current->nsproxy->net_ns))
+ 		return 0;
+ 
+ 	if (!cifs_match_ipaddr((struct sockaddr *)&ctx->srcaddr,
+ 			       (struct sockaddr *)&server->srcaddr))
+ 		return 0;
+@@ -1702,14 +1706,15 @@ cifs_get_tcp_session(struct smb3_fs_cont
+ 	}
+ 
+ 	if (ctx->nosharesock)
+ 		tcp_ses->nosharesock = true;
+ 
+ 	tcp_ses->ops = ctx->ops;
+ 	tcp_ses->vals = ctx->vals;
++	tcp_ses->volUNC = ctx->UNC;
+ 	cifs_set_net_ns(tcp_ses, get_net(current->nsproxy->net_ns));
+ 
+ 	tcp_ses->conn_id = atomic_inc_return(&tcpSesNextId);
+ 	tcp_ses->noblockcnt = ctx->rootfs;
+ 	tcp_ses->noblocksnd = ctx->noblocksnd || ctx->rootfs;
+ 	tcp_ses->noautotune = ctx->noautotune;
+ 	tcp_ses->tcp_nodelay = ctx->sockopt_tcp_nodelay;
