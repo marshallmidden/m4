@@ -1,0 +1,207 @@
+diff --git a/fs/smb/client/cifsproto.h b/fs/smb/client/cifsproto.h
+--- a/fs/smb/client/cifsproto.h	2020-01-31 18:35:29.070757324 -0600
++++ b/fs/smb/client/cifsproto.h	2020-01-31 12:41:29.000000000 -0600
+@@ -217,15 +217,16 @@ extern struct inode *cifs_iget(struct su
+ 				       struct cifs_open_info_data *data,
+ 				       struct super_block *sb,
+ 				       const unsigned int xid);
+ extern int cifs_get_inode_info_unix(struct inode **pinode,
+ 			const unsigned char *search_path,
+ 			struct super_block *sb, unsigned int xid);
+ extern int cifs_set_file_info(struct inode *inode, struct iattr *attrs,
+-			      unsigned int xid, const char *full_path, __u32 dosattr);
++			      unsigned int xid, char *full_path, __u32 dosattr,
++			      __le64 creationtime);
+ extern int cifs_rename_pending_delete(const char *full_path,
+ 				      struct dentry *dentry,
+ 				      const unsigned int xid);
+ extern int sid_to_id(struct cifs_sb_info *cifs_sb, struct cifs_sid *psid,
+ 				struct cifs_fattr *fattr, uint sidtype);
+ extern int cifs_acl_to_fattr(struct cifs_sb_info *cifs_sb,
+ 			      struct cifs_fattr *fattr, struct inode *inode,
+diff --git a/fs/smb/client/inode.c b/fs/smb/client/inode.c
+--- a/fs/smb/client/inode.c	2020-01-31 18:35:29.077757298 -0600
++++ b/fs/smb/client/inode.c	2020-01-31 13:06:59.000000000 -0600
+@@ -1580,15 +1580,15 @@ out:
+ 	free_xid(xid);
+ 	kfree(fattr.cf_symlink_target);
+ 	return inode;
+ }
+ 
+ int
+ cifs_set_file_info(struct inode *inode, struct iattr *attrs, unsigned int xid,
+-		   const char *full_path, __u32 dosattr)
++		   const char *full_path, __u32 dosattr, __le64 creationtime)
+ {
+ 	bool set_time = false;
+ 	struct cifs_sb_info *cifs_sb = CIFS_SB(inode->i_sb);
+ 	struct TCP_Server_Info *server;
+ 	FILE_BASIC_INFO	info_buf;
+ 
+ 	if (attrs == NULL)
+@@ -1623,15 +1623,15 @@ cifs_set_file_info(struct inode *inode,
+ 	if (set_time && (attrs->ia_valid & ATTR_CTIME)) {
+ 		cifs_dbg(FYI, "CIFS - CTIME changed\n");
+ 		info_buf.ChangeTime =
+ 		    cpu_to_le64(cifs_UnixTimeToNT(attrs->ia_ctime));
+ 	} else
+ 		info_buf.ChangeTime = 0;
+ 
+-	info_buf.CreationTime = 0;	/* don't change */
++	info_buf.CreationTime = creationtime;	/* don't change, if 0 */
+ 	info_buf.Attributes = cpu_to_le32(dosattr);
+ 
+ 	return server->ops->set_file_info(inode, full_path, &info_buf, xid);
+ }
+ 
+ #ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
+ /*
+@@ -1874,24 +1874,24 @@ psx_del_no_retry:
+ 		if (origattr == 0)
+ 			origattr |= ATTR_NORMAL;
+ 		dosattr = origattr & ~ATTR_READONLY;
+ 		if (dosattr == 0)
+ 			dosattr |= ATTR_NORMAL;
+ 		dosattr |= ATTR_HIDDEN;
+ 
+-		rc = cifs_set_file_info(inode, attrs, xid, full_path, dosattr);
++		rc = cifs_set_file_info(inode, attrs, xid, full_path, dosattr, 0);
+ 		if (rc != 0)
+ 			goto out_reval;
+ 
+ 		goto retry_std_delete;
+ 	}
+ 
+ 	/* undo the setattr if we errored out and it's needed */
+ 	if (rc != 0 && dosattr != 0)
+-		cifs_set_file_info(inode, attrs, xid, full_path, origattr);
++		cifs_set_file_info(inode, attrs, xid, full_path, origattr, 0);
+ 
+ out_reval:
+ 	if (inode) {
+ 		cifs_inode = CIFS_I(inode);
+ 		cifs_inode->time = 0;	/* will force revalidate to get info
+ 					   when needed */
+ 		inode_set_ctime_current(inode);
+@@ -3186,15 +3186,15 @@ cifs_setattr_nounix(struct dentry *diren
+ 			/* ignore mode change - ATTR_READONLY hasn't changed */
+ 			attrs->ia_valid &= ~ATTR_MODE;
+ 		}
+ 	}
+ 
+ 	if (attrs->ia_valid & (ATTR_MTIME|ATTR_ATIME|ATTR_CTIME) ||
+ 	    ((attrs->ia_valid & ATTR_MODE) && dosattr)) {
+-		rc = cifs_set_file_info(inode, attrs, xid, full_path, dosattr);
++		rc = cifs_set_file_info(inode, attrs, xid, full_path, dosattr, 0);
+ 		/* BB: check for rc = -EOPNOTSUPP and switch to legacy mode */
+ 
+ 		/* Even if error on time set, no sense failing the call if
+ 		the server would set the time to a reasonable value anyway,
+ 		and this check ensures that we are not being called from
+ 		sys_utimes in which case we ought to fail the call back to
+ 		the user when the server rejects the call */
+diff --git a/fs/smb/client/xattr.c b/fs/smb/client/xattr.c
+--- a/fs/smb/client/xattr.c	2020-01-31 18:35:29.082757280 -0600
++++ b/fs/smb/client/xattr.c	2020-01-31 21:35:34.469086122 -0600
+@@ -146,14 +146,46 @@ static int cifs_xattr_set(const struct x
+ 				CIFS_I(inode)->time = 0;
+ 			break;
+ 		}
+ 
+ 		if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_NO_XATTR)
+ 			goto out;
+ 
++		if ((strcmp(name, CIFS_XATTR_ATTRIB) == 0) ||
++		    (strcmp(name, SMB3_XATTR_ATTRIB) == 0)) {
++			__u32 cifsAttrs;
++			struct iattr attrs;
++			if (size != sizeof(__u32))
++			{
++				rc = -ERANGE;
++				break;
++			}
++			cifsAttrs = *(__u32 *)value;
++			memset(&attrs, 0, sizeof(attrs));
++			if (cifsAttrs == 0) {
++				cifsAttrs |= ATTR_NORMAL;
++			}
++			CIFS_I(inode)->cifsAttrs = cifsAttrs;
++			rc = cifs_set_file_info(inode, &attrs, xid, full_path, cifsAttrs, 0);
++			break;
++		} else if ((strcmp(name, CIFS_XATTR_CREATETIME) == 0) ||
++		    (strcmp(name, SMB3_XATTR_CREATETIME) == 0)) {
++			__u32 cifsAttrs;
++			struct iattr attrs;
++			if (size != sizeof(__u64))
++			{
++				rc = -ERANGE;
++				break;
++			}
++			memset(&attrs, 0, sizeof(attrs));
++			cifsAttrs = CIFS_I(inode)->cifsAttrs;
++			CIFS_I(inode)->createtime = *(__u64 *)value;
++			rc = cifs_set_file_info(inode, &attrs, xid, full_path, cifsAttrs, *(__u64 *)value);
++			break;
++		}
+ 		if (pTcon->ses->server->ops->set_EA) {
+ 			rc = pTcon->ses->server->ops->set_EA(xid, pTcon,
+ 				full_path, name, value, (__u16)size,
+ 				cifs_sb->local_nls, cifs_sb);
+ 			if (rc == 0)
+ 				inode_set_ctime_current(inode);
+ 		}
+@@ -169,36 +201,34 @@ static int cifs_xattr_set(const struct x
+ 		pacl = kmalloc(size, GFP_KERNEL);
+ 		if (!pacl) {
+ 			rc = -ENOMEM;
+ 		} else {
+ 			memcpy(pacl, value, size);
+ 			if (pTcon->ses->server->ops->set_acl) {
+-				int aclflags = 0;
++				int aclflags1 = 0;
++				int aclflags2 = 0;
++				int aclflags3 = 0;
+ 				rc = 0;
+ 
+-				switch (handler->flags) {
+-				case XATTR_CIFS_NTSD_FULL:
+-					aclflags = (CIFS_ACL_OWNER |
++					aclflags1 = (CIFS_ACL_OWNER |
+-						    CIFS_ACL_GROUP |
+-						    CIFS_ACL_DACL |
+-						    CIFS_ACL_SACL);
+-					break;
+-				case XATTR_CIFS_NTSD:
+-					aclflags = (CIFS_ACL_OWNER |
++					aclflags2 = (CIFS_ACL_OWNER |
+-						    CIFS_ACL_GROUP |
+-						    CIFS_ACL_DACL);
+-					break;
+-				case XATTR_CIFS_ACL:
+-				default:
+-					aclflags = CIFS_ACL_DACL;
++					aclflags3 = CIFS_ACL_DACL;
+-				}
+-
+-				rc = pTcon->ses->server->ops->set_acl(pacl,
+-					size, inode, full_path, aclflags);
++				rc = pTcon->ses->server->ops->set_acl(pacl,
++					size, inode, full_path, aclflags1);
++				if (rc == 0)
++				{
++					rc = pTcon->ses->server->ops->set_acl(pacl,
++						size, inode, full_path, aclflags2);
++				}
++				if (rc == 0)
++				{
++					rc = pTcon->ses->server->ops->set_acl(pacl,
++						size, inode, full_path, aclflags3);
++				}
+ 			} else {
+ 				rc = -EOPNOTSUPP;
+ 			}
+ 			if (rc == 0) /* force revalidate of the inode */
+ 				CIFS_I(inode)->time = 0;
+ 			kfree(pacl);
+ 		}
+ 		break;
