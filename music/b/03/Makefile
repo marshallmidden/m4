@@ -1,4 +1,6 @@
 V1           = v3-1
+INCLUDES     = instruments.include
+INCLUDES    += macros.include
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 IMSCOMP = ~/ims/imscomp
@@ -49,7 +51,7 @@ MC_ARGS ?=
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %_2.pdf:        %_m2.ps
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
-%.E: %.gcs ${M} instruments.include Makefile
+%.E: %.gcs ${M} ${INCLUDES} Makefile
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 %.wav:  %.mid
