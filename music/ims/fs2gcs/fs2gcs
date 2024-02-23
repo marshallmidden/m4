@@ -1002,7 +1002,7 @@ def determine_note_gcs_lengths():
                 if closest_mult < closest_single:       # Split note into two of them.
 #--                     print_stderr(f'determine_note_gcs_lengths: multiple_note_split - ch={ch} m={m} n={n} closest_mult={closest_mult} closest_single={closest_single}')
                     if closest_mult > CLICKS_SLOP:
-                        print_error(f'determine_note_gcs_lengths: multiple_note_split - ch={ch} m={m} n={n} ({which_indexes[0]}, {which_indexes[1]}), PTR, closest_mult={closest_mult}')
+                        print_error(f'determine_note_gcs_lengths: multiple_note_split - ch={ch} m={m} n={n} ({which_indexes[0]}, {which_indexes[1]}), PTR, closest_mult={closest_mult} CLICKS_SLOP={CLICKS_SLOP}')
                     # fi
                     bufs_notes_start[ch].insert(n + 1, bufs_notes_start[ch][n] + which_indexes[0])
                     bufs_notes_end[ch].insert(n + 1, bufs_notes_end[ch][n])
@@ -1119,35 +1119,56 @@ def determine_note_gcs_notes():
                 # Current key for measure:
                 k = measures_key[ch][m]
                 nksxnk = key_sig[k]
-                if k == 'cn':                             # Special case "cn" to mean use sharps. 'c' uses flats.
-                    lkj = midi_value_to_note_sharp_39[midi_note]
+                if k == 'cn':                               # Special case "cn" to mean use sharps. 'c' uses flats.
+                    if midi_note not in midi_value_to_note_flat_39:
+                        print_warning(f'determine_note_gcs_notes - midi_note={midi_note} not in midi_value_to_note_sharp_39')
+                        lkj = 'r'                           # Make it a rest.
+                    else:
+                        lkj = midi_value_to_note_sharp_39[midi_note]
+                    # fi
                 elif nksxnk <= 0:                           # If flat's on staff for key.
-                    lkj = midi_value_to_note_flat_39[midi_note]
+                    if midi_note not in midi_value_to_note_flat_39:
+                        print_warning(f'determine_note_gcs_notes - midi_note={midi_note} not in midi_value_to_note_flat_39')
+                        lkj = 'r'                           # Make it a rest.
+                    else:
+                        lkj = midi_value_to_note_flat_39[midi_note]
+                    # fi
                 else:                                       # If sharps's on staff for key.
-                    lkj = midi_value_to_note_sharp_39[midi_note]
-                # fi
-                playing_on = lkj[0:2]
-                playing_a = lkj[2:]
-                # See if this note in measure already has +/-/n.
-                acc = acc_m[playing_on]                     # if last note of this had acc already.
-                if acc != '':                               # This note already has sharp/flat/nature
-                    if playing_a == '':                     # Set to n.
-                        playing_a = acc = 'n'
+                    if midi_note not in midi_value_to_note_sharp_39:
+                        print_warning(f'determine_note_gcs_notes - midi_note={midi_note} not in midi_value_to_note_sharp_39')
+                        lkj = 'r'                           # Make it a rest.
                     else:
-                        acc = playing_a
-                    # fi
-                else:
-                    if key_convert[k][playing_on] == lkj:
-                        playing_a = acc = ''
-                    else:
-                        acc = playing_a
+                        lkj = midi_value_to_note_sharp_39[midi_note]
                     # fi
                 # fi
-                acc_m[playing_on] = acc
-                if 't' in bufs_suffix[ch][n]:
-                    acc_last_suffix_tie = playing_on
-                else:
+                if lkj == 'r':
+                    playing_on = 'r'
+                    playing_a = ''
                     acc_last_suffix_tie = ''
+                else:
+                    playing_on = lkj[0:2]
+                    playing_a = lkj[2:]
+                    # See if this note in measure already has +/-/n.
+                    acc = acc_m[playing_on]                     # if last note of this had acc already.
+                    if acc != '':                               # This note already has sharp/flat/nature
+                        if playing_a == '':                     # Set to n.
+                            playing_a = acc = 'n'
+                        else:
+                            acc = playing_a
+                        # fi
+                    else:
+                        if key_convert[k][playing_on] == lkj:
+                            playing_a = acc = ''
+                        else:
+                            acc = playing_a
+                        # fi
+                    # fi
+                    acc_m[playing_on] = acc
+                    if 't' in bufs_suffix[ch][n]:
+                        acc_last_suffix_tie = playing_on
+                    else:
+                        acc_last_suffix_tie = ''
+                    # fi
                 # fi
             # fi
             bufs_gcs_note[ch][n] = playing_on + playing_a
@@ -1165,7 +1186,7 @@ def determine_note_gcs_notes():
 #   c) key before measure 1.
 #   d) instrument before measure 1.  Number -> string.
 #   e) Titles within a measure.
-#   f) Using keys and acc_m (accidentials in this measure -- remember ties keep 
+#   f) Using keys and acc_m (accidentials in this measure -- remember ties keep
 #      that accidental into this measure. (And we always specify accidentals!)
 #
 # Example of data:
@@ -1178,13 +1199,10 @@ def printable_measures():
 #--    bufs_gcs_length[ch][n] = str(which_q_ptr_3[which_q_3][0]) + '/3'
 
     global bufs_gcs_length
-    global midi_value_to_note_sharp_39
-    global midi_value_to_note_flat_39
     global bufs_notes
     global channels
     global measures_clicks_start
     global measures_key
-    global key_sig
 
     ch = 0
     while ch <= channels:
@@ -1486,12 +1504,13 @@ def process_echo_lines(q):
         else:
             v = 'ALL'
         # fi
+        # split(delimiter, number) -- delimiter=None for whitespace(default)
         a = vs[1].split(None, 1)
         if len(a) < 2 or len(a) > 4:
-            print_error(f'key line expects key followed by "major" not {a}')
+            print_error(f'key line expects key followed by "major"/"minor" not {a}')
             return
-        elif a[1][0:6] != "'major":
-            print_error(f'key line expects "major" not {a[1]}')
+        elif a[1][0:6] != "'major" and a[1][0:6] != "'minor":
+            print_error(f'key line expects "major"/"minor" not {a[1]}')
             return
         # fi
         key_previous = q
@@ -2184,33 +2203,33 @@ def print_debug_hints():
 #--     for b in pages_measures_hint:
 #--         print_debug(f'page hint: measure {b} = {pages_measures_hint[b]}')
 #--     # rof
-#-- 
+#--
 #--     for b in bars_measures_hint:
 #--         print_debug(f'bar hint: measure {b} = {bars_measures_hint[b]}')
 #--     # rof
-#-- 
+#--
     for s in skip_measure_hint:
         print_debug(f'skip measure hint: measure {s} = {skip_measure_hint[s]}')
     # rof
-#-- 
+#--
 #--     for ch in clef_channel_measures_hint:
 #--         for m in clef_channel_measures_hint[ch]:
 #--             print_debug(f'clef hint: channel {ch} measure {m} = {clef_channel_measures_hint[ch][m]}')
 #--         # rof
 #--     # rof
-#-- 
+#--
 #--     for ch in instrument_channel_measures_hint:
 #--         for m in instrument_channel_measures_hint[ch]:
 #--             print_debug(f'instrument hint: channel {ch} measure {m} = {instrument_channel_measures_hint[ch][m]}')
 #--         # rof
 #--     # rof
-#-- 
+#--
 #--     for ch in key_channel_measures_hint:
 #--         for m in key_channel_measures_hint[ch]:
 #--             print_debug(f'key hint: channel {ch} measure {m} = {key_channel_measures_hint[ch][m]}')
 #--         # rof
 #--     # rof
-#-- 
+#--
 #--     for m in meters_measures_hint:
 #--         print_debug(f'meter hint: measure {m} = {meters_measures_hint[m]} ... {meters_values_hint[m]}')
 #--     # rof
@@ -3510,13 +3529,9 @@ key_sig = { 'c+':7, 'f+':6, 'b':5, 'bn':5, 'e':4, 'en':4, 'a':3, 'an':3, 'd':2,
             'dn':2, 'g':1, 'gn':1, 'c':0, 'cn':0, 'f':-1, 'b-':-2, 'e-':-3,
             'a-':-4, 'd-':-5, 'g-':-6, 'c-':-7 }
 
-global key_sig_int
-key_sig_int = {}
-for i in key_sig:
-    if key_sig[i] not in key_sig_int:
-        key_sig_int[key_sig[i]] = i
-    # fi
-# rof
+global key_minor_sig
+key_minor_sig = { 'a+':7, 'd+':6, 'g+':5, 'c+':4, 'f+':3, 'b':2, 'e':1, 'a':0,
+            'd':-1, 'g':-2, 'c':-3, 'f':-4, 'b-':-5, 'e-':-6, 'a-':-7 }
 
 global key_to_accidentals
 key_to_accidentals = {
@@ -4330,7 +4345,7 @@ def output_chords(m, s, notes):
         output_single_channel(m, s, ch_with_notes[0], notes)
         return
     # fi
-        
+
     # Do the voices/channels that are not all rests.
     output_real_chords(m, s, ch_with_notes, notes)
     return
