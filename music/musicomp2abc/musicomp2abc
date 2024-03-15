@@ -796,7 +796,7 @@ def print_output_no_eol(strg):
 # ----------------------------------------------------------------------------
 import calculate
 
-calculate.cexp_parser()                         # initialize parser
+calculate.cexp_parser()                             # initialize parser
 
 numarry_name        = calculate.numarry_name        # The name of the variable.
 numarry_maclevel    = calculate.numarry_maclevel    # The macro level was in effect when created.
@@ -885,7 +885,14 @@ def chkvarlevel(arg, maclev):
 def print_these_vars(strng):
 #--     print_some_variable_values('  ' + strng, [ 'ARG', 'DEF', 'NEW', 'octv', 'notenum', 'dur', 'secs' ] )
 #--     print_some_variable_values('  ' + strng, [ 'STRING', 'secs', 'dur', 'num', 'tics', 'curstaf', 'NEW' ] )
-    pass
+
+#--    vs = []
+#--    for wary in calculate.local_arrays + calculate.arrays:
+#--        name = wary[numarry_name]
+#--        vs.append(name)
+#--    # rof
+#--    print_some_variable_values('  ' + strng, vs)
+    return
 # End of print_these_vars
 
 # ----------------------------------------------------------------------------
@@ -905,7 +912,7 @@ def print_some_variable_values(s, varnams):
 #--         print_debug(f'{s}: whicharraychars={whichmacrochars}')
 #--     # fi
 
-    for wary in calculate.local_arrays:
+    for wary in calculate.local_arrays + calculate.arrays:
         name = wary[numarry_name]
         if name in varnams:
             print_debug("{}: name={:8s} ML={:1d} MA={:5s} dim={} values={} types={}".format(s, name, wary[numarry_maclevel], str(wary[numarry_macro_arg]), wary[numarry_indexes], wary[numarry_values], wary[numarry_value_type]))
@@ -7165,6 +7172,10 @@ def set_default_ims(t_args, original_line):
 
     wnote = wargs[0]
     therest, thenote, typenote = getnote(wnote, voice, True, True, False, original_line)  # Set defaults.
+    if typenote != normal_note:
+        print_error("setting default note had error with note {} -- cannot have anything but a normal note".format(wnote), original_line)
+        return
+    # fi
 
     # Restore type of processing we are doing.
     args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc = save_current_type
@@ -7183,7 +7194,7 @@ def set_default_ims(t_args, original_line):
     timeofnote, r_suffixes, number_dots = get_time(therest, original_line)
 
     if r_suffixes is None or number_dots is None:
-        print_error("decode - Error getting time for note", original_line)
+        print_error("decode - set_default_ims, Error getting time for note", original_line)
         return
     # fi
     # suffix_legato = 16            -- glide to next note.
@@ -7281,6 +7292,10 @@ def decode_gsw(t_args, original_line):
     w_note = nline
     # Ignore leading space.
     therest, thenote, typenote = getnote(w_note, voice, False, True, False, original_line)
+    if typenote != normal_note:
+        print_error("setting default note had error with note {} -- cannot have anything but a normal note".format(wnote), original_line)
+        return
+    # fi
 
     # Restore type of processing we are doing.
     args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc = save_current_type
@@ -7315,7 +7330,7 @@ def decode_gsw(t_args, original_line):
     timeofnote, r_suffixes, number_dots = get_time(therest, original_line)
 
     if r_suffixes is None or number_dots is None:
-        print_error("decode - Error getting time for note", original_line)
+        print_error("decode - decode_gsw, Error getting time for note", original_line)
         return
     # fi
     # suffix_legato = 16            -- glide to next note.
@@ -7384,6 +7399,9 @@ def decode_gsw(t_args, original_line):
 #   glissando, volumenumber, volumename, crescendo, diminuendo, position, pan,
 #   type, treble, bass, soprano, alto, tenor, normal, perc, nohead, oloz, floz,
 #   oharm, fharm, trem0, trem1, trem2, trem3, stemsoff, stemson
+# Added: "notetext": '3c+' as a string.
+#        "suffixes": The tie/legato/staccato as a string. (t/l/s)
+# Fixed notelength for dotted notes.
 
 def decode_ims(t_args, original_line):
     global args
@@ -7469,12 +7487,20 @@ def decode_ims(t_args, original_line):
     nline = replace_character_variables(w_note, original_line).strip()
     w_note = nline
     therest, midinote, typenote = getnote(w_note, voice, False, True, False, original_line)
+    if typenote != normal_note:
+        print_error("decode note had error with note {} -- cannot have anything but a normal note".format(w_note), original_line)
+        return
+    # fi
 
     # What does key_voice have to me?
     args.horizontal = True
     args.midi1csv = False
     set_staff_arr_double(voice, key_sig_int[k], measure_on, key_voice, None, original_line)
     a, thenote, b = getnote(w_note, voice, False, True, False, original_line)
+    if b != normal_note:
+        print_error("decode note had error with note {} -- cannot have anything but a normal note".format(w_note), original_line)
+        return
+    # fi
 
     # Restore type of processing we are doing.
     args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc = save_current_type
@@ -7488,7 +7514,7 @@ def decode_ims(t_args, original_line):
     # Get the time value for the note.
     timeofnote, r_suffixes, number_dots = get_time(therest, original_line)
     if r_suffixes is None or number_dots is None:
-        print_error("decode - Error getting time for note", original_line)
+        print_error("decode - decode_ims, Error getting time for note", original_line)
         return
     # fi
 
@@ -7503,7 +7529,9 @@ def decode_ims(t_args, original_line):
     note_notelength = -1
     note_dot = number_dots
     note_duration = -1                  # Set far below.
+    note_notetext = ''
     if type(thenote) is str:
+        note_notetext = thenote
         if len(thenote) < 1:
             note_octave = 0
         else:
@@ -7541,17 +7569,23 @@ def decode_ims(t_args, original_line):
     note_aa = 0                             # NOTDONEYET
     note_g = 0                              # NOTDONEYET
     note_gg = 0                             # NOTDONEYET
+    note_suffixes = ''
     if (r_suffixes & suffix_legato) != 0:
         note_l = 1
         note_z = 1
+        note_suffixes = note_suffixes + 'l'
     if (r_suffixes & suffix_staccato) != 0:
         note_s = 1
+        note_suffixes = note_suffixes + 's'
     if (r_suffixes & suffix_marcato) != 0:
         note_m = 1
+        note_suffixes = note_suffixes + 'm'
     if (r_suffixes & suffix_tied) != 0:
         note_t = 1
+        note_suffixes = note_suffixes + 't'
     if (r_suffixes & suffix_emphasis) != 0:
         note_a = 1
+        note_suffixes = note_suffixes + 'a'
     # fi
 
 # If staff-line word (which sets till changed):
@@ -7605,7 +7639,7 @@ def decode_ims(t_args, original_line):
         p = timeofnote / 2.0
         for i in range(1, number_dots+1):
             timeofnote = timeofnote + p
-        p = p / 2.0
+            p = p / 2.0
         # rof
     # fi
     note_duration = timeofnote      #               : 0.25 if 1/4 note. -1 if not a note.
@@ -7630,6 +7664,8 @@ def decode_ims(t_args, original_line):
     convertit = {
         "octave": (note_octave, is_float_number),
         "notename": (note_notename, is_float_string),
+        "notetext": (note_notetext, is_float_string),
+        "suffixes": (note_suffixes, is_float_string),
         "notenumber": (note_notenumber, is_float_number),
         "notelength": (note_notelength, is_float_number),
         "duration": (note_duration, is_float_number),
@@ -7694,7 +7730,9 @@ def decode_ims(t_args, original_line):
             print_error("decode - unknown name ({})".format(x[i]), original_line)
             return
         # fi
-        if str(convertit[x[i]][0]) == '':
+        if convertit[x[i]][1] == is_float_string:
+            computeit = x[i + 1] + '=' + f"'{convertit[x[i]][0]}'"
+        elif str(convertit[x[i]][0]) == '':
             computeit = x[i + 1] + '=' + '0'
         else:
             computeit = x[i + 1] + '=' + str(convertit[x[i]][0])
@@ -8308,6 +8346,11 @@ def do_decode(t_args, original_line):
         print_error("decode command does not have any arguments.", original_line)
         return
     # fi
+
+    for st in staff_chord_voices:
+        print_debug(f'    staff_chord_voices[{st}]={staff_chord_voices[st]}')
+    # rof
+
     if t_args.find(';') >= 0:            # if IMS format decode command (with pairs)
         decode_ims(t_args, original_line)
     elif t_args.find(',') < 0:          # No arguments - set default values for note
@@ -8465,12 +8508,20 @@ def get_defaults_for_note(t_args, voiceon, original_line):
 
     w_note = t_args
     therest, midinote, typenote = getnote(w_note, voiceon, False, True, False, original_line)
+    if typenote != normal_note:
+        print_error("getting default note had error with note {} -- cannot have anything but a normal note".format(w_note), original_line)
+        return
+    # fi
 
     # Now do text form of note.
     args.horizontal = True
     args.midi1csv = False
     set_staff_arr_double(voiceon, key_sig_int[k], measure_on, key_voice, None, original_line)
     a, thenote, b = getnote(w_note, voiceon, False, True, False, original_line)
+    if b != normal_note:
+        print_error("getting default note had error with note {} -- cannot have anything but a normal note".format(w_note), original_line)
+        return
+    # fi
 
     # Restore type of processing we are doing.
     args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc = save_current_type
@@ -8487,7 +8538,7 @@ def get_defaults_for_note(t_args, voiceon, original_line):
     # Get the time value for the note.
     timeofnote, r_suffixes, number_dots = get_time(therest, original_line)
     if r_suffixes is None or number_dots is None:
-        print_error("decode - Error getting time for note", original_line)
+        print_error("decode - get_defaults_for_note, Error getting time for note", original_line)
         return None, 0, 0, 0, 0, 0, 0, 0
     # fi
 
