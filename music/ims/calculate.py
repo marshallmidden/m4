@@ -37,6 +37,10 @@ numarry_values = 3          # Array of values ([0] for not an array).
 numarry_value_type = 4      # Array of types None=not-set, 0=int/float, 1= character string.
 numarry_macro_arg = 5       # True if macro argument - normally False.
 
+# None if variable is not set yet.
+type_is_number = 0          # Type of variable is a number.
+type_is_string = 1          # Type of variable is a string.
+
 #-- warray = [ 'abc', 8,
 #--            [ ],             # Zero dimension
 #--            [ 123.000 ],     # value
@@ -325,7 +329,7 @@ def get_value(arg):
         if where_type is None:
             arg[0] = 'CHAR'
             arg[1] = None
-        elif where_type == 0:
+        elif where_type == type_is_number:
             arg[0] = 'NUMBER'
             arg[1] = float(where_value)
         else:
@@ -360,7 +364,7 @@ def get_value(arg):
         return [ "ERROR - get_value - array needs '{}' arguments".format(len(maxwary[numarry_indexes])), None ]
     elif maxwary[numarry_value_type][0] is None:
         return [ "ERROR - get_value - variable is not set yet - '{}'".format(arg), None ]
-    elif maxwary[numarry_value_type][0] == 0:
+    elif maxwary[numarry_value_type][0] == type_is_number:
         arg[0] = 'NUMBER'
         arg[1] = float(maxwary[numarry_values][0])
     else:
@@ -427,9 +431,9 @@ def compute_value(op, arg1, arg2):
             warray = a[1]
             warray[numarry_values][idx] = arg2[1]
             if arg2[0] == 'NUMBER':
-                warray[numarry_value_type][idx] = 0
+                warray[numarry_value_type][idx] = type_is_number
             elif arg2[0] == 'CHAR':
-                warray[numarry_value_type][idx] = 1
+                warray[numarry_value_type][idx] = type_is_string
             else:
                 return [ "ERROR - ADDRESS and arg2 unrecognized '{}'".format(arg2), None]
             # fi
@@ -471,12 +475,12 @@ def compute_value(op, arg1, arg2):
 #PRINT            print("compute_value - #i1", file=sys.stderr, flush=True)  # PRINT
             maxwary[numarry_values][0] = float(arg2[1])
 #PRINT            print("compute_value - #i2", file=sys.stderr, flush=True)  # PRINT
-            maxwary[numarry_value_type][0] = 0
+            maxwary[numarry_value_type][0] = type_is_number
 #PRINT            print("compute_value - #i2", file=sys.stderr, flush=True)  # PRINT
         else:                                   # Assume CHAR
 #PRINT            print("compute_value - #j", file=sys.stderr, flush=True)  # PRINT
             maxwary[numarry_values][0] = arg2[1]
-            maxwary[numarry_value_type][0] = 1
+            maxwary[numarry_value_type][0] = type_is_string
         # fi
 #PRINT        print("compute_value - #iB-pre", file=sys.stderr, flush=True)  # PRINT
 #PRINT        print("compute_value #B - maxwary={}".format(maxwary), file=sys.stderr, flush=True)  # PRINT
@@ -1689,6 +1693,61 @@ arrays.append( [ 'm48', 0, [ ], [ 0 ],        [ 0 ] , False ] )
 arrays.append( [ 'm49', 0, [ ], [ 0 ],        [ 0 ] , False ] )
 
 arrays.append( [ 'm50', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm51', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm52', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm53', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm54', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm55', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm56', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm57', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm58', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm59', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+
+arrays.append( [ 'm60', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm61', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm62', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm63', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm64', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm65', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm66', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm67', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm68', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm69', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+
+arrays.append( [ 'm70', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm71', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm72', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm73', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm74', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm75', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm76', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm77', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm78', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm79', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+
+arrays.append( [ 'm80', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm81', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm82', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm83', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm84', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm85', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm86', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm87', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm88', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm89', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+
+arrays.append( [ 'm90', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm91', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm92', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm93', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm94', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm95', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm96', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm97', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm98', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+arrays.append( [ 'm99', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+
+arrays.append( [ 'm100', 0, [ ], [ 0 ],        [ 0 ] , False ] )
 #-----------------------------------------------------------------------------
 def cexp_parser():
     #                    oper,                         lprio, rprio, eval
