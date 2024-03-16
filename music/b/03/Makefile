@@ -54,6 +54,14 @@ MC_ARGS ?=
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E: %.gcs ${M} ${INCLUDES} Makefile
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
+%.v:    %.E
+	${IMSCOMP} ${MC_ARGS} --vert $< $@
+%_m.v:    %.E
+	${MUSICOMP} ${MC_ARGS} --vert $< $@
+%.h:    %.E
+	${IMSCOMP} ${MC_ARGS} --hori $< $@
+%_m.h:    %.E
+	${MUSICOMP} ${MC_ARGS} --hori $< $@
 #-----------------------------------------------------------------------------
 %.wav:  %.mid
 	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser/GeneralUser.sf2 -K 128 $< \
