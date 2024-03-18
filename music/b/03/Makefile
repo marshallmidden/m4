@@ -1,7 +1,17 @@
-#-- V1           = v3-1
-V1           = v3-2
+SONGS        = v3-1
+SONGS       += v3-2
 INCLUDES     = instruments.include
 INCLUDES    += macros.include
+#-----------------------------------------------------------------------------
+SONGS_E = ${SONGS:=.E}
+SONGS_ABC = ${SONGS:=.abc}
+SONGS_2_ABC = ${SONGS:=_2.abc}
+SONGS_FS = ${SONGS:=.fs}
+SONGS_2_FS = ${SONGS:=_2.fs}
+SONGS_PS = ${SONGS:=.ps}
+SONGS_2_PS = ${SONGS:=_2.ps}
+SONGS_PDF= ${SONGS:=.pdf}
+SONGS_2_PDF= ${SONGS:=_2.pdf}
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 IMSCOMP = ~/ims/imscomp
@@ -70,20 +80,20 @@ MC_ARGS ?=
 .PHONY: help
 help::
 	@echo "Example:"
-	@echo "  Use '${MUSICOMP2ABC} ${MC_ARGS} --midi1csv ${V1} to get ${V1}.abc."
-	@echo "  Use '${ABCM2PS} ${V1}.abc > ${V1}_m.ps'."
-	@echo "  Use '${PS2PDF} ${V1}_m.ps > ${V1}.pdf'."
-	@echo "  Use '${MUSICOMP2ABC} ${MC_ARGS} --fluidsynth ${V1} to get ${V1}.fs."
+	@echo "  Use '${MUSICOMP2ABC} ${MC_ARGS} --midi1csv ${SONGS} to get ${SONGS}.abc."
+	@echo "  Use '${ABCM2PS} ${SONGS_ABC} > ${SONGS_2_PS}"
+	@echo "  Use '${PS2PDF} ${SONGS_2_PS} > ${SONGS_2_PDF}'."
+	@echo "  Use '${MUSICOMP2ABC} ${MC_ARGS} --fluidsynth ${SONGS} to get ${SONGS_FS}"
 	@echo ""
 	@echo "Targets:"
-	@echo "  all    - create music files for ${V1}."
+	@echo "  all    - create music files for ${SONGS}."
 	@echo "  clean  - Remove postscript (ps), pdf, csv, and fs files."
 	@echo ""
-	@echo "  s1     - create ${V1}.abc, ${V1}_m.ps, and ${V1}.fs from ${V1}."
+	@echo "  s1     - create ${SONGS_ABC}, ${SONGS_2_PS}, and ${SONGS_FS} from ${SONGS}."
 #-----------------------------------------------------------------------------
 .PHONY: check
 check:
-	@echo "V1=${V1}"
+	@echo "SONGS=${SONGS}"
 	@echo "CPP=${CPP}"
 	@echo "MUSICOMP2ABC=${MUSICOMP2ABC}"
 	@echo "IMSCOMP=${IMSCOMP}"
@@ -99,18 +109,19 @@ check:
 #-- .PHONY: all         #-- There is a bug in gmake. I don't understand.
 all: s1
 #-----------------------------------------------------------------------------
-fs: ${V1}.fs ${V1}_2.fs
+fs: ${SONGS_FS} ${SONGS_2_FS}
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
-	rm -f ${V1}.{csv,mid,fs,pdf,abc,wav,E}
-	rm -f ${V1}_2.{csv,mid,fs,pdf,abc,wav,E}
+	rm -f ${SONGS_E} ${SONGS_ABC} ${SONGS_2_ABC} ${SONGS_FS} ${SONGS_2_FS}
+	rm -f ${SONGS_PS} ${SONGS_2_PS} ${SONGS_PS} ${SONGS_2_PS} ${SONGS_PDF} ${SONGS_2_PDF}
+	rm -f *.wav *.csv *.h *.v
 #-----------------------------------------------------------------------------
 .PHONY: s1
-s1: ${V1}.fs ${V1}.pdf      Makefile ${MUSICOMP2ABC}
-s1: ${V1}_2.fs ${V1}_2.pdf  Makefile ${IMSCOMP}
+s1: ${SONGS_FS} ${SONGS_2_FS}    Makefile ${MUSICOMP2ABC}
+s1: ${SONGS_PDF} ${SONGS_2_PDF}  Makefile ${IMSCOMP}
 #-----------------------------------------------------------------------------
 # End of Makefile
 #-----------------------------------------------------------------------------
