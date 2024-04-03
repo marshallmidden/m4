@@ -1,5 +1,6 @@
 SONGS        = v3-1
 SONGS       += v3-2
+SONGS       += v3-3
 INCLUDES     = instruments.include
 INCLUDES    += macros.include
 #-----------------------------------------------------------------------------
