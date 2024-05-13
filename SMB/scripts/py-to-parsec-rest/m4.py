@@ -9,6 +9,12 @@
 # NOTDONEYET - schedules
 # NOTDONEYET - targets (list)
 #-----------------------------------------------------------------------------
+# appliance systemid
+# appliance remoteids
+# appliance delete ID
+# appliance get ID
+# appliance put ID ??
+#-----------------------------------------------------------------------------
 '''
 2020-04-01 Modified from something Joel had and something William provided ...
 
@@ -26,6 +32,8 @@ Synopsis:
     brief on/off                        # Enable brief output, or back to full output.
     one-line                            # j and p have one line output.
     one-line on/off                     # Enable one line output, or back to full output.
+
+    appliance                           # Get system ID of appliance.
 
     j                                   # List all jobs.
     j l                                 # List all jobs.
@@ -1512,7 +1520,7 @@ def JobDele(authentication, base_url, vargs):
 def run_jobid(base_url, authentication, jobid):
     global args
 
-    (rt, r) = send_post(base_url, authentication, 'datamovement/jobs/{}/start?verify=false'.format(jobid), 202)
+    (rt, r) = send_post(base_url, authentication, 'datamovement/jobs/{}/start?dryrun=false'.format(jobid), 202)
     if not rt:
         return False
     # fi
