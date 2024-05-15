@@ -5,85 +5,101 @@
 #-- 	  172.22.12.143		SMB-Server-2012.ad.parsec.lab
 #-- 	  172.22.12.144		SMB-Server-2016.ad.parsec.lab
 #-- 	  172.22.12.112		SMB-Server-2019.ad.parsec.lab
-#-- 	  172.22.14.116		NetApp @ 172.22.14.116 - 7mode
+#-- 	  172.22.11.103		NetApp @ 172.22.11.103 - 7mode
 #-- 	  172.22.13.100		Isilon @ 172.22.13.100
 #-- 	  172.22.15.113		NetApp @ 172.22.15.113 - 9.
 
-#-- gone 2021-09-08 	  SMB-Server-2016.ad.parsec.lab
+#-- gone 2021-09-08	SMB-Server-2016.ad.parsec.lab -- Back 2023-06-07 without name in DNS.
+#-- gone 2021-09-09     KRB-TEST2-PDC.krb.test2.lab
+#--	  SMB-Server-2016.ad.parsec.lab
 I	= SMB-Server-2008.ad.parsec.lab \
 	  SMB-Server-2012.ad.parsec.lab \
- 	  KRB-TEST2-PDC.krb.test2.lab	\
+	  172.22.12.144 \
 	  SMB-Server-2019.ad.parsec.lab \
-	  172.22.14.116 \
+	  172.22.11.103 \
 	  172.22.13.100 \
-	  172.22.15.113
+	  172.22.15.113 \
+	  172.22.11.103
 
 # Brief name for device.
+#-- gone 2021-09-09	w2016 
 B	= w2008 \
 	  w2012 \
 	  w2016 \
 	  w2019 \
-	  na116 \
+	  it7modea \
 	  is100 \
-	  cdot113
+	  cdot113 \
+	  itmode7b
 
 # Source share name:
+#-- gone 2021-09-09	m4-v1
+#--	  m4_smb_v1
 S	= m4-v1 \
 	  m4-v1 \
 	  m4-v1 \
 	  m4-v1 \
-	  cifs_v1 \
+	  qSMBM4_001 \
 	  m4_v1 \
-	  m4_cdot_01
-#--	  m4_smb_v1
+	  m4_cdot_01 \
+	  qSMBM4_003
 
 # Destination share name:
+#-- gone 2021-09-09     m4-v2
+#--	  m4_smb_v2
 D	= m4-v2 \
 	  m4-v2 \
 	  m4-v2 \
 	  m4-v2 \
-	  cifs_v2 \
+	  qSMBM4_002 \
 	  m4_v2 \
-	  m4_cdot_02
-#--	  m4_smb_v2
+	  m4_cdot_02 \
+	  qSMBM4_004
 
 # Mount option(s) required:
 #--	  "vers=1.0" default, 2.0
+#-- gone 2021-09-09	"vers=default"
+#-- na103 2020-10-08	"vers=default"  nor 1.0, 2.0, 2.1, 3.0, 3.02, 3.11
 O	= "vers=default" \
 	  "vers=default" \
 	  "vers=default" \
 	  "vers=default" \
 	  "vers=2.0" \
 	  "vers=default" \
-	  "vers=default"
-#--na103 2020-10-08	  "vers=default"  nor 1.0, 2.0, 2.1, 3.0, 3.02, 3.11
+	  "vers=default" \
+	  "vers=2.0"
 
 # The windows server to ssh into and setup windows file systems on.
 # setup-files script needs it to call scripts-2-copy/SETUP.windowsserver.share.
 # First does not need, as is a windows server.
+#-- gone 2021-09-09     	  "-"
 W	= "-" \
 	  "-" \
 	  "-" \
 	  "-" \
 	  smb-server-2012.ad.parsec.lab \
 	  smb-server-2012.ad.parsec.lab \
+	  smb-server-2012.ad.parsec.lab \
 	  smb-server-2012.ad.parsec.lab
 
-#-- gone 2021-09-08		  "E:" 
 # Windows mount letter to mount on, if not already mounted.
+#-- gone 2021-09-08		  "E:" 
 V	= "E:" \
 	  "E:" \
 	  "E:" \
 	  "E:" \
 	  "M:" \
 	  "N:" \
-	  "O:"
+	  "O:" \
+	  "P:"
 
 # Windows administration login + administrator. 
+#-- gone 2021-09-09    "SMB-Server-2016"
 A	= "SMB-Server-2008" \
 	  "SMB-Server-2012" \
 	  "SMB-Server-2016" \
 	  "SMB-Server-2019" \
+	  "smb-server-2012" \
 	  "smb-server-2012" \
 	  "smb-server-2012" \
 	  "smb-server-2012"
