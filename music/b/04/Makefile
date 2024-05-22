@@ -1,9 +1,10 @@
-SONGS        = v3-1
-SONGS       += v3-2
-SONGS       += v3-3
-SONGS       += v3-4
+SONGS        = v4-1
+#-- SONGS       += v4-2
+#-- SONGS       += v4-3
+#-- SONGS       += v4-4
 INCLUDES     = instruments.include
 INCLUDES    += macros.include
+INCLUDES    += v4-1.starting
 #-----------------------------------------------------------------------------
 SONGS_E = ${SONGS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
