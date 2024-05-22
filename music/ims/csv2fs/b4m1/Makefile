@@ -24,7 +24,8 @@ MID_GCS = ${MID:.mid=.gcs}
 	${CSV2FS} "$<" "$@" || true
 %.gcs:  %.fs
 	${FS2GCS} "$<" "$@" "${MID_HINTS}" || true
-	sed -f SED-b4m1 "$@" >A ; mv A "$@"
+	sed -f SED-b4m1 "$@" >A
+	mv A "$@"
 # ----------------------------------------------------------------------------
 .PHONY: help
 help:
