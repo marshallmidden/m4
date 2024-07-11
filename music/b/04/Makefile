@@ -1,10 +1,11 @@
 SONGS        = v4-1
-#-- SONGS       += v4-2
+SONGS       += v4-2
 #-- SONGS       += v4-3
 #-- SONGS       += v4-4
 INCLUDES     = instruments.include
 INCLUDES    += macros.include
-INCLUDES    += v4-1.starting
+v4-1_INCLUDES = v4-1.starting
+v4_2_INCLUDES = v4-2.starting
 #-----------------------------------------------------------------------------
 SONGS_E = ${SONGS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
@@ -65,7 +66,7 @@ MC_ARGS ?=
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %_2.pdf:        %_m2.ps
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
-%.E: %.gcs ${M} ${INCLUDES} Makefile
+%.E: %.gcs ${M} ${INCLUDES} ${%_INCLUDES} Makefile
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
 %.v:    %.E
 	${IMSCOMP} ${MC_ARGS} --vert $< $@
