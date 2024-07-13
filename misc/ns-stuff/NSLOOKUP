@@ -1,0 +1,85 @@
+#!/bin/bash -e
+#-----------------------------------------------------------------------------
+# Remove temporary files.
+rm -f A.dns.* B.dns.*
+#-----------------------------------------------------------------------------
+declare -a NAMESERVERS
+NAMESERVERS=(75.75.75.75 \
+             75.75.76.76 \
+	     8.8.8.8 \
+	     8.8.4.4 \
+	     68.87.71.226 \
+	     68.87.73.242 \
+	     4.2.2.2)
+SLEEPTIME=0.1		# Time between loops through all servers.
+#-----------------------------------------------------------------------------
+# NSLOOKUP='nslookup -norecurse -retry=0 -timeout=2 -fail www.comcast.com.'
+NSLOOKUPFOR='nslookup -retry=0 -timeout=3 -fail www.comcast.com.'
+NSLOOKUPREV='nslookup -retry=0 -timeout=3 -fail 75.75.75.75'
+SED='sed -e "s/[0-9][0-9]*/n/g"'
+#-----------------------------------------------------------------------------
+declare -a GOOD
+declare -a ERR
+#-----------------------------------------------------------------------------
+print_stats()
+{
+    let c=0 || true
+    echo
+    for n in "${NAMESERVERS[@]}"
+    do
+	echo "good=${GOOD[$c]} errors=${ERR[$c]} -- DNS NameServer $n"
+	let c=c+1
+    done
+    exit 1
+}
+#-----------------------------------------------------------------------------
+trap print_stats SIGINT
+#-----------------------------------------------------------------------------
+# First create files to compare against.
+# echo 'Setting up expected output files.'
+let c=0 || true
+for n in "${NAMESERVERS[@]}"
+do
+    ${NSLOOKUPFOR} $n | eval ${SED} > A.dns.for.$n
+    ${NSLOOKUPREV} $n | eval ${SED} > A.dns.rev.$n
+    let GOOD[c]=ERR[c]=0 || true
+    let c=c+1
+done
+#-----------------------------------------------------------------------------
+# echo 'Loop through name servers and check if output matches original.'
+while true; do
+    let c=0 || true
+    for n in "${NAMESERVERS[@]}"
+    do
+	# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+	${NSLOOKUPFOR} $n | eval ${SED} > B.dns.for.$n
+	let e=1
+	diff A.dns.for.$n B.dns.for.$n && let GOOD[c]=GOOD[c]+1 || let e=2
+	if [ $e -ne 1 ]; then
+	    let ERR[c]=ERR[c]+1
+	    echo "Nameserver $n forward lookup error number ${ERR[$c]}"
+	    let cnt=0 || true
+	fi
+	# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+	${NSLOOKUPREV} $n | eval ${SED} > B.dns.rev.$n
+	let e=1
+	diff A.dns.rev.$n B.dns.rev.$n && let GOOD[c]=GOOD[c]+1 || let e=2
+	if [ $e -ne 1 ]; then
+	    let ERR[c]=ERR[c]+1
+	    echo "Nameserver $n reverse lookup error number ${ERR[$c]}"
+	    let cnt=0 || true
+	fi
+	# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+	let c=c+1
+    done
+    let tst=cnt%80 || true
+    if [ $tst -eq 0 ]; then
+	echo
+	date '+%Y-%m-%d_%H-%M-%S'
+    else
+    	echo -n '.'
+    fi
+    let cnt=cnt+1
+    sleep ${SLEEPTIME}
+done
+#-----------------------------------------------------------------------------

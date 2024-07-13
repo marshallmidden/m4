@@ -2,18 +2,19 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 /* ------------------------------------------------------------------------ */
-char           *buf = "abcdefghijklmnopqrstuvwxyz";
+static const char  *buf = "abcdefghijklmnopqrstuvwxyz";
 #define NUM_PTHREADS 5
-int32_t             count = 5;
-int32_t             fd = 1;
+static int32_t      count = 5;
+static int32_t      fd = 1;
 
 /* ------------------------------------------------------------------------ */
-int32_t    foo = 0;
-pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+static int32_t      foo = 0;
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
-int32_t mult[NUM_PTHREADS] = {
+static int32_t mult[NUM_PTHREADS] = {
 	100,
 	1000,
 	10000,
@@ -22,7 +23,7 @@ int32_t mult[NUM_PTHREADS] = {
 };
 
 /* ------------------------------------------------------------------------ */
-int32_t             foo_initializer(void)
+static int32_t      foo_initializer(void)
 {
   int32_t ret;
 
@@ -38,7 +39,7 @@ int32_t             foo_initializer(void)
 }
 
 /* ------------------------------------------------------------------------ */
-int32_t             foo_add(int32_t arg)
+static int32_t      foo_add(int32_t arg)
 {
   int32_t ret;
 
@@ -50,7 +51,7 @@ int32_t             foo_add(int32_t arg)
 }
 
 /* ------------------------------------------------------------------------ */
-void           *new_thread(void *args)
+static void    *new_thread(void *args)
 {
   int64_t		  arg = (int64_t)args;
   int32_t             i;
@@ -59,19 +60,19 @@ void           *new_thread(void *args)
 
   print[0] = buf[arg];
   ret = foo_initializer();
-  fprintf(stderr, "thread %d-%p, foo=%9d\n", arg, (void *)pthread_self(), ret);
+  fprintf(stderr, "thread %lld-%p, foo=%9d\n", arg, (void *)pthread_self(), ret);
 
   for (i = 0; i < count; i++) {
     write(fd, print, 2);
     ret = foo_add(mult[arg]);
     usleep(1000000/4);		/* 1/4 of a second. */
   }
-  fprintf(stderr, "thread %d-%p, foo=%9d\n", arg, (void *)pthread_self(), ret);
+  fprintf(stderr, "thread %lld-%p, foo=%9d\n", arg, (void *)pthread_self(), ret);
   return (NULL);
 }
 
 /* ------------------------------------------------------------------------ */
-int32_t main()
+int main(void)
 {
   pthread_t       thread;
   int64_t             i;

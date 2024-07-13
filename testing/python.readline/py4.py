@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 #-----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 #-----------------------------------------------------------------------------
@@ -91,11 +91,17 @@ class dnsCompleter:
 
 def input_loop():
     line = ''
+    print("here#1", file=sys.stderr)
     while line != 'quit':
+        print("here#2", file=sys.stderr)
         input('Prompt ("quit" to quit): ')
+        print("here#3", file=sys.stderr)
         line = readline.get_line_buffer().strip()
+        print("here#4", file=sys.stderr)
         print("type(line)={} line='{}'".format(type(line), line))
+        print("here#5", file=sys.stderr)
         print('Dispatch {}'.format(line))
+        print("here#6", file=sys.stderr)
     # elihw
 
 # Register our completer function

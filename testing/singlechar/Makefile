@@ -1,23 +1,19 @@
-# Start of Makefile.
-PROGS	:= basic mutex multi-reader
-
-# -O0, if bugs, need no optimization to figure things out.
-CFLAGS += -pthread -O0
-# We are a thread program.
-LDLIBS += -lpthread
-LDLIBS += -rdynamic
+# Start of Makefile for singlechar.
+#-----------------------------------------------------------------------------
+PROG1 = singlechar
+DIR=singlechar
 #-----------------------------------------------------------------------------
 OS := ${shell uname}
 #-----------------------------------------------------------------------------
 CFLAGS   +=-g
 #-- CFLAGS   +=-O0
-#-- ifneq (${OS},Darwin)
-#-- CFLAGS   +=-O4
-#-- else
-#-- CFLAGS   +=-O3
-#-- endif
-#-- CFLAGS += -mtune=corei7
-#-- CFLAGS += -march=corei7
+ifneq (${OS},Darwin)
+CFLAGS   +=-O4
+else
+CFLAGS   +=-O3
+endif
+CFLAGS += -mtune=corei7
+CFLAGS += -march=corei7
 
 CFLAGS += -W
 CFLAGS += -Wall
@@ -85,9 +81,11 @@ CFLAGS += -Wvolatile-register-var
 ifneq (${OS},Darwin)
 CFLAGS += -fbounds-check
 endif
-
 #-----------------------------------------------------------------------------
 LD = ${CC}
+LDLIBS += -lncurses
+# LDLIBS += -lcurses
+# LDLIBS += -lncurses++
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 LDFLAGS += -m64
 ifneq (${OS},Darwin)
@@ -135,35 +133,28 @@ endif
 	@${LD} -o $@ ${CFLAGS} ${LDFLAGS} $< ${LDLIBS}
 #-----------------------------------------------------------------------------
 .PHONY:	all
-all:	${PROGS}
+all:	${PROG1}
 #-----------------------------------------------------------------------------
-PROGSSRC = ${PROGS:=.c}
-PROGSOBJ = ${PROGS:=.o}
-${PROGSOBJ}: ${PROGSSRC} Makefile
+${PROG1}: ${PROG1}.o Makefile
 #-----------------------------------------------------------------------------
-PROGSEXE = ${PROGS:=.exe}
-PROGSSTACKDUMP = ${PROGS:=.stackdump}
-PROGSEXESTACKDUMP = ${PROGS:=.exe.stackdump}
-PROGSdSYM = ${PROGS:=.dSYM}
+${PROG1}.o: ${PROG1}.c Makefile
+#-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -f *.o tags ${PROGS} ${PROGSEXE} ${PROGSSTACKDUMP} ${PROGSEXESTACKDUMP}
-	rm -rf ${PROGSdSYM}
+	rm -f *.o tags ${PROG1} ${PROG1}.exe ${PROG1}.stackdump ${PROG1}.exe.stackdump
 #-----------------------------------------------------------------------------
 .PHONY: ctags tags
 ctags tags:
-	ctags ${PROGSSRC}
+	ctags ${PROG1}.c
 #-----------------------------------------------------------------------------
 .PHONY:	test m4 run
-test m4 run:	${PROGS}
-	for f in "${PROGS}"; do \
-	    ./$f; \
-	done
+test m4 run:	${PROG1}
+	./${PROG1}
 #-----------------------------------------------------------------------------
 .PHONY: help
 help:
 	@echo
-	@echo "make all         Compile program ${PROGS}."
+	@echo "make all         Compile program ${PROG1}."
 	@echo "make clean       Remove executable and potential core/dump files."
 	@echo "make tags        Create tags file for vi editor."
 	@echo "make m4          Rum the program."
@@ -171,4 +162,3 @@ help:
 #-----------------------------------------------------------------------------
 # vi: sw=4 ts=8 expandtab
 # End of Makefile
-#-----------------------------------------------------------------------------
