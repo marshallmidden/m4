@@ -1,6 +1,14 @@
+#include <stdio.h>
+/* ------------------------------------------------------------------------ */
+struct note {
+	long start_time;
+	long delta;
+	long pitch;
+	struct note *next;
+};
 /* ------------------------------------------------------------------------ */
 /* The compare function. */
-static int cmp(struct note *a, struct note *b)
+static int cmp(const struct note *a, const struct note *b)
 {
     if (a->start_time == b->start_time)
     {
@@ -54,7 +62,6 @@ static struct note *listsort(struct note *list)
             qsize = insize;
             while (psize > 0 || (qsize > 0 && q))
             {
-
                 if (psize == 0)
                 {
                     e = q;
@@ -91,7 +98,10 @@ static struct note *listsort(struct note *list)
             }
             p = q;
         }
-        tail->next = NULL;
+	if (tail)
+	{
+	    tail->next = NULL;
+	}
         if (nmerges <= 1)
         {
             return (list);
