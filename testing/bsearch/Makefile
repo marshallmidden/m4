@@ -1,4 +1,4 @@
-# Start of Makefile for stringtesting.
+# Start of Makefile for bsearch
 #-----------------------------------------------------------------------------
 PROG1 = test-bsearch
 PROG1SRC = ${PROG1:=.c}

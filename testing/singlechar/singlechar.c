@@ -94,7 +94,14 @@ int main(int argc UNUSED, char **argv UNUSED)
     do
     {
 	key = get_single_ch();
-    } while (key == '\n' || key == ' ');
+        if (key != 'q')
+        {
+            putchar(key);
+            fflush(stdout);
+        }
+    } while (key != 'q');
+    putchar('\n');
+    fflush(stdout);
 
     restore_original_termios();
     exit(0);

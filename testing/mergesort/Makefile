@@ -1,4 +1,4 @@
-# Start of Makefile for stringtesting.
+# Start of Makefile for mergesort
 #-----------------------------------------------------------------------------
 PROG1 = listsort
 PROG1SRC = ${PROG1:=.c}

@@ -1,4 +1,4 @@
-# Start of Makefile for stringtesting.
+# Start of Makefile for test_aio
 #-----------------------------------------------------------------------------
 PROG1 = aio_write_test
 PROG1SRC = ${PROG1:=.c}
