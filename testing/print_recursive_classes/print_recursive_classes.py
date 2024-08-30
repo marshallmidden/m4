@@ -55,5 +55,6 @@ def print_vars(var, indent=0):
         # For other types, just print the type name
         print(f"{indent_str}Unrecognized type: {type(var).__name__}", file=sys.stderr, flush=True)
     # fi
+# End of print_vars
 
 # ----------------------------------------------------------------------------
