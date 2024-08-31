@@ -10,17 +10,38 @@ import sys
 # ----------------------------------------------------------------------------
 def print_methods(obj):
     """ Recursively prints the methods of a Python object, including nested class methods. """
-    standard_dunder = ['__dir__', '__name__', '__module__', '__doc__', '__class__', \
-        '__dict__', '__slots__', '__match_args__', '__mro__', '__bases__', '__file__', \
-        '__wrapped__', '__version__', '__all__', '__debug__', \
-        '__defaults__', '__kwdefaults__', '__code__', '__globals__', '__closure__', \
-        '__qualname__', '__annotations__', '__type_params__', '__func__', '__self__', \
-        '__loader__', '__package__', '__spec__', '__cached__', '__path__', '__traceback__', \
-        '__notes__', '__context__', '__cause__', '__suppress_context__', '__objclass__', \
-        '__classcell__', '__weakref__', '__origin__', '__args__', '__parameters__', \
-        '__unpacked__', '__stdout__', '__stderr__', '__covariant__', '__contravariant__', \
-        '__infer_variance__', '__bound__', '__constraints__', '__import__', '__builtins__', \
-        '__future__', '__main__', '_DOC_ATTR' ]
+
+    standard_dunder = [
+        '_DOC_ATTR', '__abs__', '__add__', '__aenter__', '__aexit__', '__aiter__',
+        '__all__', '__and__', '__anext__', '__annotations__', '__args__', '__await__',
+        '__bases__', '__bool__', '__bound__', '__buffer__', '__builtins__', '__bytes__',
+        '__cached__', '__cause__', '__ceil__', '__class__', '__class_getitem__',
+        '__classcell__', '__closure__', '__code__', '__complex__', '__constraints__',
+        '__contains__', '__context__', '__contravariant__', '__copy__', '__covariant__',
+        '__debug__', '__deepcopy__', '__defaults__', '__del__', '__delattr__', '__delete__',
+        '__delitem__', '__dict__', '__dir__', '__divmod__', '__doc__', '__enter__',
+        '__eq__', '__exit__', '__file__', '__float__', '__floor__', '__floordiv__',
+        '__format__', '__fspath__', '__func__', '__future__', '__ge__', '__get__',
+        '__getattr__', '__getattribute__', '__getformat__', '__getitem__', '__getnewargs__',
+        '__getnewargs_ex__', '__getstate__', '__globals__', '__gt__', '__hash__', '__iadd__',
+        '__iand__', '__ifloordiv__', '__ilshift__', '__imatmul__', '__imod__', '__import__',
+        '__imul__', '__index__', '__infer_variance__', '__init__', '__init_subclass__',
+        '__instancecheck__', '__int__', '__invert__', '__ior__', '__ipow__', '__irshift__',
+        '__isub__', '__iter__', '__itruediv__', '__ixor__', '__kwdefaults__', '__le__',
+        '__len__', '__length_hint__', '__loader__', '__lshift__', '__lt__', '__main__',
+        '__match_args__', '__matmul__', '__missing__', '__mod__', '__module__', '__mro__',
+        '__mro_entries__', '__mul__', '__name__', '__ne__', '__neg__', '__new__', '__next__',
+        '__notes__', '__objclass__', '__or__', '__origin__', '__package__', '__parameters__',
+        '__path__', '__pos__', '__post_init__', '__pow__', '__prepare__', '__qualname__',
+        '__radd__', '__rand__', '__rdivmod__', '__reduce__', '__reduce_ex__',
+        '__release_buffer__', '__repr__', '__reversed__', '__rfloordiv__', '__rlshift__',
+        '__rmatmul__', '__rmod__', '__rmul__', '__ror__', '__round__', '__rpow__',
+        '__rrshift__', '__rshift__', '__rsub__', '__rt__', '__rtruediv__', '__rxor__',
+        '__self__', '__set__', '__set_name__', '__setattr__', '__setitem__', '__setstate__',
+        '__sizeof__', '__slots__', '__spec__', '__stderr__', '__stdout__', '__str__',
+        '__sub__', '__subclasscheck__', '__subclasses__', '__subclasshook__',
+        '__suppress_context__', '__traceback__', '__truediv__', '__trunc__', '__type_params__',
+        '__unpacked__', '__version__', '__weakref__', '__wrapped__', '__xor__' ]
 
     print(f"Method: {obj!r} ({type(obj).__name__})", file=sys.stderr, flush=True)
 
