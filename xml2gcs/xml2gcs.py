@@ -242,9 +242,7 @@ class Music:
         note.ns.append(note.ntdec + noot)
         s.appendObj(v, note, int(note.dur))
         s.lastnote = note                       # remember last note/rest for later modifications(chord, grace)
-        if noot != 'z' and noot != 'x':         # real notes and grace notes
-            s.cnt.inc('note', v)                # count number of real notes in each voice
-        # fi
+        s.cnt.inc('note', v)                # count number of real notes in each voice
     # End of appendNote
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     def getLastRec(s, voice):
@@ -326,7 +324,7 @@ class Music:
                 chunk = vn[0]
                 gcsOut.add(f'measure {bn}')     # line with barnumer
                 chunk = re.sub(r'  +', ' ', chunk)    # Get rid of doubled spaces.
-                stf = f"V{s.vceCnt}"
+                stf = f'V{s.vceCnt}'
                 gcsOut.add(f'{stf}: {chunk}')
                 del vn[0]                       # chop first measure
                 bn += 1
@@ -342,6 +340,392 @@ class Music:
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # End of class Music
 
+# ------------------------------------------------------------------
+global instruments
+# select chan sfont bank prog -      prog, bank.
+instruments = {
+    'Piano'.lower() : [0, 0],
+    'Acoustic Grand Piano'.lower() : [0, 0],
+    'Stereo Grand'.lower() : [0, 0],
+    'Bright Acoustic Piano'.lower() : [1, 0],
+    'Bright Grand'.lower() : [1, 0],
+    'Electric Grand Piano'.lower() : [2, 0],
+    'Electric Grand'.lower() : [2, 0],
+    'Honky-tonk Piano'.lower() : [3, 0],
+    'Honky-tonk'.lower() : [3, 0],
+    'Electric Piano 1'.lower() : [4, 0],
+    'Time Electric Piano 1'.lower() : [4, 0],
+    'Electric Piano 2'.lower() : [5, 0],
+    'FM Electric Piano'.lower() : [5, 0],
+    'Harpsichord'.lower() : [6, 0],
+    'Clavi'.lower() : [7, 0],
+    'Clavinet'.lower() : [7, 0],
+    'Celesta'.lower() : [8, 0],
+    'Glockenspiel'.lower() : [9, 0],
+    'Music Box'.lower() : [10, 0],
+    'Vibraphone'.lower() : [11, 0],
+    'Marimba'.lower() : [12, 0],
+    'Xylophone'.lower() : [13, 0],
+    'Tubular Bells'.lower() : [14, 0],
+    'Dulcimer'.lower() : [15, 0],
+    'Drawbar Organ'.lower() : [16, 0],
+    'Tonewheel Organ'.lower() : [16, 0],
+    'Percussive Organ'.lower() : [17, 0],
+    'Rock Organ'.lower() : [18, 0],
+    'Church Organ'.lower() : [19, 0],
+    'Pipe Organ'.lower() : [19, 0],
+    'Reed Organ'.lower() : [20, 0],
+    'Accordion'.lower() : [21, 0],
+    'Harmonica'.lower() : [22, 0],
+    'Tango Accordion'.lower() : [23, 0],
+    'Bandoneon'.lower() : [23, 0],
+    'Acoustic Guitar (nylon)'.lower() : [24, 0],
+    'Nylon Guitar'.lower() : [24, 0],
+    'Acoustic Guitar (steel)'.lower() : [25, 0],
+    'Steel Guitar'.lower() : [25, 0],
+    'Electric Guitar (jazz)'.lower() : [26, 0],
+    'Jazz Guitar'.lower() : [26, 0],
+    'Electric Guitar (clean)'.lower() : [27, 0],
+    'Clean Guitar'.lower() : [27, 0],
+    'Electric Guitar (muted)'.lower() : [28, 0],
+    'Muted Guitar'.lower() : [28, 0],
+    'Overdriven Guitar'.lower() : [29, 0],
+    'Overdrive Guitar'.lower() : [29, 0],
+    'Distortion Guitar'.lower() : [30, 0],
+    'Guitar Harmonics'.lower() : [31, 0],
+    'Acoustic Bass'.lower() : [32, 0],
+    'Electric Bass (finger)'.lower() : [33, 0],
+    'Finger Bass'.lower() : [33, 0],
+    'Electric Bass (pick)'.lower() : [34, 0],
+    'Pick Bass'.lower() : [34, 0],
+    'Fretless Bass'.lower() : [35, 0],
+    'Slap Bass 1'.lower() : [36, 0],
+    'Slap Bass 2'.lower() : [37, 0],
+    'Synth Bass 1'.lower() : [38, 0],
+    'Synth Bass 2'.lower() : [39, 0],
+    'Violin'.lower() : [40, 0],
+    'Viola'.lower() : [41, 0],
+    'Cello'.lower() : [42, 0],
+    'Contrabass'.lower() : [43, 0],
+    'Double Bass'.lower() : [43, 0],
+    'Tremolo Strings'.lower() : [44, 0],
+    'Stero Strings Trem'.lower() : [44, 0],
+    'Pizzicato Strings'.lower() : [45, 0],
+    'Orchestral Harp'.lower() : [46, 0],
+    'Timpani'.lower() : [47, 0],
+    'String Ensemble 1'.lower() : [48, 0],
+    'Stereo Strings Fast'.lower() : [48, 0],
+    'String Ensemble 2'.lower() : [49, 0],
+    'Stereo Strings Slow'.lower() : [49, 0],
+    'Synth Strings 1'.lower() : [50, 0],
+    'Synth Strings 2'.lower() : [51, 0],
+    'Choir Aahs'.lower() : [52, 0],
+    'Concert Choir'.lower() : [52, 0],
+    'Voice Oohs'.lower() : [53, 0],              # NOT RIGHT!
+    'Synth Voice'.lower() : [54, 0],             # NOT RIGHT!
+    'Orchestra Hit'.lower() : [55, 0],           # ?? strange sound. ??
+    'Trumpet'.lower() : [56, 0],
+    'Trombone'.lower() : [57, 0],
+    'Tuba'.lower() : [58, 0],
+    'Muted Trumpet'.lower() : [59, 0],
+    'French Horn'.lower() : [60, 0],
+    'French Horns'.lower() : [60, 0],
+    'Brass Section'.lower() : [61, 0],
+    'Synth Brass 1'.lower() : [62, 0],
+    'Synth Brass 2'.lower() : [63, 0],
+    'Soprano Sax'.lower() : [64, 0],
+    'Alto Sax'.lower() : [65, 0],
+    'Tenor Sax'.lower() : [66, 0],
+    'Baritone Sax'.lower() : [67, 0],
+    'Oboe'.lower() : [68, 0],
+    'English Horn'.lower() : [69, 0],
+    'Bassoon'.lower() : [70, 0],
+    'Clarinet'.lower() : [71, 0],
+    'Piccolo'.lower() : [72, 0],
+    'Flute'.lower() : [73, 0],
+    'Recorder'.lower() : [74, 0],
+    'Pan Flute'.lower() : [75, 0],
+    'Blown bottle'.lower() : [76, 0],
+    'Bottle Blow'.lower() : [76, 0],
+    'Shakuhachi'.lower() : [77, 0],
+    'Whistle'.lower() : [78, 0],
+    'Irish Tin Whistle'.lower() : [78, 0],
+    'Ocarina'.lower() : [79, 0],
+    'Lead 1 (square)'.lower() : [80, 0],
+    'Square Lead'.lower() : [80, 0],
+    'Lead 2 (sawtooth)'.lower() : [81, 0],
+    'Saw Lead'.lower() : [81, 0],
+    'Lead 3 (calliope)'.lower() : [82, 0],
+    'Synth Calliope'.lower() : [82, 0],
+    'Lead 4 (chiff)'.lower() : [83, 0],
+    'Chiffer Lead'.lower() : [83, 0],
+    'Lead 5 (charang)'.lower() : [84, 0],
+    'Charang'.lower() : [84, 0],
+    'Lead 6 (voice)'.lower() : [85, 0],
+    'Solo Vox'.lower() : [85, 0],
+    'Lead 7 (fifths)'.lower() : [86, 0],
+    '5th Saw Wave'.lower() : [86, 0],
+    'Lead 8 (bass + lead)'.lower() : [87, 0],
+    'Bass & lead'.lower() : [87, 0],
+    'Pad 1 (new age)'.lower() : [88, 0],
+    'Fantasia'.lower() : [88, 0],
+    'Pad 2 (warm)'.lower() : [89, 0],
+    'Warm Pad'.lower() : [89, 0],
+    'Pad 3 (polysynth)'.lower() : [90, 0],
+    'Polysynth'.lower() : [90, 0],
+    'Pad 4 (choir)'.lower() : [91, 0],
+    'Space Voice'.lower() : [91, 0],
+    'Pad 5 (bowed)'.lower() : [92, 0],
+    'Bowed Glass'.lower() : [92, 0],
+    'Pad 6 (metallic)'.lower() : [93, 0],
+    'Metal Pad'.lower() : [93, 0],
+    'Pad 7 (halo)'.lower() : [94, 0],
+    'Halo Pad'.lower() : [94, 0],
+    'Pad 8 (sweep)'.lower() : [95, 0],
+    'Sweep Pad'.lower() : [95, 0],
+    'FX 1 (rain)'.lower() : [96, 0],
+    'Ice Rain'.lower() : [96, 0],
+    'FX 2 (soundtrack)'.lower() : [97, 0],
+    'Soundtrack'.lower() : [97, 0],
+    'FX 3 (crystal)'.lower() : [98, 0],
+    'Crystal'.lower() : [98, 0],
+    'FX 4 (atmosphere)'.lower() : [99, 0],
+    'Atmosphere'.lower() : [99, 0],
+    'FX 5 (brightness)'.lower() : [100, 0],
+    'Brightness'.lower() : [100, 0],
+    'FX 6 (goblins)'.lower() : [101, 0],
+    'Goblins'.lower() : [101, 0],
+    'FX 7 (echoes)'.lower() : [102, 0],
+    'Echo Drops'.lower() : [102, 0],
+    'FX 8 (sci-fi)'.lower() : [103, 0],
+    'Star Theme'.lower() : [103, 0],
+    'Sitar'.lower() : [104, 0],
+    'Banjo'.lower() : [105, 0],
+    'Shamisen'.lower() : [106, 0],
+    'Koto'.lower() : [107, 0],
+    'Kalimba'.lower() : [108, 0],
+    'Bag pipe'.lower() : [109, 0],
+    'Bagpipes'.lower() : [109, 0],
+    'Fiddle'.lower() : [110, 0],
+    'Shanai'.lower() : [111, 0],
+    'Shenai'.lower() : [111, 0],
+    'Tinkle Bell'.lower() : [112, 0],
+    'Tinker Bell'.lower() : [112, 0],
+    'Agogo'.lower() : [113, 0],
+    'Steel Drums'.lower() : [114, 0],
+    'Woodblock'.lower() : [115, 0],
+    'Wood Block'.lower() : [115, 0],
+    'Taiko Drum'.lower() : [116, 0],
+    'Melodic Tom'.lower() : [117, 0],
+    'Synth Drum'.lower() : [118, 0],
+    'Reverse Cymbal'.lower() : [119, 0],
+    'Guitar Fret Noise'.lower() : [120, 0],
+    'Fret Noise'.lower() : [120, 0],
+    'Breath Noise'.lower() : [121, 0],
+    'Seashore'.lower() : [122, 0],
+    'Bird Tweet'.lower() : [123, 0],
+    'Birds'.lower() : [123, 0],
+    'Telephone Ring'.lower() : [124, 0],
+    'Telephone 1'.lower() : [124, 0],
+    'Helicopter'.lower() : [125, 0],
+    'Applause'.lower() : [126, 0],
+    'Gunshot'.lower() : [127, 0],
+    'Gun Shot'.lower() : [127, 0],
+    'Synth Bass 101'.lower() : [38, 1],
+    'Mono Strings Trem'.lower() : [44, 1],
+    'Mono Strings Fast'.lower() : [48, 1],
+    'Mono Strings Slow'.lower() : [49, 1],
+    'Concert Choir Mono'.lower() : [52, 1],
+    'Trumpet 2'.lower() : [56, 1],
+    'Trombone 2'.lower() : [57, 1],
+    'Muted Trumpet 2'.lower() : [59, 1],
+    'Solo French Horn'.lower() : [60, 1],
+    'Brass Section Mono'.lower() : [61, 1],
+    'Square Wave'.lower() : [80, 1],
+    'Saw Wave'.lower() : [81, 1],
+    'Synth Mallet'.lower() : [98, 1],
+    'Cut Noise'.lower() : [120, 1],
+    'Fl. Key Click'.lower() : [121, 1],
+    'Rain'.lower() : [122, 1],
+    'Dog'.lower() : [123, 1],
+    'Telephone 2'.lower() : [124, 1],
+    'Car-Engine'.lower() : [125, 1],
+    'Laughing'.lower() : [126, 1],
+    'Machine Gun'.lower() : [127, 1],
+    'Echo Pan'.lower() : [102, 2],
+    'String Slap'.lower() : [120, 2],
+    'Thunder'.lower() : [122, 2],
+    'Horse Gallop'.lower() : [123, 2],
+    'Door Creaking'.lower() : [124, 2],
+    'Car-Stop'.lower() : [125, 2],
+    'Scream'.lower() : [126, 2],
+    'Lasergun'.lower() : [127, 2],
+    'Howling Winds'.lower() : [122, 3],
+    'Bird 2'.lower() : [123, 3],
+    'Door'.lower() : [124, 3],
+    'Car-Pass'.lower() : [125, 3],
+    'Punch'.lower() : [126, 3],
+    'Explosion'.lower() : [127, 3],
+    'Stream'.lower() : [122, 4],
+    'Scratch'.lower() : [123, 4],
+    'Car-Crash'.lower() : [125, 4],
+    'Heart Beat'.lower() : [126, 4],
+    'Bubbles'.lower() : [122, 5],
+    'Windchime'.lower() : [124, 5],
+    'Siren'.lower() : [125, 5],
+    'Footsteps'.lower() : [126, 5],
+    'Train'.lower() : [125, 6],
+    'Jet Plane'.lower() : [125, 7],
+    'Chorused Tine EP'.lower() : [4, 8],
+    'Chorused FM EP'.lower() : [5, 8],
+    'Coupled Harpsichord'.lower() : [6, 8],
+    'Church Bells'.lower() : [14, 8],
+    'Detuned Tnwl. Organ'.lower() : [16, 8],
+    'Detuned Perc. Organ'.lower() : [17, 8],
+    'Pipe Organ 2'.lower() : [19, 8],
+    'Italian Accordian'.lower() : [21, 8],
+    'Ukulele'.lower() : [24, 8],
+    '12-String Guitar'.lower() : [25, 8],
+    'Hawaiian Guitar'.lower() : [26, 8],
+    'Chorused Clean Gt.'.lower() : [27, 8],
+    'Funk Guitar'.lower() : [28, 8],
+    'Feedback Guitar'.lower() : [30, 8],
+    'Guitar Feedback'.lower() : [31, 8],
+    'Synth Bass 3'.lower() : [38, 8],
+    'Synth Bass 4'.lower() : [39, 8],
+    'Orchestra Pad'.lower() : [48, 8],
+    'Synth Strings 3'.lower() : [50, 8],
+    'Brass Section 2'.lower() : [61, 8],
+    'Synth Brass 3'.lower() : [62, 8],
+    'Synth Brass 4'.lower() : [63, 8],
+    'Sine Wave'.lower() : [80, 8],
+    'Doctor Solo'.lower() : [81, 8],
+    'Taisho Koto'.lower() : [107, 8],
+    'Castanets'.lower() : [115, 8],
+    'Concert Bass Drum'.lower() : [116, 8],
+    'Melodic Tom 2'.lower() : [117, 8],
+    '808 Tom'.lower() : [118, 8],
+    'Starship'.lower() : [125, 8],
+    'Carillon'.lower() : [14, 9],
+    'Burst Noise'.lower() : [125, 9],
+    'Piano & Str.-Fade'.lower() : [0, 11],
+    'Piano & Str.-Sus'.lower() : [1, 11],
+    'Tine & FM EPs'.lower() : [4, 11],
+    'Piano & FM EP'.lower() : [5, 11],
+    'Tinkling Bells'.lower() : [8, 11],
+    'Bell Tower'.lower() : [14, 11],
+    'Techno Bass'.lower() : [38, 11],
+    'Pulse Bass'.lower() : [39, 11],
+    'Stereo Strings Velo'.lower() : [49, 11],
+    'Synth Strings 4'.lower() : [50, 11],
+    'Synth Strings 5'.lower() : [51, 11],
+    'Brass Section 3'.lower() : [61, 11],
+    'Whistlin'.lower() : [78, 11],
+    'Sawtooth Stab'.lower() : [81, 11],
+    "Doctor's Solo".lower() : [87, 11],
+    'Harpsi Pad'.lower() : [88, 11],
+    'Solar Wind'.lower() : [89, 11],
+    'Mystery Pad'.lower() : [96, 11],
+    'Synth Chime'.lower() : [98, 11],
+    'Bright Saw Stack'.lower() : [100, 11],
+    'Cymbal Crash'.lower() : [119, 11],
+    'Filter Snap'.lower() : [121, 11],
+    'Interference'.lower() : [127, 11],
+    'Bell Piano'.lower() : [0, 12],
+    'Bell Tine EP'.lower() : [4, 12],
+    'Christmas Bells'.lower() : [10, 12],
+    'Clean Guitar 2'.lower() : [27, 12],
+    'Mean Saw Bass'.lower() : [38, 12],
+    'Full Orchestra'.lower() : [48, 12],
+    'Mono Strings Velo'.lower() : [49, 12],
+    'Square Lead 2'.lower() : [80, 12],
+    'Saw Lead 2'.lower() : [81, 12],
+    'Fantasia 2'.lower() : [88, 12],
+    'Solar Wind 2'.lower() : [89, 12],
+    'White Noise Wave'.lower() : [122, 12],
+    'Shooting Star'.lower() : [127, 12],
+    'Woodwind Choir'.lower() : [48, 13],
+    'Square Lead 3'.lower() : [80, 13],
+    'Saw Lead 3'.lower() : [81, 13],
+    'Night Vision'.lower() : [88, 13],
+    'Mandolin'.lower() : [25, 16],
+    'Standard Drums'.lower() : [0, 120],
+    'Standard 2 Drums'.lower() : [1, 120],
+    'Room Drums'.lower() : [8, 120],
+    'Power Drums'.lower() : [16, 120],
+    'Electronic Drums'.lower() : [24, 120],
+    '808/909 Drums'.lower() : [25, 120],
+    'Dance Drums'.lower() : [26, 120],
+    'Jazz Drums'.lower() : [32, 120],
+    'Brush Drums'.lower() : [40, 120],
+    'Orchestral Perc.'.lower() : [48, 120],
+    'SFX Kit'.lower() : [56, 120],
+    'Standard'.lower() : [0, 128],
+    'Standard 2'.lower() : [1, 128],
+    'Room'.lower() : [8, 128],
+    'Power'.lower() : [16, 128],
+    'Electronic'.lower() : [24, 128],
+    '808/909'.lower() : [25, 128],
+    'Dance'.lower() : [26, 128],
+    'Jazz'.lower() : [32, 128],
+    'Brush'.lower() : [40, 128],
+    'Orchestral'.lower() : [48, 128],
+    'SFX'.lower() : [56, 128],
+}
+
+# ------------------------------------------------------------------------------
+global drum_sounds
+drum_sounds = {
+    'Acoustic Bass Drum'.lower(): 35,
+    'Bass Drum 1'.lower(): 36,
+    'Side Stick'.lower(): 37,
+    'Acoustic Snare'.lower(): 38,
+    'Hand Clap'.lower(): 39,
+    'Electric Snare'.lower(): 40,
+    'Low Floor Tom'.lower(): 41,
+    'Closed Hi Hat'.lower(): 42,
+    'High Floor Tom'.lower(): 43,
+    'Pedal Hi-Hat'.lower(): 44,
+    'Low Tom'.lower(): 45,
+    'Open Hi-Hat'.lower(): 46,
+    'Low-Mid Tom'.lower(): 47,
+    'Hi Mid Tom'.lower(): 48,
+    'Crash Cymbal 1'.lower(): 49,
+    'High Tom'.lower(): 50,
+    'Ride Cymbal 1'.lower(): 51,
+    'Chinese Cymbal'.lower(): 52,
+    'Ride Bell'.lower(): 53,
+    'Tambourine'.lower(): 54,
+    'Splash Cymbal'.lower(): 55,
+    'Cowbell'.lower(): 56,
+    'Crash Cymbal 2'.lower(): 57,
+    'Vibraslap'.lower(): 58,
+    'Ride Cymbal 2'.lower(): 59,
+    'Hi Bongo'.lower(): 60,
+    'Low Bongo'.lower(): 61,
+    'Mute Hi Conga'.lower(): 62,
+    'Open Hi Conga'.lower(): 63,
+    'Low Conga'.lower(): 64,
+    'High Timbale'.lower(): 65,
+    'Low Timbale'.lower(): 66,
+    'High Agogo'.lower(): 67,
+    'Low Agogo'.lower(): 68,
+    'Cabasa'.lower(): 69,
+    'Maracas'.lower(): 70,
+    'Short Whistle'.lower(): 71,
+    'Long Whistle'.lower(): 72,
+    'Short Guiro'.lower(): 73,
+    'Long Guiro'.lower(): 74,
+    'Claves'.lower(): 75,
+    'Hi Wood Block'.lower(): 76,
+    'Low Wood Block'.lower(): 77,
+    'Mute Cuica'.lower(): 78,
+    'Open Cuica'.lower(): 79,
+    'Mute Triangle'.lower(): 80,
+    'Open Triangle'.lower(): 81,
+}
+
+# ----------------------------------------------------------------------------
 # ------------------------------------------------------------------
 class GCSoutput:
     pagekeys = 'scale,pageheight,pagewidth,leftmargin,rightmargin,topmargin,botmargin'.split(',')
@@ -439,34 +823,27 @@ class GCSoutput:
 #--             hd.append(f"V:{vnum} {clef} {clfnms.get(vnum, '')}\n")
 #--             hd.append(f"V:{vnum} {clef} {clfnms.get(vnum, '')}\n")
             cmt = clfnms.get(vnum, '')
+            if vnum not in s.vn_to_staffname:
+                s.vn_to_staffname[vnum] = f'V{vnum}'
+            # fi
+            hd.append(f'* ............................................................................\n')
             if cmt != '':
-                if vnum not in s.vn_to_staffname:
-                    hd.append(f"staff V{vnum}    {cmt}\n")
-                else:
-                    hd.append(f"staff {s.vn_to_staffname[vnum]}    {cmt}\n")
-                # fi
+                hd.append(f'staff {s.vn_to_staffname[vnum]}    {cmt}\n')
             else:
-                if vnum not in s.vn_to_staffname:
-                    hd.append(f"staff V{vnum}\n")
-                else:
-                    hd.append(f"staff {s.vn_to_staffname[vnum]}\n")
-                # fi
+                hd.append(f'staff {s.vn_to_staffname[vnum]}\n')
             # fi
             c = clef.split('\n')
             for a in c:
-                if vnum not in s.vn_to_staffname:
-                    x = 'V' + str(vnum)
-                else:
-                    x = s.vn_to_staffname[vnum]
-                # fi
-                hd.append(re.sub(r'%%', f' {x} ', a) + '\n')
+                newc = re.sub(r'%%', f' {s.vn_to_staffname[vnum]} ', a)
+                hd.append(newc + '\n')
             # rof
 
             if vnum in vmpdct:
                 hd.append(f'%%voicemap tab{vnum}\n')
                 hd.append('key none\n')
                 hd.append('meter 4/4\n')
-                hd.append('%%clef none\n')
+#--                 hd.append('%%clef none\n')
+                hd.append(f'clef {s.vn_to_staffname[vnum]} none\n')
                 hd.append('%%staffscale 1.6\n')
                 hd.append('%%flatbeams true\n')
                 hd.append('%%stemdir down\n')
@@ -474,17 +851,34 @@ class GCSoutput:
             if 'perc' in clef:
                 hd.append('key none\n');          # no key for a perc voice
             # fi
-            if ch > 0 and ch != vnum:
-                hd.append(f'%%MIDI channel {ch}\n')
-            # fi
+# instrument 1,2 flute            $$ voice, name or number.
+#--             if ch > 0 and ch != vnum:
+#--                 hd.append(f'%%MIDI channel {ch}\n')
+#--             # fi
+#--             if prg > 0:
+#--                 hd.append(f'%%MIDI program {prg - 1}\n')
+#--             # fi
             if prg > 0:
-                hd.append(f'%%MIDI program {prg - 1}\n')
+                inst = None
+                instval = [prg - 1, 0]      # Only first bank attempt.
+                for key, value in instruments.items():
+                    if instval == value:
+                        inst = key
+                        break
+                    # fi
+                # fi
+                if inst is None:            # Value not in instrument list - HOW?
+                    inst = prg - 1
+                # fi
+                hd.append(f'instrument {s.vn_to_staffname[vnum]} {inst}\n')
             # fi
             if vol >= 0:
-                hd.append(f'%%MIDI control 7 {vol:.0f}\n')  # volume == 0 is possible ...
+#--                 hd.append(f'%%MIDI control 7 {vol:.0f}\n')  # volume == 0 is possible ...
+                hd.append(f'intensity {s.vn_to_staffname[vnum]} {round(vol)}\n')  # volume == 0 is possible ...
             # fi
             if pan >= 0:
-                hd.append(f'%%MIDI control 10 {pan:.0f}\n')
+#--                 hd.append(f'%%MIDI control 10 {pan:.0f}\n')
+                hd.append(f'pan {s.vn_to_staffname[vnum]} {round(pan)}\n')
             # fi
             for gcsNote, step, midiNote, notehead in dmap:
                 if not notehead:
@@ -496,7 +890,6 @@ class GCSoutput:
                 # fi
             # fi
         # rof
-#--         hd.append('------------------------------------------------------------------------ 1\n')
         them = '0 '                 # the last measure
         lastv = 'V0'                # the last voice
         # lines[m][v] = xxx;
@@ -545,13 +938,11 @@ class GCSoutput:
                 hd.append(f'measure {them}\n')
             # fi
             for lastv in lines[them]:
-                hd.append(lines[them][lastv])
+                newc = re.sub(r'%%', f' {lastv} ', lines[them][lastv])
+                hd.append(newc)
             # rof
         # rof
-#--         hd += '------------------------------------------------------------------------ 2\n'
-#--         s.outlist = hd + s.outlist
         s.outlist = hd
-#--         s.outlist += '------------------------------------------------------------------------ 3\n'
         if koppen:                              # output SVG stuff needed for tablature
             k1 = kopSvg                         # shift note heads 3 units left
             k2 = kopSvg2
@@ -811,18 +1202,18 @@ def outVoice(measure, divs, im, ip):    # note/elem objects of one measure in on
             # fi
             s += durstr + tie                   # and put it back again
             s += nx.after
-            nospace = nx.beam
+#--            nospace = nx.beam
         else:
             if isinstance(nx.str, listtype):
                 nx.str = nx.str[0]
             s = nx.str
-            nospace = 1
+#--            nospace = 1
         # fi
-        if nospace:
-            vs.append(s)
-        else:
-            vs.append(' ' + s)
-        # fi
+#--        if nospace:
+#--            vs.append(s)
+#--        else:
+        vs.append(' ' + s)
+#--     # fi
     # rof
     vs = ''.join(vs)                            # ad hoc: remove multiple pedal directions
     while vs.find('!ped!!ped!') >= 0:
@@ -846,7 +1237,7 @@ def sortMeasure(voice, m):
     rs = []                                     # holds rests in between notes
     for i, nx in enumerate(voice):              # establish sequentiality
         if nx.tijd > time and chkbug(nx.tijd - time, m):
-            v.append(Note(nx.tijd - time, 'x')) # fill hole with invisble rest
+            v.append(Note(nx.tijd - time, 'r')) # fill hole with invisble rest
             rs.append(len(v) - 1)
         if isinstance(nx, Elem):
             if nx.tijd < time:
@@ -1155,7 +1546,7 @@ class Parser:
                 if v2 == v1:                    # begins and ends in the same voice: keep it
                     if type1 == 'start' and (not grace1 or not stopgrace):  # normal slur: start before stop and no grace slur
                         note1.before = ['('] + note1.before # keep left-right order!
-                        note1.after = f'{note1.after}l'     # keep left-right order!
+                        note1.after += 'l'     # keep left-right order!
                         note2.after += ')'
                     # fi
                     # no else: don't bother with reversed stave spanning slurs
@@ -1284,7 +1675,7 @@ class Parser:
             s.ingrace = 1
             note.after = 'g'
             if grc.get('slash') == 'yes':
-                note.after += 'l'               # Try a slurred grace note.
+                note.after += 'l '               # Try a slurred grace note.
             # fi
         # fi
         stopgrace = not note.grace and s.ingrace
@@ -1387,7 +1778,7 @@ class Parser:
                     start_ix, text_ = s.repeat_str[n]
                     repeat_count = s.msr.ixm - start_ix
                     if text_:
-                        mid_str =  f"{text_} "
+                        mid_str =  f'{text_} '
                         repeat_count /= int(text_)
                     else:
                         mid_str = ""            # overwrite repeat with final string
@@ -1585,23 +1976,24 @@ class Parser:
             if t != None:
                 startStop('wedge', vs)
             # fi
-            allwrds = dirtyp.findall('words')   # insert text annotations
-            if not allwrds:
-                allwrds = dirtyp.findall('rehearsal')   # treat rehearsal mark as text annotation
-            # fi
-            for wrds in allwrds:
-                if jmp:                         # ignore words when a jump sound element is present this direction
-# NOTDONEYET this whole business.
-                    s.msc.appendElem(vs, '!%s!' % jmp , 1)  # to voice
-                    break
-                # fi
-                plc = plcmnt == 'below' and '_' or '^'
-                if float(wrds.get('default-y', '0')) < 0:
-                    plc = '_'
-                # fi
-                wrdstxt += (wrds.text or '').replace('"','\\"').replace('\n', '\\n')
-            # rof
-            wrdstxt = wrdstxt.strip()
+#--             allwrds = dirtyp.findall('words')   # insert text annotations
+#--             if not allwrds:
+#--                 allwrds = dirtyp.findall('rehearsal')   # treat rehearsal mark as text annotation
+#--             # fi
+#--             for wrds in allwrds:
+#--                 if jmp:                         # ignore words when a jump sound element is present this direction
+#-- # NOTDONEYET this whole business.
+#--                     s.msc.appendElem(vs, '!%s!' % jmp , 1)  # to voice
+#--                     break
+#--                 # fi
+#--                 plc = plcmnt == 'below' and '_' or '^'
+#--                 if float(wrds.get('default-y', '0')) < 0:
+#--                     plc = '_'
+#--                 # fi
+#--                 DBGPRT(f'HERE#1 - wrds.text={wrds.text}')
+#--                 wrdstxt += (wrds.text or '').replace('"','\\"').replace('\n', '\\n')
+#--             # rof
+#--             wrdstxt = wrdstxt.strip()
             for key, val in dynamics_map.items():
                 if dirtyp.find('dynamics/' + key) != None:
                     s.msc.appendElem(vs, val, 1)    # to voice
@@ -1631,9 +2023,9 @@ class Parser:
                 s.msc.appendElem(v1, f'\ntempo   {tempo},{tempo_units}\n')  # otherwise -> 1st voice
             # fi
         # fi
-        if wrdstxt:
-            s.msc.appendElem(vs, f'"{plc}{wrdstxt}"', 1) # to voice, but after tempo
-        # fi
+#--         if wrdstxt:
+#--             s.msc.appendElem(vs, f'"{plc}{wrdstxt}"', 1) # to voice, but after tempo
+#--         # fi
     # End of doDirection
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     def doHarmony(s, e, i, es):                     # parse a musicXMl harmony tag
@@ -1774,7 +2166,7 @@ class Parser:
                 elif creator.get('type') in ('lyricist', 'transcriber'):
                     lyricist += [line.strip() for line in creator.text.split('\n')]
                 else:
-                    DBGPRT(f"creator.text={creator.text}")
+                    DBGPRT(f'creator.text={creator.text}')
                 # fi
             # fi
         # rof
