@@ -1165,7 +1165,6 @@ def outVoice(measure, divs, im, ip):    # note/elem objects of one measure in on
     vs = []
     for nx in measure:
         if isinstance(nx, Note):
-            DBGPRT(f'nx - tijd={nx.tijd} dur={nx.dur} fact={nx.fact} tup={nx.tup} tupgcs={nx.tupgcs} beam={nx.beam} grace={nx.grace} before={nx.before} after={nx.after} ns={nx.ns} ntdec={nx.ntdec}')
             durstr = gcsdur(nx, divs)           # xml -> gcs duration string
             chord = len(nx.ns) > 1
             cns = [nt[:-1] for nt in nx.ns if nt.endswith('t')]
@@ -2023,15 +2022,6 @@ class Parser:
         rep = e.find('repeat')
         if rep != None:
             rep = rep.get('direction')
-        # fi
-        loc = e.get('location', 'right')            # right is the default
-        if loc == 'right':                          # only change style for the right side
-            style = e.findtext('bar-style')
-            if style == 'light-light':
-                s.msr.rline = '||'
-            elif style == 'light-heavy':
-                s.msr.rline = '|]'
-            # fi
         # fi
         if rep != None:                             # repeat found
             if rep == 'forward':
