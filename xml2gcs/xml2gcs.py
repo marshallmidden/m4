@@ -2,11 +2,7 @@
 # ----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 # ------------------------------------------------------------------
-try:
-    import xml.etree.cElementTree as E
-except:
-    import xml.etree.ElementTree as E
-# yrt
+import xml.etree.cElementTree as E
 import os, sys, types, re, math
 # ------------------------------------------------------------------
 python3 = sys.version_info.major > 2
@@ -20,6 +16,7 @@ else:
     max_int = sys.maxint
 # ------------------------------------------------------------------
 from print_method_names import *
+from print_recursive_classes import *
 
 def DBGPRT(s, method=None):
     print(s, file=sys.stderr, flush=True)
@@ -27,6 +24,10 @@ def DBGPRT(s, method=None):
         print_methods(method)
     # fi
 # End of DBGPRT
+# ------------------------------------------------------------------
+def print_element(e):
+    pass
+# print_element
 # ------------------------------------------------------------------
 
 dynamics_map = {                                    # for direction/direction-type/dynamics/
@@ -101,8 +102,6 @@ class Measure:
     def reset(s):                               # reset each measure
         s.attr = ''                             # measure signatures, tempo
         s.lline = ''                            # left barline, but only holds ':' at start of repeat, otherwise empty
-#--         s.rline = '|'                           # right barline
-#--         s.rline = '\n'                           # right barline
         s.rline = ''                            # right barline
         s.lnum = ''                             # (left) volta number
     # End of reset
@@ -272,16 +271,13 @@ class Music:
                 if p:                           # in measure 1 no previous measure is available
                     x = p.str                   # p.str is the barline string
                     if m.lline:                 # append begin of repeat, m.lline == ':'
-#--                         DBGPRT(f'm.lline={m.lline}')
                         x = (x + m.lline).replace(':|:','::').replace('||','|')
                     elif m.lnum:                # new behaviour with I:repbra 0
-#--                         DBGPRT(f'm.lnum={m.lnum}')
                         x += m.lnum             # add volta number(s) or text to all voices
                         s.repbra = 1            # signal occurrence of a volta
                     # fi
                     p.str = x                   # modify previous right barline
                 elif m.lline:                   # begin of new part and left repeat bar is required
-#--                     DBGPRT(f'beginning new part m.lline={m.lline}')
                     s.insertElem(v, '|:')
                 # fi
             # fi
@@ -778,7 +774,6 @@ class GCSoutput:
                 staffnm = ''
                 nm = ''
             else:
-#--                pattern = r'[0-9 .+_-]'
                 pattern = r'[^A-Za-z0-9]'
                 # Match all digits in the string and replace them with an empty string.
                 staffnm = re.sub(pattern, '', nm)
@@ -818,10 +813,6 @@ class GCSoutput:
             if dmap and 'perc' not in clef:
                 clef = (clef + ' map=perc').strip();
             # fi
-#--             hd.append(f"V:{vnum} {clef} {clfnms.get(vnum, '')}\n")
-#--             hd.append(f"{vn_to_staffname[vnum]}: {clef} {clfnms.get(vnum, '')}\n")
-#--             hd.append(f"V:{vnum} {clef} {clfnms.get(vnum, '')}\n")
-#--             hd.append(f"V:{vnum} {clef} {clfnms.get(vnum, '')}\n")
             cmt = clfnms.get(vnum, '')
             if vnum not in s.vn_to_staffname:
                 s.vn_to_staffname[vnum] = f'V{vnum}'
@@ -842,7 +833,6 @@ class GCSoutput:
                 hd.append(f'%%voicemap tab{vnum}\n')
                 hd.append('key none\n')
                 hd.append('meter 4/4\n')
-#--                 hd.append('%%clef none\n')
                 hd.append(f'clef {s.vn_to_staffname[vnum]} none\n')
                 hd.append('%%staffscale 1.6\n')
                 hd.append('%%flatbeams true\n')
@@ -852,12 +842,6 @@ class GCSoutput:
                 hd.append('key none\n');          # no key for a perc voice
             # fi
 # instrument 1,2 flute            $$ voice, name or number.
-#--             if ch > 0 and ch != vnum:
-#--                 hd.append(f'%%MIDI channel {ch}\n')
-#--             # fi
-#--             if prg > 0:
-#--                 hd.append(f'%%MIDI program {prg - 1}\n')
-#--             # fi
             if prg > 0:
                 inst = None
                 instval = [prg - 1, 0]      # Only first bank attempt.
@@ -873,11 +857,9 @@ class GCSoutput:
                 hd.append(f'instrument {s.vn_to_staffname[vnum]} {inst}\n')
             # fi
             if vol >= 0:
-#--                 hd.append(f'%%MIDI control 7 {vol:.0f}\n')  # volume == 0 is possible ...
                 hd.append(f'intensity {s.vn_to_staffname[vnum]} {round(vol)}\n')  # volume == 0 is possible ...
             # fi
             if pan >= 0:
-#--                 hd.append(f'%%MIDI control 10 {pan:.0f}\n')
                 hd.append(f'pan {s.vn_to_staffname[vnum]} {round(pan)}\n')
             # fi
             for gcsNote, step, midiNote, notehead in dmap:
@@ -925,10 +907,8 @@ class GCSoutput:
                 if lastv not in lines[them]:
                     lines[them][lastv] = ''
                 # fi
-#--                 DBGPRT(f'lastv="{lastv}" x[1]={x[1]} len(x)={len(x)}')
                 lines[them][lastv] += lastv + ': ' + x[1].strip() + '\n'
             else:
-#--                 DBGPRT(f'line added to lastv="{lastv}" them={them} line={line}')
                 lines[them][lastv] += line + '\n'
             # fi
         # rof
@@ -1137,7 +1117,6 @@ def insTup(ix, notes, fact):                    # read one nested tuplet
 
 # ----------------------------------------------------------------------------
 def mkBroken(vs):                               # introduce broken rhythms (vs: one voice, one measure)
-#--     DBGPRT('NOTDONEYET - mkBroken')
     vs = [n for n in vs if isinstance(n, Note)]
     i = 0
     while i < len(vs) - 1:
@@ -1175,7 +1154,6 @@ def outVoice(measure, divs, im, ip):    # note/elem objects of one measure in on
         if isinstance(nx, Note):
             durstr = gcsdur(nx, divs)           # xml -> gcs duration string
             chord = len(nx.ns) > 1
-#--             cns = [nt[:-1] for nt in nx.ns if nt.endswith('-')]
             cns = [nt[:-1] for nt in nx.ns if nt.endswith('t')]
             tie = ''
             if chord and len(cns) == len(nx.ns):      # all chord notes tied
@@ -1202,18 +1180,12 @@ def outVoice(measure, divs, im, ip):    # note/elem objects of one measure in on
             # fi
             s += durstr + tie                   # and put it back again
             s += nx.after
-#--            nospace = nx.beam
         else:
             if isinstance(nx.str, listtype):
                 nx.str = nx.str[0]
             s = nx.str
-#--            nospace = 1
         # fi
-#--        if nospace:
-#--            vs.append(s)
-#--        else:
         vs.append(' ' + s)
-#--     # fi
     # rof
     vs = ''.join(vs)                            # ad hoc: remove multiple pedal directions
     while vs.find('!ped!!ped!') >= 0:
@@ -1230,7 +1202,6 @@ def outVoice(measure, divs, im, ip):    # note/elem objects of one measure in on
 
 # ----------------------------------------------------------------------------
 def sortMeasure(voice, m):
-#--     DBGPRT('NOTDONEYET - sortMeasure')
     voice.sort(key=lambda o: o.tijd)            # sort on time
     time = 0
     v = []
@@ -1337,7 +1308,7 @@ def parseParts(xs, d, e):                       # -> [elems on current level], r
         num, type = x.get('number'), x.get('type')
         if type == 'start':
             # go one level deeper
-            s = [x.findtext(n, '') for n in['group-symbol','group-barline','group-name','group-abbreviation']]
+            s = [x.findtext(n, '') for n in ['group-symbol','group-barline','group-name','group-abbreviation']]
             d[num] = s                          # remember groupdata by group number
             e.append(num)                       # make stack of open group numbers
             elemsnext, rest1 = parseParts(xs, d, e)     # parse one level deeper to next stop
@@ -1362,7 +1333,6 @@ def parseParts(xs, d, e):                       # -> [elems on current level], r
 
 # ----------------------------------------------------------------------------
 def bracePart(part):                            # put a brace on multistaff part and group voices
-    DBGPRT('NOTDONEYET - bracePart')
     if not part:
         return []                                # empty part in the score
     # fi
@@ -1374,7 +1344,6 @@ def bracePart(part):                            # put a brace on multistaff part
         else:                                   # stave with multiple voices
             brace += ['('] + ['%s' % iv for iv in ivs] + [')']
         # fi
-#--         brace.append('|')
         brace.append('\n')
     # rof
     del brace[-1]                               # no barline at the end
@@ -1386,7 +1355,6 @@ def bracePart(part):                            # put a brace on multistaff part
 
 # ----------------------------------------------------------------------------
 def prgroupelem(x, gnm, bar, pmap, accVce, accStf): # collect partnames(accVce) and %%score map(accStf)
-    DBGPRT('NOTDONEYET - prgroupelem')
     if type(x) == tupletype:                    # partname-tuple = (part-name, part-abbrev)
         y = pmap.pop(0)
         if gnm[0]:
@@ -1406,14 +1374,12 @@ def prgroupelem(x, gnm, bar, pmap, accVce, accStf): # collect partnames(accVce) 
 
 # ----------------------------------------------------------------------------
 def prgrouplist(x, pbar, pmap, accVce, accStf):    # collect partnames, scoremap for a part-group
-    DBGPRT('NOTDONEYET - prgrouplist')
     sym, bar, gnm, gabbr = x[-1]                # bracket symbol, continue barline, group-name-tuple
     bar = bar == 'yes' or pbar                  # pbar -> the parent has bar
     accStf.append(sym == 'brace' and '{' or '[')
     for z in x[:-1]:
         prgroupelem(z, (gnm, gabbr), bar, pmap, accVce, accStf)
         if bar:
-#--             accStf.append('|')
             accStf.append('\n')
         # fi
     # rof
@@ -1533,8 +1499,7 @@ class Parser:
     # End of __init__
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     def matchSlur(s, type2, n, v2, note2, grace, stopgrace): # match slur number n in voice v2, add gcs code to before/after
-#--         DBGPRT(f'NOTDONEYET - matchSlur - type2={type2}')
-        if type2 not in['start', 'stop']:
+        if type2 not in ['start', 'stop']:
             return                              # slur type continue has no gcs equivalent
         # fi
         if n == None:
@@ -1542,15 +1507,7 @@ class Parser:
         # fi
         if n in s.slurBuf:
             type1, v1, note1, grace1 = s.slurBuf[n]
-            if type2 != type1:                  # slur complete, now check the voice
-                if v2 == v1:                    # begins and ends in the same voice: keep it
-                    if type1 == 'start' and (not grace1 or not stopgrace):  # normal slur: start before stop and no grace slur
-                        note1.before = ['('] + note1.before # keep left-right order!
-                        note1.after += 'l'     # keep left-right order!
-                        note2.after += ')'
-                    # fi
-                    # no else: don't bother with reversed stave spanning slurs
-                # fi
+            if type2 != type1:                  # slur complete.
                 del s.slurBuf[n]                # slur finished, remove from stack
             else:                               # double definition, keep the last
                 info(f'double slur numbers {type2}-{n} in part {s.msr.ixp+1}, measure {s.msr.ixm+1}, voice {v2} note {note2.ns}, first discarded')
@@ -1558,6 +1515,7 @@ class Parser:
             # fi
         else:                                   # unmatched slur, put in dict
             s.slurBuf[n] = (type2, v2, note2, grace)
+            note2.after = 'l'
         # fi
     # End of matchSlur
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
@@ -1582,10 +1540,10 @@ class Parser:
         for i in range(4):                      # support same note on 4 strings
             na = s.note_alts[i % 3] [p]         # get alternative representation of same note
             o = oct
-            if na in['^B', '^^B']:
+            if na in ['^B', '^^B']:
                 o -= 1  # because in adjacent octave
             # fi
-            if na in['_C', '__C']:
+            if na in ['_C', '__C']:
                 o += 1
             # fi
             if '/' in na or i == 3:
@@ -1638,7 +1596,7 @@ class Parser:
                 return p                        # alteration implied by the key
             # fi
             tieElms = note.findall('tie') + note.findall('notations/tied')    # in xml we have separate notated ties and playback ties
-            if 'stop' in[e.get('type') for e in tieElms]:
+            if 'stop' in [e.get('type') for e in tieElms]:
                 return p    # don't alter tied notes
             # fi
             info(f'accidental {alt} added in part {s.msr.ixp+1}, measure {s.msr.ixm+1}, voice {v+2} note {p}')
@@ -1715,10 +1673,10 @@ class Parser:
             s.drumNotes[(v, noot)] = (step, midi, nh)           # keep data for percussion map
         # fi
         tieElms = n.findall('tie') + n.findall('notations/tied')    # in xml we have separate notated and playback ties
-        if 'start' in[e.get('type') for e in tieElms]:          # n can have stop and start tie
+        if 'start' in [e.get('type') for e in tieElms]:          # n can have stop and start tie
             note.after += 't'                                   # Tack on tie.
         # fi
-        note.beam = sum([1 for b in n.findall('beam') if b.text in['continue', 'end']]) + int(note.grace)
+        note.beam = sum([1 for b in n.findall('beam') if b.text in ['continue', 'end']]) + int(note.grace)
         stemdir = n.findtext('stem')
         if chord:
             s.msc.addChord(note, noot)
@@ -1729,10 +1687,22 @@ class Parser:
             # fi
             s.msc.appendNote(v, note, noot)
         # fi
-        for slur in n.findall('notations/slur'):    # s.msc.lastnote points to the last real note/chord inserted above
-# NOTDONEYET
-            s.matchSlur(slur.get('type'), slur.get('number'), v, s.msc.lastnote, note.grace, stopgrace) # match slur definitions
-        # rof
+        x = n.findall('notations/slur')
+        if x != []:
+            for slur in x:                          # s.msc.lastnote points to the last real note/chord inserted above
+                s.matchSlur(slur.get('type'), slur.get('number'), v, s.msc.lastnote, note.grace, stopgrace) # match slur definitions
+            # rof
+        else:
+            if s.slurBuf != {}:
+                for chk in s.slurBuf:
+                    tochk = s.slurBuf[chk]
+                    if v == tochk[1]:
+                        s.msc.lastnote.after += 'l'
+                        break
+                    # fi
+                # rof
+            # fi
+        # fi
     # End of doNote
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     def doAttr(s, e):                           # parse a musicXML attribute tag
@@ -1795,7 +1765,7 @@ class Parser:
         for clef in e.findall('clef'):          # a part can have multiple staves
             n = int(clef.get('number', '1'))    # local staff number for this clef
             sgn = clef.findtext('sign')
-            line = clef.findtext('line', '') if sgn not in['percussion','TAB'] else ''
+            line = clef.findtext('line', '') if sgn not in ['percussion','TAB'] else ''
             cs = teken.get(sgn + line, '')
             if cs != '':
                 cs = 'clef%%' + cs
@@ -1809,7 +1779,6 @@ class Parser:
                 if cs != '':
                     cs += '\n'
                 # fi
-#--                cs += ' transpose=' + str(steps)
                 cs += 'xpose%%' + str(steps)
             # fi
             stfdtl = e.find('staff-details')
@@ -1839,7 +1808,6 @@ class Parser:
                     if n != s.curStf[v]:        # voice is not at its home staff n
                         s.curStf[v] = n         # reset current staff at start of measure to home position
                     # fi
-#--                     s.msc.appendElem(v, f'\nkey {cs}\n')
                     s.msc.appendElem(v, f'\n{cs}\n')
                 # rof
             # fi
@@ -1976,24 +1944,6 @@ class Parser:
             if t != None:
                 startStop('wedge', vs)
             # fi
-#--             allwrds = dirtyp.findall('words')   # insert text annotations
-#--             if not allwrds:
-#--                 allwrds = dirtyp.findall('rehearsal')   # treat rehearsal mark as text annotation
-#--             # fi
-#--             for wrds in allwrds:
-#--                 if jmp:                         # ignore words when a jump sound element is present this direction
-#-- # NOTDONEYET this whole business.
-#--                     s.msc.appendElem(vs, '!%s!' % jmp , 1)  # to voice
-#--                     break
-#--                 # fi
-#--                 plc = plcmnt == 'below' and '_' or '^'
-#--                 if float(wrds.get('default-y', '0')) < 0:
-#--                     plc = '_'
-#--                 # fi
-#--                 DBGPRT(f'HERE#1 - wrds.text={wrds.text}')
-#--                 wrdstxt += (wrds.text or '').replace('"','\\"').replace('\n', '\\n')
-#--             # rof
-#--             wrdstxt = wrdstxt.strip()
             for key, val in dynamics_map.items():
                 if dirtyp.find('dynamics/' + key) != None:
                     s.msc.appendElem(vs, val, 1)    # to voice
@@ -2023,9 +1973,6 @@ class Parser:
                 s.msc.appendElem(v1, f'\ntempo   {tempo},{tempo_units}\n')  # otherwise -> 1st voice
             # fi
         # fi
-#--         if wrdstxt:
-#--             s.msc.appendElem(vs, f'"{plc}{wrdstxt}"', 1) # to voice, but after tempo
-#--         # fi
     # End of doDirection
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     def doHarmony(s, e, i, es):                     # parse a musicXMl harmony tag
@@ -2308,7 +2255,6 @@ class Parser:
     # End of addStaffMap
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     def addMidiMap(s, ip, vvmap):                   # map gcs voices to midi settings
-        DBGPRT('NOTDONEYET - addMidiMap')
         instr = s.instMid[ip]                       # get the midi settings for this part
         if instr.values():
             defInstr = list(instr.values())[0]      # default settings = first instrument
@@ -2353,6 +2299,7 @@ class Parser:
         partlist = s.doPartList(e)
         parts = e.findall('part')
         for ip, p in enumerate(parts):
+            DBGPRT(f'PART ip={ip} p={p.attrib}')
             maten = p.findall('measure')
             s.locStaffMap(p, maten)                 # {voice -> staff} for this part
             s.drumNotes = {}                        # (xml voice, gcs note) -> (midi note, note head)
@@ -2368,6 +2315,7 @@ class Parser:
             divisions = []                          # current value of <divisions> for each measure
             s.msr = Measure(ip)                     # various measure data
             while s.msr.ixm < len(maten):
+                DBGPRT(f"  PART {ip}({p.attrib['id']}) MEASURE {s.msr.ixm}")
                 maat = maten[s.msr.ixm]
                 herhaal, lbrk = 0, ''
                 s.msr.reset()
@@ -2379,10 +2327,12 @@ class Parser:
                     elif e.tag == 'attributes':
                         s.doAttr(e)
                     elif e.tag == 'direction':
-                        s.doDirection(e, i, es)
+                        pass
                     elif e.tag == 'sound':
+                        e.printout()
                         s.doDirection(maat, i, es)  # sound element directly in measure!
                     elif e.tag == 'harmony':
+                        e.printout()
                         s.doHarmony(e, i, es)
                     elif e.tag == 'barline':
                         herhaal = s.doBarline(e)
