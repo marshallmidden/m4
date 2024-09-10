@@ -1005,6 +1005,19 @@ def gcsdur(nx, divs):                           # convert an musicXML duration d
     if flt in legal_mc_notes:
         return legal_mc_notes[flt]
     # fi
+    if nx.ns == ['r']:                          # Kludge rest.
+        DBGPRT(f'gcsdur nx.ns == r')
+        lst = 0.015625
+        for x in legal_mc_notes:
+            if x < flt:
+                lst = x
+                DBGPRT(f'gcsdur lst={lst}')
+                continue
+            # fi
+            break
+        # rof
+        return legal_mc_notes[lst]              # The one before it.
+    # fi
     DBGPRT(f'gcsdur value flt={flt} not in {legal_mc_notes}')
     return UNKNOWN
 # End of gcsdur
@@ -1152,6 +1165,7 @@ def outVoice(measure, divs, im, ip):    # note/elem objects of one measure in on
     vs = []
     for nx in measure:
         if isinstance(nx, Note):
+            DBGPRT(f'nx - tijd={nx.tijd} dur={nx.dur} fact={nx.fact} tup={nx.tup} tupgcs={nx.tupgcs} beam={nx.beam} grace={nx.grace} before={nx.before} after={nx.after} ns={nx.ns} ntdec={nx.ntdec}')
             durstr = gcsdur(nx, divs)           # xml -> gcs duration string
             chord = len(nx.ns) > 1
             cns = [nt[:-1] for nt in nx.ns if nt.endswith('t')]
@@ -2142,7 +2156,14 @@ class Parser:
             title += 'title   %s\n' % credits.replace('\n', '\ntitle   ')
         # fi
         if composer:
-            title += 'title   %s\n' % composer.replace('\n', '\ntitle   ')
+            DBGPRT(f'composer="{composer}"')
+            if type(composer) is list:
+                for cmpsr in composer:
+                    title += 'title   %s\n' % cmpsr.replace('\n', '\ntitle   ')
+                # rof
+            else:
+                title += 'title   %s\n' % composer.replace('\n', '\ntitle   ')
+            # fi
         # fi
         if lyricist:
             title += 'title   %s\n' % lyricist.replace('\n', '\ntitle   ')

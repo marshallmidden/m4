@@ -1,5 +1,6 @@
 SONGS  =
-SONGS += Beethoven_Symphony_4_Movement_III
+#-- SONGS += Beethoven_Symphony_4_Movement_III
+SONGS += Symphony_No._4_3rd_Movement
 # ----------------------------------------------------------------------------
 SONGS_GCS = ${SONGS:=.gcs}
 SONGS_ABC = ${SONGS:=.abc}
@@ -36,8 +37,9 @@ IMSCOMP = ~/ims/imscomp
 .PHONY: all
 all: ${SONGS_PDF}
 # ----------------------------------------------------------------------------
-#-- .PHONY: all_pdf
-#-- all_pdf: Beethoven_Symphony_4_Movement_III.pdf
+.PHONY: test
+test:
+	@echo "${SONGS_GCS} ${SONGS_ABC} ${SONGS_M_PS} ${SONGS_PDF}"
 # ----------------------------------------------------------------------------
 .PHONY: clean
 clean:
