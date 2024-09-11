@@ -787,7 +787,6 @@ class GCSoutput:
             # fi
             s.vn_to_staffname[firstVoice] = staffnm
             clfnms[firstVoice] = f'    $$ {nm} - {snm}'
-#--             DBGPRT(f'mkHeader #A firstVoice={firstVoice} nm="{nm}" snm="{snm}" clfnms[firstVoice]="{clfnms[firstVoice]}')
         # rof
         hd = [f'{s.title}\n']
         for i, k in enumerate(s.pagekeys):
@@ -967,6 +966,8 @@ def simplify(a, b):                             # divide a and b by their greate
 
 # ----------------------------------------------------------------------------
 legal_mc_notes = {
+       0.0078125 : '128',
+      0.01171875 : '128d',
         0.015625 : '64',
        0.0234375 : '64d',
          0.03125 : '32',
@@ -990,37 +991,47 @@ legal_mc_notes = {
 
 def gcsdur(nx, divs):                           # convert an musicXML duration d to gcs units
     if nx.dur == 0:
-        return ''                               # when called for elements without duration
+        return ['']                             # when called for elements without duration
     # fi
     num, den = simplify(nx.dur, divs * 4)
     if nx.fact:                                 # apply tuplet time modification
         numfac, denfac = nx.fact
         num, den = simplify(num * numfac, den * denfac)
     # fi
-    if den > 64:                                # limit the denominator to a maximum of 64
+    if den > 128:                               # limit the denominator to a maximum of 128
         x = float(num) / den; n = math.floor(x);  # when just above an integer n
         if x - n < 0.1 * x:
             num, den = n, 1;                    # round to n
         # fi
-        num64 = 64. * num / den + 1.0e-15       # to get Python2 behaviour of round
-        num, den = simplify(int(round(num64)), 64)
+        num128 = 128. * num / den + 1.0e-15     # to get Python2 behaviour of round
+        num, den = simplify(int(round(num128)), 128)
     # fi
     flt = num / den
     if flt in legal_mc_notes:
-        return legal_mc_notes[flt]
+        return [legal_mc_notes[flt]]
     # fi
-    if nx.ns == ['r']:                          # Kludge rest.
-        lst = 0.015625
+    r = []
+    # Here if not a simple note value. Break into multiple.
+    origflt = flt
+    while flt > 0.0:
+        lst = 0.0078125
         for x in legal_mc_notes:
-            if x < flt:
-                lst = x
+            if x > flt:
+                break
+            # fi
+            if legal_mc_notes[x][-1] == 'd':
                 continue
             # fi
-            break
+            lst = x
         # rof
-        return legal_mc_notes[lst]              # The one before it.
-    # fi
-    DBGPRT(f'gcsdur value flt={flt} for note="{nx.ns}" not in {legal_mc_notes}')
+        r.append(legal_mc_notes[lst])
+        flt = flt - lst
+        if flt < 0.0078125:
+            break
+            DBGPRT(f'gcsdur value {origflt}, left-over flt={flt} for note="{nx.ns}" not in {legal_mc_notes}')
+        # fi
+    # elihw
+    return r                                    # The list of values... .
     return UNKNOWN
 # End of gcsdur
 
@@ -1167,7 +1178,7 @@ def outVoice(measure, divs, im, ip):    # note/elem objects of one measure in on
     vs = []
     for nx in measure:
         if isinstance(nx, Note):
-            durstr = gcsdur(nx, divs)           # xml -> gcs duration string
+            durarray = gcsdur(nx, divs)           # xml -> gcs duration string
             chord = len(nx.ns) > 1
             s = nx.tupgcs + ''.join(nx.before)
             if chord:
@@ -1183,13 +1194,30 @@ def outVoice(measure, divs, im, ip):    # note/elem objects of one measure in on
                 else:
                     tie = ''
                 # fi
-                s += nt + durstr + tie + nx.after
+                if len(durarray) > 1:
+                    for q in durarray[:-1]:
+                        if cnt != 0:
+                            s += ' '
+                        # fi
+                        if nt != 'r':
+                            qt = 't'
+                        else:
+                            qt = ''
+                        # fi
+                        s += nt + q + qt + nx.after
+                        cnt += 1
+                    # rof
+                    if cnt != 0:
+                        s += ' '
+                    # fi
+                    durarray = [ durarray[-1] ]
+                # fi
+                s += nt + durarray[0] + tie + nx.after
                 cnt += 1
             # rof
             if chord:
                 s += ']'
             # fi
-#--             s += nx.after
         else:
             if isinstance(nx.str, listtype):
                 nx.str = nx.str[0]
@@ -1508,27 +1536,6 @@ class Parser:
         s.koppen = {}     # noteheads needed for %%map
     # End of __init__
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-#--     def matchSlur(s, type2, n, v2, note2, grace, stopgrace): # match slur number n in voice v2, add gcs code to before/after
-#--         if type2 not in ['start', 'stop']:
-#--             return                              # slur type continue has no gcs equivalent
-#--         # fi
-#--         if n == None:
-#--             n = '1'
-#--         # fi
-#--         if n in s.slurBuf:
-#--             type1, v1, note1, grace1 = s.slurBuf[n]
-#--             if type2 != type1:                  # slur complete.
-#--                 del s.slurBuf[n]                # slur finished, remove from stack
-#--             else:                               # double definition, keep the last
-#--                 info(f'double slur numbers {type2}-{n} in part {s.msr.ixp+1}, measure {s.msr.ixm+1}, voice {v2} note {note2.ns}, first discarded')
-#--                 s.slurBuf[n] = (type2, v2, note2, grace)
-#--             # fi
-#--         else:                                   # unmatched slur, put in dict
-#--             s.slurBuf[n] = (type2, v2, note2, grace)
-#--             note2.after = 'l'
-#--         # fi
-#--     # End of matchSlur
-    # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     def doNotations(s, note, nttn):
         stacc = nttn.find('articulations/staccato')
         if stacc != None:
@@ -1702,12 +1709,9 @@ class Parser:
                     DBGPRT(f'doNote - nesting slurs? type={tp} num={num} s.slurBuf[{num}]={s.slurBuf[num]}')
                 # fi
             elif tp == 'stop':
-#--                 DBGPRT(f'num={num} type(num)={type(num)}')
-#--                 DBGPRT(f's.slurBuf={s.slurBuf}')
                 if num not in s.slurBuf:
                     DBGPRT(f'slur stop for num={num} but none started?')
                 else:
-#--                     DBGPRT(f's.slurBuf[num]={s.slurBuf[num]}')
                     del s.slurBuf[num]
                 # fi
             else:
@@ -1730,7 +1734,7 @@ class Parser:
             s.msc.appendNote(v, note, noot)
         # fi
     # End of doNote
-#-----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
     def matchSlur(s, type2, n, v2, note2, grace, stopgrace): # match slur number n in voice v2, add gcs code to before/after
         if type2 not in ['start', 'stop']:
             return                              # slur type continue has no gcs equivalent
@@ -1751,7 +1755,7 @@ class Parser:
             note2.after = 'l'
         # fi
     # End of matchSlur
-#-----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     def doAttr(s, e):                           # parse a musicXML attribute tag
         teken = {'C1':'alto1','C2':'alto2','C3':'alto','C4':'tenor','F4':'bass','F3':'bass3','G2':'treble','TAB':'tab','percussion':'perc'}
@@ -2344,7 +2348,6 @@ class Parser:
         partlist = s.doPartList(e)
         parts = e.findall('part')
         for ip, p in enumerate(parts):
-#--             DBGPRT(f'PART {ip} ({p.attrib})')
             maten = p.findall('measure')
             s.locStaffMap(p, maten)                 # {voice -> staff} for this part
             s.drumNotes = {}                        # (xml voice, gcs note) -> (midi note, note head)
@@ -2360,7 +2363,6 @@ class Parser:
             divisions = []                          # current value of <divisions> for each measure
             s.msr = Measure(ip)                     # various measure data
             while s.msr.ixm < len(maten):
-#--                 DBGPRT(f"  MEASURE {s.msr.ixm}")
                 maat = maten[s.msr.ixm]
                 herhaal, lbrk = 0, ''
                 s.msr.reset()
