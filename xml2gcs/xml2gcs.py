@@ -2374,7 +2374,7 @@ class Parser:
                     elif e.tag == 'attributes':
                         s.doAttr(e)
                     elif e.tag == 'direction':
-                        pass
+                        s.doDirection(e, i, es)
                     elif e.tag == 'sound':
                         e.printout()
                         s.doDirection(maat, i, es)  # sound element directly in measure!
