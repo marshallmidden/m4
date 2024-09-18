@@ -1,5 +1,5 @@
-#-- SONGS        = v4-1
-#-- SONGS       += v4-2
+SONGS        = v4-1
+SONGS       += v4-2
 SONGS       += v4-3
 #-- SONGS       += v4-4
 INCLUDES     = instruments.include
