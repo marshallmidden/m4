@@ -1,9 +1,9 @@
 DIRS  = 01
 DIRS += 02/21 02/22 02/23 02/24
 DIRS += 03
+DIRS += 04
 DIRS += 06
 DIRS += sonata14
-#   04
 # - 05
 # ? 07 dyna.abc
 #   08
