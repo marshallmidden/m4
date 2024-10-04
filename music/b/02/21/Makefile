@@ -122,7 +122,7 @@ clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
 	rm -f ${V1}.{csv,mid,fs,pdf,abc,wav,E,h,v}
-	rm -f ${V1}_2.{csv,mid,fs,pdf,abc,wav,h,v}
+	rm -f ${V1}_2.{csv,mid,fs,pdf,abc,wav,E,h,v}
 	rm -f A.[012]* B.[012]*
 	rm -f ZZZ.*
 #-----------------------------------------------------------------------------

@@ -118,7 +118,7 @@ clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
 	rm -f ${V2}.{csv,mid,fs,pdf,abc,wav,E,h,v}
-	rm -f ${V2}_2.{csv,mid,fs,pdf,abc,wav,h,v}
+	rm -f ${V2}_2.{csv,mid,fs,pdf,abc,wav,E,h,v}
 
 	rm -f ZZZ.*
 #-----------------------------------------------------------------------------

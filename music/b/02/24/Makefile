@@ -94,8 +94,8 @@ fs: ${V4}.fs ${V4}_2.fs
 clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
-	rm -f ${V4}.{csv,mid,fs,pdf,abc,wav,E}
-	rm -f ${V4}_2.{csv,mid,fs,pdf,abc,wav,E}
+	rm -f ${V4}.{csv,mid,fs,pdf,abc,wav,E,h,v}
+	rm -f ${V4}_2.{csv,mid,fs,pdf,abc,wav,E,h,v}
 #-----------------------------------------------------------------------------
 .PHONY: s1
 s1: ${V4}.fs ${V4}.pdf      Makefile ${MUSICOMP2ABC}

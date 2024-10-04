@@ -121,8 +121,8 @@ fs: ${V3}.fs ${V3}_2.fs
 clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
-	rm -f ${V3}.{csv,mid,fs,pdf,abc,wav,E}
-	rm -f ${V3}_2.{csv,mid,fs,pdf,abc,wav}
+	rm -f ${V3}.{csv,mid,fs,pdf,abc,wav,E,h,v}
+	rm -f ${V3}_2.{csv,mid,fs,pdf,abc,wav,E,h,v}
 #-----------------------------------------------------------------------------
 .PHONY: s1
 s1: ${V3}.fs ${V3}.pdf      Makefile ${MUSICOMP2ABC}
