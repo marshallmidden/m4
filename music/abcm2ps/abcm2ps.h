@@ -65,6 +65,7 @@ enum accidentals {
 #endif
 
 #define CM		* 37.8	/* factor to transform cm to pt */
+#define MM		* 3.78	/* factor to transform mm to pt */
 #define PT			/* factor to transform pt to pt */
 #define IN		* 96.0	/* factor to transform inch to pt */
 
@@ -545,7 +546,7 @@ struct FORMAT { 		/* struct for page layout */
 	int staffnonote, straightflags, stretchstaff;
 	int textoption, titlecaps, titleleft, titletrim;
 	int timewarn, transpose, tuplets;
-	char *bgcolor, *dateformat, *header, *footer, *titleformat;
+	char *bgcolor, *dateformat, *header, *footer, *header2, *footer2, *titleformat;
 	char *musicfont;
 	struct FONTSPEC font_tb[FONT_MAX];
 	char ndfont;		/* current index of dynamic fonts */

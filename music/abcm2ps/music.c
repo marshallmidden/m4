@@ -382,6 +382,9 @@ static int may_combine(struct SYMBOL *s)
 	struct SYMBOL *s2;
 	int nhd2;
 
+	if (s->combine == 0
+	 && s->abc_type != ABC_T_REST)
+		return 0;
 	s2 = s->ts_next;
 	if (!s2 || s2->type != NOTEREST)
 		return 0;
@@ -519,9 +522,9 @@ static void combine_voices(void)
 	for (s = tsfirst; s->ts_next; s = s->ts_next) {
 		if (s->combine < 0)
 			continue;
-		if (s->combine == 0
-		 && s->abc_type != ABC_T_REST)
-			continue;
+//		if (s->combine == 0
+//		 && s->abc_type != ABC_T_REST)
+//			continue;
 		if (s->sflags & S_IN_TUPLET) {
 			g = s->extra;
 			if (!g)
@@ -4394,6 +4397,7 @@ static void set_stems(void)
 			if (s->sflags & S_FEATHERED_BEAM)
 				nflags = ++s->nflags;
 			for (s2 = s->next; /*s2*/; s2 = s2->next) {
+				if (s2 == NULL) break;
 				if (s2->abc_type == ABC_T_NOTE) {
 					if (s->sflags & S_FEATHERED_BEAM)
 						s2->nflags++;
@@ -4402,6 +4406,7 @@ static void set_stems(void)
 				}
 			}
 /*			if (s2) */
+  			if (s2)
 			    if (s2->nflags > nflags)
 				nflags = s2->nflags;
 		} else if ((s->sflags & (S_BEAM_ST | S_BEAM_END)) == S_BEAM_END) {

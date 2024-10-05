@@ -480,6 +480,7 @@ static void voice_compress(void)
 				}
 				break;
 #endif
+			case FMTCHG:
 			case TEMPO:
 			case PART:
 			case TUPLET:
@@ -963,6 +964,7 @@ static void set_bar_num(void)
 				bar_num = s->aux;		/* (%%setbarnb) */
 //				if (s->time < bar_time) {
 //					s->aux = 0;
+					bar_time = s->time + wmeasure;
 					break;
 //				}
 			} else {
@@ -3583,6 +3585,7 @@ void do_tune(void)
 			sym_link(s, MREST);
 			s->dur = dur;
 			curvoice->time += dur;
+			s->color = curvoice->color;
 			if (s->text)
 				gch_build(s);	/* build the guitar chords */
 			if (s->u.bar.dc.n > 0)
