@@ -1261,15 +1261,19 @@ static void print_storage(char *in, unsigned int *inat, pft storage_num)
     {
         if (worder.further_let != 0)
         {
-            printw(" -- ERROR let == '\\0' but further_let == %d\n", worder.further_let);
+//            printw(" -- ERROR let == '\\0' but further_let == %d\n", worder.further_let);
+            printf(" -- ERROR let == '\\0' but further_let == %d\n", worder.further_let);
         }
         else
         {
             for (i = 0; i <= *inat; i++)
             {
-                printw("%c", in[i]);
+//                printw("%c", in[i]);
+                printf("%c", in[i]);
             }
-            printw("\n");
+//            printw("\n");
+            printf("\n");
+//            refresh();
         }
     }
     else
@@ -1297,6 +1301,7 @@ static void print_all(void)
 
     erase();
     refresh();
+    endwin();
 
     for (prefix_on = 0; prefix_on < SIZE_PREFIX_TABLE; prefix_on++)
     {
@@ -1333,15 +1338,24 @@ static void print_all(void)
         inat = LPREFIX - 1;             /* inat set to character last found. */
         if (in[inat] == '\0' || prefix_table[prefix_on].storage_num == ONLY_IN_PREFIX_TABLE)
         {
-            printw("%s\n", in);
+//            printw("%s\n", in);
+//            refresh();
+            printf("%s\n", in);
             continue;
         }
         storage_num = prefix_table[prefix_on].storage_num;
         print_storage(in, &inat, storage_num);
     }                                   /* End of for */
 
-    refresh();
     (void)get_single_ch();
+
+//    refresh();
+    initscr();
+    intrflush(stdscr, FALSE);
+    scrollok(stdscr, TRUE);
+    /* get the number of rows and columns */
+    getmaxyx(stdscr,terminal_row,terminal_col);
+
 }                                       /* End of print_all */
 
 /* ------------------------------------------------------------------------ */
@@ -1353,11 +1367,13 @@ static void choose(void)
     {
 	erase();
 	refresh();
+        printw("Run program with file name argument to insert all words into the list.\n");
+        printw("\n");
         printw("Choose:\n");
-        printw("  a) type\n");
-        printw("  b) enter words\n");
-        printw("  p) print all in dataset\n");
-        printw("  q) quit\n");
+        printw("  a) type - only words in list are allowed - and unique parts autofill.\n");
+        printw("  b) enter words one at a time to the list.\n");
+        printw("  p) print all in dataset.\n");
+        printw("  q) quit.\n");
 	refresh();
         key = (char)tolower((int)get_single_ch());
         switch (key)
@@ -1464,6 +1480,8 @@ int main(int argc, char **argv)
 
     /* Initialize curses mode. */
     initscr();
+    intrflush(stdscr, FALSE);
+    scrollok(stdscr, TRUE);
 
     initget();
 
