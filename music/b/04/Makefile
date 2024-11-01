@@ -7,6 +7,7 @@ INCLUDES    += macros.include
 v4-1_INCLUDES = v4-1.starting
 v4_2_INCLUDES = v4-2.starting
 v4_3_INCLUDES = v4-3.starting
+v4_4_INCLUDES = v4-4.starting
 #-----------------------------------------------------------------------------
 SONGS_E = ${SONGS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
