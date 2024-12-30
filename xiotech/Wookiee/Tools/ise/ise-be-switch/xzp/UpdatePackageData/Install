@@ -1,0 +1,143 @@
+#! /bin/bash
+################################################################################
+#                         CONFIDENTIAL AND PROPRIETARY
+#         Copyright (C) 2007-2010 Xiotech Corporation, All Rights Reserved
+################################################################################
+#
+# Installation script for upgrading cisco BE switch firmware.
+#
+################################################################################
+
+
+#
+# process options
+#
+# -d        DSC Identifier.
+# -p        Back-end Switch Admin Password
+#
+
+while getopts "d:p:" opt; do
+  case $opt in
+    d  )  DSC_ID="${OPTARG}";;
+    p  )  SW_PASSWORD="${OPTARG}";;
+  esac
+done
+shift $(($OPTIND - 1))
+
+if [[ ${DSC_ID} == "" ]]
+then
+  OPT_ERR=1
+fi
+
+
+#
+# check parameters
+#
+
+if [[ ${OPT_ERR} == "1" ]]
+then
+  echo "Install script."
+  echo "Usage: $(basename $0) -d <DSC ID> [-p <Back-end switch admin password>]"
+  exit 1
+fi
+
+
+#
+# Set sshd permit root login
+#
+
+SetSshdPermitRootLogin()
+{
+  ## Remove any lingering modified sshd configuration file
+  rm -f /tmp/sshd_config.mod
+  ## Save a copy of original sshd configuration file
+  cp -f /etc/ssh/sshd_config /tmp/sshd_config
+  ## Changing the options for PermitRootLogin to yes
+  sed '
+  /PermitRootLogin/ c\
+  PermitRootLogin yes
+  ' /tmp/sshd_config > /tmp/sshd_config.mod
+  
+  ## Copying the modified file back
+  cp -f /tmp/sshd_config.mod /etc/ssh/sshd_config
+  
+  ## Removing the temporary files
+  rm -f /tmp/sshd_config.mod
+
+  ## Restart the sshd service so that new changes will come to effect
+  /sbin/service sshd restart
+
+  /etc/init.d/sshd status
+  SSHD_STATUS=$?
+  echo "SSHD status: ${SSHD_STATUS}"
+
+  ## Wait for sshd to start up 
+  RETRIES=30
+  while [[ ${SSHD_STATUS} -ne 0 ]] && [[ $RETRIES -gt 0 ]]
+  do
+    sleep 2
+    /etc/init.d/sshd status
+    SSHD_STATUS=$?
+    echo "SSHD status: ${SSHD_STATUS}"
+    RETRIES=$RETRIES-1
+  done
+}
+
+#
+# Restor sshd to original state 
+#
+# $1   Original status of sshd service.
+#
+
+RestoreSshdToOriginalState()
+{
+  ORIG_SSHD_STATUS=$1
+
+  ## Copy old file back in case failure during script does not restart the service
+  ## This will assure that SSH will be disabled after a reboot
+  cp -f /tmp/sshd_config /etc/ssh/sshd_config
+  rm -f /tmp/sshd_config
+
+  ## sshd states
+  ##   0 - service running
+  ##   1 - service dead, but /var/run/  pid  file exists
+  ##   2 - service dead, but /var/lock/ lock file exists
+  ##   3 - service not running
+  if [[ ${ORIG_SSHD_STATUS} -eq 0 ]]
+  then
+    /sbin/service sshd restart
+  else 
+    /sbin/service sshd stop
+  fi
+}
+
+/etc/init.d/sshd status
+SAVED_SSHD_STATUS=$?
+
+SetSshdPermitRootLogin
+
+## Install Expect if necessary
+if [ ! -e /usr/bin/expect ]
+then
+  tar jxf E.tbz2 -C / ; ldconfig
+fi
+
+mv -f /root/.ssh/known_hosts /root/.ssh/known_hosts.save || true
+
+chmod a+x sw_do_many do_sw check_sw SystemStatusChecker
+tar jxvf CCBE.tbz2
+
+mv -f ccbCL.ini CCBE/
+
+#-- if the following exists, the script fails in Termline package.
+rm -f /root/.ccbCL.ini
+
+## Call sw_do_many to update all the switches
+if [[ ${SW_PASSWORD} == "" ]]
+then
+  /usr/bin/perl sw_do_many -d ${DSC_ID}
+else
+  /usr/bin/perl sw_do_many -d ${DSC_ID} -p ${SW_PASSWORD}
+fi
+
+RestoreSshdToOriginalState $SAVED_SSHD_STATUS

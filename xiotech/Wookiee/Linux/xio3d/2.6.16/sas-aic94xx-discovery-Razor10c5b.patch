@@ -1,0 +1,547 @@
+diff -r -u a/drivers/scsi/aic94xx/aic94xx_sds.c b/drivers/scsi/aic94xx/aic94xx_sds.c
+--- a/drivers/scsi/aic94xx/aic94xx_sds.c	2006-09-13 14:22:57.676900767 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_sds.c	2006-09-13 07:44:49.561652694 -0500
+@@ -856,7 +856,7 @@
+                 if (speed_go_3)
+                     asd_ha->hw_prof.phy_desc[i].max_sas_lrate = PHY_LINKRATE_3;
+                 else
+-		asd_ha->hw_prof.phy_desc[i].max_sas_lrate = PHY_LINKRATE_1_5;
++		asd_ha->hw_prof.phy_desc[i].max_sas_lrate = PHY_LINKRATE_3;
+ 			//(pe->sas_link_rates & 0xF0) >> 4;
+ 		asd_ha->hw_prof.phy_desc[i].min_sas_lrate = PHY_LINKRATE_1_5;
+ 			//(pe->sas_link_rates & 0x0F);
+diff -r -u a/drivers/scsi/aic94xx/aic94xx_tmf.c b/drivers/scsi/aic94xx/aic94xx_tmf.c
+--- a/drivers/scsi/aic94xx/aic94xx_tmf.c	2006-09-13 14:22:57.693899162 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_tmf.c	2006-09-13 15:24:12.084366934 -0500
+@@ -399,12 +399,14 @@
+     /*
+     ** clear nexus for SATA or SES.
+     */
+-    if ((dev->dev_type == SATA_DEV) ||
+-        (scsi_dev && scsi_dev->inquiry[0] == 0xD))
++    if ((dev->dev_type == SATA_DEV) || (scsi_dev && scsi_dev->inquiry[0] == 0xD))
+     {
+ 		res = asd_clear_nexus(task, (EXECQ|SENDQ|NOTINQ));
+         if (scsi_dev && scsi_dev->inquiry[0] == 0xD)
+             res = TMF_RESP_FUNC_FAILED;
++        
++        if (res != SAS_TASK_UNDELIVERED)
++            res = res & 0xFF;
+ 
+         return res;
+     }
+diff -r -u a/drivers/scsi/sas/sas_discover.c b/drivers/scsi/sas/sas_discover.c
+--- a/drivers/scsi/sas/sas_discover.c	2006-09-13 14:22:57.974872631 -0500
++++ b/drivers/scsi/sas/sas_discover.c	2006-09-13 09:25:20.673881138 -0500
+@@ -493,6 +493,7 @@
+ 	task->data_dir = pci_dma_dir;
+ 	task->task_done = sas_disc_task_done;
+ 
++
+ 	for (retries = 0; retries < 5; retries++) {
+ 		task->task_state_flags = SAS_TASK_STATE_PENDING;
+ 		init_completion(&task->completion);
+@@ -529,9 +530,18 @@
+ 				    task->task_state_flags);
+ 			res2 = task->dev->port->ha->lldd_abort_task(task);
+ 			SAS_DPRINTK("came back from abort task\n");
++            if (task->dev->dev_type == SATA_DEV ) {
++                if ( !retries )
++                    sas_execute_disable_enable_phy(task->dev, 1);
++                else if ( retries )
++                    sas_execute_disable_enable_phy(task->dev, 0);
++                msleep(5000);
++                continue;
++            }
+ 			if (!(task->task_state_flags & SAS_TASK_STATE_DONE)) {
+-				if (res2 == TMF_RESP_FUNC_COMPLETE)
++				if (res2 == TMF_RESP_FUNC_COMPLETE) {
+ 					continue; /* Retry the task */
++                }
+ 				else
+ 					goto ex_err;
+ 			}
+@@ -542,13 +552,14 @@
+ 				    "stat:0x%x\n",
+ 				    task->task_status.resp,
+ 				    task->task_status.stat);
+-
+-            if ( task->task_status.stat == SAS_OPEN_REJECT ) {
+-                SAS_DPRINTK("%s: %llX task %p OPEN REJECT... HARD RESET\n", 
+-                        __FUNCTION__, SAS_ADDR(dev->sas_addr),task);
+-                sas_execute_disable_enable_phy(dev, 0);
++            
++            if (task->dev->dev_type == SATA_DEV ) {
++                if (task->task_status.stat == SAS_OPEN_REJECT) {
++                    sas_execute_disable_enable_phy(task->dev, 1);
++                    msleep(5000);
++                    continue;
++                }
+             }
+-
+ 			goto ex_err;
+ 		}
+ 		res = task->task_status.stat;
+@@ -755,7 +766,9 @@
+ 	task->ata_task.fis.command = command;
+ 	task->ata_task.fis.features = features;
+ 	task->ata_task.fis.device = d2h_fis->device;
+-	task->ata_task.retry_count = 1;
++	task->ata_task.retry_count = 5;
++    task->ata_task.stp_affil_pol = 1;
++    task->ata_task.set_affil_pol = 1;
+ 
+ 	res = sas_execute_task(task, buffer, size, pci_dma_dir);
+ 
+@@ -799,7 +812,23 @@
+ 	__le16  *identify_x;
+ 	u8      command;
+ 
+-	identify_x = kzalloc(512, GFP_KERNEL);
++	SAS_DPRINTK("smp discover sata results \n"
++                "  phy_id               %d\n"
++                "  affil_valid          %d\n"
++                "  affil_supp           %d\n"
++                "  stp_itnl_occured     %d\n"
++                "  stp_sas_addr         %llx\n"
++                "  affil_stp_ini_addr   %llx\n"
++                "  stp_intl_sas_addr    %llx\n",
++            	dev->sata_dev.rps_resp.rps.phy_id,
++            	dev->sata_dev.rps_resp.rps.affil_valid,
++            	dev->sata_dev.rps_resp.rps.affil_supp,
++            	dev->sata_dev.rps_resp.rps.stp_itnl_occured,
++            	SAS_ADDR(dev->sata_dev.rps_resp.rps.stp_sas_addr),
++            	SAS_ADDR(dev->sata_dev.rps_resp.rps.affil_stp_ini_addr),
++            	SAS_ADDR(dev->sata_dev.rps_resp.rps.stp_intl_sas_addr));
++
++            identify_x = kzalloc(512, GFP_KERNEL);
+ 	if (!identify_x)
+ 		return -ENOMEM;
+ 	
+diff -r -u a/drivers/scsi/sas/sas_event.c b/drivers/scsi/sas/sas_event.c
+--- a/drivers/scsi/sas/sas_event.c	2006-09-13 14:22:57.571910680 -0500
++++ b/drivers/scsi/sas/sas_event.c	2006-09-11 16:12:44.000000000 -0500
+@@ -113,8 +113,9 @@
+ 	struct sas_ha_struct *sas_ha = phy->ha;
+ 	enum port_event port_event;
+ 
+-	if (!try_module_get(sas_ha->lldd_module))
++    if (!try_module_get(sas_ha->lldd_module))
+ 		return;
++    
+ 	spin_lock_irqsave(&sas_ha->event_lock, flags);
+ 	while (!list_empty(&phy->port_event_list)) {
+ 		struct list_head *head = phy->port_event_list.next;
+@@ -123,6 +124,15 @@
+ 		spin_unlock_irqrestore(&sas_ha->event_lock, flags);
+ 
+ 		sas_dprint_porte(phy->id, port_event);
++        
++        spin_lock_irqsave(&sas_ha->phy_port_lock, flags);
++        if ( !phy->port && (port_event==PORTE_BROADCAST_RCVD) ) {
++            SAS_DPRINTK("Processing port event for phy %d FAILED! (deformed port)\n", phy->id);
++            spin_unlock_irqrestore(&sas_ha->phy_port_lock, flags);
++            spin_lock_irqsave(&sas_ha->event_lock, flags);
++            continue;
++        }
++        spin_unlock_irqrestore(&sas_ha->phy_port_lock, flags);
+ 
+ 		switch (port_event) {
+ 		case PORTE_BYTES_DMAED:
+diff -r -u a/drivers/scsi/sas/sas_expander.c b/drivers/scsi/sas/sas_expander.c
+--- a/drivers/scsi/sas/sas_expander.c	2006-09-13 14:22:57.979872159 -0500
++++ b/drivers/scsi/sas/sas_expander.c	2006-09-13 15:57:37.647872815 -0500
+@@ -37,6 +37,8 @@
+ static int sas_configure_routing(struct domain_device *dev, u8 *sas_addr);
+ static int sas_disable_routing(struct domain_device *dev,  u8 *sas_addr);
+ int sas_ex_find_phy(struct domain_device *dev, u8 *sas_addr, int start);
++static int smp_enable_phy(struct domain_device *dev, int phy_id,
++			   int linkrate);
+ static int smp_phy_control(struct domain_device *dev, int phy_id,
+ 			   enum phy_func phy_func);
+ 
+@@ -174,7 +176,6 @@
+ struct smp_reset_work_task {
+     struct work_struct          work;
+     void*                       dev;
+-    int (*lldd_control_phy)(struct sas_phy *, enum phy_func);
+     int                         phy_id;
+     int                         reset_only;
+ };
+@@ -296,6 +297,9 @@
+ 
+ /* ---------- Expander configuration ---------- */
+ 
++#define DISCOVER_REQ_SIZE  16
++#define DISCOVER_RESP_SIZE 64
++
+ static void sas_set_ex_phy(struct domain_device *dev, int phy_id,
+ 			   void *disc_resp)
+ {
+@@ -303,6 +307,9 @@
+ 	struct ex_phy *phy = &ex->ex_phy[phy_id];
+ 	struct smp_resp *resp = disc_resp;
+ 	struct discover_resp *dr = &resp->disc;
++    int retries = 0;
++	u8   *disc_req = NULL;
++	u8   *disc_rsp = NULL;
+ 
+ 	switch (resp->result) {
+ 	case SMP_RESP_PHY_VACANT:
+@@ -315,31 +322,104 @@
+ 		phy->phy_state = PHY_EMPTY; /* do not know yet */
+ 		break;
+ 	}
++    
++    SAS_DPRINTK("ex %016llx phy%02d dev %016llx: linkrate %1x\n", 
++            SAS_ADDR(dev->sas_addr), phy_id, 
++            SAS_ADDR(dr->attached_sas_addr), dr->linkrate);
++
++    while (1) {
++        phy->phy_id = phy_id;
++        phy->attached_dev_type = dr->attached_dev_type;
++        phy->linkrate = dr->linkrate;
++        phy->attached_sata_host = dr->attached_sata_host;
++        phy->attached_sata_dev  = dr->attached_sata_dev;
++        phy->attached_sata_ps   = dr->attached_sata_ps;
++        phy->attached_iproto = dr->iproto << 1;
++        phy->attached_tproto = dr->tproto << 1;
++        memcpy(phy->attached_sas_addr, dr->attached_sas_addr, SAS_ADDR_SIZE);
++        phy->attached_phy_id = dr->attached_phy_id;
++        if (resp->resp_len >= 0x0E) {
++            memcpy(phy->attached_dev_name, dr->attached_dev_name,
++                    SAS_ADDR_SIZE);
++        }
++        phy->phy_change_count = dr->change_count;
++        phy->routing_attr = dr->routing_attr;
++        phy->virtual = dr->virtual;
++        phy->last_da_index = -1;
++
++        if ( phy->attached_sata_dev || retries ) {
++            switch (phy->linkrate) {
++                case PHY_LINKRATE_G1:
++                    if ( phy->attached_sata_dev ) {
++                        SAS_DPRINTK("ex %016llx phy%02d dev %016llx: linkrate %1x\n", 
++                                SAS_ADDR(dev->sas_addr), phy->phy_id, 
++                                SAS_ADDR(phy->attached_sas_addr), phy->linkrate);
++                        retries = 100;
++                        break;
++                    }
++
++                case PHY_RESET_IN_PROGRESS:
++                    if ((phy->linkrate == PHY_RESET_IN_PROGRESS) && !retries)
++                        retries = 1;
++                    /* fall through */
++
++                case PHY_DISABLED:
++                case PHY_RESET_PROBLEM:
++                case PHY_LINKRATE_G2:
++                case PHY_SPINUP_HOLD:
++                default:
++                    if ( retries ) {
++                        if (!disc_req) {
++                            disc_req = alloc_smp_req(DISCOVER_REQ_SIZE);
++                            if (!disc_req)
++                                break;
++                        }
++
++                        if (!disc_rsp) {
++                            disc_rsp = alloc_smp_resp(DISCOVER_RESP_SIZE);
++                            if (!disc_rsp) {
++                                break;
++                            }
++                        }
++
++                        disc_req[1] = SMP_DISCOVER;
++            			disc_req[9] = phy_id;
++
++                        if ( !smp_execute_task(dev, disc_req, DISCOVER_REQ_SIZE,
++                                              disc_rsp, DISCOVER_RESP_SIZE) ) {
++                            resp = (struct smp_resp *)disc_rsp;
++                            dr = &resp->disc;
++                        }
++
++                    }
++                    else {
++
++                        SAS_DPRINTK("ex %016llx phy%02d dev %016llx: RESET PHY\n", 
++                                SAS_ADDR(dev->sas_addr), phy->phy_id, 
++                                SAS_ADDR(phy->attached_sas_addr));
++                        smp_enable_phy(dev, phy->phy_id, PHY_LINKRATE_G1);
++                    }
++            }
++            
++            if ( ++retries < 100 ) {
++                msleep(100);
++                continue;
++            }
++        }
+ 
+-	phy->phy_id = phy_id;
+-	phy->attached_dev_type = dr->attached_dev_type;
+-	phy->linkrate = dr->linkrate;
+-	phy->attached_sata_host = dr->attached_sata_host;
+-	phy->attached_sata_dev  = dr->attached_sata_dev;
+-	phy->attached_sata_ps   = dr->attached_sata_ps;
+-	phy->attached_iproto = dr->iproto << 1;
+-	phy->attached_tproto = dr->tproto << 1;
+-	memcpy(phy->attached_sas_addr, dr->attached_sas_addr, SAS_ADDR_SIZE);
+-	phy->attached_phy_id = dr->attached_phy_id;
+-	if (resp->resp_len >= 0x0E) {
+-		memcpy(phy->attached_dev_name, dr->attached_dev_name,
+-		       SAS_ADDR_SIZE);
+-	}
+-	phy->phy_change_count = dr->change_count;
+-	phy->routing_attr = dr->routing_attr;
+-	phy->virtual = dr->virtual;
+-	phy->last_da_index = -1;
++        break;
++    }
++
++    if (disc_req)
++        kfree(disc_req);
++    if (disc_rsp)
++        kfree(disc_rsp);
+ 
+     /* Check for valid addr */
+     if ( dev->port->ha->first_discovery_done && (SAS_ADDR(phy->attached_sas_addr) == 0) ) {
+         SAS_DPRINTK("ex %016llx attempting to reset phy%02d: BOGUS ADDR 0\n",
+                 SAS_ADDR(dev->sas_addr), phy->phy_id );
+-        sas_execute_disable_enable_phy(dev, 0);
++        sas_execute_disable_enable_phy(dev, 1);
+     }
+ 
+ 
+@@ -353,9 +433,6 @@
+ 	return;
+ }
+ 
+-#define DISCOVER_REQ_SIZE  16
+-#define DISCOVER_RESP_SIZE 64
+-
+ static int sas_ex_phy_discover(struct domain_device *dev, int single)
+ {
+ 	struct expander_device *ex = &dev->ex_dev;
+@@ -617,6 +694,35 @@
+ 
+ #define PC_REQ_SIZE  44
+ #define PC_RESP_SIZE 8
++static int smp_enable_phy(struct domain_device *dev, int phy_id,
++			   int linkrate)
++{
++	u8 *pc_req;
++	u8 *pc_resp;
++	int res;
++
++	pc_req = alloc_smp_req(PC_REQ_SIZE);
++	if (!pc_req)
++		return -ENOMEM;
++
++	pc_resp = alloc_smp_resp(PC_RESP_SIZE);
++	if (!pc_resp) {
++		kfree(pc_req);
++		return -ENOMEM;
++	}
++
++	pc_req[1] = SMP_PHY_CONTROL;
++	pc_req[9] = phy_id;
++	pc_req[10]= PHY_FUNC_LINK_RESET;
++    pc_req[33] = linkrate << 4;
++
++	res = smp_execute_task(dev, pc_req, PC_REQ_SIZE, pc_resp,PC_RESP_SIZE);
++
++	kfree(pc_resp);
++	kfree(pc_req);
++	return res;
++}
++
+ 
+ static int smp_phy_control(struct domain_device *dev, int phy_id,
+ 			   enum phy_func phy_func)
+@@ -782,15 +888,6 @@
+ 	sas_ex_get_linkrate(parent, child, phy);
+ 
+ 	if ((phy->attached_tproto & SAS_PROTO_STP) || phy->attached_sata_dev) {
+-            
+-        SAS_DPRINTK("%s: SOFT RESET SATA DEV: phy %d\n", __FUNCTION__, phy_id);
+-        res = smp_phy_control(parent, phy_id, PHY_FUNC_LINK_RESET);
+-        if (res)  {
+-            kfree(child);
+-            return NULL;
+-        }
+-        mdelay(100);
+-
+ 		child->dev_type = SATA_DEV;
+ 		if (phy->attached_tproto & SAS_PROTO_STP)
+ 			child->tproto = phy->attached_tproto;
+@@ -808,7 +905,7 @@
+ 		memcpy(child->frame_rcvd, &child->sata_dev.rps_resp.rps.fis,
+ 		       sizeof(struct dev_to_host_fis));
+ 		sas_init_dev(child);
+-		res = sas_discover_sata(child);
++        res = sas_discover_sata(child);
+ 		if (res) {
+ 			SAS_DPRINTK("sas_discover_sata() for device %16llx at "
+ 				    "%016llx:0x%x returned 0x%x\n",
+@@ -888,8 +985,7 @@
+ 
+ 	/* Phy state */
+ 	if (ex_phy->linkrate == PHY_SPINUP_HOLD) {
+-		if (!smp_phy_control(dev, phy_id, PHY_FUNC_LINK_RESET))
+-			res = sas_ex_phy_discover(dev, phy_id);
++        res = sas_ex_phy_discover(dev, phy_id);
+ 		if (res)
+ 			return res;
+ 	}
+@@ -2093,27 +2189,13 @@
+ 
+     /* Init work queue if necessary. */
+     if (!smp_reset_work_queue)
+-        smp_reset_work_queue = create_workqueue("smp_reset_work_queue");
++        smp_reset_work_queue = create_singlethread_workqueue("smp_reset_work_queue");
+     if (!smp_reset_work_queue)
+         return -ENOMEM;
+ 
+ 	if (!dev->parent) {
+-		struct sas_phy *phy = container_of(dev->port->phy_list.next,
+-						   struct sas_phy,
+-						   port_phy_el);
+-            
+-        srwt = kzalloc(sizeof(*srwt), GFP_ATOMIC);
+-        if (!srwt)
+-            return -ENOMEM;
+-
+-        INIT_WORK(&srwt->work, sas_reset_phy_task, srwt);
+-        srwt->dev = phy;
+-        srwt->lldd_control_phy = dev->port->ha->lldd_control_phy;
+-        srwt->phy_id = -1;
+-        srwt->reset_only = reset_only;
+-
+-        SAS_DPRINTK("%s: A. Adding task to workqueue for Phy %d\n", __FUNCTION__, phy->id);
+-        res = queue_work(smp_reset_work_queue, &srwt->work);
++        SAS_DPRINTK("%s: dev->parent == NULL\n", __FUNCTION__);
++        return res;
+     }
+     else {
+ 
+@@ -2140,39 +2222,42 @@
+ 	return res;
+ }
+ 
++#define SAS_RESET_PHY_TASK_JIFFIES   (5 * HZ)
++static unsigned long  sas_reset_phy_task_last_ha_reset = 0;
+ void sas_reset_phy_task( void* data)
+ {
+     struct smp_reset_work_task* srwt = (struct smp_reset_work_task*)data;
+-    struct sas_phy*             phy = NULL;
+     struct domain_device*       dev = NULL;
+     int res = 0;
+-
+-    if (!srwt || !srwt->dev) {
++    
++    BUG_ON (!srwt || !srwt->dev || !(((struct domain_device*)srwt->dev)->port) );
++    if (!srwt || !srwt->dev || !(((struct domain_device*)srwt->dev)->port) ) {
+         SAS_DPRINTK("%s: NULL srwt\n", __FUNCTION__);
+         return;
+     }
++    dev = (struct domain_device*)srwt->dev;
+ 
+-    SAS_DPRINTK("%s: Attempting Phy %d reset_only %d\n", 
+-            __FUNCTION__, srwt->phy_id, srwt->reset_only);
+-
+-    if ( srwt->phy_id == -1 ) {
+-        phy = (struct sas_phy*)srwt->dev;
+-        res = srwt->lldd_control_phy(phy, PHY_FUNC_HARD_RESET);
+-        if ( !srwt->reset_only ) {
+-            res = srwt->lldd_control_phy(phy, PHY_FUNC_DISABLE);
+-            msleep(250);
+-            res = srwt->lldd_control_phy(phy, PHY_FUNC_LINK_RESET);
+-        }
+-    } else {
+-        dev = (struct domain_device*)srwt->dev;
+-        res = smp_phy_control(dev, srwt->phy_id, PHY_FUNC_HARD_RESET);
+-        if ( !srwt->reset_only ) {
+-            res = smp_phy_control(dev, srwt->phy_id, PHY_FUNC_DISABLE);
+-            msleep(250);
+-            res = smp_phy_control(dev, srwt->phy_id, PHY_FUNC_LINK_RESET);
++    if ( !srwt->reset_only ) {
++        if (  (sas_reset_phy_task_last_ha_reset + SAS_RESET_PHY_TASK_JIFFIES) < jiffies ) {
++            sas_reset_phy_task_last_ha_reset = jiffies;
++#if 0
++            SAS_DPRINTK("%s: Attempting Exp to Host reset all\n", __FUNCTION__);
++            //smp_enable_phy(dev, 0, PHY_LINKRATE_G1);
++            smp_enable_phy(dev, 0, 0);
++            msleep(25); 
++            smp_enable_phy(dev, 1, 0);
++            msleep(25); 
++            smp_enable_phy(dev, 2, 0);
++            msleep(25); 
++            smp_enable_phy(dev, 3, 0);
++            msleep(100);
++#endif
+         }
+     }
+-
++    SAS_DPRINTK("%s: Attempting Phy %d reset_only %d\n", 
++            __FUNCTION__, srwt->phy_id, srwt->reset_only);
++    res = smp_enable_phy(dev, srwt->phy_id, 0);
++    
+     if ( res )
+     {
+         SAS_DPRINTK("%s: Phy %d FAILED (%d)\n", __FUNCTION__, srwt->phy_id, res);
+diff -r -u a/drivers/scsi/sas/sas_phy.c b/drivers/scsi/sas/sas_phy.c
+--- a/drivers/scsi/sas/sas_phy.c	2006-09-13 14:22:56.777985645 -0500
++++ b/drivers/scsi/sas/sas_phy.c	2006-09-11 16:17:31.000000000 -0500
+@@ -88,6 +88,10 @@
+ 	if (size > 0) {
+ 		if (buf[0] == '1')
+ 			phy->ha->lldd_control_phy(phy, PHY_FUNC_LINK_RESET);
++        else if (buf[0] == '0')
++			phy->ha->lldd_control_phy(phy, PHY_FUNC_DISABLE);
++        else if (buf[0] == '2')
++			phy->ha->lldd_control_phy(phy, PHY_FUNC_HARD_RESET);
+ 	}
+ 	return size;
+ }
+diff -r -u a/drivers/scsi/sas/sas_scsi_host.c b/drivers/scsi/sas/sas_scsi_host.c
+--- a/drivers/scsi/sas/sas_scsi_host.c	2006-09-13 14:22:57.985871593 -0500
++++ b/drivers/scsi/sas/sas_scsi_host.c	2006-09-13 15:48:28.168523195 -0500
+@@ -433,7 +433,7 @@
+         ** errcount >= 2 handled in sas_qc_done
+         */
+         if ( task->task_status.abort_reason == SAS_TASK_TIMED_OUT ) {
+-            if ( !task->dev->err_count++ ) {
++            if ( ++task->dev->err_count ) {
+                 sas_execute_disable_enable_phy(task->dev, 1);
+             }
+         }
+@@ -750,8 +750,7 @@
+             
+         qc->err_mask |= ac_err_mask(rp->ending_fis[0x2]);
+ 
+-        if ( (ts->stat == SAS_OPEN_REJECT)  || 
+-             ((ts->stat == SAS_ABORTED_TASK) && (dev->err_count >= 2 )) ) {
++        if ( ts->stat == SAS_OPEN_REJECT)  {
+             SAS_DPRINTK("%s: %llX task %p Resetting dev\n", 
+                 __FUNCTION__, SAS_ADDR(dev->sas_addr),task);
+             sas_execute_disable_enable_phy(dev, 0);
+@@ -804,6 +803,7 @@
+ 	task->ata_task.fis.sector_count_exp = qc->tf.hob_nsect;
+ 	task->ata_task.fis.control = qc->tf.ctl;
+ 	//task->ata_task.device_control_reg_update = 1 ;
++    task->ata_task.stp_affil_pol = 1;
+ 
+ 	switch(qc->tf.protocol) {
+ 	case ATA_PROT_NODATA:
+diff -r -u a/include/scsi/sas/sas.h b/include/scsi/sas/sas.h
+--- a/include/scsi/sas/sas.h	2006-09-13 14:22:56.812982341 -0500
++++ b/include/scsi/sas/sas.h	2006-09-12 09:50:51.000000000 -0500
+@@ -59,6 +59,7 @@
+ 	PHY_RESET_PROBLEM,
+ 	PHY_SPINUP_HOLD,
+ 	PHY_PORT_SELECTOR,
++	PHY_RESET_IN_PROGRESS,
+ 	PHY_LINKRATE_1_5 = 0x08,
+ 	PHY_LINKRATE_G1  = PHY_LINKRATE_1_5,
+ 	PHY_LINKRATE_3   = 0x09,
+

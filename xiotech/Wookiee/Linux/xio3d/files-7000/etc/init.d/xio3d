@@ -1,0 +1,210 @@
+#! /bin/sh
+# $Id: xio3d 38823 2007-12-27 20:34:29Z mdr $
+# This xio3d script was based on a standard SUSE script, hence
+# the following copyright notice.
+#
+# Copyright (c) 1995-2004 SUSE Linux AG, Nuernberg, Germany.
+# All rights reserved.
+#
+# Author: Kurt Garloff
+#
+# /etc/init.d/xio3d
+#   and its symbolic link
+# /usr/sbin/rcxio3d
+#
+# System startup script for Xiotech 3D storage application
+#
+### BEGIN INIT INFO
+# Provides:          xio3d
+# Required-Start:    $network $named
+# Required-Stop:     $network
+# Should-Start:      $remote_fs
+# Default-Start:     3 5
+# Default-Stop:      0 1 2 6
+# Short-Description: Xiotech 3D storage controller application.
+# Description:       Start the Xiotech 3D storage controller application
+#	providing storage to fibre channel attached servers.
+### END INIT INFO
+
+# Check for missing binaries (stale symlinks should not happen)
+# Note: Special treatment of stop for LSB conformance
+grep xio3d /proc/devices &>/dev/null || { echo "xio3d kernel driver missing"
+	test "$1" = "stop" && exit 0
+	exit 5; }
+
+XIO3D_BIN=/opt/xiotech/bvm
+test -x $XIO3D_BIN || { echo "$XIO3D_BIN not installed"; 
+	test "$1" = "stop" && exit 0
+	exit 5; }
+
+XIO3D_BIN=/opt/xiotech/XIOtech
+test -x $XIO3D_BIN || { echo "$XIO3D_BIN not installed"; 
+	test "$1" = "stop" && exit 0
+	exit 5; }
+
+# Check for existence of needed config file and read it
+XIO3D_CONFIG=/etc/sysconfig/xio3d
+test -r $XIO3D_CONFIG || { echo "$XIO3D_CONFIG is missing";
+	test "$1" = "stop" && exit 0
+	exit 6; }
+
+# Read config	
+. $XIO3D_CONFIG
+
+# Source LSB init functions
+# providing start_daemon, killproc, pidofproc, 
+# log_success_msg, log_failure_msg and log_warning_msg.
+# This is currently not used by UnitedLinux based distributions and
+# not needed for init scripts for UnitedLinux only. If it is used,
+# the functions from rc.status should not be sourced or used.
+#. /lib/lsb/init-functions
+
+# Shell functions sourced from /etc/rc.status:
+#      rc_check         check and set local and overall rc status
+#      rc_status        check and set local and overall rc status
+#      rc_status -v     be verbose in local rc status and clear it afterwards
+#      rc_status -v -r  ditto and clear both the local and overall rc status
+#      rc_status -s     display "skipped" and exit with status 3
+#      rc_status -u     display "unused" and exit with status 3
+#      rc_failed        set local and overall rc status to failed
+#      rc_failed <num>  set local and overall rc status to <num>
+#      rc_reset         clear both the local and overall rc status
+#      rc_exit          exit appropriate to overall rc status
+#      rc_active        checks whether a service is activated by symlinks
+#      rc_splash arg    sets the boot splash screen to arg (if active)
+. /etc/rc.status
+
+# Reset status of this service
+rc_reset
+
+# Return values acc. to LSB for all commands but status:
+# 0	  - success
+# 1       - generic or unspecified error
+# 2       - invalid or excess argument(s)
+# 3       - unimplemented feature (e.g. "reload")
+# 4       - user had insufficient privileges
+# 5       - program is not installed
+# 6       - program is not configured
+# 7       - program is not running
+# 8--199  - reserved (8--99 LSB, 100--149 distrib, 150--199 appl)
+# 
+# Note that starting an already running service, stopping
+# or restarting a not-running service as well as the restart
+# with force-reload (in case signaling is not supported) are
+# considered a success.
+
+case "$1" in
+    start)
+	checkproc $XIO3D_BIN
+	if test $? != 0; then
+	  echo -n "Starting Xio3D "
+	  ## Start daemon with startproc(8). If this fails
+	  ## the return value is set appropriately by startproc.
+	  startproc $XIO3D_BIN
+	  rc_reset	# Status doesn't really work
+	else
+	  echo -n "Xio3D already running"
+	fi
+
+	# Remember status and be verbose
+	rc_status -v
+	;;
+    stop)
+	echo -n "Shutting down Xio3D "
+	## Stop daemon with killproc(8) and if this fails
+	## killproc sets the return value according to LSB.
+
+	#killproc -INT $XIO3D_BIN
+	killall -INT pam
+
+	# Remember status and be verbose
+	rc_status -v
+	;;
+    try-restart|condrestart)
+	## Do a restart only if the service was active before.
+	## Note: try-restart is now part of LSB (as of 1.9).
+	## RH has a similar command named condrestart.
+	if test "$1" = "condrestart"; then
+		echo "${attn} Use try-restart ${done}(LSB)${attn} rather than condrestart ${warn}(RH)${norm}"
+	fi
+	$0 status
+	if test $? = 0; then
+		$0 restart
+	else
+		rc_reset	# Not running is not a failure.
+	fi
+	# Remember status and be quiet
+	rc_status
+	;;
+    restart)
+	## Stop the service and regardless of whether it was
+	## running or not, start it again.
+	$0 stop
+	$0 start
+
+	# Remember status and be quiet
+	rc_status
+	;;
+    force-reload)
+	## Signal the daemon to reload its config. Most daemons
+	## do this on signal 1 (SIGHUP).
+	## If it does not support it, restart.
+
+	echo -n "Reload service Xio3D "
+	## if it supports it:
+	#killproc -INT $XIO3D_BIN
+	killall -INT pam
+	#touch /var/run/xio3d.pid
+	rc_status -v
+
+	## Otherwise:
+	#$0 try-restart
+	#rc_status
+	;;
+    reload)
+	## Like force-reload, but if daemon does not support
+	## signaling, do nothing (!)
+
+	# If it supports signaling:
+	echo -n "Reload service Xio3D "
+	#killproc -INT $XIO3D_BIN
+	killall -INT pam
+	#touch /var/run/xio3d.pid
+	rc_status -v
+	
+	## Otherwise if it does not support reload:
+	#rc_failed 3
+	#rc_status -v
+	;;
+    status)
+	echo -n "Checking for service Xio3D "
+	## Check status with checkproc(8), if process is running
+	## checkproc will return with exit status 0.
+
+	# Return value is slightly different for the status command:
+	# 0 - service up and running
+	# 1 - service dead, but /var/run/  pid  file exists
+	# 2 - service dead, but /var/lock/ lock file exists
+	# 3 - service not running (unused)
+	# 4 - service status unknown :-(
+	# 5--199 reserved (5--99 LSB, 100--149 distro, 150--199 appl.)
+	
+	# NOTE: checkproc returns LSB compliant status values.
+	checkproc $XIO3D_BIN
+	# NOTE: rc_status knows that we called this init script with
+	# "status" option and adapts its messages accordingly.
+	rc_status -v
+	;;
+    probe)
+	## Optional: Probe for the necessity of a reload, print out the
+	## argument to this init script which is required for a reload.
+	## Note: probe is not (yet) part of LSB (as of 1.9)
+
+	test /etc/xio3d/xio3d.conf -nt /var/run/xio3d.pid && echo reload
+	;;
+    *)
+	echo "Usage: $0 {start|stop|status|try-restart|restart|force-reload|reload|probe}"
+	exit 1
+	;;
+esac
+rc_exit

@@ -1,0 +1,440 @@
+#!/bin/bash
+# $Id: bvm 159264 2012-06-10 07:54:57Z m4 $
+####
+#
+#   @file   bvm
+#
+#   @brief  Boot version manager
+#
+#   @author Converted from perl by Mark Rustad
+#
+#   @date   07/28/2007
+#
+#   This script runs the appropriate version of firmware.
+#
+#   Copyright (c) 2007 Xiotech Corporation. All rights reserved.
+
+declare -r GOOD=0
+declare -r BAD_MD5=1
+declare -r BAD_LINK=2
+declare -r BAD_DIR=3
+declare -r BAD_EXEC=5
+declare -r BAD_UNTAR=6
+declare -r BAD_COPY=7
+declare -r BAD_TOUCH=8
+declare -r NOTHING_EXECUTE=9
+
+declare -r optXioDir=/opt/xiotech
+
+declare -a fwList
+
+if [ "${XIO_HW_TYPE}" = "" ]; then
+    export XIO_HW_TYPE="SMX6DH8-XG2"
+fi
+
+rc=${GOOD}
+ttyopen=0
+
+
+###
+#
+# fail - Output an error message and return an error code
+#
+# $1 = error code
+# $2 - $n = error message
+
+fail()
+{
+    local err=$1
+
+    shift
+    echo "$@" >>/dev/stderr
+    exit $err
+}
+
+
+###
+#
+# output - Output a message to the log and possibly to ttyS0
+#
+# $1 = Message to output
+
+output()
+{
+    echo -e "$@" 2>&4 1>&4
+    if [ ${ttyopen} -eq 1 ]; then
+        echo -e "$@" 2>&3 1>&3
+    fi
+}
+
+
+###
+#
+# CheckMD5s - Validate the integrity of a firmware version
+
+CheckMD5s()
+{
+    /usr/bin/md5sum --status --check MD5sums > /dev/null
+}
+
+
+###
+#
+# getFWList - Gets the list of firmware versions into the fwList array
+
+getFWList()
+{
+    cd release || { output "Failed to cd to 'release'"; fwList=(); return; }
+
+    fwList=(`ls -crd platformApps-*`)
+
+    cd -
+}
+
+
+###
+#
+# get_ver - Output the path to the specified version
+#
+#   $1 = name of symbolic link
+
+get_ver()
+{
+    local fwdir
+
+    cd $1 || { echo -1; return; }
+    cd -
+
+    fwdir="`readlink $1`"
+    echo ${fwdir##*/}
+}
+
+
+###
+#
+# get_index - Output the index to the specified version
+#
+#   $1 = name of link to access
+
+get_index()
+{
+    local curVer
+    local -i i
+
+    curVer=`get_ver $1`
+    if [ "${curVer}" = "" ]; then
+        echo -1
+        return
+    fi
+
+    for ((i = 0; i < ${#fwList[@]}; ++i)); do
+        if [ "${fwList[${i}]}" = "${curVer}" ]; then
+            echo ${i}
+            return
+        fi
+    done
+    echo -1
+}
+
+
+###
+#
+# zeroFile - Create a zeroed file when needed
+#
+# $1 = Path to file
+# $2 = Block size
+# $3 = Number of blocks to zero
+
+zeroFile()
+{
+    test -e $1 -a -s $1 ||
+        dd if=/dev/zero of=$1 bs=$2 count=$3 1>/dev/null 2>&1
+}
+
+
+###
+#
+#   setupKernel - Set up the appropriate kernel for this code set.
+
+setupKernel()
+{
+    local -a curVer
+    local curKernel
+    local reqKernel
+    local kvpath
+    local tarpath
+
+    kvpath="${optXioDir}/apps/kernelver-${XIO_HW_TYPE}"
+    test -r "${kvpath}" || kvpath="${optXioDir}/apps/kernelver"
+
+    tarpath="${optXioDir}/apps/kernel-${XIO_HW_TYPE}.tgz"
+    test -r "${tarpath}" || tarpath="${optXioDir}/apps/kernel.tgz"
+
+    reqKernel="`cat ${kvpath}`"
+
+    curVer=(`cat /proc/version`)
+    curKernel=${curVer[2]}
+    output "Current Kernel  = ${curKernel}\nRequired Kernel = ${reqKernel}"
+
+# If 'reboot_required' exists, it means that another kernel has been
+# installed before a reboot has been done. Install whatever we need
+# again, just to be safe.
+# If 'kernelver' does not exist, install whatever we need, again to
+# be safe.
+# If the current (running) kernel does not match what is
+# required, install the new kernel.
+
+    if [ -e "${optXioDir}/reboot_required" -o \
+        ! -r "${optXioDir}/kernelver" -o \
+        "${curKernel}" != "${reqKernel}" ]; then
+        output "Setting up new kernel"
+        /bin/cp -pvfd /boot/vmlinuz-3d /boot/vmlinuz-3d.prev || {
+            output "Failed copy /boot/vmlinuz-3d -> /boot/vmlinuz-3d.prev: $?"
+            return ${BAD_COPY}
+        }
+        /bin/tar -xzvf ${tarpath} -C / || {
+            output "Failed untar ${tarpath}"
+            return ${BAD_UNTAR}
+        }
+        if [ -f /boot/grub/menu.lst-${XIO_HW_TYPE} ]; then
+            /bin/cp /boot/grub/menu.lst-${XIO_HW_TYPE} /boot/grub/menu.lst
+        fi
+        /bin/cp -pvf ${kvpath} ${optXioDir}/kernelver || {
+            output "Failed set ${optXioDir}/kernelver"
+            return ${BAD_COPY}
+        }
+        touch ${optXioDir}/reboot_required || {
+            output "Failed touch 'reboot_required' file: $?"
+            return ${BAD_TOUCH}
+        }
+    fi
+    return ${GOOD}
+}
+
+
+###
+#
+# has_link returns success if firmware has a symbolic link
+#
+#   $1 = index to firmware to check
+
+has_link()
+{
+    local fwdir="release/${fwList[$1]}"
+
+    for sln in apps latest_platform prev_platform; do
+        if [[ -h ${sln} && "`readlink ${sln}`" = "${fwdir}" ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+
+###
+#
+# good_fw return success if firmware md5s are good
+#
+#   $1 = index to firmware to check
+
+good_fw()
+{
+    local fwdir="release/${fwList[$1]}"
+    local rcMD5=${GOOD}
+
+    output "\nChecking: ${fwdir}"
+    if cd ${fwdir}; then
+        CheckMD5s
+        rcMD5=$?
+        cd -
+        if [[ ${rcMD5} -ne ${GOOD} ]]; then
+            output "Bad MD5 (${fwdir})"
+            rcMD5=${BAD_MD5}
+        fi
+    else
+        output "Failed to enter ${fwdir}"
+        rcMD5=${BAD_DIR}
+    fi
+
+    return ${rcMD5}
+}
+
+
+###
+#
+# roll_links - roll platform code symlinks
+#
+#   $* list of links to check
+
+roll_links()
+{
+    local sln
+
+    for sln in "$@"; do
+        [[ -h ${sln} ]] || continue
+        if cd ${sln}; then
+            cd -
+            output "Rolling ${sln} to prev_platform"
+            /bin/rm -f prev_platform
+            /bin/cp -pfd ${sln} prev_platform
+            return
+        fi
+    done
+}
+
+
+###
+#
+# remove_nonlinked_versions - Remove platform code with no links
+
+remove_nonlinked_versions()
+{
+    local -i i
+    local fwdir
+
+    for ((i = ${#fwList[@]} - 1; i >= 0; --i)); do
+        fwdir="release/${fwList[${i}]}"
+        if ! has_link ${i}; then
+            output "Removing ${fwdir}"
+            /bin/rm -rf ${fwdir}
+        fi
+    done
+}
+
+
+###
+#
+# choose_version - choose version to run
+#
+#   $* = list of links to check
+
+choose_version()
+{
+    local ix
+    local sln
+    local aix
+
+    aix="`get_index apps`"
+    for sln in "$@"; do
+        ix="`get_index ${sln}`"
+        [[ ${ix} -ge 0 ]] || continue
+        good_fw ${ix} || continue
+        if [[ "${aix}" != "${ix}" ]]; then
+            roll_links apps
+            /bin/rm -f apps
+            /bin/ln -sf "release/${fwList[${ix}]}" apps
+        fi
+        echo ${ix}
+        return
+    done
+    fail ${NOTHING_EXECUTE} "Nothing found to run"
+}
+
+
+#############
+
+# Main starts here
+
+cd "${optXioDir}" || fail 1 "Failed to cd to ${optXioDir}: $?"
+
+ttyopen=1
+exec 3>>/dev/ttyS0 || { ttyopen=0; echo "Failed to open ttyS0?"; }
+exec 4>&1 || echo "Failed to redirect stdout to fd 4"
+
+if [ ${ttyopen} -eq 1 ]; then
+    /bin/stty -F /dev/ttyS0 115200
+fi
+
+output "\nbvm started"
+
+getFWList
+startIdx=`get_index apps`
+
+if [ ${#fwList[@]} -le 0 ]; then
+    fail ${NOTHING_EXECUTE} "No platform code to run"
+fi
+
+most_recent=$((${#fwList[@]} - 1))
+if ! has_link ${most_recent} && good_fw ${most_recent}; then
+    output "Most recent firmware has no link, probably loading old fw"
+    roll_links latest_platform apps
+    /bin/rm -f latest_platform
+    /bin/ln -sf "release/${fwList[${most_recent}]}" latest_platform
+fi
+/bin/sync; /bin/sync
+
+curIdx="`choose_version latest_platform apps prev_platform`"
+/bin/sync; /bin/sync
+
+# Set up the appropriate kernel
+
+setupKernel
+rc=$?
+if [ ${rc} -ne ${GOOD} ]; then
+    output "\nKernel setup failed, trying previous"
+    curIdx="`choose_version prev_platform`"
+    /bin/sync; /bin/sync
+    setupKernel || fail $? "Unable to setup kernel"
+fi
+
+output "\nAvailable platform apps packages:"
+output "-----------------------------------------"
+for ((i = ${#fwList[@]} - 1; i >= 0; --i)); do
+    tag=""
+    if [ ${i} -eq ${startIdx} ]; then
+        tag="${tag}<= was "
+    fi
+    if [ ${i} -eq ${curIdx} ]; then
+        tag="${tag}<= now "
+    fi
+    output "${fwList[${i}]} ${tag}"
+done
+
+remove_nonlinked_versions
+
+# Check that the ccbdata and procdata files exist.
+mkdir -p ccbdata procdata
+zeroFile ccbdata/CCB_FLASH.mmf 512 32768
+zeroFile ccbdata/CCB_NVRAM.mmf 512 256
+zeroFile procdata/shared_memory_NVSRAM_BE 512 8192
+zeroFile procdata/shared_memory_NVSRAM_FE 512 8192
+
+# Sleep for 5 seconds if auto_aXtivation_technology file does not exist.
+seconds_to_sleep=5
+test -e auto_aXtivation_technology && seconds_to_sleep=0 && rm -f auto_aXtivation_technology
+
+cd apps
+
+output "\n========== Starting ${fwList[${curIdx}]} (in ${seconds_to_sleep} sec) ==========\n"
+/bin/sleep ${seconds_to_sleep}
+
+boots=`cat ${optXioDir}/platform_boots || echo 0`
+boots=$((boots + 1))
+echo ${boots} > ${optXioDir}/platform_boots
+/bin/sync; /bin/sync
+if [ ${ttyopen} -ne 0 ]; then
+    exec 3<&- || output "Failed to close fd 3" # Close fd 3
+    ttyopen=0
+fi
+exec 4<&- || output "Failed to close fd 4" # Close fd 4
+
+exec ./pam
+
+exec 4>&1 || echo "Failed to redirect stdout to fd 4"
+
+# If we get here, the exec of pam failed...
+fail ${BAD_EXEC} "\nExec to ${fwList[${curIdx}]} failed"
+
+output "exit: ${rc}"
+
+exit ${rc}
+
+
+###
+# Modelines:
+# Local Variables:
+# tab-width: 4
+# indent-tabs-mode: nil
+# End:
+# vi:sw=4 ts=4 expandtab

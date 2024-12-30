@@ -1,0 +1,937 @@
+#!/usr/bin/expect --
+#
+# $Id: ise_disk_upgrader 158765 2011-12-01 17:26:35Z neal_eiden $
+#
+# Script to upgrade disk firmware on one or more ISEs.
+#
+# Usage: ise_disk_upgrader production/development 
+#               <ise ip address(even)>
+#               <ip_address_MASTER_7000>
+#               <opErrorsFile> 
+#
+# Where:
+#
+#  <ise ip address(eve)>
+#    Specify one IP addresses of ISE controller MRC, the lower and even numbered one.
+#    Controllers are accessed sequentially, and MRC_1 is even and MRC_2 is MRC_1+1.
+#
+#  <ip_address_MASTER_7000>
+#    The IP address of the master controller for the 7000 that ISE is connected to.
+#
+#  <opErrorsFile> 
+#    String indicating the entire path of the OpErrors.txt file that we want to output to
+#
+# Typical command line might be:
+#    ./ise_upgrade production 10.64.102.4 10.64.102.31 "/tmp/xxxxx-xxxx-xxxx-xxxxxxxxxxx/OpErrors.txt"
+#
+#-----------------------------------------------------------------------------
+#set configuration "E5000"
+set configuration "E7000"
+
+set production [lindex $argv 0]
+if {$production == "production"} {
+    # Where the ccbCL.pl script is located.
+    set ccbe_at "./CCBE"
+} else {
+    set ccbe_at "../../../CCBE"
+}
+
+# Command to run the ccbCL.pl script.
+set run_ccbcl "cd $ccbe_at ;/usr/bin/perl ccbCL.pl"
+#-----------------------------------------------------------------------------
+
+# No user output from commands running.
+log_user 0
+# User output from commands running.
+# log_user 1
+
+# Regular expression representing the ISE prompt.  Either "seaSH> " or "root:> "
+set ise_prompt "(#|seaSH|root:|root|oem:|oem)>{0,1} "
+# Global for checking firmware versions.
+set mrc_1_fwv ""
+set mrc_2_fwv ""
+set flist ""
+set dplist ""
+
+# Global bayId (rather than passing it around all over)
+set bayID 0
+
+
+# Globals for keeping track of percent complete and status
+set opErrorsFile "OpErrors.txt"
+
+
+# Like perl, the real execution continues anywhere ... define the proc's first.
+
+#=============================================================================
+#
+# Tell how to run this script.
+#
+proc usage {} {
+    global configuration
+
+    if {$configuration == "E5000"} {
+        send_error "Usage: ise_disk_upgrader <ip_address_MRC_1> <ip_address_MRC_2>"
+    } else {
+        send_error "Usage: ise_disk_upgrader production <ip_address_MRC_1> <ip_address_MASTER_7000> <opErrorsFile>\n"
+    }
+    exit 1
+}
+# End of usage
+
+
+#=============================================================================
+proc send_ccbcl_status { message } {
+    global configuration
+    global run_ccbcl
+    global master_7000
+    global pid
+
+    if {$configuration == "E5000"} {
+        send_error "LOGMESSAGE: $message\n"
+    } else {
+        send_error "ccbCL: $message\n"
+        system "$run_ccbcl '$master_7000' -e '\"logtextmessage -v 0 $message\"' >/dev/null"
+    }
+}
+# End of send_ccbcl_status
+
+#=============================================================================
+proc send_ccbcl_error { message } {
+    global configuration
+    global run_ccbcl
+    global master_7000
+    global pid
+
+    if {$configuration == "E5000"} {
+        send_error "LOGMESSAGE: $message\n"
+    } else {
+        send_error "ccbCL: $message\n"
+        system "$run_ccbcl '$master_7000' -e '\"logtextmessage -v 2 $message\"' >/dev/null"
+    }
+}
+# End of send_ccbcl_error
+
+
+#=============================================================================
+proc update_error_file {message} {
+    global opErrorsFile
+
+    # Append the error to the end of the OpErrors file    
+    system "echo -e \"$message\" >> $opErrorsFile"
+}
+# End of update_error_file
+
+
+#=============================================================================
+proc login_now { ise user } {
+    global ise_prompt
+    
+    #
+    # log into ISE.
+    #
+    if {$user == "oem"} {
+        set password "oem"
+    } elseif {$user == "root"} {
+        set password "federal"
+    } else {
+        send_ccbcl_error "!\$ISE Login - Unknown user-$user"
+        send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+        update_error_file "ISE $ise: Login Failure- Unknown user-$user. Drive FW Update failed."
+        exit 2
+    }
+    spawn ssh "$user@$ise"
+    expect {
+        "password: " {
+            send "$password\r"
+        }
+        "(yes/no)? " {
+            send "yes\r"
+            exp_continue
+        }
+        timeout      {
+            send_ccbcl_error "\$!ISE Login Timeout $ise"
+            send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+            update_error_file "ISE $ise: Login Failure- Unknown user-$user"
+            exit 2 }
+        eof          {
+            send_error "login eof $ise\n"
+            return 0 }
+    }
+#send_error "login password sent\n"
+    #
+    # Check it started.
+    #
+    expect {
+        -re $ise_prompt {
+#send_error "login looks good\n"
+            return $spawn_id }
+        timeout         {
+            send_ccbcl_error "\$!ISE Login Prompt Timeout $ise"
+            send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+            update_error_file "ISE $ise: Login Failure- Prompt Timeout."
+            exit 2 }
+        eof             {
+            send_ccbcl_error "\$!ISE Login Prompt Drop $ise"
+            send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+            update_error_file "ISE $ise: Login Failure- Prompt Drop."
+            exit 3 }
+    }
+    send_error "prompt problem $ise\n"
+    send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+    update_error_file "ISE $ise: Command prompt problem."
+    exit 1
+}
+# End of login_now
+
+#=============================================================================
+#
+# Log into an ISE with seash running (possibly say "yes" to come up).
+#
+proc login { ise user } {
+    set tmp_spawn [login_now $ise $user]
+    if {$tmp_spawn == 0} {
+        catch {close}
+        wait
+        sleep 120
+        set tmp_spawn [login_now $ise $user]
+        if {$tmp_spawn == 0} {
+            send_ccbcl_error "\$!Problems connecting to ISE"
+            send_ccbcl_error "\$!ISE Disk FW Update FAILED"
+            update_error_file "Problems connecting to ISE $ise"
+            exit 3
+        }
+    }
+    return $tmp_spawn
+}
+# End of login
+
+
+#=============================================================================
+#
+# Check that the MRC is in reasonable state, and has correct firmware.
+#
+proc check_status_ise { ise } {
+    global ise_prompt
+    global mrc_1_fwv
+    global mrc_2_fwv
+
+    set spawn_id [login $ise oem]
+
+# send_error "check ise status\n"
+    send "show ise\r"
+    set status ""
+    while { [string compare $status ""] == 0 } {
+        expect {
+            -re "Status           : (\[^\r\n]*)" {
+                set status $expect_out(1,string)
+            }
+            -re "Time(.*)" {
+                set str $expect_out(1,string)
+                send_error "line='$str'\n"
+            }
+            timeout {
+                send_ccbcl_error "!\$ISE Status Comm Timeout"
+                send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+                update_error_file " ISE $ise: ISE Status Comm Timeout."
+                exit 2
+            }
+            eof     {
+                send_ccbcl_error "!\$ISE Status Comm Drop"
+                send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+                update_error_file "ISE $ise: ISE Status Comm Drop."
+                exit 3
+            }
+        }
+    }
+    if {$status != {"Operational (None)"}} {    #  && $status != "Warning (Component Degraded)"} {
+        send_ccbcl_error "!\$ISE Status=$status"
+        send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+        update_error_file "ISE $ise: Cannot proceed while status is '$status'."
+        exit 1
+    }
+    expect {
+        -re $ise_prompt { }
+    }
+
+# send_error "get mrc firmware versions\n"
+    send "show mrc\r"
+    expect {
+        -re "Firmware Ver.   : (\[^ \r\n]* \[^ \r\n]*) +Serial Number   :" {
+            set mrc_1_fwv $expect_out(1,string)
+#send_error "mrc_1_fwv='$mrc_1_fwv'\n"
+        }
+        timeout {
+            send_ccbcl_error "!\$MRC1 FW Version Test Comm Timeout"
+            send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+            update_error_file "ISE $ise: MRC1 FW Version test Comm Timeout."
+            exit 2
+        }
+        eof     {
+            send_ccbcl_error "!\$MRC1 FW Version Test Comm Drop"
+            send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+            update_error_file "ISE $ise: MRC1 FW Version test Comm Drop."
+            exit 3
+        }
+    }
+    expect {
+        -re "Firmware Ver.   : (\[^ \r\n]* \[^ \r\n]*) +Serial Number   :" {
+            set mrc_2_fwv $expect_out(1,string)
+#send_error "mrc_2_fwv='$mrc_2_fwv'\n"
+        }
+        timeout {
+            send_ccbcl_error "!\$MRC2 FW Version Test Comm Timeout"
+            send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+            update_error_file "ISE $ise: MRC2 FW version test communications timeout."
+            exit 2
+        }
+        eof     {
+            send_ccbcl_error "!\$MRC2 FW Version Test Comm Drop"
+            send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+            update_error_file "ISE $ise: MRC2 FW Version Test commmunications drop."
+            exit 3
+        }
+    }
+    expect {
+        -re $ise_prompt { }
+    }
+
+#send_error "fw0='$mrc_1_fwv' fw1='$mrc_2_fwv'\n"
+
+# send_error "check status\n"
+    # Check the FRU status.
+    set datapac ""
+    send "add --status\r"
+    if { [string compare $datapac 'datapac2'] ==0 } {
+      expect {
+          "DataPac 1 is online." {  }
+          timeout {
+              send_ccbcl_error "!\$Datapac1 Online Test Comm Timeout"
+              send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+              update_error_file "ISE $ise: DataPac1 Online Test Comm Timeout."
+              exit 2
+          }
+          eof     {
+              send_ccbcl_status "!\$Datapac1 Online Test Comm Drop"
+              send_ccbcl_status "\$!ISE Drive FW Update FAILED"
+              update_error_file "ISE $ise: DataPac1 Online Test Comm Drop."
+              exit 3
+          }
+      }
+    }
+    if { [string compare $datapac 'datapac1'] ==0 } {
+      expect {
+          "DataPac 2 is online." {  }
+          timeout {
+              send_ccbcl_error "!\$Datapac2 Online Test Comm Timeout"
+              send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+              update_error_file "ISE $ise: DataPac2 Online Test Comm Timeout."
+              exit 2
+          }
+          eof     {
+              send_ccbcl_error "!\$Datapac2 Online Test Comm Drop"
+              send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+              update_error_file "ISE $ise: DataPac2 Online Test Comm Drop."
+              exit 3
+          }
+      }
+    }
+    expect {
+        "MRC 1 is online." {  }
+        timeout {
+            send_ccbcl_error "!\$MRC1 Online Test Comm Timeout"
+            send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+            update_error_file "ISE $ise: MRC1 Online Test Comm Timeout."
+            exit 2
+        }
+        eof     {
+            send_ccbcl_error "!\$MRC1 Online Test Comm Drop"
+            send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+            update_error_file "ISE $ise: MRC1 Online Test Comm Drop."
+            exit 3
+        }
+    }
+    expect {
+        "MRC 2 is online." {  }
+        timeout {
+            send_ccbcl_error "!\$MRC2 Online Test Comm Timeout"
+            send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+            update_error_file "ISE $ise: MRC2 Online Test Comm Timeout."
+            exit 2
+        }
+        eof     {
+            send_ccbcl_error "!\$MRC2 Online Test Comm Drop"
+            send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+            update_error_file "ISE $ise: MRC2 Online Test Comm Drop."
+            exit 3
+        }
+    }
+    expect {
+        -re $ise_prompt { }
+    }
+
+    set reread 0
+    send "upgrade --status\r"
+    expect {        
+        -re "Progress    : Complete.*" { }
+        -re "Progress    : (.*)" {
+            set progress $expect_out(1,string)
+                send_error "unexpected Progress string:'$progress'\n"
+                sleep 20
+                set reread 1
+        }
+        -re $ise_prompt  { }
+    }
+
+    if { $reread == 1} {
+        send "upgrade --status\r"
+        expect {
+            -re "Status      : Complete.*" { }
+            -re "Progress    : (.*)" {
+                set progress $expect_out(1,string)
+                send_ccbcl_error "!\$MRC Not Ready for Upgrade"
+                send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+                update_error_file "ISE $ise: MRC not ready for upgrade."
+                send_error "unexpected Progress string:'$progress'\n"
+                exit 1
+            }
+            -re $ise_prompt  { }
+        }
+    }
+   
+    close
+    wait
+
+    return 0
+}
+# End of check_status_ise
+
+proc check_datapacs { ise } {
+    global ise_prompt
+    global flist
+    global dplist
+
+
+    #
+    # We've seen issues in the field numerous times where a DataPac simply
+    # doesn't show up in our list. We don't know if it's an Expect issue,
+    # nseash issue, or some other issue.
+    #
+    # In any case, when the bug hits, we get a timeout error. Consequently
+    # if we hit this timeout, we can simply retry a couple times rather than
+    # failing silently and not updating DataPacs (ATS-230)
+    #
+    
+    set num_attempts 0
+    set max_attempts 10 
+    set error_occurred "true"
+    
+    while { ($error_occurred == "true") && ($num_attempts < $max_attempts) } {
+
+      set num_attempts [expr $num_attempts + 1]
+      set error_occurred "false"
+      send_error "Gathering DataPac configuration. Atttempt $num_attempts...\n"
+      
+      # Initialize our lists in every loop
+      set dplist ""
+      set flist ""
+
+      # put default value in pos 0 as we
+      # use a 1 based indexing
+      lappend dplist "empty"
+
+      set spawn_id [login $ise root]
+
+      set dp_index 0
+      send "nseash -c \"show datapac\"\r"
+      expect {
+          -re "DataPac-(\[^ \r\n]*)" {
+              set dp_index $expect_out(1,string)
+              exp_continue
+          }
+          -re "Model             : .*          Part Number   : (\[^ \r\n]*)" {
+              set dp_pn $expect_out(1,string)
+
+              lappend dplist $dp_pn
+              set filename "$dp_pn"
+              send_error "Found DataPac $dp_index $dp_pn $filename\n"
+              lappend flist $filename
+          }
+          -re "No DataPac Present" {
+              send_error "DataPac $dp_index is not present!\n"
+              lappend dplist "missing"
+              lappend flist ""
+          }
+          timeout {
+              send_ccbcl_status "!\$DP 1 Test Comm Timeout"
+              set error_occurred "true"
+          }
+          eof     {
+              send_ccbcl_status "!\$DP 1 FW Version Test Comm Drop"
+              set error_occurred "true"
+          }
+      }
+      expect {
+          -re "DataPac-(\[^ \r\n]*)" {
+              set dp_index $expect_out(1,string)
+              exp_continue
+          }
+          -re "Model             : .*          Part Number   : (\[^ \r\n]*)" {
+              set dp_pn $expect_out(1,string)
+
+              lappend dplist $dp_pn
+              set filename "$dp_pn"
+              send_error "Found DataPac $dp_index $dp_pn $filename\n"
+              lappend flist $filename
+          }
+          -re "No DataPac Present" {
+              send_error "DataPac $dp_index is not present!\n"
+              lappend dplist "missing"
+              lappend flist ""
+          }
+          timeout {
+              send_ccbcl_status "!\$DP 2 Test Comm Timeout"
+              set error_occurred "true"
+          }
+          eof     {
+              send_ccbcl_status "!\$DP 2 FW Version Test Comm Drop"
+              set error_occurred "true"
+          }
+      }
+      expect {
+          -re $ise_prompt { }
+      }
+ 
+
+      if { $error_occurred == "true" } {
+        send_error "Error occurred fetching DataPac data. Need to retry...\n"
+        sleep 30
+      }
+
+      close
+      wait
+    }
+
+
+    if { $error_occurred == "true" } {
+      send_error "Failed to get DataPac information after $max_attempts attempts.\n"
+      send_ccbcl_error "\$!ISE Drive FW Update FAILED - DataPac info unavailable."
+      update_error_file "ISE $ise: ISE Drive FW Update failed. DataPac information is unavailable."
+      exit 2
+    }
+}
+
+
+#=============================================================================
+#
+# start_send -  Copy file to ISE then open a connection to kick-off upgrade.
+#
+proc start_send { ise filename } {
+    global ise_prompt
+    global timeout
+    global bayID
+    
+    # send_error "before doing scp\n"
+    # copy the file over to the ISE
+    if { $filename != ""} {
+        # send_error "scp -q $filename root@$ise:/upgrade/datapac\n"
+        spawn scp -q $filename root@$ise:/upgrade/datapac
+        expect {
+            "password: " { send "federal\r" }
+            "(yes/no)? " { send "yes\r" exp_continue }
+            timeout {
+                send_ccbcl_error "!\$Datapac File Copy Comm Timeout"
+                send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+                update_error_file "ISE $ise: Datapac File Copy Comm Timeout."
+                exit 2
+            }
+            eof     {
+                send_ccbcl_error "!\$Datapac File Copy Comm Drop"
+                send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+                update_error_file "ISE $ise: Datapac File Copy Comm Drop."
+                exit 3
+            }
+        }
+        set savetimeout $timeout
+        set timeout 480
+#send_error "scp started.\n"
+        expect {
+            timeout {
+                send_ccbcl_error "!\$Datapac File Copy Wait Timeout"
+                send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+                update_error_file "ISE $ise: Datapac File Copy Wait Timeout."
+                exit 2
+            }
+            eof     {
+            }
+        }
+#send_error "scp finished for $filename\n"
+        wait
+    }
+
+# send_error "scp finished.\n"
+    set timeout $savetimeout
+}
+# End of start_send
+#=============================================================================
+#
+# Check that the ISE is the correct product type (1400 = ISE1 & 2400 = ISE2).
+#
+proc check_product_ise { ise } {
+    global ise_prompt
+    global mrc_1_fwv
+    global mrc_2_fwv
+    global ignore_ise_status
+    global isetime
+    global iseProduct
+    set productbase "ISE1400"
+
+    set spawn_id [login $ise oem]
+
+    send "show ise\r"
+    set status ""
+            expect {
+            -re "Model            : (\[^ \r\n]*)" {
+                set iseProduct $expect_out(1,string)
+            }
+            timeout {
+                send_ccbcl_status "!\$ISE Status Comm Timeout"
+                send_ccbcl_status "!\$ISE FW Update FAILED"
+                update_error_file " ISE $ise: ISE Status Comm Timeout."
+                exit 2
+            }
+            eof     {
+                send_ccbcl_status "!\$ISE Status Comm Drop"
+                send_ccbcl_status "!\$ISE FW Update FAILED"
+                update_error_file "ISE $ise: ISE Status Comm Drop."
+                exit 3
+            }
+        }
+        # If the correct product is found continue.  Otherwise, return good to skip (should on happen on ISE2)
+        if {$iseProduct ne $productbase} {
+        send_ccbcl_status "!\$ise Model: $iseProduct is of the wrong type for this drive firmware - Skipping"
+        exit 0
+        }
+   close
+   wait
+
+}
+# End of check_product_ise
+#=============================================================================
+#
+# Start the upgrade on the MRC.
+#
+proc start_upgrade { ise datapac filename } {
+    global ise_prompt
+    global timeout
+    global bayID
+
+    
+    set spawn_id [login $ise root]
+   
+    set savetimeout $timeout
+    set timeout 200
+  
+    # ger into neash
+    send_error "nseash -c \"upgrade --$datapac=$filename\"\r\n"
+    send "nseash -c \"upgrade --$datapac=$filename\"\r"
+    expect {
+        -re "ataPac upgrade in progress" {
+            send_ccbcl_status "!\$Drive FW upgrade started succesfully"
+        }
+        -re "rong FW image" {
+            send_ccbcl_error "!\$Drive FW Image not supported by this ISE"
+            send_ccbcl_error "\$!ISE Drive FW Update FAILED."
+            update_error_file "ISE $bayID: Drive FW Image not supported by this ISE"
+            exit 1
+        }
+        -re "atrix file missing" {
+            send_ccbcl_error "!\$ISE Upgrade matrix file not found"
+            send_ccbcl_error "\$!ISE Drive FW Update FAILED."
+            update_error_file "ISE $bayID: Upgrade matrix file not found"
+            exit 1
+        }
+        -re "nable to extract upgrade" {
+            send_ccbcl_error "!\$File cannot be untar'd"
+            send_ccbcl_error "\$!ISE Drive FW Update FAILED."
+            update_error_file "ISE $bayID: Upgrade files cannot be extracted"
+            exit 1
+        }
+        -re "ould not open Matrix" {
+            send_ccbcl_error "!\$ISE Could not open Matrix file"
+            send_ccbcl_error "\$!ISE Drive FW Update FAILED."
+            update_error_file "ISE $bayID: Could not open Matrix file"
+            exit 1
+        }
+        -re "oth MRCs failed Matrix" {
+            send_ccbcl_error "!\$ISE Neither MRC has FW compatible with package"
+            send_ccbcl_error "\$!ISE Drive FW Update FAILED."
+            update_error_file "ISE $bayID: Neither MRC has FW compatible with package"
+            exit 1
+        }
+        -re "atapac Model Mismatch" {
+            send_ccbcl_error "!\$ISE Neither datapac matches model in package"
+            send_ccbcl_error "\$!ISE Drive FW Update FAILED."
+            update_error_file "ISE $bayID: Neither datapac matches model in package"
+            exit 1
+        }
+        -re $ise_prompt { 
+            send_error "!\$Found ISE prompt."
+        }
+        timeout {
+            send_ccbcl_error "!\$Datapac upgrade Comm Timeout"
+            send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+            update_error_file "ISE $bayID: DataPac upgrade Comm Timeout"
+            exit 2
+        }
+        eof     {
+            send_ccbcl_error "!\$Datapac upgrade Comm Drop"
+            send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+            update_error_file "ISE $bayID: DataPac upgrade Comm Drop"
+            exit 3
+        }
+    }
+    
+    send_ccbcl_status "!\$Monitoring Upgrade"
+
+    set progress "Not started yet"
+    set there_yet "we are there"
+    set started_yet "not yet"
+    set new_cnt 0
+    while { [string compare $progress $there_yet] != 0 } {
+        send_error "nseash -c \"upgrade --status\"\r\n"
+        send "nseash -c \"upgrade --status\"\r"
+        expect {
+            -re "Current Upgrade Status: DataPac FW Upgrade" {
+                exp_continue
+            }
+            -re "Progress    : Complete" {
+                if { [string compare $started_yet "it started"] !=0 } {
+                   set progress "Not started yet"
+                   exp_continue
+                } else {
+                   set progress "we are there"
+                }
+            }
+            -re "Progress    : (\[^\r\n]+)" {
+                set progress $expect_out(1,string)
+                set started_yet "it started"
+                exp_continue
+            }
+            -re "Drive in reformat" {
+                send_ccbcl_error "!\$Datapac upgrade not allowed, drive in reformat"
+                send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+                update_error_file "ISE $bayID: Datapac upgrade not allowed, drive in reformat"
+            }
+            -re "Active configuration event" {
+                send_ccbcl_error "!\$Datapac upgrade not allowed, configuration event active"
+                send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+                update_error_file "ISE $bayID: Datapac upgrade not allowed, configuration event active"
+            }
+            -re "ailed" {
+                send_ccbcl_error "!\$Datapac upgrade not allowed, Status is Failed"
+                send_ccbcl_error "\$!ISE Drive FW Update FAILED"
+                update_error_file "ISE $bayID: Datapac upgrade not allowed, Status is Failed"
+            }
+            -re $ise_prompt  {
+            }
+        }
+        if { [string compare $progress $there_yet] != 0 } {
+            send_ccbcl_status "!\$Drive FW Update Progress - $progress"
+            if {[string compare $progress "100"] == 0} then {
+              set progress "we are there"
+            }
+
+            sleep 5
+            set new_cnt [expr $new_cnt + 1]
+            if { $new_cnt == 30 } {
+
+              #
+              # There are 2 reasons why we may get into this situation:
+              # 1) A legitimate error occurred, but not one that we were expecting
+              #    - This is an unlikely case, though it is possible
+              #
+              # 2) The Upgrade successfully started, however, the progress-message
+              #    went away before we got a chance to query for it (this happens often)
+              #
+              # Since #2 happens with some frequency, and it panicks users making them
+              # think that their upgrade bombed out, we'll assume #2 above. It's not
+              # pretty, but it's the only thing we can do without changing nseash
+              #
+              # Discussed with Richard, and he agrees, it's the only thing we can do for now
+              #
+
+              send_error "Datapac upgrade status could not be determined after 30 attempts\n"
+              send_error "Upgrade probably finished and disappeared quickly. Assuming complete...\n"
+              set progress "we are there"
+            }
+        }
+    }
+    close
+    wait
+    
+    set timeout $savetimeout
+}
+# End of start_upgrade
+
+
+#=============================================================================
+#
+# Main program running here.
+#
+set argc [llength $argv]
+if {$configuration == "E5000"} {
+    set numargs 2
+} else {
+    set numargs 4
+}
+if {$argc != $numargs} {
+    usage
+}
+
+#
+# Gather command line arguments.
+#
+if {$configuration == "E5000"} {
+    set ise0 [lindex $argv 0]           ;# IP of the even numbered MRC
+    set ise1 [lindex $argv 1]           ;# IP of the odd numbered MRC
+} else {
+    set ise [lindex $argv 1]            ;# IP of the even numbered MRC
+    set master_7000 [lindex $argv 2]    ;# The 7000 controller IP
+    set opErrorsFile [lindex $argv 3]   ;# OpErrors.txt file name
+}
+
+#
+# For E5000 configurations, we don't have the requirement that IP
+# addresses are consecutive.  Since we are given the two IP addresses
+# on the command line, we don't have to derive them here.
+#
+if {$configuration == "E5000"} {
+    set ip_address_1 $ise0
+    set ip_address_2 $ise1
+    set bayID 1
+    set master_7000 "ERROR"
+} else {
+    # Make sure the even and odd MRC's are known.
+    set ip_nums [split $ise "."]
+    set last_num [lindex $ip_nums 3]
+    set new_num [expr $last_num & 254]
+    if { $new_num != $last_num} {
+        send_error "ISE IP address is not even\n"
+        exit 1
+    }
+
+    #
+    # Set up IDs and addresses for later use
+    #
+    set bayID [expr ($new_num&127)/2]
+    set ip_address_1 "[lindex $ip_nums 0].[lindex $ip_nums 1].[lindex $ip_nums 2].$new_num"
+    set new_num [expr $new_num + 1]
+    set ip_address_2 "[lindex $ip_nums 0].[lindex $ip_nums 1].[lindex $ip_nums 2].$new_num"
+}
+
+#
+# Under heavy load, we've seen ISE in which it takes over 45 seconds for 'nseash' to log in!
+# So, setting timeout to 90 seconds to ensure we don't prematurely bail out.
+#
+set timeout 90
+
+send_error "Will load firmware to MRC_1 ($ip_address_1) and indirectly MRC_2 ($ip_address_2).\n"
+
+# Get the 7000 controller IP.
+send_error "Running 7000 controller has IP ($master_7000).\n"
+
+# Check that we have an ISE1, ISE2 is not supported with this script
+check_product_ise $ip_address_1
+
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# Make sure MRC_1 is reasonable
+set status [check_status_ise $ip_address_1]
+
+#send_error "check_status_ise returned $status\n"
+
+if {$status != 0} {
+    # Make sure MRC_2 is reasonable
+    set status [check_status_ise $ip_address_2]
+    if {$status != 0} {
+       send_ccbcl_error "!\Could not find an MRC in good state!"
+       update_error_file "ISE $bayID: MRCs are not in supported states."
+       exit 1
+    }
+    set ip_address $ip_address_2
+} else {
+    set ip_address $ip_address_1
+}
+
+
+#send_error "check_status_ise returned $status using $ip_address\n"
+
+# Check what kind of DataPacs we have
+check_datapacs $ip_address
+
+#- send_ccbcl_status "MRC $ip_address_2 appears ready"
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+send_ccbcl_status "!\$Start ISE#$bayID Update"
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# upgrade one datapac at a time:
+#   copy ima file to ise
+#   start upgrade
+#   wait for upgrade to complete
+
+# start with DataPac 1
+set dpi 1
+foreach f $flist {
+
+    if {$f == ""} {
+        incr dpi
+        continue
+    }
+    
+    send_ccbcl_status "!\$Updating DataPac $dpi"
+
+    set filelist [glob -type f -nocomplain *{$f}*.ima]
+    set fn [lindex $filelist 0]
+
+# send_ccbcl_status "!\$Looking for file $fn"
+    
+    if {[file readable $fn] == 0} {
+# don't treat a missing file as an error.  this script might be used
+# for XZPs containing only specific IMA files.
+        send_ccbcl_status "This package does not support [lindex $dplist $dpi].\n"
+        incr dpi
+        continue 
+    }
+    send_ccbcl_status "!\$Copying Drive FW to ISE#$bayID"
+    start_send $ip_address $fn
+#send_error "MRC#1 ($ip_address_1) has received the files.\n"
+#send_ccbcl_status "!\$Copy Completed"
+
+    set datapac "datapac$dpi"
+    # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    # start the upgrade process
+    send_ccbcl_status "!\$Updating Drive FW on DataPac $dpi ISE#$bayID"
+    start_upgrade $ip_address $datapac $fn
+#send_error "MRC#1 ($ip_address_1) has started the upgrade process.\n"
+
+    send_error "MRC#1 ($ip_address) has completed the upgrade process for DataPac $dpi\n"
+    incr dpi
+    }
+close
+wait
+
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# Check that MRC_1 is still up.
+set spawn_id [login $ip_address oem]
+close
+wait
+#send_error "MRC#1 ($ip_address_1) appears to be running ok.\n"
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+exit 0
+
+###
+# Modelines:
+# Local Variables:
+# tab-width: 4
+# indent-tabs-mode: nil
+# End:
+# vi:sw=4 ts=4 expandtab

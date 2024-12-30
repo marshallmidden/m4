@@ -1,0 +1,100 @@
+# $Id: xio3d.patch 11794 2006-07-17 20:39:06Z RustadM $
+
+--- a/drivers/acpi/sleep/poweroff.c	2004-04-03 21:38:19.000000000 -0600
++++ obj/drivers/acpi/sleep/poweroff.c	2005-02-14 08:45:46.000000000 -0600
+@@ -9,6 +9,7 @@
+  * This file is released under the GPLv2.
+  */
+ 
++#include <linux/config.h>
+ #include <linux/pm.h>
+ #include <linux/init.h>
+ #include <acpi/acpi_bus.h>
+@@ -42,6 +43,10 @@
+ 
+ void acpi_power_off(void)
+ {
++#ifdef	CONFIG_XIO3D
++	extern void	xio3d_restore_hw_poweroff(void);
++	xio3d_restore_hw_poweroff();
++#endif
+ 	/* acpi_sleep_prepare(ACPI_STATE_S5) should have already been called */
+ 	printk("%s called\n", __FUNCTION__);
+ 	local_irq_disable();
+--- a/drivers/char/Kconfig	2004-08-04 10:14:42.000000000 -0500
++++ obj/drivers/char/Kconfig	2004-08-05 11:05:14.193420190 -0500
+@@ -62,6 +62,9 @@
+ 	depends on VT && !S390 && !UML
+ 	default y
+ 
++config ECC
++	tristate "ECC memory monitoring"
++ 
+ config SERIAL_NONSTANDARD
+ 	bool "Non-standard serial port support"
+ 	---help---
+@@ -991,6 +994,30 @@
+ 	  exposed to the user.  If this applies to your hardware,
+ 	  say N here.
+ 
++config XIO3D
++	tristate "Xiotech 3D driver support"
++	depends on X86_64 || X86
++	default n
++	select HUGETLBFS
++	help
++	  Provide driver support for the Xiotech 3D storage application.
++
++config XIO3D_3000
++	bool "Xiotech 3D model 3000"
++	depends on XIO3D
++	default n
++	help
++	  Build support for Xiotech 3D model 3000.
++
++config XIO3D_750
++	bool "Xiotech 3D model 750"
++	depends on XIO3D
++	default n
++	help
++	  Build support for Xiotech 3D model 750.
++
++#source "drivers/char/opendlm/Kconfig"
++
+ config HANGCHECK_TIMER
+ 	tristate "Hangcheck timer"
+ 	depends on X86 || IA64 || PPC64
+--- a/drivers/char/Makefile	2004-08-04 10:14:42.000000000 -0500
++++ obj/drivers/char/Makefile	2004-08-05 11:08:05.151981713 -0500
+@@ -14,6 +14,7 @@
+ obj-y				+= misc.o
+ obj-$(CONFIG_VT)		+= vt_ioctl.o vc_screen.o consolemap.o \
+ 				   consolemap_deftbl.o selection.o keyboard.o
++obj-$(CONFIG_ECC)		+= ecc.o
+ obj-$(CONFIG_HW_CONSOLE)	+= vt.o defkeymap.o
+ obj-$(CONFIG_MAGIC_SYSRQ)	+= sysrq.o
+ obj-$(CONFIG_ESPSERIAL)		+= esp.o
+@@ -92,6 +93,9 @@
+ obj-$(CONFIG_DRM) += drm/
+ obj-$(CONFIG_PCMCIA) += pcmcia/
+ obj-$(CONFIG_IPMI_HANDLER) += ipmi/
++obj-$(CONFIG_XIO3D) += xio3d.o
++CFLAGS_xio3d.o := -Wall -Werror
++#obj-$(CONFIG_OPENDLM) += opendlm/
+ 
+ obj-$(CONFIG_HANGCHECK_TIMER) += hangcheck-timer.o
+ obj-$(CONFIG_TCG_TPM) += tpm/
+--- a/drivers/pci/pci.c	2004-12-10 10:20:32.000000000 -0600
++++ obj/drivers/pci/pci.c	2004-12-22 18:01:53.000000000 -0600
+@@ -497,6 +497,11 @@ pci_enable_device(struct pci_dev *dev)
+ {
+ 	int err;
+ 
++#ifdef	CONFIG_XIO3D
++	extern int xio3d_disable_pci_device(struct pci_dev *);
++	if (xio3d_disable_pci_device(dev))
++		return -ENODEV;
++#endif	/* CONFIG_XIO3D */
+ 	if ((err = pci_enable_device_bars(dev, (1 << PCI_NUM_RESOURCES) - 1)))
+ 		return err;
+ 	pci_fixup_device(pci_fixup_enable, dev);

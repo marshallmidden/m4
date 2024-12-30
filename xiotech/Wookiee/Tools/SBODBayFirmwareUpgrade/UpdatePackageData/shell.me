@@ -1,0 +1,124 @@
+#!/bin/bash
+
+#
+# Find out the location of the OpStatus.txt and OpErrors.txt files
+#
+# The base directory is passed in as an arguement to shell.me
+# ex: /tmp/temp_dir_67086e1e-4f41-47fb-a5a3-c630cb9ef325
+#
+
+base_dir=$1
+opErrorsFile="$base_dir/OpErrors.txt"
+opStatusFile="$base_dir/OpStatus.txt"
+
+dscId=$2
+
+# Clean up any older runs
+rm originalIpList
+rm iplist
+rm ip_head
+
+#
+# Figure out IP addresses of all CNs, then loop through them doing raids cmd
+#
+
+/bin/ls -t /var/xiotech/XioWebService/*Dsc_List*.* |head -1|xargs cat|grep -E 'xwstype:ip_addr|</spaldsclist:id>' >originalIpList
+
+
+
+#
+# At this point, the iplist looks something like the below:
+#  <spaldsclist:id>10215</spaldsclist:id>
+#     <xwstype:ip_addr>172.17.1.1</xwstype:ip_addr>
+#     <xwstype:ip_addr>172.17.1.0</xwstype:ip_addr>
+#  <spaldsclist:id>10212</spaldsclist:id>
+#     <xwstype:ip_addr>10.64.56.11</xwstype:ip_addr>
+#     <xwstype:ip_addr>10.64.56.10</xwstype:ip_addr>
+#
+# We want to remove all IP addresses that are not in our current DSC
+#
+
+totalLines=`cat originalIpList|wc -l`
+currentLine=1
+
+# Ignore all DSCs that are not ours
+ignoreThisDsc=1
+
+while [ $currentLine -le $totalLines ]
+do
+  # Get text from the current line
+  myline=`sed -n $currentLine"p" originalIpList`
+
+  # See if this is a DSC-line.  If so, ensure it's the correct one
+  if [ `echo $myline | grep "dsclist"` ]; then
+    if [ "<spaldsclist:id>$dscId</spaldsclist:id>" == $myline ]; then
+      ignoreThisDsc=0
+      echo "Found DSC matching id: $dscId."
+    else
+      ignoreThisDsc=1
+      echo "Found another DSC that we will ignore: $myline"
+    fi
+  else
+    if [ $ignoreThisDsc == 0 ]; then
+      echo "Found IP matching DSC: $dscId: $myline"
+      echo $myline >>iplist
+    fi
+  fi
+
+  # Move to the next line in the file
+  let "currentLine++"
+done
+
+
+
+
+
+#
+# Now, go through our list (which no only has IPs for the specified dsc)
+# and pass in the IPs to the bay script
+#
+
+# Load the list of IP addresses into myvar
+myvar=`cat iplist|wc -l`
+
+while [[ $myvar != 0 ]]
+do 
+
+  #
+  # Substitute in "/usr/bin/perl DriveCodeLoad.pl" into the opening <xwstype:ip_addr> location
+  #
+  
+  sed -n $myvar"p" iplist|sed -n 's/.xwstype.ip_addr./\/usr\/bin\/perl DriveCodeLoad.pl /p' >ip_head
+  
+  
+  #
+  # At this point, the command looks something like this:
+  # /usr/bin/perl DriveCodeLoad.pl 172.17.1.0</xwstype:ip_addr>
+  #
+  # The next step is to replace the closing </xwstype:ip_addr> with "BayCodeLoad.cmd".
+  #
+  
+  echo "`sed -n 's/..xwstype.*$/:3000 /p' ip_head` $opErrorsFile $opStatusFile BayCodeLoad.cmd" >ccb_cmds
+  
+  
+  #
+  # At this point, the "ccb_cmds" file looks something like this:
+  # /usr/bin/perl DriveCodeLoad.pl 172.17.1.0:3000 BayCodeLoad.cmd ../OpErrors.txt ../OpStatus.txt
+  #
+  # Now, execute that command file
+  #
+  
+  cat ccb_cmds
+  
+  chmod +x ./ccb_cmds
+  ./ccb_cmds
+  
+  # Move to the next IP address in the list
+  myvar=`expr $myvar - 1`
+done
+
+# Clean up after ourself
+rm originalIpList
+rm iplist
+rm ip_head
+

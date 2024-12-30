@@ -1,0 +1,48 @@
+diff -ru a/drivers/scsi/aic94xx/aic94xx_tmf.c override/drivers/scsi/aic94xx/aic94xx_tmf.c
+--- a/drivers/scsi/aic94xx/aic94xx_tmf.c	2006-08-15 13:32:44.222580413 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_tmf.c	2006-08-11 10:20:05.000000000 -0500
+@@ -27,6 +27,8 @@
+ 
+ #include <linux/spinlock.h>
+ #include <scsi/sas/sas_task.h>
++#include <scsi/scsi_cmnd.h>
++#include <scsi/scsi_device.h>
+ #include "aic94xx.h"
+ #include "aic94xx_sas.h"
+ #include "aic94xx_hwi.h"
+@@ -337,9 +339,8 @@
+ 		res = asd_clear_nexus_tag(task, qflags);
+ 	else
+ 		res = asd_clear_nexus_index(task, qflags);
+-	wait_for_completion_timeout(&tascb->completion,
+-				    AIC94XX_SCB_TIMEOUT);
+-	ASD_DPRINTK("came back from clear nexus\n");
++	
++    ASD_DPRINTK("came back from clear nexus\n");
+ 	spin_lock_irqsave(&task->task_state_lock, flags);
+ 	if (task->task_state_flags & SAS_TASK_STATE_DONE)
+ 		res = TMF_RESP_FUNC_COMPLETE;
+@@ -390,6 +391,23 @@
+ 	unsigned long flags;
+ 	struct asd_ascb *ascb = NULL;
+ 	struct scb *scb;
++    struct scsi_device *scsi_dev = NULL;
++    struct domain_device *dev = task->dev;
++
++    if ( task->uldd_task )
++        scsi_dev = ((struct scsi_cmnd *)task->uldd_task)->device;
++    /*
++    ** clear nexus for SATA or SES.
++    */
++    if ((dev->dev_type == SATA_DEV) ||
++        (scsi_dev && scsi_dev->inquiry[0] == 0xD))
++    {
++		res = asd_clear_nexus(task, (EXECQ|SENDQ|NOTINQ));
++        if (scsi_dev && scsi_dev->inquiry[0] == 0xD)
++            res = TMF_RESP_FUNC_FAILED;
++
++        return res;
++    }
+ 
+ 	spin_lock_irqsave(&task->task_state_lock, flags);
+ 	if (task->task_state_flags & SAS_TASK_STATE_DONE) {

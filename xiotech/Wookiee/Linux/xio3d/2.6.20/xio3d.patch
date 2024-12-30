@@ -1,0 +1,82 @@
+# $Id: xio3d.patch 48035 2008-04-09 21:14:28Z mdr $
+
+--- a/drivers/char/Kconfig	2004-08-04 10:14:42.000000000 -0500
++++ obj/drivers/char/Kconfig	2004-08-05 11:05:14.193420190 -0500
+@@ -1000,6 +1000,28 @@
+ 	  exposed to the user.  If this applies to your hardware,
+ 	  say N here.
+ 
++config XIO3D
++	tristate "Xiotech driver support"
++	depends on X86_64 || X86
++	default n
++	select HUGETLBFS
++	help
++	  Provide driver support for the Xiotech storage application.
++
++config XIO3D_3000
++	bool "Xiotech 3D model 3000"
++	depends on XIO3D
++	default n
++	help
++	  Build support for Xiotech 3D model 3000.
++
++config XIO_7000
++	bool "Xiotech Emprise model 7000"
++	depends on XIO3D
++	default n
++	help
++	  Build support for Xiotech Emprise model 7000.
++
+ config HANGCHECK_TIMER
+ 	tristate "Hangcheck timer"
+ 	depends on X86 || IA64 || PPC64
+--- a/drivers/char/Makefile	2007-02-04 12:44:54.000000000 -0600
++++ obj-3000/drivers/char/Makefile	2009-03-17 11:17:19.000000000 -0500
+@@ -91,12 +91,14 @@ obj-$(CONFIG_GPIO_VR41XX)	+= vr41xx_giu.
+ obj-$(CONFIG_TANBAC_TB0219)	+= tb0219.o
+ obj-$(CONFIG_TELCLOCK)		+= tlclk.o
+ 
+-obj-$(CONFIG_WATCHDOG)		+= watchdog/
+ obj-$(CONFIG_MWAVE)		+= mwave/
+ obj-$(CONFIG_AGP)		+= agp/
+ obj-$(CONFIG_DRM)		+= drm/
+ obj-$(CONFIG_PCMCIA)		+= pcmcia/
+ obj-$(CONFIG_IPMI_HANDLER)	+= ipmi/
++obj-$(CONFIG_WATCHDOG)		+= watchdog/
++obj-$(CONFIG_XIO3D) += xio3d.o
++CFLAGS_xio3d.o := -Wall -Werror
+ 
+ obj-$(CONFIG_HANGCHECK_TIMER)	+= hangcheck-timer.o
+ obj-$(CONFIG_TCG_TPM)		+= tpm/
+--- a/mm/hugetlb.c
++++ b/mm/hugetlb.c
+@@ -88,6 +88,18 @@ static struct page *dequeue_huge_page(struct
+ 	return page;
+ }
+ 
++struct page *get_huge_page(struct vm_area_struct *vma, unsigned long addr)
++{
++	struct page *page;
++
++	spin_lock(&hugetlb_lock);
++	page = dequeue_huge_page(vma, addr);
++	spin_unlock(&hugetlb_lock);
++	if (page)
++		set_page_refcounted(page);
++	return page;
++}
++
+ static void free_huge_page(struct page *page)
+ {
+ 	BUG_ON(page_count(page));
+--- a/include/linux/hugetlb.h
++++ b/include/linux/hugetlb.h
+@@ -26,6 +26,7 @@
+ 			unsigned long address, int write_access);
+ int hugetlb_reserve_pages(struct inode *inode, long from, long to);
+ void hugetlb_unreserve_pages(struct inode *inode, long offset, long freed);
++struct page *get_huge_page(struct vm_area_struct *vma, unsigned long addr);
+ 
+ extern unsigned long max_huge_pages;
+ extern const unsigned long hugetlb_zero, hugetlb_infinity;

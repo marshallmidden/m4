@@ -1,0 +1,126 @@
+#!/usr/bin/expect --
+#
+#
+# Script to dump the output of various "show xxx" commands from 1 or more ISEs.
+#
+# Usage: ise_status [-abdefhimnptvwV] <ip address> [<ip address> ....]
+#
+# Where:
+#	-a	"show all"
+#	-b	"show battery"
+#	-d	"show datapac"
+#	-e	"show events"
+#	-f	"show performance"
+#	-h	"show host"
+#	-i	"show ise"
+#	-m	"show mrc"
+#	-n	"show network"
+#	-p	"show pool"
+#	-t	"show task"
+#	-v	"show volume"
+#	-w	"show hba"
+#
+#	-V	Print a small banner with the IP address before each
+#		ISE's output.
+#
+
+log_user  0
+set timeout 60
+
+source "getopts"
+
+proc usage {} {
+	puts "Usage: ise_status \[-abdefhimnptvwV] <ip address> \[<ip address> ....]"
+	exit 1
+}
+
+#
+# Log into an ISE and start seash.
+#
+proc login { ise } {
+	#
+	# log into ISE.
+	#
+	spawn ssh "oem@$ise"
+	expect {
+		"password: "	{
+					send "oem\r"
+				}
+		"(yes/no)? "	{
+					send "yes\r"
+					exp_continue
+				}
+		timeout		{
+					exit 1
+				}
+
+		eof		{
+					exit 1
+				}
+	}
+
+	#
+	# Check it started.
+	#
+	expect {
+		-re "(seaSH|oem)> "	{
+					return $spawn_id
+				}
+		timeout		{ exit 1 }
+		eof		{ exit 1}
+	}
+}
+
+#
+# command -	If $flag was specified on the command line, run the
+#		command "show $value" and wait for the prompt.
+#
+proc command { spawn_id flag value } {
+	global options
+	if {[info exists options($flag)]} then {
+		send "show $value\r"
+		expect -re "(seaSH|oem)> "
+	}
+}
+
+#
+# report -	For each ISE, produce the specified data report.
+#
+proc report { ise } {
+	global options
+
+	log_user 0
+
+	set spawn_id [login $ise]
+
+	log_user 1
+
+	if {[info exists options(V)]} then {
+		puts "\n**********\n$ise\n**********"
+	}
+
+	command $spawn_id v volume
+	command $spawn_id p pool
+	command $spawn_id i ise
+	command $spawn_id m mrc
+	command $spawn_id y powersupply
+	command $spawn_id b battery
+	command $spawn_id h hosts
+	command $spawn_id t task
+	command $spawn_id d datapac
+	command $spawn_id w hba
+	command $spawn_id n network
+	command $spawn_id e events
+	command $spawn_id f performance
+	command $spawn_id a all
+
+	close
+
+	wait
+}
+
+if {[getopts "Vvpimybhtdwnefa" argv options] > 0} usage
+
+foreach ise $argv {
+	report $ise
+}

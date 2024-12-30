@@ -1,0 +1,137 @@
+#!/bin/bash
+#
+# Copyright (C) Voltaire Ltd. 2006.  ALL RIGHTS RESERVED.
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 2 of the License, or (at your option) any later
+# version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License along with
+# this program; if not, write to the Free Software Foundation, Inc., 59 Temple
+# Place, Suite 330, Boston, MA 02111-1307 USA
+#
+# Author: Dan Bar Dov <danb@voltaire.com>
+
+# iscsi_discovery:
+#    * does a send-targets discovery to the given IP
+#    * set the transport type to ISER
+#    * tries to login
+#    * if succeeds,
+#          o logout,
+#          o mark record autmatic 
+#    * else
+#          o reset transport type to TCP
+#          o try to login
+#          o if succeeded
+#                + logout
+#                + mark record automatic 
+#
+
+dbg()
+{
+	$debug || echo $@
+}
+
+initialize()
+{
+	trap "exit" 2
+	usage="Usage: $0 [-d] <IP> [<port>]"
+	debug=false
+}
+
+parse_cmdline()
+{
+	if [ "$1" = "-d" ]; then
+		debug=true
+		shift
+	fi
+	if [ $# -lt 1 ]; then
+		echo ${usage}
+		exit 1
+	fi
+
+	ip=$1
+	port=${2:-3260}
+}
+
+
+discover()
+{
+	connected=0
+	discovered=0
+	df=/tmp/discovered.$$
+
+	dbg "starting discovery to $ip"
+	iscsiadm -m discovery --type sendtargets --portal ${ip}:${port} > ${df}
+	while read dis
+	do
+		dis=${dis/[/} # the [] caused problems with the set, so do it first
+		dis=${dis/]/}
+		set ${dis}
+		record=$1
+		portal=$2
+		target=$3
+		select_transport  > /dev/tty
+	done < ${df}
+
+	discovered=$(cat ${df} | wc -l)
+	if [ ${discovered} = 0 ]; then
+		echo "failed to discover targets at ${ip}"
+		exit 2
+	else 
+		echo "discovered ${discovered} targets at ${ip}, connected to ${connected}"
+	fi
+	/bin/rm -f ${df}
+}
+
+set_auto_if_login()
+{
+	record=$1
+	iscsiadm -m node --record ${record} --login >/dev/null 2>&1
+	ret=$?
+	if [ ${ret} = 0 ]; then
+        	iscsiadm -m node --record ${record} --logout
+		iscsiadm -m node --record ${record} --op update -n node.conn[0].startup -v automatic
+		echo "Set record ${record} to automatic login over ${transport} to ${target} portal ${portal}"
+		((connected++))
+	fi
+	return ${ret}
+}
+
+set_transport_iser()
+{
+	record=$1
+	transport=iser
+	iscsiadm -m node --record ${record} --op update -n node.conn[0].iscsi.HeaderDigest -v None
+	iscsiadm -m node --record ${record} --op update -n node.transport_name -v ${transport}
+}
+
+set_transport_tcp()
+{
+	record=$1
+	transport=tcp
+	iscsiadm -m node --record ${record} --op update -n node.conn[0].iscsi.HeaderDigest -v None
+	iscsiadm -m node --record ${record} --op update -n node.transport_name -v ${transport}
+}
+
+select_transport()
+{
+	set_transport_iser ${record}
+	dbg "Testing iser-login to target ${target} portal ${portal}"
+	set_auto_if_login ${record}
+	if [ $? != 0 ]; then
+		set_transport_tcp ${record}
+		dbg "starting to test tcp-login to target ${target} portal ${portal}"
+		set_auto_if_login ${record}
+	fi
+}
+
+initialize
+parse_cmdline "$@"
+discover

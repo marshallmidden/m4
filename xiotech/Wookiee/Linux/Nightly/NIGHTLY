@@ -1,0 +1,568 @@
+#!/usr/bin/perl -w
+
+#-----------------------------------------------------------------------------
+# If One argument is supplied, it will use that time() as the the time of the build.
+# This allows re-build next day.
+#-----------------------------------------------------------------------------
+use strict;
+#-----------------------------------------------------------------------------
+# my $Home_Dir = '/opt/xiotech';
+# my $CVSROOT = '/home/m4/.CVS';
+my $Home_Dir = '/f/m4';
+my $CVSROOT = ':pserver:MiddenM@cvs.xiotech.com.:/usr/local/cvsroot';
+
+# my $WeeklyDay = 2;	# 2 is Tuesday (@11pm), do a weekly build, not nightly.
+my $WeeklyDay = 10;	# Do not do a weekly build.
+# my $WeeklyDay = 6;	# 6 is Saturday
+# my $WeeklyDay = 0;	# 0 is Sunday
+#-----------------------------------------------------------------------------
+my @Branches;		# The branches to be done.
+my %M;			# The Module.
+my %b;			# The branch.
+my %h;			# The "cvs" headers associated with $Branches[].
+my %c;			# major count
+my %m;			# minor count.
+my %t;			# Past date/time of nightly cvs rtags.
+my %cn;			# Nightly command to run.
+my %cw;			# Weekly command to run.
+my %Comments;		# Comments before this entry.
+my $Pre_comments;	# Comments before (or after last) entries.
+my $OUTPUT;		# Temporary to capture output from command execution.
+my $timedone;		# Time (unix seconds) the program starts working.
+my ($tm_sec, $tm_min, $tm_hour, $tm_mday, $tm_mon, $tm_year, $tm_wday, $tm_yday);
+my $Bld_Dir;		# Directory we will be working in.
+my %RTAG;		# Array of rtags by branch.
+my %VERW;		# Weekly VER variable by branch.
+my %VERN;		# Nightly VER variable by branch.
+my %MONTH_HEX;		# Convert month into a single digit string.
+my $BuildVer = undef;   # Command Line "Build Version".
+my $diag = 1;           # 0=normal operation; 1=diag
+my $noWrt = "";         # cvs "no write" flag
+my $cvsCmd;             # Tmp variable to build the cvs command into
+my $perfFlag;           # PERF build or not
+#-----------------------------------------------------------------------------
+sub read_file();	# forward reference
+sub cvs_rtags();	# forward reference
+sub initialize();	# forward reference
+sub cvs_export_build();	# forward reference
+sub cvs_delete_old_tags(); # forward reference
+sub write_file();	# forward reference
+sub clean_up();		# forward reference
+#-----------------------------------------------------------------------------
+$MONTH_HEX{1} = '1';
+$MONTH_HEX{2} = '2';
+$MONTH_HEX{3} = '3';
+$MONTH_HEX{4} = '4';
+$MONTH_HEX{5} = '5';
+$MONTH_HEX{6} = '6';
+$MONTH_HEX{7} = '7';
+$MONTH_HEX{8} = '8';
+$MONTH_HEX{9} = '9';
+$MONTH_HEX{10} = 'A';
+$MONTH_HEX{11} = 'B';
+$MONTH_HEX{12} = 'C';
+#-----------------------------------------------------------------------------
+my $sep_line = ('*' x 80) . "\n";
+
+print STDERR "calling initialize()...\n";
+initialize();		# Get date & time, and move into build directory.
+
+print STDERR "calling read_file()...\n";
+read_file();		# Read the file containing what to do.
+
+print STDERR "calling cvs_rtags()...\n";
+cvs_rtags();		# cvs rtag the branches and modules.
+
+# Only call if doing an automated nightly build.  Ignore for manual
+# weekly builds.
+if (!defined($BuildVer))
+{
+    print STDERR "calling cvs_delete_old_tags()...\n";
+    cvs_delete_old_tags();	# If really old nightly tags, delete them.
+
+    print STDERR "calling write_file()...\n";
+    write_file();		# Update the table file with new ones, and deleted gone.
+}
+
+print STDERR "calling cvs_export_build()...\n";
+cvs_export_build();	# export, build, and regression test the branches.
+
+print STDERR "calling clean_up()...\n";
+clean_up();		# cleanup after ourselves.
+
+print STDERR "Success!\n";
+
+exit 0;
+
+
+#-----------------------------------------------------------------------------
+sub help()
+{
+    print "Usage: NIGHTLY [-h|help] VER DEBUG|PERF [DIAG]\n" .
+          "       -h | help:     this usage text\n" .
+          "       ver:           4-character version - \"A100\"\n" .
+          "       DEBUG | PERF:  type of build\n" .
+          "       DIAG:          if supplied, will run the script but won't\n" .
+          "                      change the repository\n";
+    exit 1;
+}
+#-----------------------------------------------------------------------------
+sub initialize()
+{
+    my $usetime = time();
+
+    if (@ARGV == 1)
+    {
+        ($usetime) = @ARGV;
+        if ($usetime =~ /-h|help/i) 
+        {
+            help();
+        }
+    }
+    elsif (@ARGV == 2)
+    {
+        ($BuildVer, $perfFlag) = @ARGV;
+    }
+    elsif (@ARGV == 3)
+    {
+        ($BuildVer, $perfFlag, $diag) = @ARGV;
+
+        # doesn't matter what diag is set to; set noWrt.
+        $noWrt = "-n";
+    }
+    elsif (@ARGV > 0)
+    {
+        help();
+    }
+
+    # Use 'BuildVer' as the indicator that we were called manually
+    if (defined($BuildVer))
+    {
+        $CVSROOT = ':pserver:build@cvs.xiotech.com:/usr/local/cvsroot';
+
+        $Home_Dir = $ENV{HOME};
+
+        if ($perfFlag !~ /^PERF|^DEBUG/i)
+        {
+            die "'PERF' or 'DEBUG' must be supplied as the 2nd parameter\n";
+        }
+        else
+        {
+            if ($perfFlag =~ /^PERF/i)
+            {
+                $perfFlag = 1;
+
+                # Perf builds are uppercase
+                $BuildVer = uc($BuildVer);
+            }
+            else
+            {
+                $perfFlag = 0;
+
+                # Debug builds are lowercase
+                $BuildVer = lc($BuildVer);
+            }
+        }
+
+        print "BuildVer = $BuildVer\n";
+        print "Home_Dir = $Home_Dir\n";
+        print "CVSROOT  = $CVSROOT\n";
+        print "noWrt    = $noWrt\n";
+        print "perfFlag = $perfFlag\n";
+    }
+    
+    if (defined($BuildVer))
+    {
+        # Do a cvs login
+        $cvsCmd = "cvs -Q -d ${CVSROOT} login 2>&1";
+        print STDERR "  $cvsCmd\n";
+        # add in the passwd for the login
+        $cvsCmd =~ s/:build@/:build:build@/;
+        $OUTPUT = `$cvsCmd`;
+        my $rc = $? >> 8;
+        if ($rc)
+        {
+            die "Couldn't login to cvs server!\n";
+        }
+    }
+    elsif (! -s ($Home_Dir . '/.cvspass')) {
+        die "'.cvspass' not found in $Home_Dir. Copy it there and try again.\n";
+    }
+
+  $timedone = $usetime;	# Save in text file for 30 day deletion information.
+  ($tm_sec, $tm_min, $tm_hour, $tm_mday, $tm_mon, $tm_year, $tm_wday, $tm_yday) = localtime($timedone);
+  $tm_mon++;		# change from ordinal to cardinal.
+  $tm_year += 1900;	# add in starting century offset.
+# printf STDERR "%-4.4d-%-2.2d-%-2.2d@%-2.2d:%-2.2d.%-2.2d -- %d [%d]\n",
+# 	$tm_year,$tm_mon,$tm_mday,$tm_hour,$tm_min,$tm_sec,$tm_wday,$tm_yday;
+
+  $Bld_Dir = $Home_Dir . '/build_' . $tm_yday;
+  if (-e $Bld_Dir) {
+    print STDERR "Build directory $Bld_Dir already exists -- deleting...\n";
+    system("rm -rf $Bld_Dir");
+    if (-e $Bld_Dir) {
+      die "Build directory $Bld_Dir already exists -- and will not delete...\n";
+    }
+  }
+  if (!mkdir($Bld_Dir)) {
+    die "Build directory $Bld_Dir can not be created!\n";
+  }
+  if (!chdir($Bld_Dir)) {
+    die "Can not move into Build directory $Bld_Dir!\n";
+  }
+}
+
+#-----------------------------------------------------------------------------
+# Reads the configuration file for branches and headers associated.
+# @Branches are each one to do.
+# $M{} = Module(s) to do.
+# $h{} = header for night build cvs tag name.  -- 1st char for weekly.
+# $c{} = major count -- incremented weekly if not maintenance branch.
+# $m{} = minor count -- incremented weekly for maintenance branch.
+# $t{} = times of previous cvs tag's nightly build. (30 day delete)
+# $Comments{} = Comments before this entry.
+
+sub read_file()
+{
+  $cvsCmd = "cvs -Q -d ${CVSROOT} checkout -r CT1_BR Nightly 2>&1";
+  print STDERR "  $cvsCmd\n";
+  $OUTPUT = `$cvsCmd`;
+  my @OUTPUT = split(/\n/, $OUTPUT);
+  $OUTPUT = '';
+  foreach my $o ( @OUTPUT ) {
+    if ($o !~ /^U .*$/) {
+      $OUTPUT .= $o . "\n";
+    }
+  }
+  if ($OUTPUT ne '') {
+    print STDERR "Unexpected output from cvs -Q -d ${CVSROOT} checkout Nightly scripts!\n";
+    die "  ${OUTPUT}\n";
+  }
+  if ($? != 0) {
+    die "Can not cvs -Q -d ${CVSROOT} checkout Nightly\n";
+  }
+  my $FILE;
+  if (!defined(open($FILE, "<Nightly/WN.table"))) {
+    die "Can not open table file Nightly/WN.table\n";
+  }
+  my $linecount = 0;
+  my $line;
+  $Pre_comments = '';		# No comments yet.
+  while (<$FILE>) {
+    $line = $_;
+    $linecount++;
+nextline:
+    if (substr($line,0,1) eq '#') {
+      $Pre_comments .= $line;
+      next;
+    }
+    chomp($line);
+    my ($b, $M, $h, $c, $m) = split(/\s+/, $line);
+    if (!defined($b)) {
+      die "Error in line ${linecount} of file Nightly/WN.table - no cvs branch label specified.\n";
+    }
+    if (!defined($M)) {
+      die "Error in line ${linecount} of file Nightly/WN.table - no module specified.\n";
+    }
+    if (!defined($h)) {
+      die "Error in line ${linecount} of file Nightly/WN.table - no header_name for branch specified.\n";
+    }
+    if (!defined($c)) {
+      $c = 0;
+    }
+    if (!defined($m)) {
+      $m = 0;
+    }
+    if (defined($M{$b})) {
+      die "Error in line ${linecount} of file Nightly/WN.table - branch duplicated.\n";
+    }
+    $Comments{$b} = $Pre_comments;
+    $Pre_comments = '';
+    push(@Branches, $b);
+    $M{$b} = join(' ', split(/,/, $M));	# Change comma field to spaces.
+    $h{$b} = $h;
+    $c{$b} = $c;
+    $m{$b} = $m;
+    $t{$b} = '';		# Nothing yet.
+    #---------------
+    $line = <$FILE>;		# Get nightly command to run.
+    $linecount++;
+    if (!defined($line)) {
+      last;
+    }
+    if ($line =~ /^\s(.*)$/) {	# Must start with whitespace.
+      $cn{$b} = $1;
+    } else {
+      goto nextline;
+    }
+    #---------------
+    $line = <$FILE>;		# Get weekly command to run.
+    $linecount++;
+    if (!defined($line)) {
+      last;
+    }
+    if ($line =~ /^\s(.*)$/) {	# Must start with whitespace.
+      $cw{$b} = $1;
+    } else {
+      goto nextline;
+    }
+    #---------------
+    $line = <$FILE>;		# Get 30 day tag deletion information.
+    $linecount++;
+    if (!defined($line)) {
+      last;
+    }
+    if ($line =~ /^\s(.*)$/) {	# Contains time's for 30 day cycle deleting.
+      $t{$b} = $1;
+    } else {
+      goto nextline;
+    }
+  }
+  close($FILE);
+}
+
+#-----------------------------------------------------------------------------
+# cvs rtag the branches and modules.
+
+sub cvs_rtags()
+{
+print STDERR "Doing cvs_rtag(s)\n";
+  foreach my $b ( @Branches ) {
+    # If day == 3, then it is Wednesday and weekly build happens.
+    my $PRERTAG;
+    if ($b eq 'HEAD') {
+      $PRERTAG = '';
+    } else {
+      $PRERTAG = "-r $b ";
+    }
+
+    #
+    # If a version was passed in, use that, otherwise figure it out
+    #
+    if (defined($BuildVer))
+    {
+      $VERW{$b} = "$BuildVer";
+      $RTAG{$b} = "YETI_" . $b . "_" . $VERW{$b};
+    }
+    elsif ($tm_wday == $WeeklyDay) {
+      $VERW{$b} = sprintf("%s%-2.2d%1d", substr($h{$b},0,1), $c{$b}, $m{$b});
+      $RTAG{$b} = "YETI_" . $b . "_" . $VERW{$b};
+      if ($m{$b} != 0) {		# If minor is not zero, then increment that.
+	$m{$b}++;			# NOTDONEYET -- How do we know to do this?
+      } else {
+	$c{$b}++;			# Increment weekly count.
+      }
+    } else {
+      $RTAG{$b} = sprintf("%s_%-4.4d_%-2.2d_%-2.2d_%-2.2d_%-2.2d",
+		    $h{$b},${tm_year},${tm_mon},${tm_mday},${tm_hour},${tm_min});
+    }
+    $VERN{$b} = sprintf("N%s%-2.2d", $MONTH_HEX{$tm_mon}, $tm_mday);
+    if ($t{$b} eq '') {
+      $t{$b} = $timedone;
+    } else {
+      $t{$b} .= ' ' . $timedone;
+    }
+    $cvsCmd = "cvs $noWrt -Q -d ${CVSROOT} rtag -F $PRERTAG $RTAG{$b} $M{$b} 2>&1";
+    print STDERR "  $cvsCmd\n";
+    $OUTPUT = `$cvsCmd`;
+    if ($OUTPUT ne '') {
+      print STDERR "Unexpected output from cvs -Q -d ${CVSROOT} rtag -F $PRERTAG $RTAG{$b} $M{$b}!\n";
+      die "  ${OUTPUT}";
+    }
+    if ($? != 0) {
+      die "Could not cvs -Q -d ${CVSROOT} rtag -F $PRERTAG $RTAG{$b} $M{$b}!\n";
+    }
+  }
+}
+
+#-----------------------------------------------------------------------------
+sub RunCommand($$$)
+{
+  my $command = $_[0];
+  my $b = $_[1];
+  my $VERS = $_[2];
+
+  $command =~ s/\$VER/$VERS/e;
+  $command =~ s/\$HEADER/$h{$b}/e;
+#    $command =~ s/\$RTAG/$RTAG{$b}/e;
+  $cvsCmd = "cvs -Q -d ${CVSROOT} export -r $RTAG{$b} $M{$b} 2>&1";
+  print STDERR "  $cvsCmd\n";
+  $OUTPUT = `$cvsCmd`;
+  my @OUTPUT = split(/\n/, $OUTPUT);
+  $OUTPUT = '';
+  foreach my $o ( @OUTPUT ) {
+    if ($o !~ /^U .*$/) {
+      $OUTPUT .= $o . "\n";
+    }
+  }
+  if ($OUTPUT ne '') {
+    print STDERR "Unexpected output from cvs -Q -d ${CVSROOT} export -r $RTAG{$b} $M{$b}\n";
+    die "  ${OUTPUT}\n";
+  }
+  if ($? != 0) {
+    die "Can not cvs -Q -d ${CVSROOT} export -r $RTAG{$b} $M{$b}\n";
+  }
+print STDERR "  $command\n";
+  $OUTPUT = `$command 2>&1`;
+  if ($OUTPUT ne '') {
+    print STDERR "Output from $command\n";
+    print STDERR "  ${OUTPUT}";
+  }
+  if ($? != 0) {
+    die "Error from command $command\n";
+  }
+# Remove directories created.
+print STDERR "rm -rf $M{$b}\n";
+  $OUTPUT = `rm -rf $M{$b} 2>&1`;
+  if ($OUTPUT ne '') {
+    print STDERR "Output from rm -rf $M{$b}\n";
+    print STDERR "  ${OUTPUT}";
+  }
+  if ($? != 0) {
+    die "Error from command rm -rf $M{$b}\n";
+  }
+print STDERR $sep_line;
+# export and build the branches and modules.
+}
+
+#-----------------------------------------------------------------------------
+sub cvs_export_build()
+{
+print STDERR $sep_line;
+print STDERR "Doing cvs_export_build(s)\n";
+print STDERR $sep_line;
+  foreach my $b ( @Branches ) {
+    my $command;
+    
+    # If day == 3, then it is Wednesday and weekly build happens.
+    # OR if a version was passed in on the command line, do a weekly build.
+    if (defined($BuildVer) or $tm_wday == $WeeklyDay) {
+      if (!defined($cw{$b})) {
+	print STDERR "No weekly command for branch $b, skipping.\n";
+	next;
+      }
+      ($command = $cw{$b}) =~ s/PERF=PERF//;
+      if ($perfFlag)
+      {
+        # Since we know we have a VER on the command line, slip in the PERF
+        # right before it.
+        $command =~ s/VER=/PERF=PERF VER=/;
+      }
+      RunCommand($command, $b, $VERW{$b});
+      # If manual call, return now
+      if (defined($BuildVer))
+      {
+        return;
+      }
+    }
+# Always run nightly debug version.
+    if (!defined($cn{$b})) {
+      print STDERR "No nightly command for branch $b, skipping.\n";
+      next;
+    }
+    $command = $cn{$b};
+    RunCommand($command, $b, $VERN{$b});
+  }
+}
+
+#-----------------------------------------------------------------------------
+# If really old nightly tags, delete them.
+
+sub cvs_delete_old_tags()
+{
+print STDERR "Doing cvs_delete_old_tags(s)\n";
+  foreach my $b ( @Branches ) {
+    my @times = split(/\s+/, $t{$b});
+    while ($#times >= 30) {
+      my $t = shift(@times);
+      my ($tm_sec, $tm_min, $tm_hour, $tm_mday, $tm_mon, $tm_year, $tm_wday, $tm_yday) = localtime($t);
+      $tm_mon++;		# change from ordinal to cardinal.
+      $tm_year += 1900;		# add in starting century offset.
+      my $D_TAG = sprintf("%s_%-4.4d_%-2.2d_%-2.2d_%-2.2d_%-2.2d",
+		  $h{$b},${tm_year},${tm_mon},${tm_mday},${tm_hour},${tm_min});
+      $cvsCmd = "cvs $noWrt -Q -d ${CVSROOT} rtag -d $D_TAG $M{$b} 2>&1";
+      print STDERR "  $cvsCmd\n";
+      $OUTPUT = `$cvsCmd`;
+      if ($OUTPUT ne '') {
+	print STDERR "Output from cvs -Q -d ${CVSROOT} rtag -d $D_TAG $M{$b}!\n";
+	print STDERR "  ${OUTPUT}";
+      }
+      if ($? != 0) {
+	print STDERR "Could not cvs -Q -d ${CVSROOT} rtag -d $D_TAG $M{$b}! (ignoring)\n";
+      }
+    }
+    $t{$b} = join(' ', @times);		# Update to what is left.
+  }
+}
+
+#-----------------------------------------------------------------------------
+# Update the table file with new "tags" added, and deleted gone.
+
+sub write_file()
+{
+  my $FILE;
+
+system ("mv Nightly/WN.table Nightly/WN.table.save");
+
+  if (!defined(open($FILE, ">Nightly/WN.table"))) {
+    die "Can not open table file Nightly/WN.table for writing\n";
+  }
+  foreach my $b ( @Branches ) {
+    print $FILE "$Comments{$b}";
+    print $FILE "$b\t$M{$b}\t$h{$b}\t$c{$b}\t$m{$b}\n";
+    if (defined($cn{$b})) {
+      print $FILE "\t$cn{$b}\n";
+    }
+    if (defined($cw{$b})) {
+      print $FILE "\t$cw{$b}\n";
+    }
+    if ($t{$b} ne '') {
+      print $FILE "\t$t{$b}\n";
+    }
+  }
+  if ($Pre_comments ne '') {
+    print $FILE "$Pre_comments";
+  }
+  close($FILE);
+# Update table file in cvs repository.
+    $cvsCmd = "cvs $noWrt -Q -d ${CVSROOT} commit -m \"NIGHTLY script update\" Nightly 2>&1";
+    print STDERR "  $cvsCmd\n";
+    $OUTPUT = `$cvsCmd`;
+    if ($OUTPUT ne '') {
+      print STDERR "Output from cvs -Q -d ${CVSROOT} commit Nightly\n";
+      print STDERR "  ${OUTPUT}";
+    }
+    if ($? != 0) {
+      die "Error from command cvs -Q -d ${CVSROOT} commit Nightly\n";
+    }
+print STDERR $sep_line;
+}
+
+#-----------------------------------------------------------------------------
+# Cleanup after ourselves.
+
+sub clean_up()
+{
+print STDERR "Doing cleanup\n";
+
+  $cvsCmd = "echo 'y' | cvs $noWrt -Q -d ${CVSROOT} release -d Nightly 2>&1";
+  print STDERR "  $cvsCmd\n";
+  $OUTPUT = `$cvsCmd`;
+  if ($OUTPUT ne '') {
+    print STDERR "output from cvs -Q -d ${CVSROOT} release -d Nightly\n";
+    print STDERR "  ${OUTPUT}\n";
+  }
+  if ($? != 0) {
+    die "Could not cvs -Q -d ${CVSROOT} release -d Nightly\n";
+  }
+  if (!chdir($Home_Dir)) {
+    die "Can not move into Home directory $Home_Dir!\n";
+  }
+  if (!rmdir($Bld_Dir)) {
+    die "Build directory $Bld_Dir can not be deleted!\n";
+  }
+print STDERR $sep_line;
+}
+
+#-----------------------------------------------------------------------------
+# End of file NIGHTLY

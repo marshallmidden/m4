@@ -1,0 +1,617 @@
+#!/bin/bash
+#
+# Network interface configuration
+#
+# Copyright (c) 2001-2002 SuSE Linux AG, Nuernberg, Germany.
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 2 of the License, or (at your option) any later
+# version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License along with
+# this program; if not, write to the Free Software Foundation, Inc., 59 Temple
+# Place, Suite 330, Boston, MA 02111-1307 USA
+#
+# Author: Michal Svec <msvec@suse.cz>
+#         Christian Zoz <zoz@suse.de>
+#         Mads Martin Jørgensen <mmj@suse.de>
+#
+# $Id: network 13421 2006-09-06 20:24:58Z RustadM $
+#
+# /etc/init.d/network
+#
+### BEGIN INIT INFO
+# Provides:       network
+# Required-Start: $local_fs
+# Should-Start: coldplug pcmcia
+# Required-Stop:
+# Should-Stop:
+# Default-Start:  2 3 5
+# Default-Stop:
+# Description:    Configure the network interfaces and set up routing
+### END INIT INFO
+
+. /etc/rc.status
+rc_reset
+
+cd /etc/sysconfig/network
+if ! . scripts/functions 2>/dev/null; then
+	echo -n "Network: file /etc/sysconfig/network/scripts/functions is missing."
+	rc_failed
+	rc_status -v
+	rc_exit
+fi
+[ -f config ] && . config
+
+# Only use ifup option 'onboot' if called by a runlevel directory.
+# Therefore determine the base, follow a runlevel link name ...
+base=${0##*/}
+link=${base#*[SK][0-9][0-9]}
+# ... and compare them
+if [ $link != $base ] ; then
+	MODE=onboot
+	rm -f ${RUN_FILES_BASE}/if-*
+	rm -f /var/run/sysconfig/route-stack-* 2>/dev/null
+fi
+
+######################################################################
+# Commandline parsing
+#
+SCRIPTNAME=${0##*/}
+debug $*
+ACTION=$1
+shift
+if [ "$1" != "-o" ] ; then INTERFACE=$1; shift; fi
+if [ -n "$1" -a "$1" != "-o" ] ; then CONFIG=$INTERFACE; INTERFACE=$1; shift; fi
+test "$1" = "-o" && shift
+OPTIONS=$@
+while [ $# -gt 0 ]; do
+	case $1 in
+		boot|onboot) MODE=onboot ;;
+		hotplug)     MODE=hotplug ;;
+		manual)      MODE=manual ;;
+		check)       CHECK=check ;;
+		quiet)       BE_QUIET=yes ;;
+		debug)       BE_QUIET=
+		             DEBUG=yes ;;
+		type*)       TYPE=${1#type=} ;;
+		fake)        FAKE=echo ;;
+		*)           echo "Unknown option $1"
+		             echo "options: {[on]boot,hotplug,check,quiet,debug,type=<typelist>,fake}"
+			     exit 1 ;;
+	esac
+	shift
+done
+
+# This has to happen early; don't move that into start section below!!!
+# (Writing NETWORK_RUNFILE means that service network is started. And only if
+# service network was started interfaces will be set up via hotplug. And it must
+# be started before checking which interfaces are already available and might
+# still have to be set up because the were registered to early. Bug 39005)
+if [ "$ACTION" = start ] ; then
+		date +%s > $NETWORK_RUNFILE
+fi
+
+if [ -n "$TYPE" ] ; then
+	type_filter() {
+		for i in $*; do
+			for t in $TYPE; do
+				case $i in
+					# $t*) echo -n "$i "; continue 2;;
+					$t*) echo $i; continue 2;;
+				esac
+			done
+		done
+		echo
+	}
+else
+	LO=lo
+	type_filter() {
+		echo $*
+	}
+fi
+
+
+
+######################################################################
+# Get interfaces to handle
+#
+# Seperate this interfaces into several sets, not all mutually exclisive;
+# none of them may contain lo, because it will always handled separately
+#
+# AVAILABLE_IFACES are all interfaces from /sys/class/net
+#                  these have to be shut down when stopping
+#
+# PHYSICAL_IFACES  are interfaces to present physical devices, they will be
+#                  derived from AVAILABLE_IFACES
+#
+# DIALUP_IFACES    are pppX, dslX, etc., they are derived from ifcfg-* files
+#
+# TUNNEL_IFACES    are interfaces that do not fit into PHYSICAL and DIALUP and
+#                  are as well derived from ifcfg-* files
+#
+#    PHYSICAL, DIALUP and TUNNEL are mutually exclusive. Their union contains
+#    AVAILABLE and MANDATORY and all of them have to be set up when starting
+#
+# MANDATORY_IFACES these must be up and well configured for success
+
+# At first get DIALUP and TUNNEL
+# these are all configurations without '-' in the configuration name (because
+# then 'config name' == 'interface name'), except those, which start with a
+# string known for real physical interfaces (eth, tr, ...) and except those,
+# which don't end in a number (those are special configs for manual usage or
+# backup files)
+while IFS=- read a b c; do
+	test -n "$c" && continue
+	b=`type_filter $b`
+	test -z "$b" && continue
+	case $b in
+		eth*[0-9]|tr*[0-9]|wlan[0-9]|ath[0-9]|ip6tnl*[0-9]|mip6mnha*[0-9])
+			continue
+			;;
+		*ppp*[0-9]|dsl*[0-9])
+			DIALUP_IFACES="$DIALUP_IFACES $b"
+			;;
+		*[0-9])
+			TUNNEL_IFACES="$TUNNEL_IFACES $b"
+			;;
+	esac
+done < <(ls -d /etc/sysconfig/network/ifcfg-*)
+
+# Now get all available interfaces drop lo and separate them into physical and
+# not physical. Then get AVAILABLE_IFACES sorted to shutdown the not physical
+# first.
+for a in $(type_filter `ls -A /sys/class/net/`); do
+	test "$a" = lo && continue;
+	test "$a" = sit0 && continue;
+	for b in $DIALUP_IFACES $TUNNEL_IFACES; do
+		if [ "$a" = "$b" ] ; then
+			NOT_PHYSICAL_IFACES="$NOT_PHYSICAL_IFACES $a"
+			continue 2
+		fi
+	done
+	case $a in
+		sit*)
+			NOT_PHYSICAL_IFACES="$NOT_PHYSICAL_IFACES $a"
+			continue 2
+			;;
+	esac
+	PHYSICAL_IFACES="$PHYSICAL_IFACES $a"
+done
+AVAILABLE_IFACES="$NOT_PHYSICAL_IFACES $PHYSICAL_IFACES"
+
+# # mandatory interfaces are specified in /etc/sysconfig/network/config
+# Hack for 9.1/SLES9: YaST does still not write MANDATORY_DEVICES
+# therfore we take all PHYSICAL_IFACES, which are configured, as mandatory
+if [ -z "$MANDATORY_DEVICES" ] ; then
+	# take all configurations except these
+	# -  which seem to be backup files
+	# -  which are mostly real hotplug or
+	# -  which have STARTMODE != onboot/auto
+	# -  which are dialup or tunnel interfaces
+	while IFS=- read a b; do
+		test -z "$b" && continue
+		case $b in
+			*~)
+				continue;
+				;;
+			*bus-pcmcia*|*bus-usb*|lo)
+				continue;
+				;;
+		esac
+		case "`get_startmode $b`" in
+			on|boot|onboot|auto) : ;;
+			*) continue ;;
+		esac
+		for d in $DIALUP_IFACES $TUNNEL_IFACES; do
+			if [ "$b" = "$d" ] ; then
+				continue 2
+			fi
+		done
+		MANDATORY_DEVICES="$MANDATORY_DEVICES $b"
+	done < <(ls -d /etc/sysconfig/network/ifcfg-*)
+	if [    -n "$MANDATORY_DEVICES" \
+	     -a "$MODE" != onboot \
+	     -a "$ACTION" = start ] ; then
+		echo "Hint: you may set mandatory devices in" \
+		     "/etc/sysconfig/network/config"
+	fi
+fi
+# Check for mandatory devices only when booting
+test "$MODE" = onboot || MANDATORY_DEVICES=""
+
+debug "CONFIG      = $CONFIG"
+debug "INTERFACE   = $INTERFACE"
+debug "AVAILABLE_IFACES = $AVAILABLE_IFACES"
+debug "PHYSICAL_IFACES  = $PHYSICAL_IFACES"
+debug "DIALUP_IFACES    = $DIALUP_IFACES"
+debug "TUNNEL_IFACES    = $TUNNEL_IFACES"
+debug "MANDATORY_DEVICES = $MANDATORY_DEVICES"
+
+status() {
+	local M IFACE
+	# declare -i R=0 F=0
+	declare -i F=0
+	if [ "$1" = "-m" ]; then
+		M=yes
+		shift
+	fi
+	for IFACE in $@; do
+		$FAKE ifstatus $CONFIG $IFACE -o ${BE_QUIET:+quiet} rc $CHECK $MODE
+		RET=$?
+		debug && printf "    %-9s returned %s\n" $IFACE $RET
+		case $RET in
+			$R_SUCCESS|$R_BUSY)
+				# : $((R++))
+				rc_failed 0
+				;;
+			$R_INACTIVE|$R_NOTCONFIGURED)
+				rc_failed 3
+				;;
+			$R_NOCONFIG)
+				if [ -f "$NETWORK_RUNFILE" -a "$M" = yes ] ; then
+					: $((F++))
+					rc_failed 1
+				else
+					rc_failed 3
+				fi
+				;;
+			*)
+				if [ -f "$NETWORK_RUNFILE" ] ; then
+					test "$M" = yes && : $((F++))
+					rc_failed 1
+				else
+					rc_failed 3
+				fi
+				;;
+		esac
+		rc_status -v1
+		rc_reset
+	done
+	test "$F" -gt 0 && return 1
+	# test "$R" = 0 && return 3
+	return 0
+}
+
+rc_reset
+declare -i FAILED=0
+
+case "$ACTION" in
+	start)
+		echo Setting up network interfaces:
+		for IFACE in ${INTERFACE:- $LO
+		                           $PHYSICAL_IFACES   }; do
+			$FAKE ifup $CONFIG $IFACE -o ${BE_QUIET:+quiet} rc $MODE
+			RET=$?
+			debug && printf "    %-9s returned %s\n" $IFACE $RET
+			case "$RET" in
+	 			$R_SUCCESS)
+	 				SUCCESS_IFACES="$SUCCESS_IFACES $IFACE"
+	 				rc_status -v1
+	 				;;
+				$R_DHCP_BG)
+	 				startmode=waiting
+	 				rc_startmode="${esc}[1A${stat}${attn}$startmode${norm}"
+	 				echo -en "$rc_startmode" 1>&2
+	 				echo
+					;;
+				$R_NOCONFIG)
+					rc_failed 6
+					rc_status -v1
+					;;
+	 			$R_NOTCONFIGURED|$R_INACTIVE)
+	 				SUCCESS_IFACES="$SUCCESS_IFACES $IFACE"
+					rc_failed 5
+					rc_status -v1
+	 				# EXTRA_MSG=yes
+	 				;;
+	 			*)
+	 				rc_failed 7
+	 				rc_status -v1
+	 				;;
+			esac
+			rc_reset
+		done
+
+		# Wait $WAIT_FOR_INTERFACES seconds after interface setup started for
+		# hotplug interfaces to become available
+		TOCHECK_IFACES=
+		NEWLINE=no
+		while true; do
+
+			debug ... still waiting for hotplug devices:
+			debug SUCCESS_IFACES=$SUCCESS_IFACES
+			debug MANDATORY_DEVICES=$MANDATORY_DEVICES
+			TMP=$MANDATORY_DEVICES
+			MANDATORY_DEVICES=
+			for D in $TMP; do
+				IFACE=`/sbin/getcfg-interface -- $D 2>/dev/null`
+				if [ $? != 0 ] ; then
+					MANDATORY_DEVICES="$MANDATORY_DEVICES $D"
+					continue	
+				fi
+				for S in $SUCCESS_IFACES; do
+					test "$IFACE" = "$S" && continue 2
+				done
+				# TOCHECK_IFACES="$TOCHECK_IFACES `type_filter $IFACE`"
+				IFACE="`type_filter $IFACE`"
+				test -z "$IFACE" && continue
+				status -m $IFACE &>/dev/null
+				RET=$?
+				if [ $RET = 0 ] ; then
+					SUCCESS_IFACES="$SUCCESS_IFACES $IFACE"
+					if [ "$NEWLINE" = yes ] ; then
+						echo
+						NEWLINE=no
+					fi
+					status -m $IFACE
+					continue
+				fi	
+				MANDATORY_DEVICES="$MANDATORY_DEVICES $D"
+			done
+
+#			debug TOCHECK_IFACES=$TOCHECK_IFACES
+#			TMP=$TOCHECK_IFACES
+#			TOCHECK_IFACES=
+#			for IFACE in $TMP; do
+#				status -m $IFACE &>/dev/null
+#				RET=$?
+#				if [ $RET = 0 ] ; then
+#					SUCCESS_IFACES="$SUCCESS_IFACES $IFACE"
+#					if [ "$NEWLINE" = yes ] ; then
+#						echo
+#						NEWLINE=no
+#					fi
+#					status -m $IFACE
+#					continue
+#				fi	
+#				TOCHECK_IFACES="$TOCHECK_IFACES $IFACE"
+#			done
+
+			TTWAIT=$((`date +%s` - `cat $NETWORK_RUNFILE`))
+			test $TTWAIT -gt $((WAIT_FOR_INTERFACES)) \
+			     -o -z "$MANDATORY_DEVICES$TOCHECK_IFACES" && break
+
+			debug "Time to wait: $((WAIT_FOR_INTERFACES - TTWAIT))"
+			if [ "$NEWLINE" != yes ] ; then
+				echo "Waiting for mandatory devices: $MANDATORY_DEVICES"
+			fi
+			echo -n "$((WAIT_FOR_INTERFACES - TTWAIT)) "
+			NEWLINE=yes
+			sleep 1
+		done
+
+		if [ "$NEWLINE" = yes ] ; then
+			echo
+		fi
+
+		for D in $MANDATORY_DEVICES; do
+			IFACE=`/sbin/getcfg-interface -- $D 2>/dev/null`
+			if [ $? = 0 ] ; then
+				TOCHECK_IFACES="$TOCHECK_IFACES $IFACE"
+				continue			
+			fi
+			printf "    %-35s No interface found\n" $D
+			rc_failed
+			rc_status -v1
+			: $((FAILED++))
+		done
+
+		for IFACE in $TOCHECK_IFACES; do
+			printf "    %-35s interface could not be set up\n" $IFACE
+			rc_failed
+			rc_status -v1
+			: $((FAILED++))
+		done
+
+		debug ... final
+		debug SUCCESS_IFACES=$SUCCESS_IFACES
+		debug MANDATORY_DEVICES=$MANDATORY_DEVICES
+		debug TOCHECK_IFACES=$TOCHECK_IFACES
+		debug FAILED=$FAILED
+
+
+		for IFACE in ${INTERFACE:- $DIALUP_IFACES
+		                           $TUNNEL_IFACES   }; do
+			$FAKE ifup $CONFIG $IFACE -o ${BE_QUIET:+quiet} rc $MODE
+			RET=$?
+			debug && printf "    %-9s returned %s\n" $IFACE $RET
+			case "$RET" in
+	 			$R_SUCCESS)
+	 				SUCCESS_IFACES="$SUCCESS_IFACES $IFACE"
+	 				rc_status -v1
+	 				;;
+				$R_DHCP_BG)
+	 				startmode=waiting
+	 				rc_startmode="${esc}[1A${stat}${attn}$startmode${norm}"
+	 				echo -en "$rc_startmode" 1>&2
+	 				echo
+					;;
+				$R_NOCONFIG)
+					rc_failed 6
+					rc_status -v1
+					;;
+	 			$R_NOTCONFIGURED|$R_INACTIVE)
+	 				SUCCESS_IFACES="$SUCCESS_IFACES $IFACE"
+					rc_failed 5
+					rc_status -v1
+	 				# EXTRA_MSG=yes
+	 				;;
+	 			*)
+	 				rc_failed 7
+	 				rc_status -v1
+	 				;;
+			esac
+			rc_reset
+		done
+
+
+		rc_reset
+		if [ -z "$INTERFACE" ] ; then
+			$FAKE ifup-route noiface -o ${BE_QUIET:+quiet} rc $MODE
+			rc_status
+			test $FAILED -gt 0 && rc_failed 7
+			echo -n "Setting up service network  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  ."
+			rc_status -v
+		fi
+
+		;;
+
+	stop)
+
+		echo Shutting down network interfaces:
+
+		if [ -z "$INTERFACE" ] ; then
+			$FAKE ifdown-route noiface -o ${BE_QUIET:+quiet} rc $MODE
+		fi
+
+		for IFACE in ${INTERFACE:-$AVAILABLE_IFACES} ; do
+			if [ "`mount | grep 'type nfs'`" != "" ]; then
+				echo -n "Leave if up with active nfs"
+				break;
+			fi
+			# printf "    %-9s " $IFACE
+			$FAKE ifdown $CONFIG $IFACE -o ${BE_QUIET:+quiet} rc $MODE
+			RET=$?
+			debug && printf "    %-9s returned %s\n" $IFACE $RET
+			rc_failed $RET
+			case "$RET" in
+				$R_NODEV|$R_NOTCONFIGURED|$R_INACTIVE)
+					rc_failed 5
+					rc_status -v1 ;;
+				# $R_NOTCONFIGURED|$R_INACTIVE)
+				# 	startmode=`get_startmode $IFACE`
+				# 	rc_startmode="${stat}${attn}$startmode${norm}"
+				# 	echo -en "$rc_startmode" 1>&2
+				# 	echo
+				# 	# EXTRA_MSG=yes
+				# 	;;
+				*)
+					rc_status -v1 ;;
+			esac
+			rc_reset
+		done
+
+		if [ -z "$INTERFACE" -a -z "$TYPE" ] ; then
+			# At last stop any remaining dhcp client
+			$FAKE ifdown-dhcp all -o ${BE_QUIET:+quiet} rc
+			rc_status
+			rm -f $NETWORK_RUNFILE
+			echo -n "Shutting down service network  .  .  .  .  .  .  .  .  .  .  .  .  .  .  ."
+			rc_status -v
+		fi
+
+		;;
+
+	try-restart)
+		cd $OLDPWD # we went to /etc/sysconfig/network, so we _have_ to go back...
+		$0 status >/dev/null &&  $0 restart
+		rc_status
+		;;
+
+	restart|force-reload)
+		cd $OLDPWD # we went to /etc/sysconfig/network, so we _have_ to go back...
+		$0 stop $CONFIG $INTERFACE ${OPTIONS:+-o $OPTIONS}
+		$0 start $CONFIG $INTERFACE ${OPTIONS:+-o $OPTIONS}
+		rc_status
+		;;
+	stop-all-dhcp-clients)
+       		cd $OLDPWD # we went to /etc/sysconfig/network, so we _have_ to go back...
+		DHCP_INTERFACES=$(dhcp-interfaces)
+		for IFACE in $DHCP_INTERFACES; do
+			$0 stop $IFACE ${OPTIONS:+-o $OPTIONS}
+		done
+		rc_status
+		;;
+
+	restart-all-dhcp-clients)
+       		cd $OLDPWD # we went to /etc/sysconfig/network, so we _have_ to go back...
+		DHCP_INTERFACES=$(dhcp-interfaces)
+		for IFACE in $DHCP_INTERFACES; do
+			$0 stop  $IFACE ${OPTIONS:+-o $OPTIONS}
+		done
+		for IFACE in $DHCP_INTERFACES; do
+			$0 start $IFACE ${OPTIONS:+-o $OPTIONS}
+		done
+		rc_status
+		;;
+
+	reload)
+		;;
+
+	status)
+
+		if [ -z "$INTERFACE" ] ; then
+ 	 		for D in $LO $MANDATORY_DEVICES; do
+ 	 			IFACE=`/sbin/getcfg-interface -- $D 2>/dev/null`
+ 	 			if [ $? != 0 ] ; then
+					printf "    %-35s No interface found\n" $D
+ 	 				: $((FAILED++))
+ 	 				continue
+ 	 			fi
+ 	 			MANDATORY_IFACES="$MANDATORY_IFACES `type_filter $IFACE`"
+ 	 		done
+			debug getting MANDATORY_IFACES: FAILED=$FAILED
+ 	 
+ 	 		for IFACE in $AVAILABLE_IFACES $DIALUP_IFACES $TUNNEL_IFACES; do
+ 	 			for MI in $MANDATORY_IFACES $TOCHECK_IFACES; do
+ 	 				test "$IFACE" = "$MI" && continue 2
+ 	 			done
+ 	 			TOCHECK_IFACES="$TOCHECK_IFACES $IFACE"
+ 	 		done
+ 	 
+ 			debug MANDATORY_DEVICES=$MANDATORY_DEVICES
+ 			debug MANDATORY_IFACES=$MANDATORY_IFACES
+ 			debug TOCHECK_IFACES=$TOCHECK_IFACES
+ 
+			if [ -n "$TOCHECK_IFACES" ] ; then
+				echo Checking optional network interfaces:
+ 	 			status $TOCHECK_IFACES
+			fi
+			if [ -n "$MANDATORY_IFACES" ] ; then
+				echo Checking mandatory network interfaces:
+ 	 			status -m $MANDATORY_IFACES
+ 	 			test $? != 0 && : $((FAILED++))
+				debug checking MANDATORY_IFACES: FAILED=$FAILED
+			else
+				echo No interfaces declared as mandatory
+			fi
+
+ 			$FAKE ifstatus-route noiface -o ${BE_QUIET:+quiet} rc $MODE
+ 			rc_status 
+			test $FAILED -gt 0 && rc_failed 1
+		else
+			status $INTERFACE
+			rc_status
+		fi
+
+		if [ ! -f $NETWORK_RUNFILE ] ; then
+			rc_failed 3 # unused
+		fi
+
+		echo -n "Checking service network .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  ."
+		rc_status -v
+
+		;;
+
+	*)
+		echo "Usage: $0 <action> [<config>] [<interface>] [-o <options>]"
+		echo "actions: {start|stop|status|reload|force-reload|try-restart|restart}"
+		echo "options: {[on]boot,hotplug,manual,check,quiet,debug,type=<typelist>,fake}"
+		echo "typelist: comma seperated list of interface types"
+		exit 1
+
+esac
+if [ "$EXTRA_MSG" = yes ] ; then
+	echo -e "INFO:	Dont worry about ${attn}skipped${norm} interfaces." \
+	        "They will be set up dynamically by service pcmcia" \
+		"hotplug or when dialing."
+fi
+
+rc_exit
+

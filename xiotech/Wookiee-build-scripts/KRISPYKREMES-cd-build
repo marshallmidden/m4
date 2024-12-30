@@ -1,0 +1,119 @@
+#!/bin/bash
+# $Id$
+#
+# cd-KRISPYKREMES - script to make a KRISPYKREMES install CD
+#
+# Copyright 2007 Xiotech Corporation. All rights reserved.
+#
+# cd-KRISPYKREMES [-h] [-b branch] [-t tag] [-v version] [-w where] [-m model]
+
+def_branch=WOOKIEE_KRISPYKREMES_GA_BR
+def_where=KRISPYKREMES
+def_model=3000
+this_script="$0"
+dest_location="/home/Builds/storage/Wookiee"
+
+usage() {
+    echo "$0 [-h] [-b branch] [-t tag] [-v version] [-w where] [-m model]"
+    echo ""
+    echo "-h display help"
+    echo "-b branch to build code from, default ${def_branch}"
+    echo "-t use tag for build"
+    echo "-v version of code to build, ie. F100"
+    echo "-w where to put results of build, default ${def_where}"
+    echo "-m model to build (or ALL), default ${def_model}"
+}
+
+fail() {
+    echo "$1"
+    exit 1
+}
+
+test "$#" -eq 0 && { echo "Parameters required"; usage; exit 1; }
+models="750 3000"
+branch="${def_branch}"
+tag=
+ver=
+where="${def_where}"
+model="${def_model}"
+
+while getopts "b:ht:m:v:w:" option; do
+    case "${option}" in
+        b) branch="${OPTARG}";;
+        h) usage;;
+        t) tag="${OPTARG}";;
+        m) model="${OPTARG}";;
+        v) ver="${OPTARG}";;
+        w) where="${OPTARG}";;
+        :) echo "Required parameter for option ${OPTARG} missing.";
+            usage; exit 1;;
+        \?) usage; exit 1;;
+        *) echo "Unknown option '${option}'"; usage; exit 1;;
+    esac
+done
+
+shift $((OPTIND - 1))
+
+test "${branch}" = "" && branch=trunk
+test "`echo ${branch}|tr [:lower:] [:upper:]`" = "MAIN" &&
+    branch=trunk
+
+test "${ver}" = "" && ver=ENGR
+uver="`echo ${ver}|tr [:lower:] [:upper:]`"
+
+where="`echo "${where}"|tr [:lower:] [:upper:]`"
+test "${where}" = "" && where=Engr
+
+test "${tag}" = "" && tag="${branch}_${uver}"
+
+test "${model}" = "ALL" && model="${models}"
+
+test -d "${dest_location}" || fail "Destination ${dest_location} not found."
+
+echo "Make install CD"
+echo ""
+echo "----------"
+echo "About to build install CD:"
+echo "    ver=${ver} where=${where}, model=${model}"
+echo ""
+
+while { echo -n "Ready [Y/N]? "; read input; } do
+    test "${input}" = "Y" -o "${input}" = "y" && break
+    test "${input}" = "n" -o "${input}" = "N" &&
+        fail "build cancelled."
+done
+echo "*** Beginning CD build ***"
+
+blddir="${branch}-${uver}"
+
+cd ${blddir} || fail "${blddir} not found"
+
+echo "** Entering ${blddir} **"
+
+cd Wookiee || fail "Wookiee directory not found"
+
+destdir="${dest_location}/${where}/${ver}"
+
+for mod in ${model}; do
+    echo "** Beginning install CD build for model ${mod} **"
+    make MODEL=${mod} VER=${ver} PERF=PERF HEADER=${where} cd ||
+        fail "MODEL=${mod} VER=${ver} cd failed\!"
+
+    echo "** Copying iso image to destination **"
+    if [[ ! -w ${destdir} ]]; then
+        chmod u+w ${destdir} || fail "Unable to write to destination"
+    fi
+    ( umask 022; cp Linux/install-cd/PS-install-${model}-*.iso ${destdir} ) ||
+        fail "Copy to destination ${destdir} failed\!"
+    chmod -w ${destdir}/PS-install-${model}-*.iso ||
+        fail "Unable to change mode on ${destdir}/PS-install-${model}-*.iso"
+    chmod -w ${destdir} || fail "Unable to change mode on ${destdir}"
+done
+
+cd ../..
+
+echo '*** Install CD build completed successfully! ***'
+
+send-build-mail "${this_script} version ${ver}"
+
+# vi:sw=4 ts=4 expandtab

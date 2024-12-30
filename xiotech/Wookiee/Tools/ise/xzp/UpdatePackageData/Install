@@ -1,0 +1,95 @@
+#! /bin/bash
+################################################################################
+#                         CONFIDENTIAL AND PROPRIETARY
+#         Copyright (C) 2007-2009 Xiotech Corporation, All Rights Reserved
+################################################################################
+#
+# Installation script for kicking off an ise fw upgrade process
+#
+################################################################################
+
+
+#
+# process options
+#
+# -d        DSC Identifier.
+# -p        Back-end Switch Admin Password
+# -s        List of ISE to skip (comma-seperated, no spaces):  172.17.1.4,172.17.1.3,etc
+#
+
+while getopts "d:p:s:" opt; do
+  case $opt in
+    d  )  DSC_ID="${OPTARG}";;
+    p  )  SW_PASSWORD="${OPTARG}";;
+    s  )  SKIP_ISE="${OPTARG}";;
+  esac
+done
+shift $(($OPTIND - 1))
+
+if [[ ${DSC_ID} == "" ]]
+then
+  OPT_ERR=1
+fi
+
+if [[ ${SKIP_ISE} == "" ]]
+then
+  SKIP_ISE = "NONE"
+fi
+
+
+#
+# check parameters
+#
+
+if [[ ${OPT_ERR} == "1" ]]
+then
+  echo "Install script."
+  echo "Usage: $(basename $0) -d <DSC ID> [-p <Back-end switch admin password>] [-s <specific ISE to skip. comma-seperated, no spaces>"
+  exit 1
+fi
+
+
+#
+# Get the current directory (temp directory created by IWS) This directory
+# must hold the OpErrors.txt and OpStatus.txt files, so we must pass this
+# directory into the other scripts
+#
+
+base_dir=`pwd` 
+
+
+#
+# Move all of the necessary files (CCBCL, etc) into temp folders
+#
+
+rm -rf /tmp/ise
+
+mkdir -p /tmp/ise
+tar jxf E.tbz2 -C / ; ldconfig
+cp * /tmp/ise
+cp ccbCL.ini /tmp/ise
+mv /root/.ssh/known_hosts /root/.ssh/known_hosts.save || true
+pushd /tmp/ise
+chmod a+x do_many_ises ise_upgrader check_switch SystemStatusChecker check_warm_booted_sw
+tar jxvf CCBE.tbz2
+mv ccbCL.ini CCBE/ 
+
+
+#
+# Execute the script
+#
+# Note: Output is no longer redirected. Instead, it will simply insert
+#       itself into the /var/log/XioWebService.xiolog file. The benefit
+#       here is that the "log" is not lost after the script completes
+#
+
+if [[ ${SW_PASSWORD} == "" ]]
+then
+  echo "Executing /usr/bin/perl ./do_many_ises -c production -b $base_dir -d ${DSC_ID} -s ${SKIP_ISE}"
+  /usr/bin/perl ./do_many_ises -c production -b $base_dir -d ${DSC_ID} -s {$SKIP_ISE}
+else
+  echo "Executing /usr/bin/perl ./do_many_ises -c production -b $base_dir -d ${DSC_ID} -p <custom password> -s ${SKIP_ISE}"
+  /usr/bin/perl ./do_many_ises -c production -b $base_dir -d ${DSC_ID} -p ${SW_PASSWORD} -s {$SKIP_ISE}
+fi
+popd
+

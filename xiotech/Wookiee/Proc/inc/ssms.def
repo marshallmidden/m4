@@ -1,0 +1,208 @@
+# $Id: ssms.def 159966 2012-10-01 23:20:49Z marshall_midden $
+#**********************************************************************
+#
+#  NAME: ssms.def (Snapshot Management Structure)
+#
+#  DESCRIPTION:
+#       To provide a common means of supplying snapshot management
+#       structure definitions.
+#
+#  Copyright (c) 2004-2009 Xiotech Corporation.  All rights reserved.
+#
+#**********************************************************************
+
+                                    @#ifndef _SSMS_H_
+                                    @#define _SSMS_H_
+
+                                    @#include "system.h"
+                                    @#include "XIO_Types.h"
+
+                                    @struct SYNC;
+                                    @struct SSMS;
+                                    @struct OGER;
+                                    @struct ILT;
+                                    @struct SGL;
+#
+# --- Constants -------------------------------------------------------
+#
+# This is the number of OGERs (1 gb chunks) times (largest value fitting in a short (65536) - plus 1).
+.def MAX_SNAPSHOT_SPACE 67108864    @#define MAX_SNAPSHOT_SPACE @ Max allowed SS space in MB (64TB)
+# NOTE: for customers, 64 is max snapshot count. For testing margins, if a snapshot is created
+#       that has source 355 and destination 455, then set limit to 256 (below). NOTE!!
+.def MAX_SNAPSHOT_COUNT 256         @#define MAX_SNAPSHOT_COUNT @ Max number of snapshots
+.ifdef PERF                         @#ifdef PERF
+.def SS_COUNT_LIMIT     64          @#define SS_COUNT_LIMIT     @ Default limit on snapshot count
+.else  # PERF                       @#else
+.def SS_COUNT_LIMIT    256          @#define SS_COUNT_LIMIT     @ Debug build has snapshot limit of 256
+.endif # PERF                       @#endif
+
+# NOTE: MAX_OGER_COUNT_GT2TB/8 = 8192 for dog_table, which is 0 to 8191, and 8191 = 0x1fff. Must divide by 8.
+.def MAX_OGER_COUNT        2048     @#define MAX_OGER_COUNT         @ Max number of OGERs
+.def MAX_OGER_COUNT_GT2TB 65536     @#define MAX_OGER_COUNT_GT2TB   @ Max number of OGERs (value fits in short)
+
+.def MAX_SEG_ACCESS     4           @#define MAX_SEG_ACCESS     @ Max segments/access (power of two)
+.def SEG_ACC_MASK (MAX_SEG_ACCESS-1)@#define SEG_ACC_MASK       @ Mask for segment access
+.def MAX_COW_ORC        15          @#define MAX_COW_ORC        @ Max oustanding COWs
+
+# An OG-er is a One Gig-er, or one gigabyte. Thus 1g/512 = 2097152 (0x200000)
+# The first OGER is @ 2097152, meaning that HEADER and SSMS are before this on vdisk.
+.def OGERSIZE           0x200000    @#define OGERSIZE           @ Oger size in sectors (2097152) [1gb]
+.def SEGSIZE            0x800       @#define SEGSIZE            @ Segment size in sectors (2048) [1mb]
+.def SEGSPEROGER (OGERSIZE/SEGSIZE) @#define SEGSPEROGER        @ Num segs in an OGER (1024)
+
+# OGTHRSH is intended to stop thrashing. I believe there was a truncation error and this
+# was a panic attempt to get around the problem (at 820). Leave "2" instead of doing 80%.
+# Otherwise, only can use 80% of the ogers (or space) which is bad. This does 99% of space.
+.def OGTHRSH            820         @#define OGTHRSH            @ Max OGER seg population (80%)
+.def OGTHRSH_GT2TB   SEGSPEROGER-2  @#define OGTHRSH_GT2TB      @ Max OGER seg population (leave 2 for end-checks)
+
+.def H1_PRIME           5867        @#define H1_PRIME           @ First hash prime number
+.def H2_PRIME           11867       @#define H2_PRIME           @ Second hash prime number
+
+.def SS_MAGIC           0xFFEEDDCC  @#define SS_MAGIC           @ Magic number for snapshot
+.def SNAP_NVRETRY       5           @#define SNAP_NVRETRY       @ Snap shot NV retry count
+.def SNAP_COWRETRY      3           @#define SNAP_COWRETRY      @ Snap shot COW Retry Count
+
+.def SS_SEC2GB_SF       21          @#define SS_SEC2GB_SF       @ Shift factor for sectors to GBs
+#
+# Below are three "c" only definitions of long line macros.
+        @#define segment_is_populated(seg,ssms) (!D_chk_seg_bit((seg), (ssms)))
+        @#define segment_not_populated(seg,ssms) (D_chk_seg_bit((seg), (ssms)))
+#
+# --- ssm_stat definitions
+#
+.def ssm_stat_op        0           @#define ssm_stat_op        @ Operational
+.def ssm_stat_sat       1           @#define ssm_stat_sat       @ Danger of saturation
+.def ssm_stat_inop      2           @#define ssm_stat_inop      @ Inoperative
+#
+# --- ssm_flags definitions
+#
+.def ssm_flags_setop    0           @#define ssm_flags_setop    @ Set operational
+#
+# --- syn_state definitions
+#
+                                    @#define syn_state_new      0
+                                    @#define syn_state_rd       1
+                                    @#define syn_state_wr       2
+                                    @#define syn_state_done     3
+                                    @#define syn_state_new_oger 4
+                                    @#define syn_state_acc_src  5       /* Access source */
+#
+# --- ogr_stat definitions
+#
+.def ogr_stat_ok        0           @#define ogr_stat_ok
+.def ogr_stat_full      1           @#define ogr_stat_full
+#
+# --- Begin ssmdep structure -------------------------------------------------
+#
+                                    @typedef struct ssmdep {
+                                    @   UINT16      ssmdep_cnt;     @ Dependency count
+                                    @   UINT16      ssmdep_max;     @ Maximum dependency count
+                                    @   struct {
+                                    @       struct ILT *ilt;        @ Primary COW ILT pointer
+                                    @       struct SGL *sgl;        @ Per-segment COW SGL pointer
+                                    @       struct ILT *ilts[MAX_SNAPSHOT_COUNT]; @ Persnapshot ILTs
+                                    @   } ssmdep_cow_seg[MAX_SEG_ACCESS]; @ Per-segment COW info
+                                    @} ssmdep;
+#
+# --- Begin SYNC structure -------------------------------------------
+# This structure tracks outstanding COW/CTW operations, ensuring that
+# outstanding write or read operations are properly held off until snapshot
+# data is moved.
+#
+                                    @typedef struct SYNC {
+                                    @   struct SYNC *syn_link;      @ Next SYNC struct
+                                    @   struct SYNC *syn_prev;      @ Previous sync record
+                                    @   struct ILT  *syn_rdreq;     @ Read request pointer
+                                    @   struct ssmdep *syn_iscnt;   @ Write request pointer
+                                    @   struct SYNC *syn_master;    @ Group master pointer
+                                    @   struct ILT  *syn_firstilt;  @ First dependent ilt
+                                    @   UINT32       syn_map;       @ Group completion map
+                                    @   UINT16       syn_count;     @ Group sync count
+                                    @   UINT16       syn_thcount;   @ This sync number
+                                    @   struct SYNC *syn_deplst;    @ Intergroup dependency
+                                    @   struct SYNC *syn_acclst;    @ Source VDisk access list
+                                    @   UINT32       syn_segnum;    @ Segment number
+                                    @   struct SSMS *syn_ssms;      @ SSMS pointer
+                                    @   UINT8        syn_state;     @ State of the sync op
+                                    @   UINT8        syn_status;    @ Status of the sync op
+                                    @   struct OGER *syn_oger;      @ Pointer to the OGER
+                                    @} SYNC;
+#
+# --- Begin OGER structure -------------------------------------------
+# This structure tracks the OGER location and internal usage
+#
+.struct                             @typedef struct OGER {
+.w ogr_link                         @   struct OGER *ogr_link;      @ Next OGER struct
+.s ogr_vid                          @   UINT16 ogr_vid;             @ Vid holding OGER
+.s ogr_segcnt                       @   UINT16 ogr_segcnt;          @ Number of segs
+.l ogr_sda                          @   UINT64 ogr_sda;             @ SDA on VID
+.s ogr_ord                          @   UINT16 ogr_ord;             @ Ordinal of this OGER
+.s ogr_maxpr                        @   UINT16 ogr_maxpr;           @ Max probe count
+.s ogr_ssvid                        @   UINT16 ogr_ssvid;           @ SS VID for this OGER
+.b ogr_stat                         @   UINT8  ogr_stat;            @ Status of the OGER
+.b ogr_res                          @   UINT8  ogr_res;
+.w ogr_leftch                       @   struct OGER *ogr_leftch;    @ Left child OGER
+.w ogr_rightch                      @   struct OGER *ogr_rightch;   @ Right child OGER
+.w ogr_parent                       @   struct OGER *ogr_parent;    @ Parent OGER
+.w ogr_sdakey                       @   UINT32 ogr_sdakey;          @ SDA key value
+.f ogr_segfld SEGSPEROGER/8         @   UINT8  ogr_segfld[SEGSPEROGER/8]; @ Segment bitfield
+.f ogr_sdamap SEGSPEROGER*4         @   UINT32 ogr_sdamap[SEGSPEROGER]; @ SDA bitmap
+.f ogr_size 0                       @} OGER;                        @ NOTE: 4264 bytes long
+#
+# --- Begin SSMS structure -------------------------------------------
+# This is the snapshot record, tracking info about a specific snapshot
+#
+.struct                             @typedef struct SSMS {
+.w ssm_link                         @   struct SSMS *ssm_link;      @ Next SSMS
+.w ssm_synchead                     @   struct SYNC *ssm_synchead;  @ First sync record
+.w ssm_synctail                     @   struct SYNC *ssm_synctail;  @ Tail sync record
+.w ssm_regmap 32                    @   struct RM   *ssm_regmap[32];@ Pointer to region maps (to 64 terabytes)
+.s ssm_srcvid                       @   UINT16 ssm_srcvid;          @ Vid of source Vdisk
+.s ssm_ssvid                        @   UINT16 ssm_ssvid;           @ Vid of snapshot Vdisk
+.b ssm_stat                         @   UINT8  ssm_stat;            @ Status
+.b ssm_flags                        @   UINT8  ssm_flags;           @ Flag byte
+.b ssm_prefowner                    @   UINT8  ssm_prefowner;       @ The preferred owner
+.b ssm_res1                         @   UINT8  ssm_res1;            @ Reserved 1 byte
+.w ssm_frstoger                     @   struct OGER *ssm_frstoger;  @ Pointer to first OGER
+.w ssm_tailoger                     @   struct OGER *ssm_tailoger;  @ Tail OGER pointer
+.w ssm_prev_tailoger                @   struct OGER *ssm_prev_tailoger; @ Previous Tail OGER pointer
+.s ssm_ogercnt                      @   UINT16 ssm_ogercnt;         @ Number of OGERs used
+.s ssm_ordinal                      @   UINT16 ssm_ordinal;         @ Ordinal of this SSMS
+.b ssm_res2 4                       @   UINT8  res2[4];             @ Reserved 4 bytes
+.f ssm_size 0                       @} SSMS;                        @ NOTE: 40 + 32*4 = 168 bytes long
+#
+# --- Begin SPLIT structure -------------------------------------------
+#
+                                    @typedef struct SPLIT {
+                                    @   struct SSMS *spl_ssms;      @ SSMS struct pointer
+                                    @   UINT32 spl_stat;            @ Status
+                                    @   UINT32 spl_segcnt;          @ Total segment count
+                                    @   UINT32 spl_finished;        @ Finished count
+                                    @   struct ILT  *spl_master;    @ Master req pointer
+                                    @   struct ILT  *spl_origilt;   @ Original ilt
+                                    @   UINT16 spl_ssvid;           @ The snapshot vid
+                                    @   UINT16 spl_srcvid;          @ The source vid
+                                    @} SPLIT;
+#
+# --- Global data prototypes   -------------------------------------------
+#
+            @extern UINT32  cow_orc;
+#
+# --- Function prototypes   -------------------------------------------
+#
+            @extern struct SYNC *search_sync_groups(struct SSMS *, const UINT32 seg);
+            @extern struct OGER *htinsert(UINT32 *slot, int *new_oger, UINT32 seg, struct SSMS *);
+            @extern int write_ss_source(struct SSMS *, struct ILT *, UINT64 sda);
+            @extern void start_deferred_cow(struct SYNC *);
+            @extern void clean_up_ssms_ic(struct ssmdep *ssms_ic);
+            @extern UINT32 cal_seg_bit(UINT32 *seg, UINT64 sda, UINT64 eda, UINT64 devCap, UINT8 cmorss);
+
+            @#endif /* _SSMS_H_ */
+####
+## Modelines:
+## Local Variables:
+## tab-width: 4
+## indent-tabs-mode: nil
+## End:
+## vi:sw=4 ts=4 expandtab

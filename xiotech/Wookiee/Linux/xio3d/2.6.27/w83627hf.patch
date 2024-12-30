@@ -1,0 +1,288 @@
+--- a/drivers/hwmon/w83627hf.c	2008-10-09 17:13:53.000000000 -0500
++++ obj-7000/drivers/hwmon/w83627hf.c	2009-01-16 17:05:06.000000000 -0600
+@@ -53,6 +53,8 @@
+ #include <asm/io.h>
+ #include "lm75.h"
+ 
++#define X7DWE	1
++
+ static struct platform_device *pdev;
+ 
+ #define DRVNAME "w83627hf"
+@@ -253,6 +255,7 @@ static const u8 BIT_SCFG2[] = { 0x10, 0x
+ #define IN_TO_REG(val)  (SENSORS_LIMIT((((val) + 8)/16),0,255))
+ #define IN_FROM_REG(val) ((val) * 16)
+ 
++#ifndef X7DWE
+ static inline u8 FAN_TO_REG(long rpm, int div)
+ {
+ 	if (rpm == 0)
+@@ -328,6 +331,7 @@ static inline u8 pwm_freq_to_reg(unsigne
+ 
+ #define BEEP_MASK_FROM_REG(val)		((val) & 0xff7fff)
+ #define BEEP_MASK_TO_REG(val)		((val) & 0xff7fff)
++#endif /* !X7DWE */
+ 
+ #define DIV_FROM_REG(val) (1 << (val))
+ 
+@@ -356,6 +360,7 @@ struct w83627hf_data {
+ 	char valid;		/* !=0 if following fields are valid */
+ 	unsigned long last_updated;	/* In jiffies */
+ 
++#ifndef X7DWE
+ 	u8 in[9];		/* Register value */
+ 	u8 in_max[9];		/* Register value */
+ 	u8 in_min[9];		/* Register value */
+@@ -377,6 +382,9 @@ struct w83627hf_data {
+ 				   4 = thermistor */
+ 	u8 vrm;
+ 	u8 vrm_ovt;		/* Register value, 627THF/637HF/687THF only */
++#else
++	u8 gpio;		/* Register value, 627hf only */
++#endif /* !X7DWE */
+ };
+ 
+ struct w83627hf_sio_data {
+@@ -387,9 +395,13 @@ struct w83627hf_sio_data {
+ static int w83627hf_probe(struct platform_device *pdev);
+ static int __devexit w83627hf_remove(struct platform_device *pdev);
+ 
++#ifndef	X7DWE
+ static int w83627hf_read_value(struct w83627hf_data *data, u16 reg);
++#endif	/* !X7DWE */
+ static int w83627hf_write_value(struct w83627hf_data *data, u16 reg, u16 value);
++#ifndef X7DWE
+ static void w83627hf_update_fan_div(struct w83627hf_data *data);
++#endif	/* !X7DWE */
+ static struct w83627hf_data *w83627hf_update_device(struct device *dev);
+ static void w83627hf_init_device(struct platform_device *pdev);
+ 
+@@ -402,6 +414,7 @@ static struct platform_driver w83627hf_d
+ 	.remove		= __devexit_p(w83627hf_remove),
+ };
+ 
++#ifndef X7DWE
+ static ssize_t
+ show_in_input(struct device *dev, struct device_attribute *devattr, char *buf)
+ {
+@@ -1115,6 +1128,7 @@ static SENSOR_DEVICE_ATTR(temp##offset##
+ sysfs_temp_type(1);
+ sysfs_temp_type(2);
+ sysfs_temp_type(3);
++#endif /* !X7DWE */
+ 
+ static ssize_t
+ show_name(struct device *dev, struct device_attribute *devattr, char *buf)
+@@ -1199,6 +1213,7 @@ static int __init w83627hf_find(int sioa
+ 	return err;
+ }
+ 
++#ifndef X7DWE
+ #define VIN_UNIT_ATTRS(_X_)	\
+ 	&sensor_dev_attr_in##_X_##_input.dev_attr.attr,		\
+ 	&sensor_dev_attr_in##_X_##_min.dev_attr.attr,		\
+@@ -1248,11 +1263,29 @@ static struct attribute *w83627hf_attrib
+ 	&dev_attr_name.attr,
+ 	NULL
+ };
++#else
++
++static ssize_t
++show_ps_state(struct device *dev, struct device_attribute *devattr, char *buf)
++{
++	struct w83627hf_data *data = w83627hf_update_device(dev);
++
++	return sprintf(buf, "%d\n", (data->gpio >> 1) & 1);
++}
++static DEVICE_ATTR(ps_state, S_IRUGO, show_ps_state, NULL);
++
++static struct attribute *w83627hf_attributes[] = {
++	&dev_attr_ps_state.attr,
++	&dev_attr_name.attr,
++	NULL
++};
++#endif /* !X7DWE */
+ 
+ static const struct attribute_group w83627hf_group = {
+ 	.attrs = w83627hf_attributes,
+ };
+ 
++#ifndef X7DWE
+ static struct attribute *w83627hf_attributes_opt[] = {
+ 	VIN_UNIT_ATTRS(1),
+ 	VIN_UNIT_ATTRS(5),
+@@ -1276,6 +1309,7 @@ static struct attribute *w83627hf_attrib
+ static const struct attribute_group w83627hf_group_opt = {
+ 	.attrs = w83627hf_attributes_opt,
+ };
++#endif /* !X7DWE */
+ 
+ static int __devinit w83627hf_probe(struct platform_device *pdev)
+ {
+@@ -1283,7 +1317,11 @@ static int __devinit w83627hf_probe(stru
+ 	struct w83627hf_sio_data *sio_data = dev->platform_data;
+ 	struct w83627hf_data *data;
+ 	struct resource *res;
++#ifndef X7DWE
+ 	int err, i;
++#else
++	int err;
++#endif /* !X7DWE */
+ 
+ 	static const char *names[] = {
+ 		"w83627hf",
+@@ -1316,16 +1354,19 @@ static int __devinit w83627hf_probe(stru
+ 	/* Initialize the chip */
+ 	w83627hf_init_device(pdev);
+ 
++#ifndef X7DWE
+ 	/* A few vars need to be filled upon startup */
+ 	for (i = 0; i <= 2; i++)
+ 		data->fan_min[i] = w83627hf_read_value(
+ 					data, W83627HF_REG_FAN_MIN(i));
+ 	w83627hf_update_fan_div(data);
++#endif /* !X7DWE */
+ 
+ 	/* Register common device attributes */
+ 	if ((err = sysfs_create_group(&dev->kobj, &w83627hf_group)))
+ 		goto ERROR3;
+ 
++#ifndef X7DWE
+ 	/* Register chip-specific device attributes */
+ 	if (data->type == w83627hf || data->type == w83697hf)
+ 		if ((err = device_create_file(dev,
+@@ -1425,6 +1466,7 @@ static int __devinit w83627hf_probe(stru
+ 		if ((err = device_create_file(dev,
+ 				&sensor_dev_attr_pwm3_enable.dev_attr)))
+ 			goto ERROR4;
++#endif /* !X7DWE */
+ 
+ 	data->hwmon_dev = hwmon_device_register(dev);
+ 	if (IS_ERR(data->hwmon_dev)) {
+@@ -1436,7 +1478,9 @@ static int __devinit w83627hf_probe(stru
+ 
+       ERROR4:
+ 	sysfs_remove_group(&dev->kobj, &w83627hf_group);
++#ifndef X7DWE
+ 	sysfs_remove_group(&dev->kobj, &w83627hf_group_opt);
++#endif	/* !X7DWE */
+       ERROR3:
+ 	platform_set_drvdata(pdev, NULL);
+ 	kfree(data);
+@@ -1454,7 +1498,9 @@ static int __devexit w83627hf_remove(str
+ 	hwmon_device_unregister(data->hwmon_dev);
+ 
+ 	sysfs_remove_group(&pdev->dev.kobj, &w83627hf_group);
++#ifndef X7DWE
+ 	sysfs_remove_group(&pdev->dev.kobj, &w83627hf_group_opt);
++#endif	/* !X7DWE */
+ 	platform_set_drvdata(pdev, NULL);
+ 	kfree(data);
+ 
+@@ -1483,6 +1529,7 @@ static inline void w83627hf_reset_bank(s
+ 	}
+ }
+ 
++#ifndef X7DWE
+ static int w83627hf_read_value(struct w83627hf_data *data, u16 reg)
+ {
+ 	int res, word_sized;
+@@ -1507,7 +1554,9 @@ static int w83627hf_read_value(struct w8
+ 	mutex_unlock(&data->lock);
+ 	return res;
+ }
++#endif	/* !X7DWE */
+ 
++#ifndef X7DWE
+ static int __devinit w83627thf_read_gpio5(struct platform_device *pdev)
+ {
+ 	int res = 0xff, sel;
+@@ -1564,6 +1613,7 @@ exit:
+ 	superio_exit();
+ 	return res;
+ }
++#endif	/* !X7DWE */
+ 
+ static int w83627hf_write_value(struct w83627hf_data *data, u16 reg, u16 value)
+ {
+@@ -1589,12 +1639,29 @@ static int w83627hf_write_value(struct w
+ 	return 0;
+ }
+ 
++#ifdef	X7DWE
++static int w83627hf_read_gpio(void)
++{
++	int res = 0xff;
++
++	superio_enter();
++	superio_select(W83627HF_LD_GPIO5);
++
++	res = superio_inb(W83687THF_VID_DATA);
++
++	superio_exit();
++	return res;
++}
++#endif	/* X7DWE */
++
+ static void __devinit w83627hf_init_device(struct platform_device *pdev)
+ {
+ 	struct w83627hf_data *data = platform_get_drvdata(pdev);
++#ifndef X7DWE
+ 	int i;
+ 	enum chips type = data->type;
+ 	u8 tmp;
++#endif /* !X7DWE */
+ 
+ 	/* Minimize conflicts with other winbond i2c-only clients...  */
+ 	/* disable i2c subclients... how to disable main i2c client?? */
+@@ -1602,6 +1669,7 @@ static void __devinit w83627hf_init_devi
+ 	w83627hf_write_value(data, W83781D_REG_I2C_SUBADDR, 0x89);
+ 	w83627hf_write_value(data, W83781D_REG_I2C_ADDR, force_i2c);
+ 
++#ifndef X7DWE
+ 	/* Read VID only once */
+ 	if (type == w83627hf || type == w83637hf) {
+ 		int lo = w83627hf_read_value(data, W83781D_REG_VID_FANDIV);
+@@ -1668,8 +1736,10 @@ static void __devinit w83627hf_init_devi
+ 	tmp = w83627hf_read_value(data, W83781D_REG_VBAT);
+ 	if (!(tmp & 0x01))
+ 		w83627hf_write_value(data, W83781D_REG_VBAT, tmp | 0x01);
++#endif	/* !X7DWE */
+ }
+ 
++#ifndef X7DWE
+ static void w83627hf_update_fan_div(struct w83627hf_data *data)
+ {
+ 	int reg;
+@@ -1687,17 +1757,21 @@ static void w83627hf_update_fan_div(stru
+ 	if (data->type != w83697hf)
+ 		data->fan_div[2] |= (reg >> 5) & 0x04;
+ }
++#endif /* !X7DWE */
+ 
+ static struct w83627hf_data *w83627hf_update_device(struct device *dev)
+ {
+ 	struct w83627hf_data *data = dev_get_drvdata(dev);
++#ifndef X7DWE
+ 	int i, num_temps = (data->type == w83697hf) ? 2 : 3;
+ 	int num_pwms = (data->type == w83697hf) ? 2 : 3;
++#endif	/* !X7DWE */
+ 
+ 	mutex_lock(&data->update_lock);
+ 
+ 	if (time_after(jiffies, data->last_updated + HZ + HZ / 2)
+ 	    || !data->valid) {
++#ifndef X7DWE
+ 		for (i = 0; i <= 8; i++) {
+ 			/* skip missing sensors */
+ 			if (((data->type == w83697hf) && (i == 1)) ||
+@@ -1773,6 +1847,9 @@ static struct w83627hf_data *w83627hf_up
+ 		data->beep_mask = (i << 8) |
+ 		    w83627hf_read_value(data, W83781D_REG_BEEP_INTS1) |
+ 		    w83627hf_read_value(data, W83781D_REG_BEEP_INTS3) << 16;
++#else
++		data->gpio = w83627hf_read_gpio();
++#endif /* !X7DWE */
+ 		data->last_updated = jiffies;
+ 		data->valid = 1;
+ 	}

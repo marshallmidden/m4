@@ -1,0 +1,427 @@
+diff -rubB obj-750/drivers/scsi/aic94xx/aic94xx_dev.c obj-750.new/drivers/scsi/aic94xx/aic94xx_dev.c
+--- obj-750/drivers/scsi/aic94xx/aic94xx_dev.c	2006-07-19 13:26:41.192102596 -0500
++++ obj-750.new/drivers/scsi/aic94xx/aic94xx_dev.c	2006-07-19 13:25:38.301120135 -0500
+@@ -133,10 +133,15 @@
+ 
+ 		if (w76 & 0x100) /* NCQ? */
+ 			qdepth = (w75 & 0x1F) + 1;
+-		asd_ddbsite_write_dword(asd_ha, ddb, SATA_TAG_ALLOC_MASK,
+-					(1<<qdepth)-1);
++
++		if (qdepth == 32)
++			asd_ddbsite_write_dword(asd_ha, ddb,
++					SATA_TAG_ALLOC_MASK, ~0);
++		else
++			asd_ddbsite_write_dword(asd_ha, ddb,
++					SATA_TAG_ALLOC_MASK, (1<<qdepth)-1);
++
+ 		asd_ddbsite_write_byte(asd_ha, ddb, NUM_SATA_TAGS, qdepth);
+-/*DWD*/	printk("Qdepth - %d\n", qdepth);
+ 	}
+ 	if (dev->dev_type == SATA_DEV || dev->dev_type == SATA_PM ||
+ 	    dev->dev_type == SATA_PM_PORT) {
+@@ -163,7 +168,7 @@
+ 	dev->lldd_dev = (void *) (unsigned long) ddb;
+ 
+ 	asd_ddbsite_write_byte(asd_ha, ddb, 0, DDB_TP_CONN_TYPE);
+-	asd_ddbsite_write_byte(asd_ha, ddb, 1, 0);
++        asd_ddbsite_write_byte(asd_ha, ddb, 1, dev->max_linkrate);
+ 	asd_ddbsite_write_word(asd_ha, ddb, INIT_CONN_TAG, 0xFFFF);
+ 	for (i = 0; i < SAS_ADDR_SIZE; i++)
+ 		asd_ddbsite_write_byte(asd_ha, ddb, DEST_SAS_ADDR+i,
+diff -rubB obj-750/drivers/scsi/aic94xx/aic94xx_task.c obj-750.new/drivers/scsi/aic94xx/aic94xx_task.c
+--- obj-750/drivers/scsi/aic94xx/aic94xx_task.c	2006-07-19 13:26:42.061019455 -0500
++++ obj-750.new/drivers/scsi/aic94xx/aic94xx_task.c	2006-07-19 13:25:38.265123579 -0500
+@@ -255,6 +255,7 @@
+ 	case TF_OPEN_REJECT:
+ 		ts->resp = SAS_TASK_UNDELIVERED;
+ 		ts->stat = SAS_OPEN_REJECT;
++/*DWD*/		printk("Open Reject 0x%02x/0x%02x\n", dl->status_block[1], dl->status_block[2]);
+ 		if (dl->status_block[1] & 2)
+ 			ts->open_rej_reason = 1 + dl->status_block[2];
+ 		else if (dl->status_block[1] & 1)
+diff -rubB obj-750/drivers/scsi/aic94xx/aic94xx_tmf.c obj-750.new/drivers/scsi/aic94xx/aic94xx_tmf.c
+--- obj-750/drivers/scsi/aic94xx/aic94xx_tmf.c	2006-07-19 13:26:41.348087670 -0500
++++ obj-750.new/drivers/scsi/aic94xx/aic94xx_tmf.c	2006-07-19 13:25:38.305119752 -0500
+@@ -114,6 +114,10 @@
+ 		return -ENOMEM; \
+                                 \
+ 	scb = ascb->scb;        \
++	if (scb ==NULL)  { \
++           ASD_DPRINTK("scb == NULLL \n");               \
++	   return -ENOMEM; \
++        }                           \
+ 	scb->header.opcode = CLEAR_NEXUS
+ 
+ #define CLEAR_NEXUS_POST        \
+@@ -192,8 +196,18 @@
+ 	struct asd_ascb *ascb;
+ 	struct scb *scb;
+ 	int res;
+-
++        ASD_DPRINTK("asd_clear_nexus_I_T_L : ENTER\n");
++        if ( asd_ha==NULL )
++        {
++            ASD_DPRINTK("asd_clear_nexus_I_T_L : asd_ha==NULL \n");
++            return -ENOMEM;
++        }
+ 	CLEAR_NEXUS_PRE;
++        if ( scb==NULL )
++        {
++            ASD_DPRINTK("asd_clear_nexus_I_T_L : scb==NULL \n");
++            return -ENOMEM;
++        }
+ 	scb->clear_nexus.nexus = NEXUS_I_T_L;
+ 	scb->clear_nexus.flags = qflags;
+ 	memcpy(scb->clear_nexus.ssp_task.lun, lun, 8);
+@@ -608,7 +622,7 @@
+ 
+ 	asd_clear_nexus_I_T_L(dev, lun, CN_QFLAGS_PRE);
+ 	res = asd_initiate_ssp_tmf(dev, lun, TMF_ABORT_TASK_SET, 0);
+-	if (res == TMF_RESP_FUNC_COMPLETE)
++        if ((res == TMF_RESP_FUNC_COMPLETE)  || ( dev->dev_type== SATA_DEV))
+ 		asd_clear_nexus_I_T_L(dev, lun, CN_QFLAGS_POST);
+ 	return res;
+ }
+@@ -622,12 +636,18 @@
+ 
+ int asd_clear_task_set(struct domain_device *dev, u8 *lun)
+ {
+-	int res;
+-
++        int res=TMF_RESP_FUNC_COMPLETE;
++        if (dev == NULL)
++        {
++            ASD_DPRINTK("asd_clear_task_set : BLEEP! dev is NULL?\n");
++            return    -ENOMEM;
++        }
+ 	asd_clear_nexus_I_T_L(dev, lun, CN_QFLAGS_PRE);
++        if  ( dev->dev_type!= SATA_DEV)
+ 	res = asd_initiate_ssp_tmf(dev, lun, TMF_CLEAR_TASK_SET, 0);
+-	if (res == TMF_RESP_FUNC_COMPLETE)
++        if ((res == TMF_RESP_FUNC_COMPLETE)  || ( dev->dev_type== SATA_DEV))
+ 		asd_clear_nexus_I_T_L(dev, lun, CN_QFLAGS_POST);
++       
+ 	return res;
+ }
+ 
+@@ -637,7 +657,7 @@
+ 
+ 	asd_clear_nexus_I_T_L(dev, lun, CN_QFLAGS_PRE);
+ 	res = asd_initiate_ssp_tmf(dev, lun, TMF_LU_RESET, 0);
+-	if (res == TMF_RESP_FUNC_COMPLETE)
++        if ((res == TMF_RESP_FUNC_COMPLETE)  || ( dev->dev_type== SATA_DEV))
+ 		asd_clear_nexus_I_T_L(dev, lun, CN_QFLAGS_POST);
+ 	return res;
+ }
+@@ -654,11 +674,15 @@
+ int asd_I_T_nexus_reset(struct domain_device *dev)
+ {
+ 	int res;
++//         struct asd_ha_struct *asd_ha = dev->port->ha->lldd_ha;
++//         int ddb = (int) (unsigned long) dev->lldd_dev;
+ 
+ 	asd_clear_nexus_I_T(dev, CN_QFLAGS_PRE);
+ 	res = dev->port->ha->execute_hard_reset(dev);
+-	if (res == TMF_RESP_FUNC_COMPLETE)
++        if ((res == TMF_RESP_FUNC_COMPLETE)  || ( dev->dev_type== SATA_DEV))
+ 		asd_clear_nexus_I_T(dev, CN_QFLAGS_POST);
++        
++     //   asd_dump_target_ddb(asd_ha,ddb);
+ 	return res;
+ }
+
+
+diff -rubB obj-750/drivers/scsi/libata-scsi.c obj-750.new/drivers/scsi/libata-scsi.c
+--- obj-750/drivers/scsi/libata-scsi.c	2006-07-19 13:26:42.031022325 -0500
++++ obj-750.new/drivers/scsi/libata-scsi.c	2006-07-19 13:25:38.312119082 -0500
+@@ -1295,9 +1295,10 @@
+  	    ((cdb[2] & 0x20) || need_sense)) {
+  		ata_gen_ata_desc_sense(qc);
+ 	} else {
+-		if (!need_sense) {
+-			cmd->result = SAM_STAT_GOOD;
+-		} else {
++// 		if (!need_sense) {
++// 			cmd->result = SAM_STAT_GOOD;
++// 		} else {
++            if (need_sense) {
+ 			/* TODO: decide which descriptor format to use
+ 			 * for 48b LBA devices and call that here
+ 			 * instead of the fixed desc, which is only
+@@ -1312,7 +1313,8 @@
+ 		/* The ata_gen_..._sense routines fill in tf */
+ 		ata_dump_status(qc->ap->id, &qc->tf);
+ 	}
+-
++        if (cmd->result )
++            printk(KERN_INFO"ata_scsi_qc_complete: calling scsidone cmd %p result %02x\n",cmd,cmd->result);
+ 	qc->scsidone(cmd);
+ 
+ 	return 0;
+diff -rubB obj-750/drivers/scsi/sas/sas_discover.c obj-750.new/drivers/scsi/sas/sas_discover.c
+--- obj-750/drivers/scsi/sas/sas_discover.c	2006-07-19 13:26:42.036021847 -0500
++++ obj-750.new/drivers/scsi/sas/sas_discover.c	2006-07-19 13:25:38.318118508 -0500
+@@ -474,7 +474,8 @@
+ 	struct task_status_struct *ts = &task->task_status;
+ 	int num_scatter = 0;
+ 	int retries = 0;
+-
++        unsigned long flags;
++        struct domain_device * dev = task->dev;
+ 	if (pci_dma_dir != PCI_DMA_NONE) {
+ 		scatter = kzalloc(sizeof(*scatter), GFP_KERNEL);
+ 		if (!scatter)
+@@ -500,15 +501,26 @@
+ 		task->timer.expires = jiffies + SAS_DEV_TIMEOUT*HZ;
+ 		add_timer(&task->timer);
+ 
++                spin_lock_irqsave(&dev->io_list_lock,flags); 
++                list_add(&task->dev_io_list,&dev->io_list);
++                spin_unlock_irqrestore(&dev->io_list_lock,flags);
+ 		res = task->dev->port->ha->lldd_execute_task(task, 1,
+ 							     GFP_KERNEL);
+ 		if (res) {
+ 			del_timer(&task->timer);
+ 			SAS_DPRINTK("executing SAS discovery task failed:%d\n",
+ 				    res);
++                        spin_lock_irqsave(&dev->io_list_lock,flags);
++                        list_del_init(&task->dev_io_list);
++                        spin_unlock_irqrestore(&dev->io_list_lock,flags);
+ 			goto ex_err;
+ 		}
++                
++                
+ 		wait_for_completion(&task->completion);
++                spin_lock_irqsave(&dev->io_list_lock,flags);
++                list_del_init(&task->dev_io_list);
++                spin_unlock_irqrestore(&dev->io_list_lock,flags);
+ 		res = SAS_TASK_UNDELIVERED;
+ 		if (task->task_state_flags & SAS_TASK_STATE_ABORTED) {
+ 			int res2;
+@@ -1296,7 +1308,7 @@
+ 	kobject_unregister(&dev->dev_obj);
+ }
+ 
+-static int sas_del_io_list(struct domain_device *dev)
++int sas_del_io_list(struct domain_device *dev)
+ {
+ //    struct sas_task *task;
+ //    struct list_head *ntask;
+@@ -1312,8 +1324,13 @@
+ //         SAS_DPRINTK("%s: task %p in list \n", __FUNCTION__,task);
+ //     }
+     
++    if (dev->dev_type == SATA_DEV )
++        ha->lldd_clear_task_set(dev,dev->sata_dev.lu->LUN);
++    else{
+     list_for_each_entry_safe(lu, n, &dev->end_dev.LU_list, list) {
+-        ha->lldd_abort_task_set(dev,lu->LUN);
++            SAS_DPRINTK("   CLEARINGING TASKSET \n");
++            ha->lldd_clear_task_set(dev,lu->LUN);
++        }
+     }
+     
+     spin_lock_irqsave(&dev->io_list_lock,flags);
+diff -rubB obj-750/drivers/scsi/sas/sas_expander.c obj-750.new/drivers/scsi/sas/sas_expander.c
+--- obj-750/drivers/scsi/sas/sas_expander.c	2006-07-19 13:26:41.974027778 -0500
++++ obj-750.new/drivers/scsi/sas/sas_expander.c	2006-07-19 13:25:38.324117934 -0500
+@@ -197,6 +197,7 @@
+ {
+ 	int res;
+ 	struct sas_task *task = sas_alloc_task(GFP_KERNEL);
++        unsigned long flags;
+ 
+ 	if (!task)
+ 		return -ENOMEM;
+@@ -213,14 +214,23 @@
+ 	task->timer.expires = jiffies + SMP_TIMEOUT*HZ;
+ 	add_timer(&task->timer);
+ 
++        spin_lock_irqsave(&dev->io_list_lock,flags); 
++        list_add(&task->dev_io_list,&dev->io_list);
++        spin_unlock_irqrestore(&dev->io_list_lock,flags);
+ 	res = task->dev->port->ha->lldd_execute_task(task, 1, GFP_KERNEL);
+ 
+ 	if (res) {
+ 		del_timer(&task->timer);
+ 		SAS_DPRINTK("executing SMP task failed:%d\n", res);
++                spin_lock_irqsave(&dev->io_list_lock,flags);
++                list_del_init(&task->dev_io_list);
++                spin_unlock_irqrestore(&dev->io_list_lock,flags);
+ 		goto ex_err;
+ 	}
+ 	wait_for_completion(&task->completion);
++        spin_lock_irqsave(&dev->io_list_lock,flags);
++        list_del_init(&task->dev_io_list);
++        spin_unlock_irqrestore(&dev->io_list_lock,flags);
+ 	res = SAS_TASK_UNDELIVERED;
+ 	if ((task->task_state_flags & SAS_TASK_STATE_ABORTED)) {
+ 		SAS_DPRINTK("smp task timed out or aborted\n");
+@@ -1780,7 +1790,7 @@
+ out:
+ 	return res;
+ }
+-
++extern int sas_del_io_list(struct domain_device *dev);
+ static int sas_rediscover_dev(struct domain_device *dev, int phy_id)
+ {
+ 	struct expander_device *ex = &dev->ex_dev;
+@@ -1815,6 +1825,7 @@
+ 		   SAS_ADDR(phy->attached_sas_addr)) {
+ 		SAS_DPRINTK("ex %016llx phy 0x%x broadcast flutter\n",
+ 			    SAS_ADDR(dev->sas_addr), phy_id);
++                sas_del_io_list(dev);
+ 	} else
+ 		res = sas_discover_new(dev, phy_id);
+ out:
+diff -rubB obj-750/drivers/scsi/sas/sas_scsi_host.c obj-750.new/drivers/scsi/sas/sas_scsi_host.c
+--- obj-750/drivers/scsi/sas/sas_scsi_host.c	2006-07-19 13:26:42.053020220 -0500
++++ obj-750.new/drivers/scsi/sas/sas_scsi_host.c	2006-07-19 13:25:38.330117360 -0500
+@@ -617,14 +617,14 @@
+ 	spin_lock_irqsave(&task->task_state_lock, flags);
+ 	if (task->task_state_flags & SAS_TASK_STATE_DONE) {
+ 		spin_unlock_irqrestore(&task->task_state_lock, flags);
+-		SAS_DPRINTK("command 0x%p, task 0x%p, timed out: EH_HANDLED\n",
++                SAS_DPRINTK("command %llX 0x%p, task 0x%p, timed out: EH_HANDLED\n",SAS_ADDR(task->dev->sas_addr),
+ 			    cmd, task);
+ 		return EH_HANDLED;
+ 	}
+ 	task->task_state_flags |= SAS_TASK_STATE_ABORTED;
+ 	spin_unlock_irqrestore(&task->task_state_lock, flags);
+ 
+-	SAS_DPRINTK("command 0x%p, task 0x%p, timed out: EH_NOT_HANDLED\n",
++        SAS_DPRINTK("command %llX 0x%p, task 0x%p, timed out: EH_NOT_HANDLED\n",SAS_ADDR(task->dev->sas_addr),
+ 		    cmd, task);
+ 
+ 	return EH_NOT_HANDLED;
+@@ -633,20 +633,90 @@
+ /* ---------- Initialization and Host Registration ---------- */
+ static void sas_ata_phy_reset(struct ata_port *ap)
+ {
+-	struct domain_device *dev = ap->private_data;
++	//struct domain_device *dev = ap->private_data;
+ 
+ 	ap->device[0].class = ATA_DEV_ATA;
+ }
++static void sata_xlate_err_codes(struct task_status_struct *ts,struct scsi_cmnd *sc )
++{
++    int hs = 0, stat = 0;
++    switch (ts->resp) {
++        case SAS_TASK_UNDELIVERED:
++            /* Service Delivery or Target Failure */
++        case SSP_RESP_INVALID_FRAME:
++        case SSP_RESP_OVERLAPPED_TAG:
++            hs = DID_NO_CONNECT;
++            break;
++        default:
++            break;
++    }
+ 
++    switch (ts->stat) {
++        case SAS_DEV_NO_RESPONSE:
++        case SAS_INTERRUPTED:
++        case SAS_PHY_DOWN:
++        case SAS_NAK_R_ERR:
++        case SAS_OPEN_TO:
++            hs = DID_NO_CONNECT;
++            break;
++        case SAS_DATA_UNDERRUN:
++            sc->resid = ts->residual;
++            if (sc->request_bufflen - sc->resid < sc->underflow)
++                hs = DID_ERROR;
++            break;
++        case SAS_DATA_OVERRUN:
++            hs = DID_ERROR;
++            break;
++        case SAS_QUEUE_FULL:
++            hs = DID_SOFT_ERROR; /* retry */
++            break;
++        case SAS_DEVICE_UNKNOWN:
++            hs = DID_BAD_TARGET;
++            break;
++        case SAS_SG_ERR:
++            hs = DID_PARITY;
++            break;
++        case SAS_OPEN_REJECT:
++            if (ts->open_rej_reason == SAS_OREJ_RSVD_RETRY)
++                hs = DID_SOFT_ERROR; /* retry */
++            else
++                hs = DID_NO_CONNECT;
++            break;
++        case SAS_ABORTED_TASK:
++            hs = DID_ABORT;
++            break;
++        default:
++            stat = ts->stat;
++            break;
++    }
++    sc->result = (hs << 16) | stat;
++}
+ static void sas_qc_done(struct sas_task *task)
+ {
+ 	struct ata_queued_cmd *qc = task->private;
+ 	struct ata_task_resp *rp = (struct ata_task_resp *)&(task->task_status.buf[0]);
++        unsigned long flags;
++        struct domain_device *dev = task->dev;
++        struct task_status_struct *ts = &task->task_status;
+ 
+-
++        spin_lock_irqsave(&dev->io_list_lock,flags);
++        list_del_init(&task->dev_io_list);
++        spin_unlock_irqrestore(&dev->io_list_lock,flags);
++        if (qc->scsicmd != NULL)
++            ASSIGN_SAS_TASK(qc->scsicmd, NULL);
+ 	/*
+ 	 * TODO - qc->err_mask.
+ 	 */
++        if (qc->scsicmd != NULL)
++            qc->scsicmd->result = SAM_STAT_GOOD;
++        if  ((ts->resp) ||(ts->stat)) {
++            SAS_DPRINTK("sas_qc_done: %llX task %p resp %02X stat %02X sstatus %02X  serror %02X\n",SAS_ADDR(dev->sas_addr),
++                        task,ts->resp,ts->stat, rp->sstatus,rp->serror);
++             if (qc->scsicmd != NULL)
++                sata_xlate_err_codes(ts,qc->scsicmd);
++        }
++
++            
+ 	qc->err_mask |= ac_err_mask(rp->sstatus);
+ 
+ 	ata_qc_complete(qc);
+@@ -660,7 +730,7 @@
+ 	struct ata_port *ap = qc->ap;
+ 	struct domain_device *dev = ap->private_data;
+ 	struct dev_to_host_fis *d2h_fis = (struct dev_to_host_fis *)&dev->frame_rcvd[0];
+-
++        unsigned long flags;
+ 
+ 	task = sas_alloc_task(GFP_ATOMIC);
+ 	if (!task)
+@@ -709,14 +779,26 @@
+ 	task->private = qc;
+ 
+ 	task->uldd_task = qc->scsicmd ;
+-
++        if (qc->scsicmd != NULL)
++            ASSIGN_SAS_TASK(qc->scsicmd, task);
+ 	task->ata_task.retry_count = 1;
+ 	task->task_state_flags = SAS_TASK_STATE_PENDING;
+ 
+ 	task->task_done = sas_qc_done;
+ 
++        spin_lock_irqsave(&dev->io_list_lock,flags); 
++        list_add(&task->dev_io_list,&dev->io_list);
++        spin_unlock_irqrestore(&dev->io_list_lock,flags);
++        
+ 	res = dev->port->ha->lldd_execute_task(task, 1, GFP_ATOMIC);
++        if (res)
++        {
++            SAS_DPRINTK("lldd_execute_task returned %02x task %p\n",res,task);
++            spin_lock_irqsave(&dev->io_list_lock,flags);
++            list_del_init(&task->dev_io_list);
++            spin_unlock_irqrestore(&dev->io_list_lock,flags);
+ 
++        }
+ out:
+ 	return res;
+ }

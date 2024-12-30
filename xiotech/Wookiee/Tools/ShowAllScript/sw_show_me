@@ -1,0 +1,278 @@
+#!/usr/bin/expect --
+#
+# Script to view get cores on a specific CN
+#
+# Usage: get_cores
+#               <ip_address_CN>
+#
+# Where:
+#
+#  <ip_address_CN>
+#    The IP address of controller.
+#
+# Typical command line might be:
+#    ./get_cores 10.64.102.31
+#
+#-----------------------------------------------------------------------------
+# Where the ccbCL.pl script is located.
+set ccbe_at "./CCBE"
+
+# Command to run the ccbCL.pl script.
+set run_ccbcl "cd $ccbe_at ;/usr/bin/perl ccbCL.pl"
+#-----------------------------------------------------------------------------
+
+# Regular expression representing the CN prompt.
+set cn_prompt "# $"
+
+# Like perl, the real execution continues anywhere ... define the proc's first.
+
+#=============================================================================
+#
+# Tell how to run this script.
+#
+proc usage {} {
+    send_error "Usage: ise_show_me <ip_address_MRC_1> <ip_address_MASTER_7000>
+    exit 1
+}
+# End of usage
+
+#=============================================================================
+proc send_ccbcl_status { message } {
+    global run_ccbcl
+    global cn_ip
+    set msg3 [string map {\: "-"} $message]
+
+    send_error "ccbCL: $msg3\n"
+    system "$run_ccbcl '$cn_ip':3000 -e '\"logtextmessage -v 0 $msg3\"' >/dev/null"
+#    system "$run_ccbcl '$cn_ip':3000 -e '\"logtextmessage -v 0 $message\"'"
+}
+
+proc send_cmd_to_ccbcl { cmd } {
+    global run_ccbcl
+    global cn_ip
+    system "$run_ccbcl '$cn_ip' -e '\"$cmd\"'"
+}
+    
+# End of send_ccbcl_status
+
+#=============================================================================
+proc login_now { cnip user password do_ssh } {
+    global cn_prompt
+    
+    #
+    # log into CN.
+    #
+    if {$do_ssh == 1} {
+      spawn ssh "$user@$cnip"
+    } else {
+      spawn telnet -l $user $cnip
+      send_error "spawned telnet -l $user $cnip\n"
+    }
+    expect {
+        "assword: " {
+            send_error "sending password=$password\n"
+            send "$password\r"
+        }
+        "(yes/no)? " {
+            send "yes\r"
+            exp_continue
+        }
+        timeout      {
+            send_ccbcl_status "\$!Login Timeout $cnip"
+            exit 2 }
+        eof          {
+            send_error "login eof $cnip\n"
+            return 0 }
+    }
+    send_error "login password sent\n"
+    #
+    # Check it started.
+    #
+    expect {
+        -re $cn_prompt {
+               send_error "login looks good\n"
+               return $spawn_id
+            }
+        -re "Login incorrect" {
+               return -1
+            }
+        -re "Access denied" {
+               return -1
+            }
+        -re "assword:" {
+               return -1
+            }
+        timeout         {
+            send_ccbcl_status "\$!Login Prompt Timeout $cnip"
+            exit 2 }
+        eof             {
+            send_ccbcl_status "\$!Login Prompt Drop $cnip"
+            exit 3 }
+    }
+    send_error "prompt problem $cnip\n"
+    exit 1
+}
+# End of login_now
+
+#=============================================================================
+#
+# Log into a switch.
+#
+proc login { swip } {
+  global use_ssh
+  global last_pw_idx
+  set pwd(0) "@dmin123"
+  set pwd(1) "Made4you"
+  set pwd(2) "made4you"
+  set pwd(3) "@dm1n123"
+  set pwd(4) "@dmin1234"
+  set pwd(5) "admin123#"
+  set pwd(6) "adm1n123"
+  set pwd(7) "admin@123"
+  set pwd(8) "x10t3ch1"
+  set pwd(9) "x10t3ch!"
+  set pwd(10) "password"
+  set pwd(11) "xiotech"
+
+  set numpwds 12
+  for {set count 0} {$count < $numpwds} {incr count 1} {
+    set tmp_spawn [login_now $swip "admin" $pwd($last_pw_idx) $use_ssh]
+    if {$tmp_spawn == 0} {
+#        close
+        wait
+        sleep 10
+        set use_ssh [ expr 1-$use_ssh ]
+        set tmp_spawn [login_now $swip "admin" $pwd($last_pw_idx) $use_ssh ]
+        if {$tmp_spawn == 0} {
+            send_ccbcl_status "!\$No Switch at $swip"
+            exit 3
+        }
+    }
+    if {$tmp_spawn == -1} {
+      set last_pw_idx [expr 1 + $last_pw_idx]
+      if {$last_pw_idx == $numpwds} {
+         set last_pw_idx 0
+      }
+      continue;
+    }
+    break;
+  }
+  if {$count == $numpwds} {
+    send_error "no valid passwords found\n"
+    exit 4
+  }
+  return $tmp_spawn
+}
+# End of login
+
+
+#=============================================================================
+#
+# Send a show version command to the switch
+#
+proc send_show_version { swip } {
+    global cn_prompt
+    set spawn_id [login $swip]
+    send "show ver\n"
+    expect {
+        -re "kickstart: (.*)" {
+           set switchversion $expect_out(1,string)
+           send_error "Version retrieved=$switchversion\n"
+           send_ccbcl_status "!\$BES=$swip - $switchversion"
+        }
+        timeout {
+            send_ccbcl_status "!\$Status Comm Timeout"
+            exit 2
+        }
+        eof     {
+            send_ccbcl_status "!\$Status Comm Drop"
+            exit 3
+        }
+        default{ exp_continue }
+    }
+    send "exit\r"
+    close
+    wait
+    send_error "send_cmd complete\n"
+}
+# End of check_status_ise
+
+#=============================================================================
+#
+# Send a show tech (switch logs) command to the switch
+#
+proc send_show_tech { swip } {
+    global timeout
+    global cn_prompt
+    set spawn_id [login $swip]
+    send "term len 0\n"
+    expect {
+        -re "# $" { }
+        timeout {
+            send_ccbcl_status "!\$Status Comm Timeout"
+            return 2
+        }
+        eof     {
+            send_ccbcl_status "!\$Status Comm Drop"
+            return 3
+        }
+        default{ exp_continue }
+    }
+    set timeout 300
+    send "show tech detail\n"
+    expect {
+        -re "# $" { }
+        timeout {
+            send_ccbcl_status "!\$Status Comm Timeout"
+            return 2
+        }
+        eof     {
+            send_ccbcl_status "!\$Status Comm Drop"
+            return 3
+        }
+        default{ exp_continue }
+    }
+    send "exit\r"
+    close
+    wait
+    send_error "send_cmd complete\n"
+    set timeout 10
+}
+# End of check_status_ise
+
+#=============================================================================
+#
+# Main program running here.
+#
+set timeout 20 
+set use_ssh 0
+set last_pw_idx 0
+
+# Get the controller IP.
+set cn_ip [lindex $argv 0]
+set sw_ip [lindex $argv 1]
+set icon_ip [lindex $argv 2]
+send_error "Controller has IP ($cn_ip), Switch IP=$sw_ip, ICON IP=$icon_ip.\n"
+
+# following line gets the version
+send_show_version $sw_ip
+
+# following line gets the 'show tech' logs
+# sequnce is: log in to switch, term len 0, show tech detail, exit
+send_show_tech $sw_ip
+
+# and another example...this is how to skip a sw or use != to only do one sw
+# if { $sw_ip != "10.64.100.93" } {
+#   send_error "Skipping $sw_ip\n"
+#   exit 0
+# }
+
+exit 0
+
+###
+# Modelines:
+# Local Variables:
+# tab-width: 4
+# indent-tabs-mode: nil
+# End:
+# vi:sw=4 ts=4 expandtab

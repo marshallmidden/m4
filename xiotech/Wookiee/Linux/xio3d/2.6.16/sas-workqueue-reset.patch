@@ -1,0 +1,269 @@
+diff -ur 2.6.16/obj-750/drivers/scsi/aic94xx/aic94xx_scb.c /home/holtyb/cvsrep/head/work/Wookiee/Linux/xio3d/2.6.16/obj-750/drivers/scsi/aic94xx/aic94xx_scb.c
+--- a/drivers/scsi/aic94xx/aic94xx_scb.c	2006-08-31 08:21:18.615023026 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_scb.c	2006-08-30 13:13:28.000000000 -0500
+@@ -322,7 +322,8 @@
+ 				    __FUNCTION__, le16_to_cpu(task_index));
+ 			return;
+ 		}
+-		scsi_req_abort_cmd(sc);
++		/* race condition here, let time out. */
++        /* scsi_req_abort_cmd(sc); */
+ 	}
+ }
+ 
+diff -ur 2.6.16/obj-750/drivers/scsi/sas/sas_discover.c /home/holtyb/cvsrep/head/work/Wookiee/Linux/xio3d/2.6.16/obj-750/drivers/scsi/sas/sas_discover.c
+--- a/drivers/scsi/sas/sas_discover.c	2006-08-31 08:21:20.152876963 -0500
++++ b/drivers/scsi/sas/sas_discover.c	2006-08-30 08:35:30.000000000 -0500
+@@ -546,7 +546,7 @@
+             if ( task->task_status.stat == SAS_OPEN_REJECT ) {
+                 SAS_DPRINTK("%s: %llX task %p OPEN REJECT... HARD RESET\n", 
+                         __FUNCTION__, SAS_ADDR(dev->sas_addr),task);
+-                sas_execute_disable_enable_phy(dev);
++                sas_execute_disable_enable_phy(dev, 0);
+             }
+ 
+ 			goto ex_err;
+diff -ur 2.6.16/obj-750/drivers/scsi/sas/sas_expander.c /home/holtyb/cvsrep/head/work/Wookiee/Linux/xio3d/2.6.16/obj-750/drivers/scsi/sas/sas_expander.c
+--- a/drivers/scsi/sas/sas_expander.c	2006-08-31 08:21:20.158876393 -0500
++++ b/drivers/scsi/sas/sas_expander.c	2006-08-30 17:23:53.000000000 -0500
+@@ -30,6 +30,7 @@
+ #include <scsi/sas/sas_task.h>
+ #include <scsi/sas/sas_discover.h>
+ 
++#include <linux/workqueue.h>
+ #include <linux/delay.h>	/*DWD*/
+ 
+ static int sas_discover_expander(struct domain_device *dev);
+@@ -170,6 +171,17 @@
+ 	.default_attrs = ex_dev_attrs,
+ };
+ 
++struct smp_reset_work_task {
++    struct work_struct          work;
++    void*                       dev;
++    int (*lldd_control_phy)(struct sas_phy *, enum phy_func);
++    int                         phy_id;
++    int                         reset_only;
++};
++
++struct workqueue_struct* smp_reset_work_queue = NULL;
++
++
+ /* ---------- SMP task management ---------- */
+ 
+ static void smp_task_timedout(unsigned long _task)
+@@ -327,7 +339,7 @@
+     if ( dev->port->ha->first_discovery_done && (SAS_ADDR(phy->attached_sas_addr) == 0) ) {
+         SAS_DPRINTK("ex %016llx attempting to reset phy%02d: BOGUS ADDR 0\n",
+                 SAS_ADDR(dev->sas_addr), phy->phy_id );
+-        sas_execute_disable_enable_phy(dev);
++        sas_execute_disable_enable_phy(dev, 0);
+     }
+ 
+ 
+@@ -2067,46 +2079,103 @@
+  * 	   SAS_QUEUE_FULL (controller's queue is full)
+  * 	   SAS_TASK_UNDELIVERED (Task delivery or Target failure)
+  */
+-int sas_execute_disable_enable_phy(struct domain_device *dev)
++void sas_reset_phy_task( void* data);
++int sas_execute_disable_enable_phy(struct domain_device *dev, int reset_only)
+ {
+ 	int res = -ENOSYS;
+-    
+-    SAS_DPRINTK("%s: Disable Enable Phy ...", __FUNCTION__);
++    int i = 0;
++    struct smp_reset_work_task* srwt = NULL;
++
++    /* Init work queue if necessary. */
++    if (!smp_reset_work_queue)
++        smp_reset_work_queue = create_workqueue("smp_reset_work_queue");
++    if (!smp_reset_work_queue)
++        return -ENOMEM;
+ 
+ 	if (!dev->parent) {
+ 		struct sas_phy *phy = container_of(dev->port->phy_list.next,
+ 						   struct sas_phy,
+ 						   port_phy_el);
+-        SAS_DPRINTK(" phy %d...", phy->id);
+-		res = dev->port->ha->lldd_control_phy(phy,PHY_FUNC_HARD_RESET);
+-		res = dev->port->ha->lldd_control_phy(phy,PHY_FUNC_DISABLE);
+-		res = dev->port->ha->lldd_control_phy(phy,PHY_FUNC_LINK_RESET);
+-        
+-	} else {
+-		int i = 0;
++            
++        srwt = kzalloc(sizeof(*srwt), GFP_ATOMIC);
++        if (!srwt)
++            return -ENOMEM;
++
++        INIT_WORK(&srwt->work, sas_reset_phy_task, srwt);
++        srwt->dev = phy;
++        srwt->lldd_control_phy = dev->port->ha->lldd_control_phy;
++        srwt->phy_id = -1;
++        srwt->reset_only = reset_only;
+ 
+-		if (dev->parent->dev_type != EDGE_DEV &&
+-		    dev->parent->dev_type != FANOUT_DEV)
+-			return -ENOSYS;
++        SAS_DPRINTK("%s: A. Adding task to workqueue for Phy %d\n", __FUNCTION__, phy->id);
++        res = queue_work(smp_reset_work_queue, &srwt->work);
++    }
++    else {
++
++        if ( (dev->parent->dev_type != EDGE_DEV) &&
++                (dev->parent->dev_type != FANOUT_DEV) )
++            return -ENOSYS;
+ 
+         i = sas_ex_find_phy(dev->parent, dev->sas_addr, -1);
+         if (i != -1) {
+-			res = smp_phy_control(dev->parent, i, PHY_FUNC_HARD_RESET);
+-            res = smp_phy_control(dev->parent, i, PHY_FUNC_DISABLE);
+-            res = smp_phy_control(dev->parent, i, PHY_FUNC_LINK_RESET);
++            srwt = kzalloc(sizeof(*srwt), GFP_ATOMIC);
++            if (!srwt)
++                return -ENOMEM;
++
++            INIT_WORK(&srwt->work, sas_reset_phy_task, srwt);
++            srwt->dev = dev->parent;
++            srwt->phy_id = i;
++            srwt->reset_only = reset_only;
++
++            SAS_DPRINTK("%s: B. Adding task to workqueue for Phy %d\n", __FUNCTION__, srwt->phy_id);
++            res = queue_work(smp_reset_work_queue, &srwt->work);
+         }
+-        SAS_DPRINTK(" phy %d...", i);
+-	}
++    }
++
++	return res;
++}
++
++void sas_reset_phy_task( void* data)
++{
++    struct smp_reset_work_task* srwt = (struct smp_reset_work_task*)data;
++    struct sas_phy*             phy = NULL;
++    struct domain_device*       dev = NULL;
++    int res = 0;
++
++    if (!srwt || !srwt->dev) {
++        SAS_DPRINTK("%s: NULL srwt\n", __FUNCTION__);
++        return;
++    }
++
++    SAS_DPRINTK("%s: Attempting Phy %d reset_only %d\n", 
++            __FUNCTION__, srwt->phy_id, srwt->reset_only);
++
++    if ( srwt->phy_id == -1 ) {
++        phy = (struct sas_phy*)srwt->dev;
++        res = srwt->lldd_control_phy(phy, PHY_FUNC_HARD_RESET);
++        if ( !srwt->reset_only ) {
++            res = srwt->lldd_control_phy(phy, PHY_FUNC_DISABLE);
++            msleep(250);
++            res = srwt->lldd_control_phy(phy, PHY_FUNC_LINK_RESET);
++        }
++    } else {
++        dev = (struct domain_device*)srwt->dev;
++        res = smp_phy_control(dev, srwt->phy_id, PHY_FUNC_HARD_RESET);
++        if ( !srwt->reset_only ) {
++            res = smp_phy_control(dev, srwt->phy_id, PHY_FUNC_DISABLE);
++            msleep(250);
++            res = smp_phy_control(dev, srwt->phy_id, PHY_FUNC_LINK_RESET);
++        }
++    }
+ 
+     if ( res )
+     {
+-        SAS_DPRINTK("FAILED (%d)\n", res);
++        SAS_DPRINTK("%s: Phy %d FAILED (%d)\n", __FUNCTION__, srwt->phy_id, res);
+     }
+     else
+     {
+-        SAS_DPRINTK("SUCCESS\n");
++        SAS_DPRINTK("%s: Phy %d SUCCESS\n", __FUNCTION__, srwt->phy_id);
+     }
+ 
+-
+-	return res;
++    kfree(srwt);
+ }
+diff -ur 2.6.16/obj-750/drivers/scsi/sas/sas_scsi_host.c /home/holtyb/cvsrep/head/work/Wookiee/Linux/xio3d/2.6.16/obj-750/drivers/scsi/sas/sas_scsi_host.c
+--- a/drivers/scsi/sas/sas_scsi_host.c	2006-08-31 08:21:20.162876013 -0500
++++ b/drivers/scsi/sas/sas_scsi_host.c	2006-08-31 08:12:48.590455643 -0500
+@@ -427,8 +427,17 @@
+ 	SAS_DPRINTK("%s: aborting task 0x%p\n", __FUNCTION__, task);
+ 	res = task->dev->port->ha->lldd_abort_task(task);
+ 
+-    if ( task->task_status.abort_reason == SAS_TASK_TIMED_OUT )
+-        sas_execute_disable_enable_phy(task->dev);
++    if ( task->dev->dev_type == SATA_DEV )
++    {
++        /*
++        ** errcount >= 2 handled in sas_qc_done
++        */
++        if ( task->task_status.abort_reason == SAS_TASK_TIMED_OUT ) {
++            if ( !task->dev->err_count++ ) {
++                sas_execute_disable_enable_phy(task->dev, 1);
++            }
++        }
++    }
+ 
+ 	spin_lock_irqsave(&task->task_state_lock, flags);
+ 	if (task->task_state_flags & SAS_TASK_STATE_DONE) {
+@@ -741,11 +750,15 @@
+             
+         qc->err_mask |= ac_err_mask(rp->ending_fis[0x2]);
+ 
+-        if ( ts->stat == SAS_OPEN_REJECT ) {
+-            SAS_DPRINTK("%s: %llX task %p OPEN REJECT... HARD RESET\n", 
++        if ( (ts->stat == SAS_OPEN_REJECT)  || 
++             ((ts->stat == SAS_ABORTED_TASK) && (dev->err_count >= 2 )) ) {
++            SAS_DPRINTK("%s: %llX task %p Resetting dev\n", 
+                 __FUNCTION__, SAS_ADDR(dev->sas_addr),task);
+-            sas_execute_disable_enable_phy(dev);
++            sas_execute_disable_enable_phy(dev, 0);
++            dev->err_count = 0;
+         }
++        else if ( ts->stat != SAS_ABORTED_TASK )
++            dev->err_count = 0;
+ 
+         if (task->task_state_flags & SAS_TASK_STATE_ABORTED)
+         {
+@@ -962,7 +975,7 @@
+ 
+ 				if (rc) {
+ 					ata_sas_port_destroy(ap);
+-                    sas_execute_disable_enable_phy(dev);
++                    sas_execute_disable_enable_phy(dev, 0);
+ 					return rc;
+ 				}
+ 
+diff -ur 2.6.16/obj-750/include/scsi/sas/sas_discover.h /home/holtyb/cvsrep/head/work/Wookiee/Linux/xio3d/2.6.16/obj-750/include/scsi/sas/sas_discover.h
+--- a/include/scsi/sas/sas_discover.h	2006-08-31 08:21:20.081883705 -0500
++++ b/include/scsi/sas/sas_discover.h	2006-08-30 17:31:50.000000000 -0500
+@@ -162,6 +162,7 @@
+ 	u8  hashed_sas_addr[HASHED_SAS_ADDR_SIZE];
+ 
+ 	u8  frame_rcvd[32];
++    u32 err_count;
+ 
+ 	union {
+ 		struct expander_device ex_dev;
+@@ -205,6 +206,7 @@
+         INIT_LIST_HEAD(&dev->io_list);
+         spin_lock_init(&dev->io_list_lock);
+         dev->time_jiffies_created = jiffies;
++        dev->err_count = 0;
+ 	switch (dev->dev_type) {
+ 	case SAS_END_DEV:
+ 		INIT_LIST_HEAD(&dev->end_dev.LU_list);
+diff -ur 2.6.16/obj-750/include/scsi/sas/sas_expander.h /home/holtyb/cvsrep/head/work/Wookiee/Linux/xio3d/2.6.16/obj-750/include/scsi/sas/sas_expander.h
+--- a/include/scsi/sas/sas_expander.h	2006-08-31 08:21:20.085883326 -0500
++++ b/include/scsi/sas/sas_expander.h	2006-08-30 08:07:36.000000000 -0500
+@@ -134,5 +134,5 @@
+ int  sas_ex_revalidate_domain(struct domain_device *port_dev);
+ 
+ int sas_execute_hard_reset(struct domain_device *dev);
+-int sas_execute_disable_enable_phy(struct domain_device *dev);
++int sas_execute_disable_enable_phy(struct domain_device *dev, int reset_only);
+ #endif /* _SAS_EXPANDER_H_ */

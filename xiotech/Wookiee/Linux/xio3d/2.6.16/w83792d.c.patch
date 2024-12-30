@@ -1,0 +1,134 @@
+--- a/drivers/hwmon/w83792d.c	2006-02-21 13:45:06.918723942 -0600
++++ obj-750/drivers/hwmon/w83792d.c	2006-02-23 10:53:19.100803340 -0600
+@@ -42,8 +42,15 @@
+ #include <linux/i2c.h>
+ #include <linux/hwmon.h>
+ #include <linux/hwmon-sysfs.h>
++#include <linux/fs.h>
++#include <linux/watchdog.h>
+ #include <linux/err.h>
+ 
++#include <asm/uaccess.h>
++#include <asm/io.h>
++
++#define	PFX "w83792d:"
++
+ /* Addresses to scan */
+ static unsigned short normal_i2c[] = { 0x2c, 0x2d, 0x2e, 0x2f, I2C_CLIENT_END };
+ 
+@@ -193,6 +200,10 @@ static const u8 W83792D_REG_LEVELS[3][4]
+ 	  0xE2 }	/* (bit3-0) SmartFanII: Fan3 Level 3 */
+ };
+ 
++#define W83792D_REG_WDTLOCK		0x01
++#define W83792D_REG_WDTENA		0x02
++#define W83792D_REG_WDTSTS		0x03
++#define W83792D_REG_WDTTIME		0x04
+ #define W83792D_REG_GPIO_EN		0x1A
+ #define W83792D_REG_CONFIG		0x40
+ #define W83792D_REG_VID_FANDIV		0x47
+@@ -294,6 +314,7 @@ struct w83792d_data {
+ 	u32 alarms;		/* realtime status register encoding,combined */
+ 	u8 chassis;		/* Chassis status */
+ 	u8 chassis_clear;	/* CLR_CHS, clear chassis intrusion detection */
++	u8 watchdog;		/* Watchdog count */
+ 	u8 thermal_cruise[3];	/* Smart FanI: Fan1,2,3 target value */
+ 	u8 tolerance[3];	/* Fan1,2,3 tolerance(Smart Fan I/II) */
+ 	u8 sf2_points[3][4];	/* Smart FanII: Fan1,2,3 temperature points */
+@@ -1047,6 +1059,39 @@ device_create_file(&client->dev, \
+ } while (0)
+ 
+ 
++static ssize_t
++show_watchdog(struct device *dev, struct device_attribute *attr, char *buf)
++{
++	struct w83792d_data *data = w83792d_update_device(dev);
++	return sprintf(buf, "%d\n", data->watchdog);
++}
++
++static ssize_t
++store_watchdog(struct device *dev, struct device_attribute *attr,
++			const char *buf, size_t count)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct w83792d_data *data = i2c_get_clientdata(client);
++	u32 val;
++
++	val = simple_strtoul(buf, NULL, 10);
++
++	down(&data->update_lock);
++	w83792d_write_value(client, W83792D_REG_WDTTIME, val);
++	up(&data->update_lock);
++
++	return count;
++}
++
++static DEVICE_ATTR(watchdog, S_IRUGO | S_IWUSR,
++		show_watchdog, store_watchdog);
++
++#define device_create_file_watchdog(client) \
++do { \
++device_create_file(&client->dev, &dev_attr_watchdog); \
++} while (0)
++
++
+ /* This function is called when:
+      * w83792d_driver is inserted (when this module is loaded), for each
+        available adapter
+@@ -1147,6 +1175,30 @@ ERROR_SC_0:
+ 	return err;
+ }
+ 
++
++static void wdt_init(struct i2c_client *client)
++{
++	struct w83792d_data *data = i2c_get_clientdata(client);
++	u8 tmp;
++
++	down(&data->update_lock);
++	tmp = w83792d_read_value(client, W83792D_REG_CONFIG);
++	tmp |= 0x10;
++	w83792d_write_value(client, W83792D_REG_WDTLOCK, 0xAA);
++	w83792d_write_value(client, W83792D_REG_WDTLOCK, 0xCC);
++	w83792d_write_value(client, W83792D_REG_CONFIG, tmp);
++	tmp = w83792d_read_value(client, W83792D_REG_WDTENA);
++	printk(KERN_INFO PFX "Before, enable=%02x\n", tmp);
++	w83792d_write_value(client, W83792D_REG_WDTLOCK, 0xAA);
++	w83792d_write_value(client, W83792D_REG_WDTLOCK, 0xCC);
++	w83792d_write_value(client, W83792D_REG_WDTTIME, 0);
++	w83792d_write_value(client, W83792D_REG_WDTLOCK, 0x55);
++	tmp = w83792d_read_value(client, W83792D_REG_WDTENA);
++	printk(KERN_INFO PFX "After, enable=%02x\n", tmp);
++	up(&data->update_lock);
++
++	return;
++}
+ 
+ static int
+ w83792d_detect(struct i2c_adapter *adapter, int address, int kind)
+@@ -1322,6 +1388,7 @@ w83792d_detect(struct i2c_adapter *adapt
+ 
+ 	device_create_file_chassis(new_client);
+ 	device_create_file_chassis_clear(new_client);
++	device_create_file_watchdog(new_client);
+ 
+ 	device_create_file_thermal_cruise(new_client, 1);
+ 	device_create_file_thermal_cruise(new_client, 2);
+@@ -1354,6 +1543,8 @@ w83792d_detect(struct i2c_adapter *adapt
+ 	device_create_file_sf2_level(new_client, 2, 3);	/* Fan3 */
+ 	device_create_file_sf2_level(new_client, 3, 3);	/* Fan3 */
+ 
++	wdt_init(new_client);
++
+ 	return 0;
+ 
+ ERROR3:
+@@ -1506,6 +1575,8 @@ static struct w83792d_data *w83792d_upda
+ 			W83792D_REG_CHASSIS) >> 5) & 0x01;
+ 		data->chassis_clear = (w83792d_read_value(client,
+ 			W83792D_REG_CHASSIS_CLR) >> 7) & 0x01;
++		data->watchdog = w83792d_read_value(client,
++					W83792D_REG_WDTTIME);
+ 
+ 		/* Update Thermal Cruise/Smart Fan I target value */
+ 		for (i = 0; i < 3; i++) {

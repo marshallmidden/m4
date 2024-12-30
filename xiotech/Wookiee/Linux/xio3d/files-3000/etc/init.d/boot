@@ -1,0 +1,300 @@
+#! /bin/bash
+#
+# Copyright (c) 1996-2004 SuSE Linux AG, Nuernberg, Germany.
+# All rights reserved.
+#
+# Author: Ruediger Oertel <ro@suse.de>, 1996-2002
+#         Werner Fink <werner@suse.de>, 1996-2003
+#         Burchard Steinbild, 1996-2000
+#         Florian La Roche, 1996
+#
+# Please send feedback to http://www.suse.de/feedback
+#
+# /etc/init.d/boot
+#
+# first script to be executed from init on system startup
+#
+
+#
+# Avoid be interrupted by child or keyboard
+# 
+trap "echo" SIGINT SIGSEGV SIGQUIT
+set +e
+
+#
+# Get terminal size of standard input of the system console
+#
+test -z "$CONSOLE" && CONSOLE=/dev/console
+set -- $(stty size < $CONSOLE)
+  LINES=$1
+COLUMNS=$2
+export LINES COLUMNS CONSOLE
+
+#
+# Set I/O of this script and its childs to console
+#
+exec 0<> $CONSOLE 1>&0 2>&0
+
+#
+# Export the real device in variable REDIRECT.
+#
+REDIRECT="/dev/console"
+export REDIRECT
+if test $COLUMNS -eq 0 ; then
+    # Serial: columns and lines are not defined
+      LINES=24
+    COLUMNS=80
+    test "$TERM" = "linux" -o -z "$TERM" && TERM=vt102
+fi
+
+#
+# Configuration and coloring of the boot messages
+#
+
+. /etc/rc.status
+. /etc/sysconfig/boot
+
+# reasonable start values for bootsplash progress.
+export progress=0                                                              
+export sscripts=45                                                             
+export kscripts=45                                                             
+
+echo -n "System Boot Control: "
+echo "Running $0"
+
+#
+# Start of e.g. blogd, requires /proc and /dev/pts.
+#
+rc_reset
+echo -n "Mounting /proc filesystem"
+mount -n -t proc proc /proc
+rc_status -v -r
+
+test -d /sys && {
+    while read a b c  ; do
+	case "$b" in 
+	    sysfs)
+		echo -n "Mounting sysfs on /sys"
+		mount -n -t sysfs sysfs /sys
+		rc_status -v -r
+		break
+		;;
+	esac
+    done < /proc/filesystems
+}
+
+echo -n "Mounting /dev/pts"
+optpts="-o mode=0620,gid=5"
+mount -n -t devpts $optpts devpts /dev/pts
+rc_status -v -r
+
+#
+# Save old terminal settings and set -nl to avoid staircase
+# effect, do not lock scrolling, and avoid break characters.
+#
+otty=$(stty -g)
+if test "$FLOW_CONTROL" = "yes" ; then
+    stty -nl  ixon ignbrk -brkint
+else
+    stty -nl -ixon ignbrk -brkint
+fi
+
+#
+# Should we ask for interactive boot mode
+#
+DO_CONFIRM=""
+read -t 2 check < /proc/cmdline 2> /dev/null
+case "$check" in
+    *confirm*) DO_CONFIRM=yes ;;
+esac
+test -z "$CONFIRM_PROMPT_TIMEOUT" && CONFIRM_PROMPT_TIMEOUT=5
+if test "$PROMPT_FOR_CONFIRM" = "yes" -a "$DO_CONFIRM" != "yes" ; then
+    echo -en "${extd}Enter Interactive startup mode?${norm}"
+    rc_timer_on "$CONFIRM_PROMPT_TIMEOUT" 37
+    read -t "$CONFIRM_PROMPT_TIMEOUT" -n 1 \
+	-p " ${extd}y${norm}/[${extd}n${norm}]("${CONFIRM_PROMPT_TIMEOUT}s") " answer
+    rc_timer_off
+    case "$answer" in
+    [yYiI]) DO_CONFIRM=yes ;;
+    *)      DO_CONFIRM=    ;;
+    esac
+    unset answer
+    echo
+fi
+export DO_CONFIRM
+
+#
+# Start blogd, requires /proc and /dev/pts.
+# Export the real device in variable REDIRECT.
+#
+test -x /sbin/blogd -a -n "$REDIRECT" && /sbin/blogd $REDIRECT
+if test -z "$REDIRECT" ; then
+    if (echo -n > /dev/tty) 2>/dev/null ; then
+	REDIRECT=/dev/tty
+    else
+	REDIRECT=/dev/console
+    fi
+fi
+
+#
+# Common used variables
+#
+bootrc=/etc/init.d/boot.d
+rex="[0-9][0-9]"
+failed=""
+skipped=""
+callord=""
+
+#
+# Do we stop/start script in parallel?
+#
+startpar=$(type -p startpar)
+test "$RUN_PARALLEL" = "yes" || startpar=""
+test "$DO_CONFIRM"   = "yes" && startpar=""
+
+#
+# Start bootup client scripts.
+#
+if test -d ${bootrc}/ ; then
+    for i in ${bootrc}/S*; do
+	test -f $i || continue
+
+	B=${i##*/}
+	script=${B#*S$rex}
+	B=${B%$script}
+
+	rc_splash "$script start"
+
+	if test "$DO_CONFIRM" = "yes" ; then
+	    rc_confirm -t 5 "Start bootup script ${script}" < $REDIRECT > $REDIRECT 2>&1
+	    case "$?" in
+	    0) true     ;;
+	    1) continue ;;
+	    2) DO_CONFIRM=""
+	    esac
+	fi
+
+	if test -z "$startpar" ; then
+	    blogger "$script start"
+
+	    if test -x "$i" ; then
+		$i start
+	    else
+	        echo Running $i
+		/bin/sh $i b
+		rc_status -v1 -r
+	    fi
+	    status=$?
+	    echo -en "$rc_reset"
+
+	    case $status in
+	    [1-4])   failed="${failed:+$failed }$script"   ;;
+	    [56])   skipped="${skipped:+$skipped }$script" ;;
+	    [07]|*) ;;
+	    esac
+
+	    blogger "'$script start' exits with status $status"
+	else
+	    # Parallel boot only for valid scripts
+	    test -x $i || continue
+
+	    # Current vector
+	    eval cur=\${$B}
+	    test -n "$cur" || callord="${callord:+$callord }$B"
+
+	    # Remember scripts
+	    eval $B="\${cur:+$i }\${cur:-$i}"
+	fi
+    done
+fi
+
+#
+# Call the scripts in correct order
+#
+if test -n "$startpar" ; then
+    declare -i s
+    for p in $callord ; do
+	vect=$p
+	eval p=(\${$p})
+
+	blogger "run boot scripts (${p[@]##*S$rex})"
+	if test ${#p[@]} -eq 1 ; then
+	    ${p} start
+	    status=($?)
+	else
+	    status=($($startpar -t 30 -T 3 -a start ${p[@]}))
+	fi
+	echo -en "$rc_reset"
+	blogger "exit status of (${p[@]##*S$rex}) is (${status[@]})"
+
+	s=0
+	for script in ${p[@]##*S$rex} ; do
+	    case "${status[$s]}" in
+	    [1-4])  failed="${failed:+$failed }$script"   ;;
+	    [56])  skipped="${skipped:+$skipped }$script" ;;
+	    0|*)   ;;
+	    esac
+	    : $((s++))
+	done
+    done
+fi
+
+#
+# Be verbose and print stats
+#
+echo -n "System Boot Control: "
+echo -e "The system has been ${stat}${extd}set up${norm}"
+if test -n "$failed" ; then
+    n=$((${#failed} + 7))
+    echo -n  "Failed features: "
+    test $n -lt 47 && echo -en "\033[${COLUMNS}C\033[${n}D"
+    echo -e  "${warn}${failed}${norm}"
+fi
+if test -n "$skipped" ; then
+    n=$((${#skipped} + 7))
+    echo -n  "Skipped features: "
+    test $n -lt 47 && echo -en "\033[${COLUMNS}C\033[${n}D"
+    echo -e  "${attn}${skipped}${norm}"
+fi
+
+#
+# Start user defined bootup script.
+#
+if test -f /etc/init.d/boot.local ; then
+    echo -n "System Boot Control: "
+    echo "Running /etc/init.d/boot.local"
+    /bin/sh /etc/init.d/boot.local
+    rc_status -v1 -r
+    rc_splash "boot.local start"
+fi
+
+#
+# Stop blogd
+#
+test -x /sbin/blogd && killproc -QUIT /sbin/blogd
+
+#
+# Check for boot cycle detection
+#
+test -s /lib/bootcycle/stats && . /lib/bootcycle/stats
+
+#
+# Remember for master resource script
+#
+if test "$DO_CONFIRM" = "yes" ; then
+    touch /var/run/do_confirm
+fi
+
+#
+# Restore old terminal settings
+#
+stty $otty
+
+# run SuSEconfig (with args) if needed
+if test -f /var/lib/YaST2/run_suseconfig ; then
+    /sbin/SuSEconfig `cat /var/lib/YaST2/run_suseconfig`
+    rm -f /var/lib/YaST2/run_suseconfig
+fi
+
+rc_reset
+exit 0

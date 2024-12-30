@@ -1,0 +1,126 @@
+===============
+FlightRecorder
+===============
+
+The flightrecorder is compiled into the frontend and backend only on
+debug builds by default.  It can be enabled for performance builds by
+editing Proc/src/Makefile and defining FLIGHTRECORDER even for
+performance builds (PERF defined).
+
+The config file /opt/xiotech/procdata/flightrecorder.cfg control the
+flightrecorder's configuration.  Comments in the example file
+demonstrate the default settings.  You can configure the number of
+records for both the frontend and backend, as well as the number of
+data bytes to include with each record.  Enable bits for various
+layers of the system can be used to limit what gets recorded in the
+trace at run-time.
+
+You can also send signals to Front.t and/or Back.t to control 
+the flightrecorder:
+
+SIGRTMAX-3 will start the flightrecorder (open a trace file)
+SIGRTMAX-2 will stop the flightrecorder (close a trace file)
+SIGRTMAX-1 will restart a trace file (logically discard all records)
+SIGRTMAX   will rotate a trace file (close, rename, reopen)
+
+You can determine signal numbers with `kill -l`.
+
+Examples where SIGRTMAX == 64:
+  # start based on current config file settings,
+  # or with defaults if no config file exists.
+  killall -61 Front.t Back.t
+
+  # stop
+  killall -62 Front.t Back.t
+
+  # restart (discards all records, but doesn't check config file)
+  killall -63 Front.t Back.t
+
+  # rotate (rename existing file, load config, and open a new file)
+  killall -64 Front.t Back.t
+
+
+If the flightrecorder actually sees much use, we can and should create
+ccbcl commands to control it, rather than using environment variables
+and signals.
+
+========
+frtview
+========
+
+The frtview program will display flightrecorder traces.
+
+Because frtview scans the trace twice (once in order to find the
+oldest record, and again to display everything), you may get strange
+results if you view a file that is still being written to by the
+flightrecorder, because records will be overwritten between scans, and
+the delta calculations will be totally wrong.  You should either make
+a copy of the trace file before viewing the trace file, stop or rotate
+the flightrecorder with signals, or stop xio3d prior to viewing the
+trace file.
+
+frtview can interleave multiple trace files together in chronological
+order, based on the tsc values.  Ties are broken by the order of the
+trace files on the command line.  You'll typically want to put the
+frontend filename first.
+
+When data bytes have been recorded in the trace, they will be
+displayed in both hex and ascii, with non-printable characters showing
+as a dot.  Note that many records will show you an allocated but not
+yet filled data buffer, either because a read has not yet been issued,
+or because write data has not yet been transferred from the host into
+the buffer.
+
+===============
+frtview output:
+===============
+
+Each line is preceded by a line number.  
+The records are displayed in chronological order sorted by tsc.
+
+Following the line number is the address of the PRP or RRP being traced.
+
+Next is the record type description.  The possiblities are:
+     RAID execute: an RRP was executed by r$exec
+
+     RAID complete: an RRP was completed by r$comp
+
+     PHYS queue@tail or queue@head: a PRP was queued by PH_que
+
+     PHYS discard: a mirrored read PRP was discarded after being queued
+
+     PHYS sent-sg/sent-isp: a command was sent to the SG driver/ISP driver
+
+     PHYS sg-done/isp-done: a command completion was read from the SG driver/ISP driver
+
+     PHYS complete: a PRP was completed
+
+     PHYS error@tail: a PRP was placed in the errio queue for delay before retry
+
+     PHYS retry@head: a PRP was moved from the errio queue to the head of newio
+                      queue to be retried.
+
+
+The pid, rid, or vid indicates the id of the device.
+
+The operation in the request packet will be displayed, both
+symbolically for read/write/verify, and as the VRP/RRP function number
+for VRPs/RRPs, and the SCSI CDB opcode for PRPs.
+
+The sda is the starting disk address.  Many of the internal filesystem
+ops do not set the sda in the PRP, so it may be displayed as zero even
+when the CDB specifies a non-zero disk address.  Fix the Proc code if
+you want the sda displayed more accuretely in traces.
+
+A block count (or byte count for certain PRP CDB opcodes) will be shown.
+
+Some sort of status or data field of interest will be displayed next,
+depending on the record type.  It is typically either a queue depth or
+completion status of some sort.
+
+The tsc is the processor's timestamp counter.
+
+Following the tsc is an optional delta area, which if present will
+show the record type and line number of a previous record for the same
+PRP or RRP, as well as the tsc delta in ticks, microseconds, and
+milliseconds.

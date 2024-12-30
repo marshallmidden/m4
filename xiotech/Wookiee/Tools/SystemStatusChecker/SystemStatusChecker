@@ -1,0 +1,776 @@
+#!/usr/bin/perl -w
+#-----------------------------------------------------------------------------
+#
+# $Id: SystemStatusChecker.pl $
+#
+# Script to validate the the following:
+# 1. All Controllers are Operational
+# 2. All paths to all Pdisks/ISE Volumes/Bays are present.
+# 3. All RAIDS fully operational
+# 4. ALL PDisk DevStatus
+# 5. No Remote DSCs seen by controllers
+#
+#
+# Usage: statusChecker [-d DscId]
+#
+# Where:
+#
+# [-d DscId]
+#    Dsc ID of the system you want to analyze
+#
+# optional: [-e OpErrors.txt file]
+#    File to keep track of error messages to send to the customers
+#
+# optional: [-s OpStatus.txt file]
+#    File to keep track of the current status to send to the customer.
+#
+# optional: [-p switch_password]
+#    User-supplied password to log into a switch.
+#
+# optional: [-g check_for_georep_zones]
+#    Whether or not to run the geo-rep zone checker.
+#
+# Note: The scripts opens the /var/xiotech/XioWebService/*Dsc_List*.xml to
+#       determine the IP addresses to connect to
+#
+#
+# Note: If any of the system-checks failes, the function will initiate
+#       return non-zero indicating the error.  If all is successful, then 
+#       the script will exit with a status of 0
+#
+#-----------------------------------------------------------------------------
+
+use Getopt::Std;
+
+
+# Ensure that the user supplied the correct command-line params
+getopts('d:s:e:p:g:');
+
+# Initialize variables that make this update a Custom Update Package.
+my $op_errors_file = "ThrowAwayError.txt";
+my $op_status_file = "ThrowAwayStatus.txt";
+my $g_dsc_id = 0;
+my $optionalSwitchPassword = "";
+my $check_for_georep_zones = 0;
+
+#
+# Get the DSC that we're operating on
+#
+
+if ($opt_d) {
+  $g_dsc_id = $opt_d;
+} else {
+  die ("Usage: SystemStatusChecker -d dsc-id -e [OpErrors.txt path] -s [OpStatus.txt path]\n");
+}
+
+
+#
+# Get the OpErrors.txt and OpStatus.txt file (if supplied)
+#
+
+if ($opt_e) {
+  $op_errors_file = "$opt_e";
+} 
+if ($opt_s) {
+  $op_status_file = "$opt_s";
+}
+if ($opt_g) {
+  $check_for_georep_zones = "$opt_g";
+  print STDERR "StatusChecker: Will executed GeoRep zone check.\n";
+}
+else
+{
+  print STDERR "StatusChecker: Won't execute GeoRep zone check (non-DSC upgrade).\n";
+}
+
+if ($opt_p) {
+  $optionalSwitchPassword = "$opt_p";
+  print STDERR "StatusChecker: Using user-supplied switch password.\n";
+}
+else
+{
+  print STDERR "StatusChecker: Using standard switch passwords (not user-supplied).\n";
+}
+
+print STDERR "Executing SystemStatusChecker against DSC: $g_dsc_id\n";
+
+
+#
+# Define the Ewok Description List (file containing the DSC IPs)
+#
+
+my $dsc_file;
+$dsc_file = `/bin/ls -t /var/xiotech/XioWebService/*Dsc_List*.*|head -1`;
+
+# Array of all DSCs on the system
+my %dsc;
+
+
+#
+# Define the location of the CCBCL and CCBCL-related variables 
+#
+
+my $ccbe_at;
+$ccbe_at = "./CCBE";
+
+# Command to run the ccbCL.pl script.
+my $run_ccbcl = "pushd $ccbe_at ;/usr/bin/perl ccbCL.pl";
+
+
+
+
+#
+# Define a bunch of subroutines, run them at the end of the file.
+#
+
+
+
+#-----------------------------------------------------------------------------
+#
+# send_ccbcl_message
+#
+# Sends an error message to the OpErrors file AND the customer log via CCBCL
+#
+# \param   controller   Controller to send the error through
+# \param   message      Error message that you want to send
+#
+#-----------------------------------------------------------------------------
+
+sub send_error_message($$)
+{
+    my $controller = $_[0];
+    my $message = "$_[1]";
+
+    #
+    # First, write out to the OpErrors.txt file
+    #
+
+    open (ERRORS_FILE, ">>$op_errors_file") or print STDERR "Can't open file '$op_errors_file' $!";
+    print (ERRORS_FILE "$message\n");
+    close (ERRORS_FILE);
+
+    #
+    # Next, write out to the controller via CCBCL
+    #
+
+    print STDERR "CCBCL($controller) ERROR - $message\n";
+    system( "$run_ccbcl '$controller' -e '\"logtextmessage -v 2 $message\"' >/dev/null" );
+
+}   # End of send_ccbcl_status
+
+
+
+
+#-----------------------------------------------------------------------------
+#
+# send_updated_progress
+#
+# \param   status	String indicating the status
+#
+#-----------------------------------------------------------------------------
+sub send_updated_progress($)
+{
+    my $status = $_[0];
+
+    open (STATUS_FILE, ">$op_status_file") or print STDERR "Can't open file '$op_status_file' $!";
+    print (STATUS_FILE "PercentComplete=-1\nStatus=$status");
+    close (STATUS_FILE);
+}   # End of send_updated_progress
+
+
+
+
+#-----------------------------------------------------------------------------
+#
+# chompit()
+#
+# Deletes any carriage returns and/or new-lines from the end of the input line.
+#
+#-----------------------------------------------------------------------------
+sub chompit($)
+{
+    my $line = $_[0];
+    $line =~ s/\n*\r*\n*$//;
+    return($line);
+}   # End of chompit
+
+
+
+#-----------------------------------------------------------------------------
+#
+# read_Dsc_List()
+#
+# Read $dsc_file to get $dsc{} hash array set.
+#
+#-----------------------------------------------------------------------------
+sub read_Dsc_List
+{
+    if (!defined(open(FILE, "<$dsc_file"))) {
+        die("Cannot open Dsc_List file $dsc_file\n");
+    }
+    my $line;
+    my $id;
+    while (<FILE>) {
+        $line = chompit($_);
+        if ($line =~ /^.*<spaldsclist:id>(.*)<\/spaldsclist:id>/) {
+            $id = $1;                   # DSC ID number.
+        } elsif ($line =~ /^.*<xwstype:ip_addr>(.*)<\/xwstype:ip_addr>/) {
+            if (!defined($id)) {
+                die("Found ip_addr ($1) without a spaldsclist:id\n")
+            }
+           
+            if ($id == $g_dsc_id) {
+                if (defined($dsc{$id})) {
+                    $dsc{$id} .= ' ' . $1;
+                } else {
+                    $dsc{$id} =  $1;
+                }
+            }
+        }
+    }
+    close(FILE);
+}   # End of read_Dsc_List
+
+
+
+#---------------------------------------------------------------------------
+#
+# check_bedevicepaths_ok()
+#
+# Use @controller_ips to check if be device paths are ok.
+# 
+# Note: If needed, this will issue a 'rescan luns' to try to pick up new paths
+#
+#---------------------------------------------------------------------------
+
+sub check_bedevicepaths_ok($$)
+{
+    my $master_ip = $_[0];
+    my $dscs = $_[1];
+    my @controller_ips = split(/\s+/, $_[1]);
+    my $ips = join(':3000 ', @controller_ips) . ':3000';
+    
+    my $retryCount = 0;
+    my $maxRetries = 5;
+    my $firstAttempt = 1;
+    
+    while ($retryCount <= $maxRetries) {
+  
+      if ($firstAttempt == 0) {
+        # We must be retrying, so sleep 1 minute before re-checking
+        sleep(60);
+      }
+      
+      
+      #
+      # Execute the CCBCL command "a:bedevicepath enc bp" against each controller
+      #
+      
+      my $ccbe_output = `$run_ccbcl $ips -e 'a:bedevicepath enc bp ; a: bedevicepath pdisk bp'`;
+
+      print STDERR "ccbe_output=$ccbe_output";
+      
+      #
+      # Example output is below
+      #
+      # [0] 10.64.100.92:3000:4> bedevicepath enc bp
+      # Number of devices: 16
+      #   PID   BIT_PATH 
+      #  -----  -------- 
+      #  0000     0003
+      #  0001     0003
+      #  0002     0003
+      #  0003     0003
+      #  0004     0003
+      #  0005     0003
+      #  0006     0003
+      #  0007     0003
+      #  0008     000C
+      #  0009     000C
+      #  000A     000C
+      #  000B     000C
+      #  000C     000C
+      #  000D     000C
+      # --- Thus "3" is 2 bits set, and "C" are the other 2 bits set.
+      #
+
+      my @ccbe_output = split(/\n/, $ccbe_output);
+      my $bad_pids;
+      my $count = 0;
+      foreach my $i (@ccbe_output) {
+          if ($i =~ /^ *(0[0-9A-Fa-f]*) *000([0-9A-Fa-f])/) {
+              my $pid = $1;
+              my $ports = $2;
+              if ($ports ne '3' && $ports ne 'C') {
+                  $count++;
+                  if (!defined($bad_pids)) {
+                      $bad_pids = "$pid";
+                  } else {
+                      $bad_pids .= ",$pid";
+                  }
+              }
+          }
+      }
+      if ($count == 0) {
+          print STDERR "All back-end devices have redundant paths...";
+          return(0);              # Flag everything ok.
+      }
+
+
+      #
+      # We've encountered a problem.  At least one path is missing.
+      # It's possible that the system simply needs to issue a "rescan luns"
+      # and the problem may resolve itself. So, try this once.
+      #
+      
+      if ($firstAttempt) {
+      
+        # Issue the rescan luns command to both controllers
+        print STDERR "Found $count physical devices without dual connectivity.\n";
+        print STDERR "Executing 'rescan luns' on all controllers to attempt path-count correction...\n";
+        send_updated_progress("Rescanning storage devices");
+        my $rescanLunsOutput = `$run_ccbcl $ips -e 'a:rescan luns ; a: rescan luns'`;
+        
+      } elsif ($retryCount == $maxRetries) {
+        
+        # That was our last try.  Log the error and fail
+        print STDERR "Found $count physical devices without dual connectivity. Aborting upgrade...\n";
+        send_error_message($ips, "Found back-end physical devices without dual connectivity. Check Physical View for details.  Aborting upgrade...");
+        
+      } else {
+      
+        print STDERR "Found at least 1 non-redundant back-end device. Will check again in 1 minute.\n";
+        print STDERR "Executing 'resetq be 0' and 'resetq be 1' on ports 0 and 1 to attempt path-count correction...\n";
+        my $resetQlogigOutput_1 = `$run_ccbcl ${master_ip}:3000 -e resetq be 0`;
+        my $resetQlogigOutput_2 = `$run_ccbcl ${master_ip}:3000 -e resetq be 1`;
+      }
+      
+      $firstAttempt = 0;
+      $retryCount++;
+    }
+
+    return(1);
+
+}   # End of check_bedevicepaths_ok
+
+
+
+
+#-----------------------------------------------------------------------------
+#
+# Use @controller_ips to get $master set.
+#
+# \param  dscs
+#
+#-----------------------------------------------------------------------------
+
+sub get_master($)
+{
+    my @controller_ips = split(/\s+/, $_[0]);
+    my $master;
+    my $slave;
+    my $bSuccess = 1;
+    my $m_ip; # = "1.1.1.1";
+
+    #
+    # Get master and other stuff, this allows for one to not be configured yet.
+    #
+
+    my $ips = join(':3000 ', @controller_ips) . ':3000';
+    print STDERR "ips=$ips\n";
+    
+    my $ccbcl_grep;
+    $ccbcl_grep .= "'" . 'OPERATIONAL *MASTER';
+    $ccbcl_grep .= "|" . 'OPERATIONAL *SLAVE';
+    $ccbcl_grep .= "|" . 'VCG_MAX_NUM_CTRLS';
+    $ccbcl_grep .= "'";
+
+
+    #
+    # Execute the "vcginfo" command and get the controller IPs and states
+    # via the 'grep's above
+    #
+
+    print STDERR "$run_ccbcl $ips -e 'a:vcginfo' | egrep -i $ccbcl_grep\n";
+    my $ccbe_output = `$run_ccbcl $ips -e 'a:vcginfo' | egrep -i $ccbcl_grep`;
+
+
+    #
+    # Split up the CCBCL output by lines
+    #
+
+    print STDERR "ccbe_output=$ccbe_output";
+    my @ccbe_output = split(/\n/, $ccbe_output);
+    
+
+    #
+    # Go through each line of the CCBCL output, checking for Ip and State
+    #
+
+    my $maxControllers = 0;
+    foreach my $i (@ccbe_output) {
+        if ($i =~ /^.* (\d+\.\d+\.\d+\.\d+) *OPERATIONAL *MASTER.*/i) {
+            $m_ip = $1;
+            $master = $1 . ':3000';
+        } elsif ($i =~ /^.* (\d+\.\d+\.\d+\.\d+) *MASTER.*/i) {
+            send_error_message($ips, "Master controller not operational");
+        } elsif ($i =~ /.*VCG_MAX_NUM_CTRLS:.*(\d)/) {
+            #We matched the licensed-max line. Get the number after the matched string
+            print STDERR "System licensed for $1 controllers\n";
+            $maxControllers = $1;
+        }
+
+        if ($i =~ /^.* (\d+\.\d+\.\d+\.\d+) *OPERATIONAL *SLAVE.*/i) {
+            $slave = $1 . ':3000';
+        }
+    }
+
+    my $operational_ctrlrs = 0;
+    if (defined($master)) {
+        $operational_ctrlrs++;
+    }
+    if (defined($slave)) {
+        $operational_ctrlrs++;
+    }
+    if ($operational_ctrlrs != $maxControllers) {
+        send_error_message($ips, "At least one controller is not operational. Aborting upgrade...");
+        $bSuccess = 0;
+    } 
+
+    return ($master, $m_ip, $bSuccess);
+}   # end of get_master
+
+
+
+#-----------------------------------------------------------------------------
+#
+# check_raids
+#
+# Validate that all RAIDS on the system are 100% operational. Block if
+# we find any Inoperative or Degraded raids (because the upgrade could
+# make the situation worse
+#
+# \param    master controller IP address
+#
+#-----------------------------------------------------------------------------
+sub check_raids($)
+{
+    my $ctrlr_ip = $_[0];
+    print STDERR "$ctrlr_ip\n";
+
+    my $ip = "$ctrlr_ip:3000";
+    my $ccbe_output = `$run_ccbcl ${ctrlr_ip}:3000 -e raids`;
+    print STDERR "ccbe_output\n";
+
+
+    my @ccbe_output = split(/\n/, $ccbe_output);
+    
+
+    my $rid;
+    my $stat;
+    my $inopRaids = 0;
+    foreach my $i (@ccbe_output) {
+        if ($i =~ /^ *(\d+) *(\d+) *(\d+) *(0x[0-9A-Fa-f]*)/) {
+            $rid = $1;
+            $stat = $4;
+            print STDERR "RAIDs rid=|$rid| stat=|$stat|\n";
+            if ($stat =~ /^0x01/) {
+                send_error_message($ip, "At least 1 RAID (ID $rid) is inoperative. Aborting upgrade...");
+                return 6;
+            }
+
+            if ($stat =~ /^0x11/) {
+                send_error_message($ip, "At least 1 RAID (ID $rid) is degraded. Aborting upgrade...");
+                return 7;
+            }
+        }
+   }
+
+   return 0;
+}
+
+
+
+#-----------------------------------------------------------------------------
+#
+# check_pdisks()
+#
+# Checks all of the pdisks on the system for a bad devstat (ignores bad miscstat)
+#
+# \param  master controller IP address
+#
+#-----------------------------------------------------------------------------
+
+sub check_pdisks($)
+{
+    my $ctrlr_ip = $_[0];
+    my $ip = "$ctrlr_ip:3000";
+
+    my $ccbe_output = `$run_ccbcl ${ctrlr_ip}:3000 -e devstat PD`;
+
+    my @ccbe_output = split(/\n/, $ccbe_output);
+
+    my $pid;
+    my $pdevstat;
+    my $pmiscstat;
+    my $pname;
+    foreach my $i (@ccbe_output) {
+        # Note: sometimes a line starts with a '*', this is ignored
+        if ($i =~ /^. *(\d+) *(0x[0-9A-Fa-f]*) *(0x[0-9A-Fa-f]*).*(PD[^ ]*)/) {
+            $pid = $1;
+            $pdevstat = $2;
+            $pmiscstat = $3;
+            $pname = $4;
+            print STDERR "PDisk pid=|$pid| pdevstat=|$pdevstat| pmiscstat=|$pmiscstat| pname=|$pname|\n";
+            if (!($pdevstat =~ /^0x10/)) {
+                send_error_message($ip, "Physical Disk $pname has a problem ($pdevstat). Aborting...");
+                return 9;
+            }
+        }
+    }
+   
+    return 0;
+}
+
+
+
+#-----------------------------------------------------------------------------
+#
+# check_warm_booted_switches()
+#
+# Checks all of the switches for the warm booted condition
+#
+# \param  master controller IP address
+#
+#-----------------------------------------------------------------------------
+
+sub check_warm_booted_switches($$)
+{
+    my $ctrlr_ip = $_[0];
+    my $ip = "$ctrlr_ip:3000";
+
+    my $optionalSwitchPassword = $_[1];
+
+
+    #
+    # Must be a 7000
+    #
+
+    my $ccbe_output = `$run_ccbcl ${ctrlr_ip}:3000 -e quit`;
+print STDERR "ccbe_output=$ccbe_output";
+    my @ccbe_output = split(/\n/, $ccbe_output);
+
+    my $model;
+
+    # Check each (might be only 1) controller to see if it is a 7000, and up.
+    foreach my $i (@ccbe_output) {
+       # Check controller model.
+       if ($i =~ /^Login to (.*) controller at \(.*\) successful, connection ID:/) {
+          $model = $1;
+print STDERR "model=$model ip=$ctrlr_ip\n";
+          # If connection is not to a 7000, do not attempt to check for switches.
+          if ($model ne "7000") {
+             return 0;
+          }
+       }
+    }
+
+    # If can not connect to controller, do not attempt check switches.
+    if (!defined($model)) {
+print STDERR "model=not defined ip=$ip\n";
+       return 0;
+    }
+
+    print STDERR "Checking for warm booted switches...\n";
+    send_updated_progress("Checking for warm booted switches...");
+
+    # Command to run the check warm booted switch script.
+    my $run_check_warm_booted_sw = "./check_warm_booted_sw";
+
+    my @splt_ip =  split(/\./, $ctrlr_ip);
+    my $priv_net_ip = "$splt_ip[0].$splt_ip[1].$splt_ip[2]";
+    for (my $lip = 192; $lip <= 199; $lip++) {
+        my $sw_ip = "$priv_net_ip" . "." . "$lip";
+        send_updated_progress("Checking switch $sw_ip...");
+        my $command = "$run_check_warm_booted_sw $sw_ip $optionalSwitchPassword";
+        my $output = `$command`;
+        $status = $? >> 8;
+        if ($status == 1) {
+            send_error_message($ip, "Warm booted switch detected: $sw_ip. Aborting...");
+            return 10;
+        } 
+        elsif ($status == 7)
+        {
+            send_error_message($ip, "Failed to log into switch at: $sw_ip (invalid password). Aborting...");
+            return 11;
+        } 
+    } 
+
+    return 0;
+}
+
+
+#-----------------------------------------------------------------------------
+#
+# check_no_remote_ctrlrs()
+#
+# Checks to make sure no remote DSCs are seen by this system (vlink zones removed)
+#
+# \param  master controller IP address
+# \param  List of all controllers
+#
+#-----------------------------------------------------------------------------
+
+sub check_no_remote_ctrlrs($@)
+{
+
+    my $result = 0;
+    my $master_ctrlr_ip = shift;
+    my @ctrlr_ip_list = @_;
+    my $numControllers = @ctrlr_ip_list;
+    my $bWarningIssued = 0;
+    
+    # Need to check for connections from both controllers
+    for ($count = 0; $count < $numControllers; $count++) {
+    
+      print STDERR "Checking for remote links on controller: $ctrlr_ip_list[$count]\n";
+      
+      # Execute "vlinkctrlcount" to find number of remote controllers attached to ctrlr.
+      my $ccbe_output = `$run_ccbcl ${ctrlr_ip_list[$count]}:3000 -e vlinkctrlcount`;
+      
+      # Seperate the output into multiple lines
+      my @ccbe_output = split(/\n/, $ccbe_output);
+      foreach my $i (@ccbe_output) {
+      
+          # Look for a link that says "Number of remote controllers: X"
+          if ($i =~ /Number of remote controllers: ([0-9][0-9]*)/) {
+          
+              $numRemoteControllers = $1;
+              print STDERR "Number of remote controllers on ctrlr: $ctrlr_ip_list[$count] = $numRemoteControllers\n";
+
+              if ($numRemoteControllers != 0) {
+                if ($bWarningIssued == 0) {
+                  send_error_message($master_ctrlr_ip, "Geo-Replication (remote link) zones must be disabled during the upgrade process.\n");
+                  $bWarningIssued = 1;
+                }
+                send_error_message($master_ctrlr_ip, "$numRemoteControllers remote controller ports are connected to controller $ctrlr_ip_list[$count].");
+                $result = 1;
+              }             
+          }
+      }#for each output line
+    }#for each controller
+   
+    return $result;
+}
+
+
+#-----------------------------------------------------------------------------
+#
+# Main()
+#
+# Perform all of the system-health checks here.
+#
+# Note: If any of the system-checks failes, the function will initiate
+#       an "exit X" indicating the error.  If all is successful, then 
+#       the script will exit with a status of 0
+#
+#----------------------------------------------------------------------------
+
+
+
+#
+# Get %dsc set to all DSC's and IP addresses of their controllers.
+#
+
+read_Dsc_List();
+
+
+
+#
+# Perform analysis for the DSC, the DSC specified by the -d option.
+#
+
+my $errorEncountered = 0;
+my $dscWasFound = 0;
+foreach my $k (keys(%dsc)) {
+    $dscWasFound = 1;
+    printf STDERR "DSC%s: -> %s\n", $k, $dsc{$k};
+
+    my @controller_ips = split(/\s+/, $dsc{$k});
+
+    # Get the master controller (also validates all controllers are operational)
+    my ($master, $m_ip, $bSuccess) = get_master($dsc{$k});
+    if (!defined($m_ip)) {
+        send_error_message($controller_ips[0], "Could not locate master controller. Aborting...");
+        undef($dsc{$k}); # Do not use this DSC in the future.
+        $errorEncountered = 1;
+        next;
+    }
+
+    if (defined($bSuccess) and (0 == $bSuccess)) {
+      # Some error occurred. Abort...
+      $errorEncountered = 1;
+      next;
+    }
+
+
+    if ($check_for_georep_zones) {
+      send_updated_progress("Checking for remote link zones...");
+      if (0 != check_no_remote_ctrlrs($m_ip, @controller_ips)) {
+        $errorEncountered = 1;
+        next;
+      }
+    }
+
+    print STDERR "Checking drive connectivity...\n";
+    send_updated_progress("Checking drive connectivity...");
+    if (0 != check_bedevicepaths_ok($m_ip, $dsc{$k})) {
+      $errorEncountered = 1;
+      next;
+    }
+
+    print STDERR "Checking RAIDS...\n";
+    send_updated_progress("Checking RAIDs...");
+    if (0 != check_raids($m_ip)) {
+      $errorEncountered = 1;
+      next;
+    }
+
+
+    print STDERR "Checking physical disks...\n";
+    send_updated_progress("Checking physical disks...");
+    if (0 != check_pdisks($m_ip)) {
+      $errorEncountered = 1;
+      next;
+    }
+
+    if (0 != check_warm_booted_switches($m_ip, $optionalSwitchPassword)) {
+      $errorEncountered = 1;
+      next;
+    }
+}
+
+
+if ($dscWasFound == 0) {
+  send_error_message("0.0.0.0", "The DSC $g_dsc_id could not be found. Contact Xiotech Support.");
+}
+
+
+
+print STDERR "Finshed checking DSC for problems. Problems?: $errorEncountered\n";
+
+
+if (0 == $errorEncountered) {
+  exit 0;
+} else {
+  exit 1;
+}
+
+#-----------------------------------------------------------------------------
+###
+# Modelines:
+# Local Variables:
+# tab-width: 4
+# indent-tabs-mode: nil
+# End:
+# vi:sw=4 ts=4 expandtab

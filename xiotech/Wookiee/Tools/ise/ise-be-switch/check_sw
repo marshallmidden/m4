@@ -1,0 +1,554 @@
+#!/usr/bin/expect --
+#
+# Script to check whether a switch needs to be updated
+#
+# Usage: check_sw <ip_7000_master> <ip_switch> <switch_password>
+#
+# Exit with 1 if a switch upgrade (or reload) is required, else 0.
+#-----------------------------------------------------------------------------
+
+send_error "Running script check_sw\n"
+
+# Globals 
+set g_sw_password "UNDEFINED"
+
+#-----------------------------------------------------------------------------
+
+# Regular expression representing the CN prompt.
+set cn_prompt ""
+
+# Like perl, the real execution continues anywhere ... define the proc's first.
+
+
+#=============================================================================
+#
+# Defines a "safe" version of "expect_out(0,string)"
+#
+#=============================================================================
+proc safe_expect_out_0 {} {
+  global expect_out
+  
+  if {[info exists expect_out(0,string)]} {
+    return $expect_out(0,string)
+  } else {
+    return ""
+  }
+}
+
+
+#=============================================================================
+proc login_now { user password do_ssh pwnum} {
+    global cn_prompt
+    global expect_out
+    global sw_ip
+    
+    #
+    # log into CN.
+    #
+    if {$do_ssh == 1} {
+        system "rm -f /root/.ssh/known_hosts"
+
+        spawn ssh "$user@$sw_ip"
+    } else {
+        spawn telnet -l $user $sw_ip
+    }
+    expect {
+        -ex "assword: " {
+            send_error "login_now, sending password <$expect_out(0,string)>\n"
+            send "$password\r"
+        }
+        -ex "(yes/no)? " {
+            send_error "login_now, sending yes <$expect_out(0,string)>\n"
+            send "yes\r"
+            exp_continue
+        }
+        -ex ": Connection refused" {
+            send_error "login_now <$expect_out(0,string)>\n"
+            return -1
+        }
+        -ex ": No route to host" {
+            send_error "login_now <$expect_out(0,string)>\n"
+            # This value 2 is used in sw_do_many to not print out a message.
+            exit 2
+        }
+        timeout      {
+            send_error "login_now timeout <[safe_expect_out_0]>\n"
+            exit 3
+        }
+        eof          {
+            send_error "login_now eof $sw_ip <[safe_expect_out_0]>\n"
+            return 0
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "login_now <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+
+# Toss the rest until prompt found
+
+    expect {
+        -re "\[\r\n]*(\[^\r\n]*)# $" {
+            set cn_prompt "$expect_out(1,string)"
+            send_error "login prompt -$cn_prompt- looks good\n"
+            return $spawn_id
+        }
+        -ex "assword: " {
+            send_error "login_now <$expect_out(0,string)>\n"
+            return -1
+        }
+        -ex "Permission denied, please try again." {
+            send_error "login_now <$expect_out(0,string)>\n"
+            return -1
+        }
+        -ex "Login incorrect" {
+            send_error "login_now <$expect_out(0,string)>\n"
+            return -1
+        }
+        -ex "Access denied" {
+            send_error "login_now <$expect_out(0,string)>\n"
+            return -1
+        }
+        timeout         {
+            send_error "login_now timeout <[safe_expect_out_0]>\n"
+            exit 3
+        }
+        eof             {
+            send_error "login_now eof <[safe_expect_out_0]>\n"
+            exit 4
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "login_now Prompt <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+    send_error "prompt problem $sw_ip\n"
+    exit 5
+}
+# End of login_now
+
+#=============================================================================
+# Log into a switch.
+#
+proc login { use_pwd use_ssh} {
+    global use_this_passwd
+    global telnet_or_ssh
+    global sw_ip
+    global g_sw_password
+    global pwd
+
+    set pwd(0) "@dmin123"
+    set pwd(1) "Made4you"
+    set pwd(2) "made4you"
+    set pwd(3) "@dm1n123"
+    set pwd(4) "@dmin1234"
+    set pwd(5) "admin123#"
+    set pwd(6) "adm1n123"
+    set pwd(7) "admin@123"
+    set pwd(8) "x10t3ch1"
+    set pwd(9) "x10t3ch!"
+    set pwd(10) "password"
+    set pwd(11) "xiotech"
+
+    if {$g_sw_password == "UNDEFINED"} {
+        set numpwds 12
+    } else {
+        set pwd(12) $g_sw_password;
+        set numpwds 13
+    }
+
+# Initialize to previous (if any);
+    set use_this_passwd $use_pwd
+    set telnet_or_ssh $use_ssh
+
+    for {} {$use_this_passwd < $numpwds} {incr use_this_passwd 1} {
+        for {} {$telnet_or_ssh < 2} {incr telnet_or_ssh 1} {
+            set tmp_spawn [login_now "admin" $pwd($use_this_passwd) $telnet_or_ssh $use_this_passwd]
+            if {$tmp_spawn == -1} {
+                close
+                wait
+                continue;
+            }
+            if {$tmp_spawn != 0} {
+                break;
+            }
+        }
+
+        if {$tmp_spawn == 0} {
+            exit 6
+        }
+
+        if {$tmp_spawn == -1} {
+            set telnet_or_ssh 0
+            continue;
+        }
+        break;
+    }
+
+    if {$use_this_passwd >= $numpwds} {
+        send_error "no valid passwords found\n"
+        exit 7
+    }
+    return $tmp_spawn
+}
+# End of login
+
+#=============================================================================
+# Send a terminal length 0 to the switch
+#
+proc send_terminal_length_0 {} {
+    global cn_prompt
+    global expect_out
+    global sw_ip
+
+    # We know login worked if here, else command exits.
+    send_error "send terminal length 0\n"
+    send "terminal length 0\n"
+    expect {
+        -re "^$cn_prompt. $" {
+            send_error "prompt -$cn_prompt- gotten - terminal length 0\n"
+        }
+        timeout {
+            send_error "send_terminal_length_0 timeout <[safe_expect_out_0]>\n"
+            exit 23
+        }
+        eof     {
+            send_error "send_terminal_length_0 eof <[safe_expect_out_0]>\n"
+            exit 24
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "send_terminal_length_0 <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+}
+# End of send_terminal_length_0
+
+
+#=============================================================================
+# Change the password to whatever we expect/want -- the first in the list.
+# 1) "config terminal"
+# 2) "username admin password 0 @dmin123"
+# 3) "exit"
+#
+proc set_default_password {} {
+    global cn_prompt
+    global expect_out
+    global pwd
+    global use_this_passwd
+    global sw_ip
+
+    send_error "send config terminal\n"
+    send "config terminal\n"
+    expect {
+        -re "^$cn_prompt.config.. $" {
+            send_error "prompt gotten -$cn_prompt-(config)- config terminal\n"
+        }
+        timeout {
+            send_error "config terminal timeout <[safe_expect_out_0]>\n"
+            exit 25
+        }
+        eof     {
+            send_error "config terminal eof <[safe_expect_out_0]>\n"
+            exit 26
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "config terminal <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+
+    send_error "send username admin password 0\n"
+    send "username admin password 0 $pwd(0)\n"
+    expect {
+        -re "^$cn_prompt.config.. $" {
+            send_error "prompt gotten -$cn_prompt-(config)- send username admin password\n"
+        }
+        timeout {
+            send_error "send username admin password timeout <[safe_expect_out_0]>\n"
+            exit 27
+        }
+        eof     {
+            send_error "send username admin password eof <[safe_expect_out_0]>\n"
+            exit 28
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "send username admin password <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+
+    send_error "send end from config\n"
+    send "end\n"
+    expect {
+        -re "^$cn_prompt. $" {
+            send_error "prompt gotten -$cn_prompt- send end from config\n"
+        }
+        timeout {
+            send_error "send end from config timeout <[safe_expect_out_0]>\n"
+            exit 29
+        }
+        eof     {
+            send_error "send end from config eof <[safe_expect_out_0]>\n"
+            exit 30
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "send end from config <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+    # Set to the new default.
+    set use_this_passwd 0
+}
+# End of set_default_password
+
+
+#=============================================================================
+# "copy running-config startup-config" Just in case it needs doing before reboot.
+# Send "copy running-config startup-config" to the switch.
+#
+proc copy_running_startup {} {
+    global cn_prompt
+    global expect_out
+    global sw_ip
+    global timeout
+
+    set savetimeout $timeout
+    set timeout 480
+
+    send_error "send copy running-config startup-config\n"
+    send "copy running-config startup-config\n"
+    expect {
+        -re "^$cn_prompt. $" {
+            send_error "prompt gotten -$cn_prompt- copy_running_startup\n"
+        }
+        timeout {
+            send_error "copy_running_startup timeout <[safe_expect_out_0]>\n"
+            exit 21
+        }
+        eof     {
+            send_error "copy_running_startup eof <[safe_expect_out_0]>\n"
+            exit 22
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "copy_running_startup <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+    set timeout $savetimeout
+}
+# End of copy_running_startup
+
+
+#=============================================================================
+# Send a show version command to the switch
+#
+proc send_show_version { } {
+    global switchversion
+    global kickstart_image_file
+    global system_image_file
+    global system_version
+    global reset_reason
+    global cn_prompt
+    global expect_out
+    global sw_ip
+
+    set switchversion "None"
+    set kickstart_image_file "None"
+    set system_image_file "None"
+    set system_version "None"
+    set reset_reason "None"
+
+# We know login worked if here, else command exits.
+    send_error "send show version\n"
+    send "show version\n"
+    expect {
+        -re "  kickstart: (\[^\r\n]*)" {
+            set switchversion $expect_out(1,string)
+            send_error "Version retrieved=$switchversion for $sw_ip\n"
+            exp_continue
+        }
+        -re "  kickstart image file is: *bootflash:/(\[^\r\n]*)" {
+            set kickstart_image_file $expect_out(1,string)
+            send_error "Kickstart image file for $sw_ip is $kickstart_image_file\n"
+            exp_continue
+        }
+        -re "  system image file is: *bootflash:/(\[^\r\n]*)" {
+            set system_image_file $expect_out(1,string)
+            send_error "System image file for $sw_ip is $system_image_file\n"
+            exp_continue
+        }
+        -re "Reason: (\[^\r\n]*)" {
+            set reset_reason $expect_out(1,string)
+            send_error "Reset-Reason for $sw_ip is $reset_reason\n"
+            exp_continue
+        }
+        -re "  System version: (\[^\r\n]*)" {
+            set system_version $expect_out(1,string)
+            send_error "System version for $sw_ip is $system_version\n"
+            exp_continue
+        }
+        timeout {
+            send_error "send_show_version timeout <[safe_expect_out_0]>\n"
+            exit 8
+        }
+        eof     {
+            send_error "send_show_version eof <[safe_expect_out_0]>\n"
+            exit 9
+        }
+        -re "^$cn_prompt. $" {
+            send_error "prompt -$cn_prompt- gotten - show version\n"
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "send_show_version <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+
+    if {"$switchversion" == "None" || "$system_version" == "None"} {
+        exit 11
+    }
+
+    if {$kickstart_image_file == "None"} {
+        send_error "No kickstart image file found -- continue anyway.\n"
+    }
+
+    if {$system_image_file == "None"} {
+        send_error "No system image file found -- continue anyway.\n"
+    }
+}
+# End of send_show_version
+
+#=============================================================================
+# Send exit command to the switch
+#
+proc send_exit { } {
+    send "exit\r"
+    close
+    wait
+}
+# End of send_exit
+
+#=============================================================================
+# Main program running here.
+#
+# Set default timeout to 60 seconds (10 seconds would occasionally fail)
+set timeout 60 
+
+# Get the controller IP.
+set master [lindex $argv 0]
+set sw_ip [lindex $argv 1]
+set g_sw_password [lindex $argv 2]
+
+set match "MATCH"
+set notb "NOTB"
+send_error "Controller has master ($master), Switch IP=$sw_ip, match=$match, notb=$notb.\n"
+
+# Login to switch.
+set spawn_id [login 0 0]
+
+# Following line sets the terminal to not do "--More--"
+send_terminal_length_0
+
+# If password is not the recommended, change it to be the recommended.
+if { $use_this_passwd != 0 } {
+    set_default_password
+    copy_running_startup
+}
+
+# Following line gets the version
+send_show_version
+
+if { $switchversion == "None" } {
+    send_error "Did not get a version? $switchversion\n"
+    # Logout
+    send_exit
+    exit 10
+}
+
+# Delete any letters or parentheses.
+set sw1 $switchversion
+while {[regsub {[ A-Za-z)]} $sw1 {} sw1]} {}
+regsub {[(]} $sw1 {.} sw1
+while {[regsub {[.][.]} $sw1 {.} sw1]} {}
+
+# switch upgrade (or reload) is required boolean.  
+set upgrade_switch 0
+
+# Array of switchversion numbers.
+set sw2 [split $sw1 "."]
+set s0 [lindex $sw2 0]
+set s1 [lindex $sw2 1]
+set s2 [lindex $sw2 2]
+if { "$notb" != {} } {
+    set nb [split $notb "."]
+    set n0 [lindex $nb 0]
+    set n1 [lindex $nb 1]
+    set n2 [lindex $nb 2]
+    if {$s0 < $n0 || ($s0 == $n0 && ($s1 < $n1 || ($s1 == $n1 && $s2 < $n2)))} {
+        send_error "$switchversion before version $notb\n"
+        set upgrade_switch 1
+    }
+}
+
+
+
+#
+# Check for all conditions that give a definitive yes/no for warm-boot conditions:
+#
+
+set warm_boot_detected "true"
+send_error "BES: Last-reset-version = $system_version, CurrentVer: $switchversion, Reset Reason: $reset_reason\n"
+if {($switchversion == "version 4.2(1b)") && ($system_version == "3.1(3a)")} {
+    send_error "last-reset-version is 3.1(3a) and current version at 4.2(1b) - Definately not warm-boot.\n"
+    set warm_boot_detected "false"
+} elseif {$reset_reason == "Reset due to upgrade"} {
+    send_error "Switch firmware reset-reason is $reset_reason. Definitive warm-boot issue detected\n"
+    set warm_boot_detected "true"
+} elseif {$reset_reason == "Reset Requested by CLI command reload"} {
+    send_error "Switch firmware reset-reason is $reset_reason. Switch is not warm-booted.\n"
+    set warm_boot_detected "false"
+} elseif {$reset_reason == "Unknown"} {
+    send_error "Switch firmware reset-reason is $reset_reason. Switch is not warm-booted (indicates power-cycle)\n"
+    set warm_boot_detected "false"
+} else {
+    send_error "Cannot determine if switch is warm-booted or not. Assuming warm-booted...\n"
+    set warm_boot_detected "true"
+}
+
+if {$warm_boot_detected == "true"} {
+    send_error "BES: Warm boot issue detected\n"
+    exit 100
+}
+
+
+if { $switchversion == "version $match" } {
+    send_error "Already at version $match - skipping $sw_ip\n"
+    set upgrade_switch 0
+} else {
+    set upgrade_switch 1
+}
+
+# Logout of cisco switch.
+send_exit
+
+# Exit with 1 if a switch upgrade (or reload) is required, else 0.
+exit $upgrade_switch
+
+#=============================================================================
+
+###
+# Modelines:
+# Local Variables:
+# tab-width: 4
+# indent-tabs-mode: nil
+# End:
+# vi:sw=4 ts=4 expandtab

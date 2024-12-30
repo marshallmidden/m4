@@ -1,0 +1,72 @@
+--- a/drivers/scsi/scsi_lib.c	2006-03-19 23:53:29.000000000 -0600
++++ obj-3d3000/drivers/scsi/scsi_lib.c	2006-06-12 17:52:17.860791985 -0500
+@@ -368,12 +368,19 @@ static int scsi_req_map_sg(struct reques
+ 			   int nsegs, unsigned bufflen, gfp_t gfp)
+ {
+ 	struct request_queue *q = rq->q;
+-	int nr_pages = (bufflen + PAGE_SIZE - 1) >> PAGE_SHIFT;
++	int nr_pages = (bufflen + sgl[0].offset + PAGE_SIZE - 1) >> PAGE_SHIFT;
+ 	unsigned int data_len = 0, len, bytes, off;
+ 	struct page *page;
+ 	struct bio *bio = NULL;
+ 	int i, err, nr_vecs = 0;
+ 
++	/* The nr_pages calc above assumes that only the first and last page
++	 * may be partial.  With direct I/O of iovecs, the first and last page
++	 * of each iovec may be partial pages, so make sure we allocate at
++	 * least nsegs pages to handle the worst case when nothing coalesces.
++	 */
++	nr_pages = max_t(int, nr_pages, nsegs);
++
+ 	for (i = 0; i < nsegs; i++) {
+ 		page = sgl[i].page;
+ 		off = sgl[i].offset;
+@@ -417,6 +424,18 @@ static int scsi_req_map_sg(struct reques
+ 		}
+ 	}
+ 
++	/* if bio_add_pc_page coalesced page fragments, we may not have hit
++	 * the vec limit, and we may still need to merge the bio into the req.
++	 */
++	if (bio != NULL) {
++		err = scsi_merge_bio(rq, bio);
++		if (err) {
++			bio_endio(bio, bio->bi_size, 0);
++			goto free_bios;
++		}
++		bio = NULL;
++	}
++
+ 	rq->buffer = rq->data = NULL;
+ 	rq->data_len = data_len;
+ 	return 0;
+@@ -1480,6 +1499,8 @@ static inline int scsi_host_queue_ready(
+ static void scsi_kill_request(struct request *req, request_queue_t *q)
+ {
+ 	struct scsi_cmnd *cmd = req->special;
++	struct scsi_device *sdev = cmd->device;
++	struct Scsi_Host *shost = sdev->host;
+ 
+ 	blkdev_dequeue_request(req);
+ 
+@@ -1492,6 +1513,20 @@ static void scsi_kill_request(struct req
+ 	scsi_init_cmd_errh(cmd);
+ 	cmd->result = DID_NO_CONNECT << 16;
+ 	atomic_inc(&cmd->device->iorequest_cnt);
++
++	/* backported from 2.6.17-rc6 */
++	/*
++	 * SCSI request completion path will do scsi_device_unbusy(),
++	 * bump busy counts.  To bump the counters, we need to dance
++	 * with the locks as normal issue path does.
++	 */
++	sdev->device_busy++;
++	spin_unlock(sdev->request_queue->queue_lock);
++	spin_lock(shost->host_lock);
++	shost->host_busy++;
++	spin_unlock(shost->host_lock);
++	spin_lock(sdev->request_queue->queue_lock);
++
+ 	__scsi_done(cmd);
+ }
+ 

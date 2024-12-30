@@ -1,0 +1,561 @@
+#!/usr/bin/expect --
+#
+#
+# Script to configure 1 or more ISEs. Tailored for use with
+# Nitrogen.
+#
+# Usage: ise_configure [-D] [-C] [-l] [-d <dsc>] [-v <n>] [-r <x>] [-s <s>] <ip address> [<ip address> ...]
+#
+# Where:
+#   -D  Debug
+#       Show the dialog with the ISE.
+#
+#   -C  Clean
+#       Remove all volumes and hosts from ISE (can be combined with options to
+#       subsequenetly create new volumes/hosts.)
+#
+#   -l  List the available storage space on the ISE for each diskpac and
+#       raid type.
+#
+#   -d <dsc>
+#       Create a host entry that accurately reflects the set of all possible
+#       back-end WWNs required to communicate with the specified DSC number.
+#
+#   -v <n>
+#       Create <n> volumes per ISE. May not handle odd numbers optimally.
+#       Given an even number, will create n/2 volumes per datapac; attempting
+#       to equally divide the available capacity between the volumes. The last
+#       volume on each datapac may be upto (n-1) GB larger than the others,
+#       due to the remainder when dividing total capacity by n.
+#
+#       If both -v and -d options are specified, the volumes are presented to
+#       the specified DSC.
+#
+#   -r <x>
+#       Specify the RAID type of all volumes created/listed by this command.
+#       Default is 5. Only other reasonable option is 1.
+#
+#   -s <s>
+#       Limit the size of created volumes to <s> GB instead of (capacity/n)
+#
+#   <ip address>
+#       Specify one or more IP addresses of ISE controllers. Note - does not
+#       check for duplicates, or for repeated access to the same ISE via
+#       differing controllers. Controllers are accessed sequentially.
+#
+# Typical command line to freshly initialize two ISEs with 4 RAID5 volumes per
+# datapac for use with DSC 10234 would be:
+#       ise_configure -d 10234 -C -v 8 10.64.102.150 10.64.102.164
+#
+
+set raid 5
+set cache "back"
+log_user 0
+
+set format "%a %b %d %X %Z %Y"
+set vol_prefix "V_"
+set host_prefix "D"
+
+proc usage {} {
+    puts "Usage: ise_configure \[-D] \[-C] \[-l] \[-d <dsc>] \[-v <n>] \[-r <x>] \[-s <s>] <ip address> \[<ip address> ...]"
+    puts "    Typical command line to freshly initialize two ISEs with 4 RAID5 volumes"
+    puts "    per datapac for use with DSC 10234 would be:"
+    puts "        ise_configure -d 10234 -C -v 8 10.64.102.150 10.64.102.164"
+    exit 1
+}
+
+# source "getopts"
+
+#-----------------------------------------------------------------------------
+# Given a dsc #, return a list of all the BE WWNs used.
+#
+proc dsc2wwn { dsc } {
+    set hex [format "%02X%02X%01X" [expr [expr $dsc >> 12] & 0xff] [expr [expr $dsc >> 4] & 0xff] [expr $dsc & 0xf]]
+    foreach dcn {0 1} {
+        foreach port {0 1 2 3} {
+            lappend wwn [format "21A%d00D0B2$hex%d" $port $dcn]
+        }
+    }
+    return $wwn
+}
+
+
+# regular expression representing the ISE prompt.  Either "seaSH> " or "root:> "
+set ise_prompt "(seaSH|root:|root|oem:|oem)> "
+
+#-----------------------------------------------------------------------------
+# Log into an ISE and start seash.
+#
+proc login { ise } {
+    global ise_prompt
+    #
+    # log into ISE.
+    #
+    spawn ssh "root@$ise"
+    expect {
+        "password: "    { send "federal\r" }
+        "(yes/no)? "    {
+                          send "yes\r"
+                          exp_continue
+        }
+        timeout         { exit 1 }
+        eof             { exit 1 }
+    }
+
+    #
+    # Start nseash.
+    #
+    expect {
+        "\# "   { send "nseash\r" }
+        timeout { exit 1 }
+        eof     { exit 1}
+    }
+
+    #
+    # Check it started.
+    #
+    expect {
+        -re $ise_prompt { return $spawn_id }
+        timeout         { exit 1 }
+        eof             { exit 1}
+    }
+}
+
+#-----------------------------------------------------------------------------
+# getopts  -- like the library routine
+#  sets flags based on the options available
+#
+proc getopts {opts Argv Options} {
+    upvar $Argv argv $Options options
+    catch {unset options}
+
+    set errflag 0
+
+    while {[string match "-*" $argv]} {
+        regexp "^-(\[^ ]+)( +(.*)?)?$" $argv junk block junk newargv
+        set argv $newargv
+        if {[string match "-" $block]} break
+
+        for {set index 0} {$index < [string length $block]} {incr index} {
+            set char [string range $block $index $index]
+            set junk [string first $char $opts]
+            if {$junk < 0} {
+                puts stderr "getopt: unknown option '$char'"
+                incr errflag
+            } else {
+                set options($char) 1
+                incr junk
+                if {! [string match ":" [string range $opts $junk $junk]]} {
+                    continue
+                }
+#
+#  here is the case where we expect a mandatory argument to the option
+#
+#   if there is anything left in the block, that is the argument
+#   otherwise, we take the next argument in the line
+#   otherwise, it is an error
+                if {[incr index] < [string length $block]} {
+                    set options($char) [string range $block $index end]
+                } else {
+                    set pos [string first " " $argv]
+                    if {$pos < 0} {
+                        if {[string length $argv] < 1} {
+                            puts stderr "getopt: missing argument for '$char' option"
+                            incr errflag
+                        } else {
+                            set options($char) $argv
+                            set argv ""
+                        }
+                    } else {
+                        set options($char) [string range $argv 0 [expr $pos - 1]]
+                        set argv [string range $argv [incr pos] end]
+                    }
+                }
+                break
+            }
+        }
+    }
+    return $errflag
+}
+
+#-----------------------------------------------------------------------------
+# config_network -  Configure network settings.
+#
+proc config_network { spawn_id } {
+    global netmask 
+    global ip_address_1 
+    global ip_address_2 
+    global ise_prompt
+
+    #
+    # Set all ports to 4GB
+    #
+    # ISE1
+    send "configure --fcspeed=4\r"
+    #
+    # ISE2
+    #send "configure --fcspeed=4 --port=all\r"
+
+    expect {
+        -re $ise_prompt {}
+        timeout { exit 1 }
+        eof  { exit 1}
+    }
+
+    #
+    # Disables DHCP
+    #
+    send "configure --dhcp=Disable\r"
+
+    expect {
+        -re $ise_prompt {}
+        timeout { exit 1 }
+        eof     { exit 1}
+    }
+}
+
+#-----------------------------------------------------------------------------
+# list_space - fill in $space($pool,$raid) member with available space on ISE.
+#
+proc list_space { spawn_id } {
+    global space
+    global ise_prompt
+
+    set count 0;
+
+    while { $count < 6 } {
+        set count 0;
+        send "show pool\r"
+        expect {
+            -re " +Pools\[\n\r]" { exp_continue }
+            -re "Pool (\[12]) \[^\r\n]*\[\r\n]" {
+                        set pool $expect_out(1,string)
+                        puts "Pool $pool"
+                        exp_continue
+            }
+            -re "Raid +(\[0156]) *: *(\[0123456789]+) +GB      \[^\r\n]*\[\r\n]" {
+                        set raid_type $expect_out(1,string)
+                        set size $expect_out(2,string)
+                        set space($pool,$raid_type) $size
+                        puts "raid=$raid_type size=$size pool=$pool"
+                        set count [expr $count + 1]
+                        exp_continue
+            }
+            -re $ise_prompt { }
+            timeout         { exit 1 }
+            eof             { exit 1}
+            # print messages line by line (allows finding problems).
+#            -re "(\[^\r\n]*)\[\r\n]" {
+#                        puts "ignoring show pool <$expect_out(1,string)>"
+#                        exp_continue
+#            }
+        }
+        if { $count == 6 } {
+            return
+        }
+        puts "Prompt found with only $count of needed 6 Raids, sleep a second and try again" 
+        sleep 1
+    }
+}
+
+#-----------------------------------------------------------------------------
+# create_vol - Create volume of specified size on specified pool/datapac.
+#       Name will be "$vol_prefix$index". Does not present it to anyone.
+#
+proc create_vol { spawn_id index size pool } {
+    global ise_prompt
+    global vol_prefix
+    global raid
+    global cache
+    global env
+    global format
+
+    set vol_size $size
+    set resend 1
+
+    while { $resend > 0 } {
+        set resend 0
+
+        puts "create --volume=$vol_prefix$index --size=$vol_size --raid$raid --pool$pool --write-$cache"
+        send "create --volume=$vol_prefix$index --size=$vol_size --raid$raid --pool$pool --write-$cache --comment=\"Created by $env(USER) [timestamp -format $format]\"\r"
+        expect {
+            "Creation started successfully" {
+                expect {
+                    -re $ise_prompt {}
+                    timeout { exit 1 }
+                    eof    { exit 1}
+                }
+            }
+            "Creation ERROR: Error code = 35" { set resend 1 }
+            timeout { set resend 1 }
+            eof     { set resend 1 }
+        }
+
+        if { $resend > 0 } {
+            set vol_size [expr $vol_size - 1]
+            puts "Error detected, retrying with volume size $vol_size"
+        } else {
+            if { $vol_size > 1460 } {
+                #
+                # Pause here because a volume could
+                # take up to 18 seconds to become real enough
+                # to present.
+                #
+                puts "Waiting 30 seconds for volume to become real."
+                sleep 30
+            } else {
+                puts "Waiting 20 seconds for volume to become real."
+                sleep 20
+            }
+        }
+    }
+}
+
+#-----------------------------------------------------------------------------
+# create_host -    Create q host with 8 WWNS that match the gamut of possible
+#           WWNs used by the specified DSC. Does not present any volumes
+#           to this host.
+#
+proc create_host { spawn_id dsc } {
+    global ise_prompt
+    global host_prefix
+    global env
+    global format
+
+# puts "create --host=$host_prefix$dsc --linux --comment=\"Created by $env(USER) [timestamp -format $format]\" [dsc2wwn $dsc]"
+    send "create --host=$host_prefix$dsc --linux --comment=\"Created by $env(USER) [timestamp -format $format]\" [dsc2wwn $dsc]\r"
+
+    expect {
+        "Host created" {
+                    expect {
+                        -re $ise_prompt {}
+                        timeout { exit 1 }
+                        eof    { exit 1}
+                    }
+        }
+        timeout { exit 1 }
+        eof     { exit 1}
+    }
+}
+
+#-----------------------------------------------------------------------------
+# list_hosts -    Return a list of all hosts configured on this ISE.
+#           A precursor to removing them.
+#
+proc list_hosts { spawn_id } {
+    global ise_prompt
+
+    set host_list {}
+
+    send "show hosts\r"
+
+    expect {
+        -re "(\[A-Za-z0-9_\\-]\[A-Za-z0-9_\\- ]*): \\(\[A-Za-z]+\\)" {
+                    lappend host_list $expect_out(1,string)
+# puts "host_list=$host_list"
+                    exp_continue
+        }
+        -re $ise_prompt { return $host_list }
+        timeout { exit 1 }
+        eof     { exit 1}
+    }
+}
+
+#-----------------------------------------------------------------------------
+# list_vols - Return list of all volumes configured on this ISE.
+#           A precursor to removing them.
+#
+proc list_vols { spawn_id } {
+    global ise_prompt
+
+    set vol_list {}
+
+    send "show volumes\r"
+
+    expect {
+        -re "(\[A-Za-z0-9_\\-]\[A-Za-z0-9_\\- ]*): \\(Pool" {
+                lappend vol_list $expect_out(1,string)
+# puts "vol_list=$vol_list"
+                exp_continue
+        }
+        -re $ise_prompt { return $vol_list }
+        timeout { exit 1 }
+        eof     { exit 1 }
+    }
+}
+
+#-----------------------------------------------------------------------------
+# unpresent - Unpresent all volumes from host list or hosts from volume list.
+# $type must be one of "host" or "volume", and list must match appropriately.
+#
+proc unpresent { spawn_id type list } {
+    global ise_prompt
+    global timeout
+
+    set saved_timeout $timeout
+    set timeout 30
+    foreach item $list {
+# puts "unpresent --$type=\"$item\" --all"
+        send "unpresent --$type=\"$item\" --all\r"
+        expect {
+            -re $ise_prompt { continue }
+            timeout { exit 1 }
+            eof     { exit 1}
+        }
+    }
+    set timeout $saved_timeout
+}
+
+#-----------------------------------------------------------------------------
+# present - Present specified volume to specified host using specified LUN.
+#
+proc present { spawn_id host volume lun } {
+    global ise_prompt
+# puts "present --volume=\"$volume\" \"$host:$lun\""
+    send "present --volume=\"$volume\" \"$host:$lun\"\r"
+
+    expect {
+        -re $ise_prompt { return }
+        timeout { exit 1 }
+        eof     { exit 1}
+    }
+}
+
+#-----------------------------------------------------------------------------
+# delete - Delete list of hosts or volumes, depending on $type.
+# $type must be one of "host" or "volume".
+#
+proc delete { spawn_id type list } {
+    global ise_prompt
+    foreach item $list {
+# puts "delete --$type=\"$item\""
+        send "delete --$type=\"$item\"\r"
+        expect {
+            "\\(y/N\\): " {
+                send "y"
+                exp_continue
+            }
+            -re $ise_prompt { continue }
+            timeout { exit 1 }
+            eof     { exit 1 }
+        }
+    }
+}
+
+#-----------------------------------------------------------------------------
+# session - Open connection to specified ISE, and do our business.
+#
+proc session { ise } {
+    global options
+    global space
+    global raid
+
+    set spawn_id [login $ise]
+
+    #
+    # Clean the ISE before we create anything..
+    if {[info exists options(C)]} then {
+        set vols [list_vols $spawn_id]
+        unpresent $spawn_id "volume" $vols
+        delete $spawn_id "volume" $vols
+
+        set hosts [list_hosts $spawn_id]
+        unpresent $spawn_id "host" $hosts
+        delete $spawn_id "host" $hosts
+    }
+
+    config_network $spawn_id
+
+    # Show pool
+    list_space $spawn_id
+
+    if {[info exists options(l)]} then {
+        foreach pool {1 2} {
+            puts "$ise: Pool $pool: $space($pool,$raid) GB"
+        }
+        return
+    }
+
+    #
+    # Optionally create the host entry for the specified DSC.
+    #
+    if {[info exists options(d)]} then {
+        create_host $spawn_id $options(d)
+    }
+
+    #
+    # Optionally create n volumes on an ISE
+    #
+    # Work out the size of each volume per datapac, for
+    # the specified raid type.
+    # Note we will make the last volume slightly larger
+    # to take care of rounding errors.
+    # Volumes are created as follows:
+    #
+    #    Name        Pool (datapac)
+    #    $vol_prefix_0    0
+    #    $vol_prefix_1    1
+    #    $vol_prefix_2    0
+    #    $vol_prefix_3    1
+    #    ....
+    #
+    if {[info exists options(v)]} then {
+        global vol_prefix
+        global host_prefix
+        set vol_count $options(v)
+
+        foreach pool { 1 2 } {
+            set quanta($pool) [expr $space($pool,$raid) / [expr [expr $vol_count + 1] / 2]]
+            if {[info exists options(s)]} then {
+                set size $options(s)
+                if {$quanta($pool) > $size} then {
+                    set quanta($pool) $size
+                }
+            }
+            set resid($pool) $space($pool,$raid)
+        }
+
+        for {set i 1} {$i <= $vol_count} { incr i} {
+            set pool [expr 2 - [expr $i & 1]]
+            if {$resid($pool) < [expr $quanta($pool) * 2]} then {
+                set size $resid($pool)
+            } else {
+                set size $quanta($pool)
+            }
+            create_vol $spawn_id $i $size $pool
+            incr resid($pool) -$size
+
+            if {[info exists options(d)]} then {
+                present $spawn_id $host_prefix$options(d) $vol_prefix$i $i
+            }
+        }
+    }
+    close
+    wait
+}
+
+#-----------------------------------------------------------------------------
+set timeout 10
+
+if {[getopts "Dd:lCcr:s:v:" argv options] > 0} usage
+
+if {[info exists options(r)]} then {
+    set raid $options(r)
+}
+
+if {[info exists options(D)]} then {
+    log_user 1
+}
+
+foreach ise $argv {
+    session $ise
+}
+puts "Done"
+
+
+# Modelines:
+# Local Variables:
+# tab-width: 4
+# indent-tabs-mode: nil
+# End:
+# vi:sw=4 ts=4 expandtab

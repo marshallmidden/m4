@@ -1,0 +1,2381 @@
+diff -u -r a/drivers/scsi/aic94xx/aic94xx_dev.c b/drivers/scsi/aic94xx/aic94xx_dev.c
+--- a/drivers/scsi/aic94xx/aic94xx_dev.c	2006-10-11 07:01:12.327957015 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_dev.c	2006-10-11 06:59:10.365663805 -0500
+@@ -90,7 +90,6 @@
+ 	asd_ddbsite_write_byte(asd_ha, ddb, DDB_TYPE, DDB_TYPE_UNUSED);
+ 	spin_lock_irqsave(&asd_ha->hw_prof.ddb_lock, flags);
+ 	CLEAR_DDB(ddb, asd_ha);
+-    WARN_ON(!asd_ha->ddb_map[ddb]);
+     asd_ha->ddb_map[ddb] = NULL;
+ 	spin_unlock_irqrestore(&asd_ha->hw_prof.ddb_lock, flags);
+ }
+@@ -176,7 +175,10 @@
+ 	dev->lldd_dev = (void *) (unsigned long) ddb;
+ 
+ 	asd_ddbsite_write_byte(asd_ha, ddb, 0, DDB_TP_CONN_TYPE);
+-        asd_ddbsite_write_byte(asd_ha, ddb, 1, dev->max_linkrate);
++
++    /* Con rate Filled in from SCB, set to 0 here. */
++    asd_ddbsite_write_byte(asd_ha, ddb, 1, 0);
++
+ 	asd_ddbsite_write_word(asd_ha, ddb, INIT_CONN_TAG, 0xFFFF);
+ 	for (i = 0; i < SAS_ADDR_SIZE; i++)
+ 		asd_ddbsite_write_byte(asd_ha, ddb, DEST_SAS_ADDR+i,
+@@ -184,6 +186,13 @@
+ 	asd_ddbsite_write_word(asd_ha, ddb, SEND_QUEUE_HEAD, 0xFFFF);
+ 	asd_set_ddb_type(dev);
+ 	asd_ddbsite_write_byte(asd_ha, ddb, CONN_MASK, dev->port->phy_mask);
++
++	if (dev->tproto & SAS_PROTO_STP) {
++        flags |= OPEN_REQUIRED;
++        flags |= STP_AFFIL_POL;
++        flags |= SUPPORTS_AFFIL;
++    }
++
+ 	if (dev->port->oob_mode != SATA_OOB_MODE) {
+ 		flags |= OPEN_REQUIRED;
+ 		if ((dev->dev_type == SATA_DEV) ||
+diff -u -r a/drivers/scsi/aic94xx/aic94xx.h b/drivers/scsi/aic94xx/aic94xx.h
+--- a/drivers/scsi/aic94xx/aic94xx.h	2006-10-11 07:01:12.335956247 -0500
++++ b/drivers/scsi/aic94xx/aic94xx.h	2006-10-11 06:59:10.368663517 -0500
+@@ -56,12 +56,16 @@
+ #define AIC94XX_SCB_TIMEOUT  (5*HZ)
+ 
+ /* ERROR RECOVERY */
+-#define AIC_ATTEMPT_RESET_RECOVER  1
+-#define AIC_RESET_REQ_DEV_RESET  0
++#define AIC_ATTEMPT_RESET_RECOVER   1
++#define AIC_RESET_REQ_DEV_RESET     0
+ 
+-#define DUMP_REGS_ON_DL_FAULT   0
+-#define PROCESS_IN_INTERRUPT    0
++#define DUMP_REGS_ON_DL_FAULT       0
++#define PROCESS_IN_INTERRUPT        1
+ 
++#define AIC_LINK_MONITOR_ENABLE     1
++#define AIC_LINK_MONITOR_REC_LINK   0
++
++#define DUMP_ON_REQ_DEV_RESET       0
+ #define DUMP_LSEQ_ON_ARP2CIOPERR    0
+ #define DUMP_LSEQ_ON_BREAK0         0
+ #define DUMP_LSEQ_ON_BREAK1         0
+diff -u -r a/drivers/scsi/aic94xx/aic94xx_hwi.c b/drivers/scsi/aic94xx/aic94xx_hwi.c
+--- a/drivers/scsi/aic94xx/aic94xx_hwi.c	2006-10-11 07:01:12.343955480 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_hwi.c	2006-10-11 06:59:10.373663037 -0500
+@@ -37,6 +37,8 @@
+ #include "aic94xx_seq.h"
+ #include "aic94xx_dump.h"
+ 
++static int asd_init_ctxmem(struct asd_ha_struct *asd_ha);
++
+ u32 MBAR0_SWB_SIZE;
+ 
+ /* ---------- Initialization ---------- */
+@@ -89,7 +91,7 @@
+ 	phy->identify_frame->phy_id = phy->sas_phy.id;
+ }
+ 
+-static int asd_init_phy(struct asd_phy *phy)
++int asd_init_phy(struct asd_phy *phy)
+ {
+ 	struct asd_ha_struct *asd_ha = phy->sas_phy.ha->lldd_ha;
+ 	struct sas_phy *sas_phy = &phy->sas_phy;
+@@ -103,13 +105,12 @@
+ 	sas_phy->oob_mode = OOB_NOT_CONNECTED;
+ 	sas_phy->linkrate = PHY_LINKRATE_NONE;
+ 
+-	if (!phy->id_frm_tok) {
+-        phy->id_frm_tok = asd_alloc_coherent(asd_ha,
+-                sizeof(*phy->identify_frame),
+-                GFP_KERNEL);
+-    }
+-    else
+-        memset(phy->id_frm_tok, 0, sizeof(*phy->identify_frame));
++	if (phy->id_frm_tok) 
++        asd_free_coherent(asd_ha, phy->id_frm_tok);
++    
++    phy->id_frm_tok = asd_alloc_coherent(asd_ha,
++            sizeof(*phy->identify_frame),
++            GFP_KERNEL);
+ 
+ 	if (!phy->id_frm_tok) {
+ 		asd_printk("no mem for IDENTIFY for phy%d\n", sas_phy->id);
+@@ -237,11 +238,11 @@
+ 	spin_lock_init(&seq->tc_index_lock);
+ 
+ 	seq->next_scb.size = sizeof(struct scb);
+-	if (!seq->next_scb.vaddr) 
+-        seq->next_scb.vaddr = dma_pool_alloc(asd_ha->scb_pool, GFP_KERNEL,
+-                &seq->next_scb.dma_handle);
+-    else
+-        memset(seq->next_scb.vaddr, 0, sizeof(struct scb));
++	if (seq->next_scb.vaddr)
++        dma_pool_free(asd_ha->scb_pool, seq->next_scb.vaddr, seq->next_scb.dma_handle);
++
++    seq->next_scb.vaddr = dma_pool_alloc(asd_ha->scb_pool, GFP_KERNEL,
++            &seq->next_scb.dma_handle);
+ 
+ 	if (!seq->next_scb.vaddr) {
+ 		kfree(asd_ha->seq.tc_index_bitmap);
+@@ -273,21 +274,22 @@
+ 
+ static int asd_init_dl(struct asd_ha_struct *asd_ha)
+ {
+-	if (!asd_ha->seq.actual_dl)
+-        asd_ha->seq.actual_dl
+-            = asd_alloc_coherent(asd_ha,
+-                    ASD_DL_SIZE * sizeof(struct done_list_struct),
+-                    GFP_KERNEL);
++	if (asd_ha->seq.actual_dl) 
++        asd_free_coherent(asd_ha, asd_ha->seq.actual_dl);
+     else
+-        memset(asd_ha->seq.actual_dl, 0, ASD_DL_SIZE * sizeof(struct done_list_struct));
++        tasklet_init(&asd_ha->seq.dl_tasklet, asd_dl_tasklet_handler,
++                (unsigned long) asd_ha);
++    
++    asd_ha->seq.actual_dl
++        = asd_alloc_coherent(asd_ha,
++                ASD_DL_SIZE * sizeof(struct done_list_struct),
++                GFP_KERNEL);
+ 
+ 	if (!asd_ha->seq.actual_dl)
+ 		return -ENOMEM;
+ 	asd_ha->seq.dl = asd_ha->seq.actual_dl->vaddr;
+ 	asd_ha->seq.dl_toggle = ASD_DEF_DL_TOGGLE;
+ 	asd_ha->seq.dl_next = 0;
+-	tasklet_init(&asd_ha->seq.dl_tasklet, asd_dl_tasklet_handler,
+-		     (unsigned long) asd_ha);
+ 
+ 	return 0;
+ }
+@@ -305,9 +307,12 @@
+ 		return -ENOMEM;
+ 
+ 	for (i = 0; i < seq->num_edbs; i++) {
+-		if (!seq->edb_arr[i])
+-            seq->edb_arr[i] = asd_alloc_coherent(asd_ha, ASD_EDB_SIZE,
+-                    gfp_flags);
++		if (seq->edb_arr[i])
++            asd_free_coherent(asd_ha, seq->edb_arr[i]);
++
++        seq->edb_arr[i] = asd_alloc_coherent(asd_ha, ASD_EDB_SIZE,
++                gfp_flags);
++
+ 		if (!seq->edb_arr[i])
+ 			goto Err_unroll;
+ 		memset(seq->edb_arr[i]->vaddr, 0, ASD_EDB_SIZE);
+@@ -335,6 +340,9 @@
+ 	if (!seq->escb_arr)
+         seq->escb_arr = kzalloc(seq->num_escbs*sizeof(*seq->escb_arr),
+                 gfp_flags);
++    else
++        memset(seq->escb_arr, 0, seq->num_escbs*sizeof(*seq->escb_arr));
++
+ 	if (!seq->escb_arr)
+ 		return -ENOMEM;
+ 
+@@ -470,8 +478,11 @@
+ static int asd_reset_chip_init(struct asd_ha_struct *asd_ha)
+ {
+ 	int err;
++    int i;
++    u32 v;
+ 
+-	err = asd_chip_hardrst(asd_ha);
++	for(i=0;i<4;++i)
++        err = asd_chip_hardrst(asd_ha);
+ 	if (err) {
+ 		asd_printk("couldn't hard reset %s\n",
+ 			    pci_name(asd_ha->pcidev));
+@@ -479,6 +490,22 @@
+ 	}
+ 
+ 	asd_disable_ints(asd_ha);
++
++    udelay(100);
++    err = pci_read_config_dword(asd_ha->pcidev, PCIC_HSTPCIX_CNTRL, &v);
++	if (err) {
++		asd_printk("couldn't read PCIC_HSTPCIX_CNTRL of %s\n",
++			   pci_name(asd_ha->pcidev));
++		return err;
++	}
++	pci_write_config_dword(asd_ha->pcidev, PCIC_HSTPCIX_CNTRL,
++					v | SC_TMR_DIS);
++	if (err) {
++		asd_printk("couldn't disable split completion timer of %s\n",
++			   pci_name(asd_ha->pcidev));
++		return err;
++	}
++
+  out:
+ 	return err;
+ }
+@@ -516,26 +543,48 @@
+ {
+     struct asd_ha_struct *asd_ha = sas_ha->lldd_ha;
+     struct asd_seq_data *seq = &asd_ha->seq;
+-    struct asd_ascb *ascb;
++    struct asd_ascb *ascb, *n;
+     int err, i;
+     unsigned long flags;
+     
+     asd_printk("%s: Resetting Chip\n", __FUNCTION__);
++	for(i=0;i<4;++i) {
++        err = asd_chip_hardrst(asd_ha);
++        if (err)
++            continue;
++        break;
++    }
++    if (err) {
++        asd_printk("%s: Resetting Chip FAILED\n", __FUNCTION__);
++		goto out;
++    }
++
++#if !AIC_ATTEMPT_RESET_RECOVER
++    return -1;
++#endif
+ 
+     asd_printk("%s: Clearing out ascbs\n", __FUNCTION__);
+     /* Clean up outstanding ascb's */
+     spin_lock_irqsave(&seq->pend_q_lock, flags);
+-    for (i=0; i < ASD_DL_SIZE; ++i) {
+-        ascb = asd_tc_index_find(seq, i);
+-        if (ascb) {
+-            list_del_init(&ascb->list);
+-            asd_ascb_free(ascb);
+-        }
+-        asd_tc_index_release(seq, i);
++    i = 0;
++    list_for_each_entry_safe(ascb, n, &asd_ha->seq.pend_q, list) {
++        list_del_init(&ascb->list);
++        asd_ascb_free(ascb);
++        ++i;
+     }
++    asd_printk("%s: Cleared out %d ascbs\n", __FUNCTION__, i);
++    
++    asd_printk("%s: Clearing tc index\n", __FUNCTION__);
++    spin_lock(&seq->tc_index_lock);
++    while ( asd_tc_index_get(seq, NULL) != -1 ) {}
++    spin_unlock(&seq->tc_index_lock);
+     spin_unlock_irqrestore(&seq->pend_q_lock, flags);
++    
++    asd_printk("%s: Init ctxmem\n", __FUNCTION__);
++    asd_init_ctxmem(asd_ha);
+ 
+     asd_printk("%s: Init phys\n", __FUNCTION__);
++    asd_ha->hw_prof.enabled_phys = 0xFF;
+     err = asd_init_phys(asd_ha);
+ 	if (err) {
+ 		asd_printk("couldn't initialize phys for %s\n",
+@@ -568,13 +617,17 @@
+ 
+     asd_printk("%s: Reset chip\n", __FUNCTION__);
+     err = asd_reset_chip_init(asd_ha);
+-    if (err)
++    if (err) {
++        asd_printk("%s: Reset chip failed\n", __FUNCTION__);
+         goto out;
+-    
++    }
++
+     asd_printk("%s: Start chip\n", __FUNCTION__);
+     err = asd_start_chip(asd_ha);
+-    if (err)
++    if (err) {
++        asd_printk("%s: Start chip failed\n", __FUNCTION__);
+         goto out;
++    }
+ 	
+     asd_printk("%s: Enable interrupts\n", __FUNCTION__);
+     asd_enable_ints(asd_ha);
+@@ -643,7 +696,11 @@
+ 	size = (max_devs - asd_ha->hw_prof.max_ddbs + MAX_DEVS_IN_OCM + 1)
+ 		* ASD_DDB_SIZE;
+ 
+-	asd_ha->hw_prof.ddb_ext = asd_alloc_coherent(asd_ha, size, GFP_KERNEL);
++	if (asd_ha->hw_prof.ddb_ext)
++        asd_free_coherent(asd_ha, asd_ha->hw_prof.ddb_ext);
++
++    asd_ha->hw_prof.ddb_ext = asd_alloc_coherent(asd_ha, size, GFP_KERNEL);
++
+ 	if (!asd_ha->hw_prof.ddb_ext) {
+ 		asd_printk("couldn't allocate memory for %d devices\n",
+ 			   max_devs);
+@@ -679,7 +736,11 @@
+ 
+ 	size = (max_cmnds - asd_ha->hw_prof.max_scbs + 1) * ASD_SCB_SIZE;
+ 
+-	asd_ha->hw_prof.scb_ext = asd_alloc_coherent(asd_ha, size, GFP_KERNEL);
++	if (asd_ha->hw_prof.scb_ext) 
++        asd_free_coherent(asd_ha, asd_ha->hw_prof.scb_ext);
++
++    asd_ha->hw_prof.scb_ext = asd_alloc_coherent(asd_ha, size, GFP_KERNEL);
++
+ 	if (!asd_ha->hw_prof.scb_ext) {
+ 		asd_printk("couldn't allocate memory for %d commands\n",
+ 			   max_cmnds);
+@@ -723,9 +784,14 @@
+ 	/* The kernel wants bitmaps to be unsigned long sized. */
+ 	bitmap_bytes = (asd_ha->hw_prof.max_ddbs+7)/8;
+ 	bitmap_bytes = BITS_TO_LONGS(bitmap_bytes*8)*sizeof(unsigned long);
+-	asd_ha->hw_prof.ddb_bitmap = kzalloc(bitmap_bytes, GFP_KERNEL);
++	if (!asd_ha->hw_prof.ddb_bitmap)
++        asd_ha->hw_prof.ddb_bitmap = kzalloc(bitmap_bytes, GFP_KERNEL);
++    else
++        memset(asd_ha->hw_prof.ddb_bitmap, 0, bitmap_bytes);
++
+ 	if (!asd_ha->hw_prof.ddb_bitmap)
+ 		return -ENOMEM;
++    memset(asd_ha->ddb_map, 0, (sizeof(struct domain_device*) * ASD_MAX_DDBS));
+ 	spin_lock_init(&asd_ha->hw_prof.ddb_lock);
+ 
+ 	return 0;
+@@ -1599,53 +1665,74 @@
+ 	return 0;
+ }
+ 
+-int asd_enable_phys(struct asd_ha_struct *asd_ha, const u8 phy_mask)
+-{
+-	u8  phy_m;
+-	u8  i;
++#if AIC_LINK_MONITOR_ENABLE
++static int asd_phy_monitor_running = 0;
++static int asd_phy_monitor ( void* _asd_ha )
++{	
++	u8 phy_m, i;
+ 	int num = 0, k;
++	struct asd_ha_struct *asd_ha = _asd_ha;
+ 	struct asd_ascb *ascb;
+ 	struct asd_ascb *ascb_list;
+ 
+-	if (!phy_mask) {
+-		asd_printk("%s called with phy_mask of 0!?\n", __FUNCTION__);
+-		return 0;
+-	}
++	asd_phy_monitor_running = 1;
+ 
+-	for_each_phy(phy_mask, phy_m, i) {
+-		num++;
+-		asd_enable_phy(asd_ha, i);
+-	}
++    daemonize("asd_phy_monitor");
++	current->flags |= PF_NOFREEZE;
++	
++    asd_printk("asd_phy_monitor starting\n");
+ 
+-	k = num;
+-	ascb_list = asd_ascb_alloc_list(asd_ha, &k, GFP_KERNEL);
+-	if (!ascb_list) {
+-		asd_printk("no memory for control phy ascb list\n");
+-		return -ENOMEM;
+-	}
+-	num -= k;
++    ssleep(5);
++	while (1)
++	{
++		phy_m = i = k = num = 0;
++       
++        ssleep((AIC94XX_SCB_TIMEOUT / HZ)+1);
+ 
+-	ascb = ascb_list;
+-	for_each_phy(phy_mask, phy_m, i) {
+-		asd_build_control_phy(ascb, i, ENABLE_PHY);
+-		ascb = list_entry(ascb->list.next, struct asd_ascb, list);
++		if (!asd_ha->hw_prof.enabled_phys)
++			break;
++        
++        if ( sas_ha_in_reset_recovery(&asd_ha->sas_ha) )
++            continue;
++		
++        for_each_phy(asd_ha->hw_prof.enabled_phys, phy_m, i) {
++            num++;
++        }
++
++        k = num;
++        ascb_list = asd_ascb_alloc_list(asd_ha, &k, GFP_KERNEL);
++        if (!ascb_list) {
++            asd_printk("no memory for control phy ascb list\n");
++            continue;
++        }
++        num -= k;
++
++        ascb = ascb_list;
++        for_each_phy(asd_ha->hw_prof.enabled_phys, phy_m, i) {
++            asd_build_control_phy(ascb, i, PHY_NO_OP);
++            ascb = list_entry(ascb->list.next, struct asd_ascb, list);
++        }
++        
++//        asd_printk("asd_phy_monitor pinging %d phys\n", i);
++        
++        k = asd_post_ascb_list(asd_ha, ascb_list, num);
++        if (k)
++            asd_ascb_free_list(ascb_list);
+ 	}
+-	ASD_DPRINTK("posting %d control phy scbs\n", num);
+-	k = asd_post_ascb_list(asd_ha, ascb_list, num);
+-	if (k)
+-		asd_ascb_free_list(ascb_list);
+ 
+-    ssleep(1);
+-	return k;
+-}
++	asd_phy_monitor_running = 0;
++	
++    asd_printk("asd_phy_monitor exiting\n");
+ 
+-#if 0
++	return 0;
++}
++#endif
+ 
+ int asd_enable_phys(struct asd_ha_struct *asd_ha, const u8 phy_mask)
+ {
+ 	u8  phy_m;
+ 	u8  i;
+-	int num = 0, k = 0, j = 0;
++	int num = 0, k;
+ 	struct asd_ascb *ascb;
+ 	struct asd_ascb *ascb_list;
+ 
+@@ -1657,47 +1744,31 @@
+ 	for_each_phy(phy_mask, phy_m, i) {
+ 		num++;
+ 		asd_enable_phy(asd_ha, i);
+-        j = 1;
+-        ascb = asd_ascb_alloc_list(asd_ha, &j, GFP_KERNEL);
+-        if ( !j ) {
+-            asd_build_control_phy(ascb, i, ENABLE_PHY);
+-            if ( !asd_post_ascb_list(asd_ha, ascb, 1) )
+-                ++k;
+-            else
+-                asd_ascb_free_list(ascb);
+-        }
+-        msleep(300);
+ 	}
+-	
+-    ASD_DPRINTK("posted %d of %d control phy scbs\n", k, num);
+-    k = num - k;
+ 
+-#if 0
+-    k = num;
++	k = num;
+ 	ascb_list = asd_ascb_alloc_list(asd_ha, &k, GFP_KERNEL);
+ 	if (!ascb_list) {
+ 		asd_printk("no memory for control phy ascb list\n");
+ 		return -ENOMEM;
+ 	}
+ 	num -= k;
+-    k = num;
+ 
+-	ASD_DPRINTK("posting %d control phy scbs\n", num);
+ 	ascb = ascb_list;
+ 	for_each_phy(phy_mask, phy_m, i) {
+ 		asd_build_control_phy(ascb, i, ENABLE_PHY);
+-		ascb = ascb_list;
+-        ascb_list = list_entry(ascb->list.next, struct asd_ascb, list);
+-        list_del_init(&ascb->list);
+-
+-        if ( !asd_post_ascb_list(asd_ha, ascb, 1) )
+-            --k;
+-        else
+-            asd_ascb_free_list(ascb);
+-        msleep(100);
++		ascb = list_entry(ascb->list.next, struct asd_ascb, list);
+ 	}
++	ASD_DPRINTK("posting %d control phy scbs\n", num);
++	k = asd_post_ascb_list(asd_ha, ascb_list, num);
++	if (k)
++		asd_ascb_free_list(ascb_list);
++
++#if AIC_LINK_MONITOR_ENABLE
++	if (!asd_phy_monitor_running)
++		kernel_thread(asd_phy_monitor, asd_ha, 0);
+ #endif
+-    ssleep(1);
+ 
++    ssleep(1);
+ 	return k;
+-#endif
++}
+diff -u -r a/drivers/scsi/aic94xx/aic94xx_init.c b/drivers/scsi/aic94xx/aic94xx_init.c
+--- a/drivers/scsi/aic94xx/aic94xx_init.c	2006-10-11 07:01:12.351954712 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_init.c	2006-10-11 06:59:10.377662653 -0500
+@@ -30,6 +30,7 @@
+ #include <linux/init.h>
+ #include <linux/kernel.h>
+ #include <linux/pci.h>
++#include <linux/delay.h>
+ 
+ #include <scsi/scsi_host.h>
+ 
+@@ -544,6 +545,9 @@
+ 	kfree(sas_phys);
+ 	kfree(sas_ports);
+ 
++	asd_ha->hw_prof.enabled_phys = 0;
++	ssleep((AIC94XX_SCB_TIMEOUT / HZ)+1);
++
+ 	return res;
+ }
+ 
+diff -u -r a/drivers/scsi/aic94xx/aic94xx_reg_def.h b/drivers/scsi/aic94xx/aic94xx_reg_def.h
+--- a/drivers/scsi/aic94xx/aic94xx_reg_def.h	2006-10-11 07:01:12.356954232 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_reg_def.h	2006-10-11 06:59:10.382662173 -0500
+@@ -2243,16 +2243,10 @@
+ #define LmSEQ_SAS_RESET_MODE(LinkNum)		(LmSCRATCH(LinkNum) + 0x0074)
+ #define LmSEQ_LINK_RESET_RETRY_COUNT(LinkNum)	(LmSCRATCH(LinkNum) + 0x0075)
+ #define LmSEQ_NUM_LINK_RESET_RETRIES(LinkNum)	(LmSCRATCH(LinkNum) + 0x0076)
+-#if 1
+-#define LmSEQ_OOB_INT_ENABLES(LinkNum)		(LmSCRATCH(LinkNum) + 0x007A)
+-#define LmSEQ_NOTIFY_TIMER_TIMEOUT(LinkNum)	(LmSCRATCH(LinkNum) + 0x007C)
+-#define LmSEQ_NOTIFY_TIMER_DOWN_COUNT(LinkNum)	(LmSCRATCH(LinkNum) + 0x007E)
+-#else
+ #define LmSEQ_OOB_INT_ENABLES(LinkNum)		(LmSCRATCH(LinkNum) + 0x0078)
+-#define LmSEQ_NOTIFY_TIMER_TIMEOUT(LinkNum)	(LmSCRATCH(LinkNum) + 0x007A)
+-#define LmSEQ_NOTIFY_TIMER_DOWN_COUNT(LinkNum)	(LmSCRATCH(LinkNum) + 0x007C)
++#define LmSEQ_NOTIFY_TIMER_DOWN_COUNT(LinkNum)	(LmSCRATCH(LinkNum) + 0x007A)
++#define LmSEQ_NOTIFY_TIMER_TIMEOUT(LinkNum)	(LmSCRATCH(LinkNum) + 0x007C)
+ #define LmSEQ_NOTIFY_TIMER_INITIAL_COUNT(LinkNum)	(LmSCRATCH(LinkNum) + 0x007E)
+-#endif
+ 
+ /* Mode dependent scratch page 1, mode 0 and mode 1 */
+ #define LmSEQ_SG_LIST_PTR_ADDR0(LinkNum)        (LmSCRATCH(LinkNum) + 0x0020)
+diff -u -r a/drivers/scsi/aic94xx/aic94xx_sas.h b/drivers/scsi/aic94xx/aic94xx_sas.h
+--- a/drivers/scsi/aic94xx/aic94xx_sas.h	2006-10-11 07:01:12.210968243 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_sas.h	2006-10-11 06:59:10.386661789 -0500
+@@ -89,6 +89,7 @@
+ 
+ 	__le16 itnl_timeout;
+ #define ITNL_TIMEOUT_CONST 0x7D0 /* 2 seconds */
++//#define ITNL_TIMEOUT_CONST 0x01 /* 1ms */
+ 
+ 	__le32 itnl_timestamp;
+ } __attribute__ ((packed));
+diff -u -r a/drivers/scsi/aic94xx/aic94xx_scb.c b/drivers/scsi/aic94xx/aic94xx_scb.c
+--- a/drivers/scsi/aic94xx/aic94xx_scb.c	2006-10-11 07:01:12.361953752 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_scb.c	2006-10-11 06:59:10.390661405 -0500
+@@ -349,22 +349,35 @@
+ {
+     struct asd_ha_struct *asd_ha = escb->ha;
+ 	__le16 handle = *(__le16 *)&dl->status_block[1];
+-	ASD_DPRINTK("%s: handle %d reason: 0x%x\n", __FUNCTION__, handle, dl->status_block[3]);
+-#if AIC_RESET_REQ_DEV_RESET
+-    ASD_DPRINTK("%s: handle %d reason: 0x%x Resetting chip\n", 
+-            __FUNCTION__, handle, dl->status_block[3]);
+-    asd_chip_reset(asd_ha);
+-#else
+ 	unsigned long flags;
+     struct sas_ha_struct *sas_ha = &asd_ha->sas_ha;
+     struct domain_device *dev;
++#if DUMP_ON_REQ_DEV_RESET
++	struct asd_ddb_sata_tag ddb;
++	int i;
++	asd_pause_lseq(asd_ha, 0xFF);
++		
++	ASD_DPRINTK("%s: handle %d reason: 0x%x... Dumping DDB\n", __FUNCTION__, handle, dl->status_block[3]);
++	for (i = 0; i < sizeof(struct asd_ddb_sata_tag); i+= 2)
++		ddb.scb_pointer[i/2] = asd_ddbsite_read_word(asd_ha, (int)handle, i);
++	asd_dump_hex(&ddb, sizeof(struct asd_ddb_sata_tag));
++	asd_dump(sas_ha);
++	asd_chip_reset(asd_ha);
++	return;
++#endif
++	ASD_DPRINTK("%s: handle %d reason: 0x%x\n", __FUNCTION__, handle, dl->status_block[3]);
+     
+     spin_lock_irqsave(&asd_ha->hw_prof.ddb_lock, flags);
+     dev = asd_ha->ddb_map[handle];
+     spin_unlock_irqrestore(&asd_ha->hw_prof.ddb_lock, flags);
+ 
+     WARN_ON(!dev);
+-    
++
++#if AIC_RESET_REQ_DEV_RESET
++    ASD_DPRINTK("%s: handle %d reason: 0x%x Resetting chip\n", 
++            __FUNCTION__, handle, dl->status_block[3]);
++    asd_chip_reset(asd_ha);
++#else
+     if (dev) {
+         if (sas_ha->dev_queue_work)
+             sas_ha->dev_queue_work(dev, 
+@@ -656,15 +669,16 @@
+ 			ASD_DPRINTK("%s: phy%d: hot plug or device present\n",
+ 				    __FUNCTION__, phy_id);
+ 		} else {
+-			asd_ha->hw_prof.enabled_phys |= (1 << phy_id);
++			asd_ha->hw_prof.enabled_phys &= ~(1 << phy_id);
+ 			asd_turn_led(asd_ha, phy_id, 0);
+ 			ASD_DPRINTK("%s: phy%d: no device present: "
+ 				    "oob_status:0x%x\n",
+ 				    __FUNCTION__, phy_id, oob_status);
+ 		}
+ 		break;
+-	case RELEASE_SPINUP_HOLD:
+ 	case PHY_NO_OP:
++        break;
++	case RELEASE_SPINUP_HOLD:
+ 	case EXECUTE_HARD_RESET:
+ 		ASD_DPRINTK("%s: phy%d: sub_func:0x%x\n", __FUNCTION__,
+ 			    phy_id, control_phy->sub_func);
+@@ -836,7 +850,27 @@
+ 	unsigned long flags;
+ 
+ 	ASD_DPRINTK("scb:0x%x timed out\n", ascb->scb->header.opcode);
++#if AIC_LINK_MONITOR_ENABLE
++	if ( ascb->scb->header.opcode == CONTROL_PHY ) {
++        struct control_phy *control_phy = &ascb->scb->control_phy;
++#if AIC_LINK_MONITOR_REC_LINK		
++        if ( ascb->ha->hw_prof.enabled_phys & (1 << control_phy->phy_id) ) {
++            ascb->ha->hw_prof.enabled_phys &= ~(1 << control_phy->phy_id);
++            ASD_DPRINTK("resetting phy %d\n", control_phy->phy_id);
++            ascb->ha->sas_ha.notify_phy_event(
++                    &ascb->ha->phys[control_phy->phy_id].sas_phy, 
++                    PHYE_LINK_DOWN);
++        }
++        else
++#endif
++        {
++            ASD_DPRINTK("Phy %d dead, HA RESET\n", control_phy->phy_id);
++            asd_chip_reset(ascb->ha);
++        }
++	}
++#endif
+ 
++	
+ 	spin_lock_irqsave(&seq->pend_q_lock, flags);
+ 	seq->pending--;
+ 	list_del_init(&ascb->list);
+diff -u -r a/drivers/scsi/aic94xx/aic94xx_seq.c b/drivers/scsi/aic94xx/aic94xx_seq.c
+--- a/drivers/scsi/aic94xx/aic94xx_seq.c	2006-10-11 07:01:12.365953368 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_seq.c	2006-10-11 06:59:10.394661021 -0500
+@@ -45,6 +45,8 @@
+ #define PAUSE_TRIES 2000
+ 
+ static int asd_seq_start_lseq(struct asd_ha_struct *asd_ha, int lseq);
++static int asd_download_seq(struct asd_ha_struct *asd_ha, const u8 *_prog,
++			    u32 size, u8 lseq_mask);
+ static void asd_init_lseq_mip(struct asd_ha_struct *asd_ha, u8 lseq);
+ static void asd_init_lseq_mdp(struct asd_ha_struct *asd_ha,  int lseq);
+ static void asd_init_lseq_cio(struct asd_ha_struct *asd_ha, int lseq);
+@@ -203,18 +205,31 @@
+ 
+ 	return err;
+ }
+-
++extern int asd_init_phy(struct asd_phy *phy);
+ int asd_unpause_phy(struct sas_phy* sas_phy, int reset) 
+ {
+ 	int res;
+ 
+     if (reset) {
+         asd_seq_pause_lseq(sas_phy->ha->lldd_ha, sas_phy->id);
+-		asd_init_lseq_mip(sas_phy->ha->lldd_ha, sas_phy->id);
+-		asd_init_lseq_mdp(sas_phy->ha->lldd_ha, sas_phy->id);
+-        asd_init_lseq_cio(sas_phy->ha->lldd_ha, sas_phy->id);
+-        ASD_DPRINTK("LSEQ %d, restarting\n", sas_phy->id);
+-        res = asd_seq_start_lseq(sas_phy->ha->lldd_ha, sas_phy->id);
++        asd_init_phy(sas_phy->lldd_phy);
++        res = asd_download_seq(sas_phy->ha->lldd_ha, Lseq, 
++                sizeof(Lseq), 1<<sas_phy->id);
++        if (!res) {
++            asd_init_lseq_mip(sas_phy->ha->lldd_ha, sas_phy->id);
++            asd_init_lseq_mdp(sas_phy->ha->lldd_ha, sas_phy->id);
++            asd_init_lseq_cio(sas_phy->ha->lldd_ha, sas_phy->id);
++            ASD_DPRINTK("LSEQ %d, restarting\n", sas_phy->id);
++            res = asd_seq_start_lseq(sas_phy->ha->lldd_ha, sas_phy->id);
++        }
++        else
++            ASD_DPRINTK("LSEQ %d, download failed\n", sas_phy->id);
++
++        if (!res) {
++            res = asd_enable_phys(sas_phy->ha->lldd_ha, 
++                    1<<sas_phy->id);
++        }
++
+     } else {
+         res = asd_seq_unpause_lseq(sas_phy->ha->lldd_ha, sas_phy->id);
+     }
+@@ -825,6 +840,7 @@
+ 	/* No delay for the first NOTIFY to be sent to the attached target. */
+ 	asd_write_reg_word(asd_ha, LmSEQ_NOTIFY_TIMER_DOWN_COUNT(lseq),
+ 			   ASD_NOTIFY_DOWN_COUNT);
++	asd_write_reg_word(asd_ha, LmSEQ_NOTIFY_TIMER_INITIAL_COUNT(lseq), 0);
+ 
+ 	/* LSEQ Mode dependent, mode 0 and 1, page 1 setup. */
+ 	for (i = 0; i < 2; i++)	{
+@@ -966,46 +982,54 @@
+ {
+ 	int i;
+ 
+-	asd_write_reg_byte(asd_ha, CSEQCOMINTEN, 0);
+-	asd_write_reg_byte(asd_ha, CSEQDLCTL, ASD_DL_SIZE_BITS);
+-	asd_write_reg_byte(asd_ha, CSEQDLOFFS, 0);
+-	asd_write_reg_byte(asd_ha, CSEQDLOFFS+1, 0);
+-	asd_ha->seq.scbpro = 0;
+-	asd_write_reg_dword(asd_ha, SCBPRO, 0);
+-	asd_write_reg_dword(asd_ha, CSEQCON, 0);
++    /* Clear interrupts */
++    asd_write_reg_dword(asd_ha, CARP2INT, 0xFFFFFFFF);
+ 
+-	/* Intialize CSEQ Mode 11 Interrupt Vectors.
+-	 * The addresses are 16 bit wide and in dword units.
+-	 * The values of their macros are in byte units.
+-	 * Thus we have to divide by 4. */
+-	asd_write_reg_word(asd_ha, CM11INTVEC0, CSEQ_INT_VEC0);
+-	asd_write_reg_word(asd_ha, CM11INTVEC1, CSEQ_INT_VEC1);
+-	asd_write_reg_word(asd_ha, CM11INTVEC2, CSEQ_INT_VEC2);
++    /* Enable ARP2HALTC (ARP2 Halted from Halt Code Write). */
++	asd_write_reg_byte(asd_ha, CARP2INTEN, EN_ARP2HALTC);
+ 
+     /* Set the break addresses */
+     asd_write_reg_dword(asd_ha, CARP2BREAKADR01, 0x0FFF0FFF);
+     asd_write_reg_dword(asd_ha, CARP2BREAKADR23, 0x0FFF0FFF);
+ 	
+-    /* Enable ARP2HALTC (ARP2 Halted from Halt Code Write). */
+-	asd_write_reg_byte(asd_ha, CARP2INTEN, EN_ARP2HALTC);
+-
+-	/* Initialize CSEQ Scratch Page to 0x04. */
+-	asd_write_reg_byte(asd_ha, CSCRATCHPAGE, 0x04);
+-
+ 	/* Initialize CSEQ Mode[0-8] Dependent registers. */
+ 	/* Initialize Scratch Page to 0. */
+ 	for (i = 0; i < 9; i++)
+ 		asd_write_reg_byte(asd_ha, CMnSCRATCHPAGE(i), 0);
+ 
+-	/* Reset the ARP2 Program Count. */
+-	asd_write_reg_word(asd_ha, CPRGMCNT, CSEQ_IDLE_LOOP_ENTRY);
++	asd_write_reg_byte(asd_ha, CSEQCOMINTEN, 0);
++	
++    /* Initialize CSEQ Scratch Page to 0x04. */
++	asd_write_reg_byte(asd_ha, CSCRATCHPAGE, 0x04);
++
++    asd_write_reg_byte(asd_ha, CSEQDLCTL, ASD_DL_SIZE_BITS);
++	asd_write_reg_byte(asd_ha, CSEQDLOFFS, 0);
++	asd_write_reg_byte(asd_ha, CSEQDLOFFS+1, 0);
++
+ 
++	/* Intialize CSEQ Mode 11 Interrupt Vectors.
++	 * The addresses are 16 bit wide and in dword units.
++	 * The values of their macros are in byte units.
++	 * Thus we have to divide by 4. */
++	asd_write_reg_word(asd_ha, CM11INTVEC0, CSEQ_INT_VEC0);
++	asd_write_reg_word(asd_ha, CM11INTVEC1, CSEQ_INT_VEC1);
++	asd_write_reg_word(asd_ha, CM11INTVEC2, CSEQ_INT_VEC2);
++	
+ 	for (i = 0; i < 8; i++) {
+ 		/* Intialize Mode n Link m Interrupt Enable. */
+ 		asd_write_reg_dword(asd_ha, CMnINTEN(i), EN_CMnRSPMBXF);
+ 		/* Initialize Mode n Request Mailbox. */
+ 		asd_write_reg_dword(asd_ha, CMnREQMBX(i), 0);
+ 	}
++	
++    asd_write_reg_dword(asd_ha, CSEQCON, 0);
++	
++    asd_ha->seq.scbpro = 0;
++	asd_write_reg_dword(asd_ha, SCBPRO, 0);
++
++
++	/* Reset the ARP2 Program Count. */
++	asd_write_reg_word(asd_ha, CPRGMCNT, CSEQ_IDLE_LOOP_ENTRY);
+ }
+ 
+ /**
+@@ -1017,21 +1041,18 @@
+ 	u8  *sas_addr;
+ 	int  i;
+ 
+-	/* Enable Blind SG Move. */
+-	asd_write_reg_dword(asd_ha, LmMODECTL(lseq), LmBLIND48);
+-	asd_write_reg_word(asd_ha, LmM3SATATIMER(lseq),
+-			   ASD_SATA_INTERLOCK_TIMEOUT);
+-
++    /* Clear the interrupt register. */
++    asd_write_reg_dword(asd_ha, LmARP2INT(lseq), 0xFFFFFFFF);
++    
++	/* Enable ARP2HALTC (ARP2 Halted from Halt Code Write). */
++	//asd_write_reg_dword(asd_ha, LmARP2INTEN(lseq), EN_ARP2HALTC);
++	asd_write_reg_dword(asd_ha, LmARP2INTEN(lseq), (EN_ARP2HALTC | ARP2HANDLED));
+ 
+     /* Set the break addresses */
+ //    asd_write_reg_dword(asd_ha, LmARP2BREAKADR01(lseq), 0x0FFF0FFF);
+-    asd_write_reg_dword(asd_ha, LmARP2BREAKADR01(lseq), 0x0FFF0FFF);
++    asd_write_reg_dword(asd_ha, LmARP2BREAKADR01(lseq), 0x0FFF0D1C);
+     asd_write_reg_dword(asd_ha, LmARP2BREAKADR23(lseq), 0x0FFF0FFF);
+ 
+-	/* Enable ARP2HALTC (ARP2 Halted from Halt Code Write). */
+-	//asd_write_reg_dword(asd_ha, LmARP2INTEN(lseq), EN_ARP2HALTC);
+-	asd_write_reg_dword(asd_ha, LmARP2INTEN(lseq), (EN_ARP2HALTC | ARP2HANDLED));
+-
+ 	asd_write_reg_byte(asd_ha, LmSCRATCHPAGE(lseq), 0);
+ 
+ 	/* Initialize Mode 0,1, and 2 SCRATCHPAGE to 0. */
+@@ -1041,37 +1062,34 @@
+ 	/* Initialize Mode 5 SCRATCHPAGE to 0. */
+ 	asd_write_reg_byte(asd_ha, LmMnSCRATCHPAGE(lseq, 5), 0);
+ 
+-	asd_write_reg_dword(asd_ha, LmRSPMBX(lseq), 0);
+-	/* Initialize Mode 0,1,2 and 5 Interrupt Enable and
+-	 * Interrupt registers. */
++	/* Initialize Mode 0,1,2 and 5 Interrupt Enable */
+ 	asd_write_reg_dword(asd_ha, LmMnINTEN(lseq, 0), LmM0INTEN_MASK);
+-	asd_write_reg_dword(asd_ha, LmMnINT(lseq, 0), 0xFFFFFFFF);
+ 	/* Mode 1 */
+ 	asd_write_reg_dword(asd_ha, LmMnINTEN(lseq, 1), LmM1INTEN_MASK);
+-	asd_write_reg_dword(asd_ha, LmMnINT(lseq, 1), 0xFFFFFFFF);
+ 	/* Mode 2 */
+ 	asd_write_reg_dword(asd_ha, LmMnINTEN(lseq, 2), LmM2INTEN_MASK);
+-	asd_write_reg_dword(asd_ha, LmMnINT(lseq, 2), 0xFFFFFFFF);
+ 	/* Mode 5 */
+ 	asd_write_reg_dword(asd_ha, LmMnINTEN(lseq, 5), LmM5INTEN_MASK);
+-	asd_write_reg_dword(asd_ha, LmMnINT(lseq, 5), 0xFFFFFFFF);
+-
++   
+ 	/* Enable HW Timer status. */
+ 	asd_write_reg_byte(asd_ha, LmHWTSTATEN(lseq), LmHWTSTATEN_MASK);
+ 
+-	/* Enable Primitive Status 0 and 1. */
+-	asd_write_reg_dword(asd_ha, LmPRIMSTAT0EN(lseq), LmPRIMSTAT0EN_MASK);
+-	asd_write_reg_dword(asd_ha, LmPRIMSTAT1EN(lseq), LmPRIMSTAT1EN_MASK);
+-
+ 	/* Enable Frame Error. */
+ 	asd_write_reg_dword(asd_ha, LmFRMERREN(lseq), LmFRMERREN_MASK);
+ 	asd_write_reg_byte(asd_ha, LmMnHOLDLVL(lseq, 0), 0x50);
+ 
++	/* Enable SATA Frame Size. */
++	asd_write_reg_byte(asd_ha, LmMnSATAFS(lseq, 1), 0x80);
++
+ 	/* Initialize Mode 0 Transfer Level to 512. */
+ 	asd_write_reg_byte(asd_ha,  LmMnXFRLVL(lseq, 0), LmMnXFRLVL_512);
+ 	/* Initialize Mode 1 Transfer Level to 256. */
+ 	asd_write_reg_byte(asd_ha, LmMnXFRLVL(lseq, 1), LmMnXFRLVL_256);
+ 
++	/* Enable Primitive Status 0 and 1. */
++	asd_write_reg_dword(asd_ha, LmPRIMSTAT0EN(lseq), LmPRIMSTAT0EN_MASK);
++	asd_write_reg_dword(asd_ha, LmPRIMSTAT1EN(lseq), LmPRIMSTAT1EN_MASK);
++
+ 	/* Initialize Interrupt Vector[0-10] address in Mode 3.
+ 	 * See the comment on CSEQ_INT_* */
+ 	asd_write_reg_word(asd_ha, LmM3INTVEC0(lseq), LSEQ_INT_VEC0);
+@@ -1086,9 +1104,21 @@
+ 	asd_write_reg_word(asd_ha, LmM3INTVEC9(lseq), LSEQ_INT_VEC9);
+ 	asd_write_reg_word(asd_ha, LmM3INTVEC10(lseq), LSEQ_INT_VEC10);
+ 	
+-    /* Initialize Program Count. */
+-	asd_write_reg_word(asd_ha, LmPRGMCNT(lseq), LSEQ_IDLE_LOOP_ENTRY);
++    /* Enable Blind SG Move. */
++	asd_write_reg_dword(asd_ha, LmMODECTL(lseq), LmBLIND48);
++/*	asd_write_reg_word(asd_ha, LmM3SATATIMER(lseq),
++			   ASD_SATA_INTERLOCK_TIMEOUT); */
++	
++    /* Initialize Mode 0,1,2 and 5 Interrupt registers. */
++	asd_write_reg_dword(asd_ha, LmMnINT(lseq, 0), 0xFFFFFFFF);
++	/* Mode 1 */
++	asd_write_reg_dword(asd_ha, LmMnINT(lseq, 1), 0xFFFFFFFF);
++	/* Mode 2 */
++	asd_write_reg_dword(asd_ha, LmMnINT(lseq, 2), 0xFFFFFFFF);
++	/* Mode 5 */
++	asd_write_reg_dword(asd_ha, LmMnINT(lseq, 5), 0xFFFFFFFF);
+ 
++    /* Read the mailbox register. */
+ 	(void) asd_read_reg_dword(asd_ha, LmREQMBX(lseq));
+ 
+ 	/* Clear Primitive Status 0 and 1. */
+@@ -1120,14 +1150,18 @@
+ 	for (i = 0; i < SAS_ADDR_SIZE; i++)
+ 		asd_write_reg_byte(asd_ha, LmWWN(lseq) + i, sas_addr[i]);
+ 
+-	/* Set the Transmit Size to 1024 bytes, 0 = 256 Dwords. */
+-	asd_write_reg_byte(asd_ha, LmMnXMTSIZE(lseq, 1), 0);
+-
+ 	/* Set the Bus Inactivity Time Limit Timer. */
+ 	asd_write_reg_word(asd_ha, LmBITL_TIMER(lseq), 9);
+ 
+-	/* Enable SATA Port Multiplier. */
+-	asd_write_reg_byte(asd_ha, LmMnSATAFS(lseq, 1), 0x80);
++#if 0 
++    /* Check Debug Registers CRC ???????????????????? */
++    rdval = asd_read_reg_dword(asd_ha, LmDBGMODE(lseq));
++    if ( !(rdval & LmDISCRCCHK) ) {
++        asd_printk("%s:  lseq %d, Disabling LmDISCRCCHK\n",  __FUNCTION__, lseq);
++        rdval |= LmDISCRCCHK;
++        asd_write_reg_dword(asd_ha, LmDBGMODE(lseq), rdval);
++    }
++#endif
+ 
+ 	/*
+ 	 * Program the Link LED control, applicable only for
+@@ -1139,6 +1173,16 @@
+     /* Set the Align Rate for SAS and STP mode. */
+ 	asd_write_reg_byte(asd_ha, LmM1SASALIGN(lseq), SAS_ALIGN_DEFAULT);
+ 	asd_write_reg_byte(asd_ha, LmM1STPALIGN(lseq), STP_ALIGN_DEFAULT);
++
++    /* Initialize Program Count. */
++	asd_write_reg_word(asd_ha, LmPRGMCNT(lseq), LSEQ_IDLE_LOOP_ENTRY);
++
++	/* Set the Transmit Size to 1024 bytes, 0 = 256 Dwords. */
++	asd_write_reg_byte(asd_ha, LmMnXMTSIZE(lseq, 1), 0);
++
++#if 0	
++    asd_write_reg_dword(asd_ha, LmRSPMBX(lseq), 0);
++#endif
+ }
+ 
+ 
+@@ -1261,10 +1305,6 @@
+ 	/* Reset the ARP2 instruction to location zero. */
+ 	asd_write_reg_word(asd_ha, LmPRGMCNT(lseq), LSEQ_IDLE_LOOP_ENTRY);
+ 
+-    /* Clear outstanding interrupts */
+-//    asd_write_reg_dword(asd_ha, LmARP2INT(lseq), 0xFFFFFFFF);
+-//    (void)asd_read_reg_dword(asd_ha, LmARP2INT(lseq));
+-
+ 	/* Unpause the LmSEQ  */
+ 	return asd_seq_unpause_lseq(asd_ha, lseq);
+ }
+diff -u -r a/drivers/scsi/aic94xx/aic94xx_task.c b/drivers/scsi/aic94xx/aic94xx_task.c
+--- a/drivers/scsi/aic94xx/aic94xx_task.c	2006-10-11 07:01:12.369952984 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_task.c	2006-10-11 06:59:10.398660637 -0500
+@@ -583,6 +583,11 @@
+ 	res = asd_can_queue(asd_ha, num);
+ 	if (res)
+ 		return res;
++    
++    if ( sas_ha_in_reset_recovery(&asd_ha->sas_ha) ) {
++        res = SAS_ABORTED_TASK;
++        goto out_err;
++    }
+ 
+ 	res = num;
+ 	ascb = asd_ascb_alloc_list(asd_ha, &res, gfp_flags);
+diff -u -r a/drivers/scsi/aic94xx/aic94xx_tmf.c b/drivers/scsi/aic94xx/aic94xx_tmf.c
+--- a/drivers/scsi/aic94xx/aic94xx_tmf.c	2006-10-11 07:01:12.373952600 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_tmf.c	2006-10-11 06:59:10.402660253 -0500
+@@ -27,6 +27,7 @@
+ 
+ #include <linux/spinlock.h>
+ #include <scsi/sas/sas_task.h>
++#include <scsi/sas/sas_class.h>
+ #include <scsi/scsi_cmnd.h>
+ #include <scsi/scsi_device.h>
+ #include "aic94xx.h"
+@@ -44,6 +45,10 @@
+ 				void (*timed_out)(unsigned long))
+ {
+ 	int res;
++    
++    if ( sas_ha_in_reset_recovery(&ascb->ha->sas_ha) ) {
++        return SAS_ABORTED_TASK;
++    }
+ 
+ 	ascb->tasklet_complete = tasklet_complete;
+ 	ascb->uldd_timer = 1;
+diff -u -r a/drivers/scsi/sas/sas_discover.c b/drivers/scsi/sas/sas_discover.c
+--- a/drivers/scsi/sas/sas_discover.c	2006-10-11 07:01:12.379952025 -0500
++++ b/drivers/scsi/sas/sas_discover.c	2006-10-11 06:59:53.720502060 -0500
+@@ -26,6 +26,7 @@
+ #include <linux/pci.h>
+ #include <linux/scatterlist.h>
+ #include <linux/delay.h>	/*DWD*/
++#include <linux/blkdev.h>
+ #include <scsi/scsi_host.h>
+ #include <scsi/scsi_eh.h>
+ #include <scsi/scsi_cmnd.h>
+@@ -533,7 +534,7 @@
+             if (task->dev->dev_type == SATA_DEV ) {
+                 if (task->task_status.abort_reason != SAS_TASK_CONTROLLED) {
+                     sas_queue_device_work(task->dev, 
+-                            (SAS_DWT_OPTION_RESET_DEV | SAS_DWT_OPTION_HARD_RESET));
++                            (SAS_DWT_OPTION_RESET_DEV));
+                 }
+                 else
+                     task->task_status.abort_reason = SAS_TASK_TIMED_OUT;
+@@ -558,7 +559,7 @@
+             
+             if (task->dev->dev_type == SATA_DEV ) {
+                 sas_queue_device_work(task->dev, 
+-                        (SAS_DWT_OPTION_RESET_DEV | SAS_DWT_OPTION_HARD_RESET));
++                        (SAS_DWT_OPTION_RESET_DEV));
+                 ssleep(5);
+                 continue;
+             }
+@@ -1552,8 +1553,10 @@
+ 				    __FUNCTION__, dev->dev_type);
+ 			break;
+ 		}
+-                if (ret==-EAGAIN)
++                if (ret==-EAGAIN) {
++                    sas_queue_device_work(dev, SAS_DWT_OPTION_RESET_DEV);
+                     SAS_DPRINTK("LOOK AT ME ret %02X ex_dev %p phy %p phyid %d\n",ret,ex_dev,phy,phy_id);
++                }
+                 
+                 if ((parent) && (ret==-EAGAIN))
+                 {
+@@ -1605,7 +1608,7 @@
+  * Discover process only interrogates devices in order to discover the
+  * domain.
+  */
+-static int sas_discover_domain(struct sas_port *port)
++int sas_discover_domain(struct sas_port *port)
+ {
+ 	int error = 0;
+ 
+@@ -1700,6 +1703,7 @@
+                 }
+ 				module_put(sas_ha->lldd_module);
+ 			}
++            sas_ha->first_discovery_done =1;
+ 			break;
+ 		case DISCE_REVALIDATE_DOMAIN:
+ 			if (try_module_get(sas_ha->lldd_module)) {
+@@ -1721,7 +1725,6 @@
+ 	disc->disc_thread = NULL;
+ 	spin_unlock(&disc->disc_event_lock);
+ 	up(&disc->disc_sema);
+-        sas_ha->first_discovery_done =1;
+ 	return 0;
+ }
+ 
+@@ -1824,6 +1827,53 @@
+ 		sas_unregister_domain_devices(sas_ha->sas_port[i]);
+ }
+ 
++/**
++ * Device handling.
++ * return 0 if successful.
++ */
++static int sas_device_reset_ddb_entry( struct domain_device* dev )
++{
++    int res = 0;
++
++    /* Remove Device */
++    sas_notify_lldd_dev_gone(dev);
++    
++    /* Add Device */
++    res = sas_notify_lldd_dev_found(dev);
++    if (res) 
++        SAS_DPRINTK("%016llx: dev %p Failed to notify lldd dev_found\n",
++                SAS_ADDR(dev->sas_addr), dev);
++    return res;
++}
++
++void sas_reinit_all_ha_ddbs(struct sas_ha_struct *sas_ha)
++{
++	int i;
++
++	for (i = 0; i < sas_ha->num_phys; i++) {
++        struct domain_device *dev, *n;
++
++        list_for_each_entry_safe(dev,n,&sas_ha->sas_port[i]->dev_list,dev_list_node) {
++            switch (dev->dev_type) {
++                case SAS_END_DEV:
++                case SATA_DEV:
++                case SATA_PM:
++                case FANOUT_DEV:
++                case EDGE_DEV:
++                    SAS_DPRINTK("%016llx: dev %p Reinit DDB\n",
++                            SAS_ADDR(dev->sas_addr), dev);
++                    sas_device_reset_ddb_entry(dev);
++                    break;
++                default:
++                    SAS_DPRINTK("%s: unknown device %p type %d\n",
++                            __FUNCTION__, dev, dev->dev_type);
++                    BUG_ON(dev);
++                    break;
++            }
++        }
++    }
++}
++
+ static void sas_abort_all_port_io(struct sas_port *port)
+ {
+ 	struct domain_device *dev, *n;
+@@ -1841,8 +1891,8 @@
+             case FANOUT_DEV:
+                 break;
+             default:
+-                SAS_DPRINTK("%s: unknown device type %d\n",
+-                        __FUNCTION__, dev->dev_type);
++                SAS_DPRINTK("%s: unknown device %p type %d\n",
++                        __FUNCTION__, dev, dev->dev_type);
+                 BUG_ON(dev);
+                 break;
+         }
+@@ -1970,13 +2020,7 @@
+ 
+         if ( (dev->dev_type == SATA_DEV) && lldd_notify) {
+             msleep(300);
+-            if (dev->port->ha->lldd_dev_gone)
+-                dev->port->ha->lldd_dev_gone(dev);
+-            if (try_module_get(dev->port->ha->lldd_module)) {
+-                if (dev->port->ha->lldd_dev_found) 
+-                    res = dev->port->ha->lldd_dev_found(dev);
+-                module_put(dev->port->ha->lldd_module);
+-            }
++            res = sas_device_reset_ddb_entry(dev); 
+         }
+     } 
+ 
+@@ -2008,13 +2052,7 @@
+                         sizeof(struct dev_to_host_fis));
+             }
+ 
+-            if (dev->port->ha->lldd_dev_gone)
+-                dev->port->ha->lldd_dev_gone(dev);
+-            if (try_module_get(dev->port->ha->lldd_module)) {
+-                if (dev->port->ha->lldd_dev_found) 
+-                    res = dev->port->ha->lldd_dev_found(dev);
+-                module_put(dev->port->ha->lldd_module);
+-            }
++            res = sas_device_reset_ddb_entry(dev); 
+         }
+     }
+ 
+@@ -2022,23 +2060,94 @@
+     return res;
+ }
+ 
++static inline int sas_set_scsi_state(struct scsi_device *scsi_dev, 
++        enum scsi_device_state state ) 
++{
++    enum scsi_device_state oldstate = scsi_dev->sdev_state;
++    int res;
++    unsigned long flags;
++    
++    if (oldstate == state)
++        return 0;
++
++    switch (state) {
++        case SDEV_BLOCK:
++                res = scsi_device_set_state(scsi_dev, state);
++                if (!res) {
++                    spin_lock_irqsave(scsi_dev->request_queue->queue_lock, flags);
++                    blk_stop_queue(scsi_dev->request_queue);
++                    spin_unlock_irqrestore(scsi_dev->request_queue->queue_lock, flags);
++                }
++            break;
++        
++        case SDEV_CANCEL:
++        case SDEV_RUNNING:
++            if (oldstate == SDEV_BLOCK) {
++                res = scsi_device_set_state(scsi_dev, state);
++                if (!res) {
++                    spin_lock_irqsave(scsi_dev->request_queue->queue_lock, flags);
++                    blk_start_queue(scsi_dev->request_queue);
++                    spin_unlock_irqrestore(scsi_dev->request_queue->queue_lock, flags);
++                }
++                break;
++            }
++            else if (oldstate == SDEV_CANCEL)
++                return 1;
++            /* fall through */
++        default:
++            res = scsi_device_set_state(scsi_dev, state);
++            break;
++    }
++
++    if (res)
++        SAS_DPRINTK("%016llx: sas_set_scsi_state failed new %x, old %x\n",
++                SAS_ADDR(((struct LU*)scsi_dev->hostdata)->parent->sas_addr), 
++                state, oldstate);
++
++    return res;
++}
++
++static int sas_set_device_scsi_state( struct domain_device* dev, 
++        enum scsi_device_state state ) 
++{
++    struct LU *lu, *n;
++    struct scsi_device *scsi_dev = NULL;
++    int res = 1;
++
++    if ( (dev->dev_type == SATA_DEV) && (dev->sata_dev.lu) &&
++            (dev->sata_dev.lu->uldd_dev) ) {
++        scsi_dev = dev->sata_dev.lu->uldd_dev;
++        res = sas_set_scsi_state(scsi_dev, state);
++    } 
++    else if (dev->dev_type == SAS_END_DEV) {
++        list_for_each_entry_safe(lu, n, &dev->end_dev.LU_list, list) {
++            scsi_dev = lu->uldd_dev;
++            if (scsi_dev && scsi_dev->request_queue) {
++                res = sas_set_scsi_state(scsi_dev, state);
++            }
++        } 
++    }
++
++    return res;
++}
++
+ /**
+  * Device handling.
+  * return 0 if successful.
+  */
++extern int scsi_delete_timer(struct scsi_cmnd *scmd);
+ static void sas_device_work( void* data )
+ {
+     struct domain_device* dev = (struct domain_device*)data;
+     unsigned long flags;
+-    struct LU *lu, *n;
+-    struct scsi_device *scsi_dev = NULL;
+     u32 options = 0;
+     struct sas_task *task, *task_end;
+     int res;
++    struct sas_ha_struct *sas_ha = dev->port->ha;
+ 
+ 
+     spin_lock_irqsave(&dev->dwt.options_lock, flags);
+-    dev->dwt.options &= ~SAS_DWT_OPTION_QUEUED;
++    dev->dwt.options &= ~SAS_DWT_QUEUED;
+     options = dev->dwt.options;
+     spin_unlock_irqrestore(&dev->dwt.options_lock, flags);
+ 
+@@ -2047,21 +2156,13 @@
+ 
+ 
+     /* BLOCK DEVICE */
+-    if ( (dev->dev_type == SATA_DEV) && (dev->sata_dev.lu) &&
+-            (dev->sata_dev.lu->uldd_dev) ) {
+-        scsi_dev = dev->sata_dev.lu->uldd_dev;
+-        scsi_internal_device_block(scsi_dev);
+-    } 
+-    else if (dev->dev_type == SAS_END_DEV) {
+-        list_for_each_entry_safe(lu, n, &dev->end_dev.LU_list, list) {
+-            scsi_dev = lu->uldd_dev;
+-            if (scsi_dev && scsi_dev->request_queue) {
+-                scsi_internal_device_block(scsi_dev);
+-            }
+-        } 
++    if ( !(options & SAS_DWT_OPTION_PRE_REMOVE_DEV) ) {
++        if ( sas_set_device_scsi_state(dev, SDEV_BLOCK))
++            SAS_DPRINTK("%016llx: dev %p, failed to set scsi "
++                    "state to SDEV_BLOCK\n",
++                    SAS_ADDR(dev->sas_addr), dev);
+     }
+ 
+-
+     /********* ABORT IO PRE / NCQ SIGNAL ***********/
+     if ( (options & SAS_DWT_OPTION_ABORT_ALL_IO) ||
+          (options & SAS_DWT_OPTION_NCQ_SIGNAL) ) {
+@@ -2072,38 +2173,52 @@
+         if ( options & SAS_DWT_OPTION_NCQ_SIGNAL ) 
+             dev->dwt.options &= ~SAS_DWT_OPTION_NCQ_SIGNAL;
+         spin_unlock_irqrestore(&dev->dwt.options_lock,flags);
++            
++        SAS_DPRINTK("%016llx: dev %p, abort suspend\n",
++                SAS_ADDR(dev->sas_addr), dev);
+         
+-        /* Reset chip if failed */
+-        res = sas_device_work_abort_suspend(dev);
+-        if (res != TMF_RESP_FUNC_COMPLETE) {
++        if ( !sas_ha_in_reset_recovery(sas_ha) ) {
+             
++            /* Reset chip if failed */
++            res = sas_device_work_abort_suspend(dev);
++            if (res != TMF_RESP_FUNC_COMPLETE) {
++
++                SAS_DPRINTK("%016llx: dev %p, abort suspend "
++                        "failed... RESET CHIP\n",
++                        SAS_ADDR(dev->sas_addr), dev);
++
++                notify_ha_event(dev->port->ha, HAE_RESET);
++                goto out_unblock;
++            }
++
++            if ( options & SAS_DWT_OPTION_NCQ_SIGNAL ) 
++                sas_device_ncq_analyze(dev);
++        } else {
+             SAS_DPRINTK("%016llx: dev %p, abort suspend "
+-                    "failed... RESET CHIP\n",
++                    "skipping in HA Reset/Recovery\n",
+                     SAS_ADDR(dev->sas_addr), dev);
+-#if 0
+-            if ( dev->port->ha->lldd_reset_chip )
+-                dev->port->ha->lldd_reset_chip(dev->port->ha);
+-#endif
+         }
+-    
+-        if ( options & SAS_DWT_OPTION_NCQ_SIGNAL ) 
+-            sas_device_ncq_analyze(dev);
+     }
+ 
+     /********* RESET DEVICE ***********/
+     if ( options & SAS_DWT_OPTION_RESET_DEV ) {
+-
+-        int type = (options & SAS_DWT_OPTION_HARD_RESET) ?
+-            PHY_FUNC_HARD_RESET : PHY_FUNC_LINK_RESET;
++        int type = (dev->dev_type == SATA_DEV) ?
++            PHY_FUNC_LINK_RESET : PHY_FUNC_HARD_RESET;
+         
+         spin_lock_irqsave(&dev->dwt.options_lock,flags);
+         dev->dwt.options &= ~SAS_DWT_OPTION_RESET_DEV;
+-        if ( type == PHY_FUNC_HARD_RESET)
+-            dev->dwt.options &= ~SAS_DWT_OPTION_HARD_RESET;
+         spin_unlock_irqrestore(&dev->dwt.options_lock,flags);
+         
++        SAS_DPRINTK("%016llx: dev %p, reset dev\n",
++                SAS_ADDR(dev->sas_addr), dev);
+         
+-        sas_device_reset(dev, type);
++        if ( !sas_ha_in_reset_recovery(sas_ha) ) {
++            sas_device_reset(dev, type);
++        } else {
++            SAS_DPRINTK("%016llx: dev %p, reset dev "
++                    "skipping in HA Reset/Recovery\n",
++                    SAS_ADDR(dev->sas_addr), dev);
++        }
+     }
+ 
+     /********* ABORT IO POST / NCQ CLEAR ***********/
+@@ -2114,19 +2229,27 @@
+         if (options & SAS_DWT_OPTION_NCQ_CLEAR)
+             dev->dwt.options &= ~SAS_DWT_OPTION_NCQ_CLEAR;
+         spin_unlock_irqrestore(&dev->dwt.options_lock,flags);
+-
+-        
+-        /* Reset chip if failed */
+-        res = sas_device_work_clear_resume(dev);
+-        if (res != TMF_RESP_FUNC_COMPLETE) {
+         
++        SAS_DPRINTK("%016llx: dev %p, abort resume\n",
++                SAS_ADDR(dev->sas_addr), dev);
++
++        if ( !sas_ha_in_reset_recovery(sas_ha) ) {
++
++            /* Reset chip if failed */
++            res = sas_device_work_clear_resume(dev);
++            if (res != TMF_RESP_FUNC_COMPLETE) {
++
++                SAS_DPRINTK("%016llx: dev %p, abort resume "
++                        "failed... RESET CHIP\n",
++                        SAS_ADDR(dev->sas_addr), dev);
++
++                notify_ha_event(dev->port->ha, HAE_RESET);
++                goto out_unblock;
++            }
++        } else {
+             SAS_DPRINTK("%016llx: dev %p, abort resume "
+-                    "failed... RESET CHIP\n",
++                    "skipping in HA Reset/Recovery\n",
+                     SAS_ADDR(dev->sas_addr), dev);
+-#if 0
+-            if ( dev->port->ha->lldd_reset_chip )
+-                dev->port->ha->lldd_reset_chip(dev->port->ha);
+-#endif
+         }
+     }
+ 
+@@ -2138,79 +2261,96 @@
+         if (options & SAS_DWT_OPTION_CLEAR_ALL_IO)
+             dev->dwt.options &= ~SAS_DWT_OPTION_CLEAR_ALL_IO;
+         spin_unlock_irqrestore(&dev->dwt.options_lock,flags);
++
++        SAS_DPRINTK("%016llx: dev %p, abort IO\n",
++                SAS_ADDR(dev->sas_addr), dev);
+         
+         /* Make sure all IO is completed */
+-        spin_lock(&dev->io_list_lock);
+-        
++Again:
++        spin_lock_irqsave(&dev->io_list_lock, flags);
+         list_for_each_entry_safe(task, task_end, &dev->io_list, dev_io_list) {
+-            spin_lock_irqsave(&task->task_state_lock, flags);
+-            if (  task->task_state_flags & SAS_TASK_STATE_ABORTED )
+-                if ( task->uldd_task )
+-                    ((struct scsi_cmnd*)task->uldd_task)->eh_eflags = 0;
+-            
+-            if ( (task->task_state_flags & SAS_TASK_STATE_PENDING) &&
+-                 !(task->task_state_flags & SAS_TASK_STATE_DONE) )  {
+-                task->task_state_flags |= SAS_TASK_STATE_ABORTED;
++            spin_lock(&task->task_state_lock);
++
++            if ( (task->task_state_flags & SAS_TASK_STATE_DONE) && 
++                    !(task->task_state_flags & SAS_TASK_STATE_ABORTED) ) {
++                spin_unlock(&task->task_state_lock);
++                continue;
+             }
++            
++            task->task_state_flags &= ~SAS_TASK_STATE_PENDING;
++	        task->task_state_flags |= SAS_TASK_STATE_DONE;
++            task->task_state_flags |= SAS_TASK_STATE_ABORTED;
+ 
+-            if ( task->task_state_flags & SAS_TASK_STATE_ABORTED ) {
+-                spin_unlock_irqrestore(&task->task_state_lock, flags);
+-                spin_unlock(&dev->io_list_lock);
+-                
+-                if (task->timer.expires) {
+-                    if (del_timer(&task->timer)) {
+-                        SAS_DPRINTK("%016llx: completing internal task %p\n", 
+-                                SAS_ADDR(dev->sas_addr), task);
+-                        task->timer.function((unsigned long)task);
+-                    }
+-                }
+-                else if ( task->uldd_task ) {
+-                        SAS_DPRINTK("%016llx: completing external task %p\n", 
+-                                SAS_ADDR(dev->sas_addr), task);
+-                    task->task_done(task);
+-                }
+-                else {
+-                    SAS_DPRINTK("%016llx: ERROR - No completion!!! task %p\n", 
++            spin_unlock(&task->task_state_lock);
++
++            if (task->uldd_task)
++                scsi_delete_timer((struct scsi_cmnd*)task->uldd_task);
++
++            /* remove the task from the list */
++            list_del_init(&task->dev_io_list);
++            
++            spin_unlock_irqrestore(&dev->io_list_lock, flags);
++
++            if (task->timer.expires) {
++                if (del_timer(&task->timer)) {
++                    SAS_DPRINTK("%016llx: completing internal task %p\n", 
+                             SAS_ADDR(dev->sas_addr), task);
++                    task->timer.function((unsigned long)task);
+                 }
+-                spin_lock(&dev->io_list_lock);
+-                continue;
+             }
+-            spin_unlock_irqrestore(&task->task_state_lock, flags);
++            else if ( task->uldd_task ) {
++                SAS_DPRINTK("%016llx: completing external task %p\n", 
++                        SAS_ADDR(dev->sas_addr), task);
++                ((struct scsi_cmnd*)task->uldd_task)->eh_eflags=0;
++                task->task_done(task);
++            }
++            else {
++                SAS_DPRINTK("%016llx: ERROR - No completion!!! task %p\n", 
++                        SAS_ADDR(dev->sas_addr), task);
++                sas_free_task(task);
++            }
++
++            goto Again;
+         }
+-        
+-        while (!list_empty(&dev->io_list)){
+-            spin_unlock(&dev->io_list_lock);
++
++        if (!list_empty(&dev->io_list)) {
++            spin_unlock_irqrestore(&dev->io_list_lock, flags);
+             msleep(100);
+-            spin_lock(&dev->io_list_lock);
++            SAS_DPRINTK("%016llx: Still IO outstanding, try again\n", 
++                    SAS_ADDR(dev->sas_addr));
++            goto Again;
+         }
+- 
+-        spin_unlock(&dev->io_list_lock);
++
++        spin_unlock_irqrestore(&dev->io_list_lock, flags);
+     }
+     
++    /********* REINIT DDB ENTRY ***********/
++    if ( options & SAS_DWT_OPTION_REINIT_DDB ) {
++        SAS_DPRINTK("%016llx: dev %p, reinit DDB's\n",
++                SAS_ADDR(dev->sas_addr), dev);
++        spin_lock_irqsave(&dev->dwt.options_lock,flags);
++        dev->dwt.options &= ~SAS_DWT_OPTION_REINIT_DDB;
++        spin_unlock_irqrestore(&dev->dwt.options_lock,flags);
+ 
+-    /* UNBLOCK DEVICE */
+-    if ( (dev->dev_type == SATA_DEV) && (dev->sata_dev.lu) &&
+-            (dev->sata_dev.lu->uldd_dev) ) {
+-        scsi_dev = dev->sata_dev.lu->uldd_dev;
+-        scsi_internal_device_unblock(scsi_dev);
+-    } 
+-    else if (dev->dev_type == SAS_END_DEV) {
+-        list_for_each_entry_safe(lu, n, &dev->end_dev.LU_list, list) {
+-            scsi_dev = lu->uldd_dev;
+-            if (scsi_dev && scsi_dev->request_queue) {
+-                scsi_internal_device_unblock(scsi_dev);
+-            }
+-        } 
++        sas_device_reset_ddb_entry(dev);
+     }
+-    
+-    spin_lock_irqsave(&dev->dwt.options_lock, flags);
+-    dev->dwt.options &= ~SAS_DWT_OPTION_BLOCKED;
+-    spin_unlock_irqrestore(&dev->dwt.options_lock, flags);
+ 
++out_unblock:    
++    if ( !(options & SAS_DWT_OPTION_PRE_REMOVE_DEV) ) {
++        if ( sas_set_device_scsi_state(dev, SDEV_RUNNING))
++            SAS_DPRINTK("%016llx: dev %p, failed to set scsi "
++                    "state to SDEV_RUNNING\n",
++                    SAS_ADDR(dev->sas_addr), dev);
++    }
++
++    if ( options & SAS_DWT_BLOCKED ) {
++        spin_lock_irqsave(&dev->dwt.options_lock, flags);
++        dev->dwt.options &= ~SAS_DWT_BLOCKED;
++        spin_unlock_irqrestore(&dev->dwt.options_lock, flags);
++    }
++    
+     SAS_DPRINTK("%016llx: Task done for dev %p, options: %08x\n",
+             SAS_ADDR(dev->sas_addr), dev, options);
+-
+ }
+ 
+ /**
+@@ -2228,15 +2368,19 @@
+             SAS_ADDR(dev->sas_addr), dev, options);
+ 
+     if ( options & SAS_DWT_OPTION_PRE_REMOVE_DEV ) {
+-
++        if ( sas_set_device_scsi_state(dev, SDEV_CANCEL))
++            SAS_DPRINTK("%016llx: dev %p, failed to set scsi "
++                    "state to SDEV_CANCEL\n",
++                    SAS_ADDR(dev->sas_addr), dev);
+         /* Take care of the workqueue. */
+         flush_workqueue(dev->dwt.dev_work_queue);
+         destroy_workqueue(dev->dwt.dev_work_queue);
+         dev->dwt.dev_work_queue = NULL;
+         spin_lock_irqsave(&dev->dwt.options_lock, flags);
+-        dev->dwt.options = SAS_DWT_OPTION_BLOCKED;
++        dev->dwt.options = SAS_DWT_OPTION_PRE_REMOVE_DEV;
++        dev->dwt.options |= SAS_DWT_BLOCKED;
+         dev->dwt.options |= SAS_DWT_OPTION_ABORT_ALL_IO;
+-        dev->dwt.options |= SAS_DWT_OPTION_QUEUED;
++        dev->dwt.options |= SAS_DWT_QUEUED;
+         spin_unlock_irqrestore(&dev->dwt.options_lock, flags);
+         sas_device_work(dev);
+ 
+@@ -2245,7 +2389,7 @@
+     
+     spin_lock_irqsave(&dev->dwt.options_lock, flags);
+     
+-    if ( dev->dwt.options & SAS_DWT_OPTION_BLOCKED ) {
++    if ( dev->dwt.options & SAS_DWT_BLOCKED ) {
+         spin_unlock_irqrestore(&dev->dwt.options_lock, flags);
+         SAS_DPRINTK("%016llx: dev %p BLOCKED, options: %08x\n",
+                 SAS_ADDR(dev->sas_addr), dev, options);
+@@ -2253,7 +2397,8 @@
+     }
+     
+     if ( options & SAS_DWT_OPTION_CLEAR_ALL_IO ) {
+-        dev->dwt.options |= SAS_DWT_OPTION_BLOCKED;
++        options = 0;
++        dev->dwt.options |= SAS_DWT_BLOCKED;
+         
+         spin_unlock_irqrestore(&dev->dwt.options_lock, flags);
+         
+@@ -2261,41 +2406,44 @@
+         flush_workqueue(dev->dwt.dev_work_queue);
+         
+         spin_lock_irqsave(&dev->dwt.options_lock, flags);
+-        dev->dwt.options &= SAS_DWT_TASK_INITIALIZED;
+-        dev->dwt.options |= SAS_DWT_OPTION_BLOCKED;
++        dev->dwt.options &= SAS_DWT_INITIALIZED;
++        dev->dwt.options |= SAS_DWT_BLOCKED;
+         dev->dwt.options |= SAS_DWT_OPTION_CLEAR_ALL_IO;
++        spin_unlock_irqrestore(&dev->dwt.options_lock, flags);
++        sas_device_work(dev);
++        return 0;
+     }
+     
+     dev->dwt.options |= options;
+ 
+-    if ( !(dev->dwt.options & SAS_DWT_TASK_INITIALIZED) ) {
+-        dev->dwt.options |= SAS_DWT_TASK_INITIALIZED;
++    if ( !(dev->dwt.options & SAS_DWT_INITIALIZED) ) {
++        dev->dwt.options |= SAS_DWT_INITIALIZED;
+         spin_unlock_irqrestore(&dev->dwt.options_lock, flags);
+         INIT_WORK(&dev->dwt.work, sas_device_work, dev);
+         spin_lock_irqsave(&dev->dwt.options_lock, flags);
+     } else {
+-        options |= SAS_DWT_TASK_INITIALIZED;
++        options |= SAS_DWT_INITIALIZED;
+     }
+ 
+-    if ( dev->dwt.options & SAS_DWT_OPTION_QUEUED )
+-        options |= SAS_DWT_OPTION_QUEUED;
++    if ( dev->dwt.options & SAS_DWT_QUEUED )
++        options |= SAS_DWT_QUEUED;
+     else
+-        dev->dwt.options |= SAS_DWT_OPTION_QUEUED;
++        dev->dwt.options |= SAS_DWT_QUEUED;
+ 
+     spin_unlock_irqrestore(&dev->dwt.options_lock, flags);
+     
+         
+-    if ( options & SAS_DWT_OPTION_QUEUED) {
++    if ( options & SAS_DWT_QUEUED) {
+         SAS_DPRINTK("%016llx: Already waiting for dev %p, options: %08x\n",
+-                SAS_ADDR(dev->sas_addr), dev, options);
++                SAS_ADDR(dev->sas_addr), dev, dev->dwt.options);
+         return 0;
+     }
+     
+-    if ( options & SAS_DWT_TASK_INITIALIZED )
++    if ( options & SAS_DWT_INITIALIZED )
+         PREPARE_WORK(&dev->dwt.work, sas_device_work, dev);
+     
+     SAS_DPRINTK("%016llx: Queuing work for dev %p, options: %08x\n",
+-            SAS_ADDR(dev->sas_addr), dev, options);
++            SAS_ADDR(dev->sas_addr), dev, dev->dwt.options);
+     
+     return !queue_work(dev->dwt.dev_work_queue, &dev->dwt.work);
+ }
+diff -u -r a/drivers/scsi/sas/sas_dump.c b/drivers/scsi/sas/sas_dump.c
+--- a/drivers/scsi/sas/sas_dump.c	2006-10-11 07:01:10.914092716 -0500
++++ b/drivers/scsi/sas/sas_dump.c	2006-10-11 06:59:10.411659389 -0500
+@@ -29,6 +29,7 @@
+ 
+ static const char *sas_hae_str[] = {
+ 	[0] = "HAE_RESET",
++	[1] = "HAE_RESTART",
+ };
+ 
+ static const char *sas_porte_str[] = {
+@@ -37,6 +38,7 @@
+ 	[2] = "PORTE_LINK_RESET_ERR",
+ 	[3] = "PORTE_TIMER_EVENT",
+ 	[4] = "PORTE_HARD_RESET",
++	[5] = "PORTE_LINK_DOWN",
+ };
+ 
+ static const char *sas_phye_str[] = {
+@@ -44,6 +46,7 @@
+ 	[1] = "PHYE_OOB_DONE",
+ 	[2] = "PHYE_OOB_ERROR",
+ 	[3] = "PHYE_SPINUP_HOLD",
++	[4] = "PHYE_LINK_DOWN",
+ };
+ 
+ void sas_dprint_porte(int phyid, enum port_event pe)
+diff -u -r a/drivers/scsi/sas/sas_event.c b/drivers/scsi/sas/sas_event.c
+--- a/drivers/scsi/sas/sas_event.c	2006-10-11 07:01:12.383951641 -0500
++++ b/drivers/scsi/sas/sas_event.c	2006-10-11 06:59:10.414659101 -0500
+@@ -98,6 +98,9 @@
+ 		case PHYE_SPINUP_HOLD:
+ 			sas_phye_spinup_hold(phy);
+ 			break;
++		case PHYE_LINK_DOWN:
++			sas_port_phy_reset(phy);
++			break;
+ 		}
+ 		spin_lock_irqsave(&sas_ha->event_lock, flags);
+ 	}
+@@ -150,6 +153,9 @@
+ 		case PORTE_HARD_RESET:
+ 			sas_porte_hard_reset(phy);
+ 			break;
++		case PORTE_LINK_DOWN:
++			sas_port_port_reset(phy);
++			break;
+ 		}
+ 		spin_lock_irqsave(&sas_ha->event_lock, flags);
+ 	}
+@@ -170,7 +176,6 @@
+ 	while (!list_empty(&sas_ha->ha_event_list)) {
+ 		struct list_head *head = sas_ha->ha_event_list.next;
+ 		ha_event = container_of(head, struct sas_event, el)->event;
+-		list_del_init(head);
+ 		spin_unlock_irqrestore(&sas_ha->event_lock, flags);
+ 
+ 		sas_dprint_hae(sas_ha, ha_event);
+@@ -178,10 +183,19 @@
+ 		switch (ha_event) {
+ 		case HAE_RESET:
+ 			sas_hae_reset(sas_ha);
++            spin_lock_irqsave(&sas_ha->event_lock, flags);
++            list_del_init(head);
++            goto out;
++			break;
++		case HAE_RESTART:
++			sas_hae_restart(sas_ha);
++
+ 			break;
+ 		}
+-		spin_lock_irqsave(&sas_ha->event_lock, flags);
++        spin_lock_irqsave(&sas_ha->event_lock, flags);
++		list_del_init(head);
+ 	}
++out:
+ 	spin_unlock_irqrestore(&sas_ha->event_lock, flags);
+ 	module_put(sas_ha->lldd_module);
+ }
+@@ -214,13 +228,19 @@
+ 
+ }
+ 
+-static void notify_ha_event(struct sas_ha_struct *sas_ha, enum ha_event event)
++void notify_ha_event(struct sas_ha_struct *sas_ha, enum ha_event event)
+ {
+ 	unsigned long flags;
+ 
+ 	spin_lock_irqsave(&sas_ha->event_lock, flags);
+-	list_move_tail(&sas_ha->ha_events[event].el, &sas_ha->ha_event_list);
+-	up(&sas_ha->event_sema);
++    if (list_empty(&sas_ha->ha_events[event].el)) {
++        sas_ha->state_flags |= SAS_HA_STATE_BLOCKED;
++	    list_move_tail(&sas_ha->ha_events[event].el, &sas_ha->ha_event_list);
++	    up(&sas_ha->event_sema);
++    }
++    else
++        SAS_DPRINTK("%s: Already processing event %d\n",
++                __FUNCTION__, event);
+ 	spin_unlock_irqrestore(&sas_ha->event_lock, flags);
+ }
+ 
+@@ -242,9 +262,9 @@
+ 	unsigned long flags;
+ 
+ 	spin_lock_irqsave(&ha->event_lock, flags);
+-	list_move_tail(&phy->phy_events[event].el, &phy->phy_event_list);
+-	ha->phye_mask |= (1 << phy->id);
+-	up(&ha->event_sema);
++    list_move_tail(&phy->phy_events[event].el, &phy->phy_event_list);
++    ha->phye_mask |= (1 << phy->id);
++    up(&ha->event_sema);
+ 	spin_unlock_irqrestore(&ha->event_lock, flags);
+ }
+ 
+diff -u -r a/drivers/scsi/sas/sas_expander.c b/drivers/scsi/sas/sas_expander.c
+--- a/drivers/scsi/sas/sas_expander.c	2006-10-11 07:01:12.388951161 -0500
++++ b/drivers/scsi/sas/sas_expander.c	2006-10-11 06:59:10.419658621 -0500
+@@ -33,7 +33,6 @@
+ #include <linux/workqueue.h>
+ #include <linux/delay.h>	/*DWD*/
+ 
+-static int sas_discover_expander(struct domain_device *dev);
+ static int sas_configure_routing(struct domain_device *dev, u8 *sas_addr);
+ static int sas_disable_routing(struct domain_device *dev,  u8 *sas_addr);
+ static int smp_phy_control(struct domain_device *dev, int phy_id,
+@@ -420,7 +419,6 @@
+     if ( dev->port->ha->first_discovery_done && (SAS_ADDR(phy->attached_sas_addr) == 0) ) {
+         SAS_DPRINTK("ex %016llx attempting to reset phy%02d: BOGUS ADDR 0\n",
+                 SAS_ADDR(dev->sas_addr), phy->phy_id );
+-        sas_queue_device_work(dev, SAS_DWT_OPTION_RESET_DEV);
+     }
+ 
+ 
+@@ -1584,7 +1582,7 @@
+  *
+  * See comment in sas_discover_sata().
+  */
+-static int sas_discover_expander(struct domain_device *dev)
++int sas_discover_expander(struct domain_device *dev)
+ {
+ 	int res;
+     int retries;
+diff -u -r a/drivers/scsi/sas/sas_init.c b/drivers/scsi/sas/sas_init.c
+--- a/drivers/scsi/sas/sas_init.c	2006-10-11 07:01:12.392950777 -0500
++++ b/drivers/scsi/sas/sas_init.c	2006-10-11 06:59:10.423658237 -0500
+@@ -27,8 +27,14 @@
+ #include <linux/init.h>
+ #include <linux/device.h>
+ #include <linux/spinlock.h>
+-#include <linux/delay.h>
++#include <scsi/scsi.h>
++#include <scsi/scsi_device.h>
++#include <scsi/scsi_eh.h>
+ #include <scsi/scsi_host.h>
++#include <scsi/scsi_ioctl.h>
++#include <scsi/scsi_request.h>
++#include <linux/delay.h>
++#include <linux/blkdev.h>
+ 
+ #include "sas_internal.h"
+ #include <scsi/sas/sas_task.h>
+@@ -42,36 +48,77 @@
+ 
+ void sas_hae_reset(struct sas_ha_struct *sas_ha)
+ {
+-	unsigned long flags;
++    unsigned long flags;
++    int res = 0;
++    int retries;
+ 
+-	/* Lock the host */
++    /* Lock the host */
++    SAS_DPRINTK("%s: Blocking incoming host IO\n", __FUNCTION__);
+ 	spin_lock_irqsave(sas_ha->core.shost->host_lock, flags);
+-	scsi_host_set_state(sas_ha->core.shost, SHOST_RECOVERY);
++    scsi_host_set_state(sas_ha->core.shost, SHOST_RECOVERY);
+ 	spin_unlock_irqrestore(sas_ha->core.shost->host_lock, flags);
+ 
+-	SAS_DPRINTK("%s: Aborting all IO\n", __FUNCTION__);
+-	sas_abort_all_ha_io(sas_ha);
++    SAS_DPRINTK("%s: Aborting all IO\n", __FUNCTION__);
++    sas_abort_all_ha_io(sas_ha);
+ 
+-	SAS_DPRINTK("%s: Waiting for all IO to complete %u outstanding\n",
+-		__FUNCTION__, sas_ha->core.shost->host_busy);
+-	while (sas_ha->core.shost->host_busy != 0) {
+-		msleep(500);
+-		SAS_DPRINTK("%s: Waiting for all IO to complete %u outstanding\n",
+-			__FUNCTION__, sas_ha->core.shost->host_busy);
+-	}
+-
+-	sas_ha->porte_mask = 0;
+-	sas_ha->phye_mask = 0;
+-
+-	SAS_DPRINTK("%s: Resetting Chip\n", __FUNCTION__);
+-	if ( sas_ha->lldd_reset_chip )
+-		sas_ha->lldd_reset_chip(sas_ha);
+-	
+-	spin_lock_irqsave(sas_ha->core.shost->host_lock, flags);
+-	scsi_host_set_state(sas_ha->core.shost, SHOST_RUNNING);
+-	spin_unlock_irqrestore(sas_ha->core.shost->host_lock, flags);
++    SAS_DPRINTK("%s: Waiting for all IO to complete %u outstanding\n", 
++            __FUNCTION__, sas_ha->core.shost->host_busy);
++    while (sas_ha->core.shost->host_busy != 0) {
++        msleep(500);
++        SAS_DPRINTK("%s: Waiting for all IO to complete %u outstanding\n",
++                __FUNCTION__, sas_ha->core.shost->host_busy);
++    }
++
++    sas_ha->porte_mask = 0;
++    sas_ha->phye_mask = 0;
++
++    SAS_DPRINTK("%s: Resetting Chip\n", __FUNCTION__);
++    if ( sas_ha->lldd_reset_chip ) {
++        for ( retries = 0; retries < 5; ++retries ) {
++            res = sas_ha->lldd_reset_chip(sas_ha);
++            if (res) {
++                msleep(100);
++                continue;
++            }
++            break;
++        }
++    }
++    else
++        SAS_DPRINTK("%s: Resetting Chip... NO LLDD FUNCTION\n", __FUNCTION__);
++
++    if ( res ) {
++        SAS_DPRINTK("%s: Resetting Chip Failed... Going down... "
++                "Remove all devs\n", __FUNCTION__);
++        sas_unregister_devices(sas_ha);
++        return;
++    }
++
++    msleep(100);
++    
++    notify_ha_event(sas_ha, HAE_RESTART);
++}
+ 
+-	wake_up(&sas_ha->core.shost->host_wait);
++extern void scsi_restart_operations(struct Scsi_Host *shost);
++extern int sas_discover_domain(struct sas_port *port);
++void sas_hae_restart(struct sas_ha_struct *sas_ha)
++{
++    int i;
++    unsigned long flags;
++    int res;
++
++    spin_lock_irqsave(&sas_ha->event_lock, flags);
++    /* Clear the blocked state */
++    sas_ha->state_flags &= ~SAS_HA_STATE_BLOCKED;
++    spin_unlock_irqrestore(&sas_ha->event_lock, flags);
++
++	for (i = 0; i < sas_ha->num_phys; i++)
++		res = sas_discover_domain(sas_ha->sas_port[i]);
++    
++    SAS_DPRINTK("%s: Re-initializing ddb entries\n", __FUNCTION__);
++    sas_reinit_all_ha_ddbs(sas_ha);
++    
++    SAS_DPRINTK("%s: Unblocking incoming host IO\n", __FUNCTION__);
++    scsi_restart_operations(sas_ha->core.shost);
+ }
+ 
+ /* ---------- HA attributes ---------- */
+@@ -91,11 +138,26 @@
+ {
+         return sprintf(buf,"%d\n",sas_ha->first_discovery_done);
+ }
+-static ssize_t sas_ha_dump_data(struct sas_ha_struct *sas_ha, char *buf)
++static ssize_t sas_ha_dump_data(struct sas_ha_struct *sas_ha, const char *buf,
++				     size_t size)
+ {
+     if ( sas_ha->lldd_dump )
+         sas_ha->lldd_dump(sas_ha);
+-    return 0;
++    return size;
++}
++static ssize_t sas_ha_reset(struct sas_ha_struct *sas_ha, const char *buf,
++				     size_t size)
++{
++	if (size > 0) {
++		if (buf[0] == '0') 
++			notify_ha_event(sas_ha, HAE_RESET);
++        else if (buf[0] == '1') {
++            if ( sas_ha->lldd_reset_chip )
++                sas_ha->lldd_reset_chip(sas_ha);
++        }
++	}
++    
++    return size;
+ }
+ /* ---------- SAS HA Class ---------- */
+ 
+@@ -121,11 +183,25 @@
+ 	return ret;
+ }
+ 
++static ssize_t ha_store_attr(struct kobject *kobj,
++			      struct attribute *attr,
++			      const char *page, size_t size)
++{
++	ssize_t ret = 0;
++	struct sas_ha_struct *sas_ha = to_sas_ha(kobj);
++	struct ha_attribute *ha_attr = to_ha_attr(attr);
++
++	if (ha_attr->store)
++		ret = ha_attr->store(sas_ha, page, size);
++	return ret;
++}
++
+ static struct ha_attribute ha_attrs[] = {
+ 	__ATTR(ha_name, 0444, sas_ha_name_show, NULL),
+ 	__ATTR(device_name, 0444, sas_ha_addr_show, NULL),
+         __ATTR(first_scan_done, 0444, sas_ha_scan_show, NULL),
+-        __ATTR(dump_data, 0444, sas_ha_dump_data, NULL),
++        __ATTR(dump_data, 0644, NULL, sas_ha_dump_data),
++        __ATTR(reset_ha, 0644, NULL, sas_ha_reset),
+ 	__ATTR_NULL,
+ };
+ 
+@@ -133,6 +209,7 @@
+ 
+ static struct sysfs_ops ha_sysfs_ops = {
+ 	.show = ha_show_attr,
++    .store = ha_store_attr,
+ };
+ 
+ static struct kobj_type ha_ktype = {
+@@ -201,7 +278,7 @@
+ 	}
+ 
+ 	sas_ha->execute_hard_reset = sas_execute_hard_reset;
+-	sas_ha->dev_queue_work = sas_queue_device_work;
++    sas_ha->dev_queue_work = sas_queue_device_work;
+ 
+ 	return 0;
+ 
+diff -u -r a/drivers/scsi/sas/sas_internal.h b/drivers/scsi/sas/sas_internal.h
+--- a/drivers/scsi/sas/sas_internal.h	2006-10-11 07:01:12.400950009 -0500
++++ b/drivers/scsi/sas/sas_internal.h	2006-10-11 06:59:10.426657949 -0500
+@@ -62,6 +62,8 @@
+ void sas_phye_spinup_hold(struct sas_phy *phy);
+ 
+ void sas_deform_port(struct sas_phy *phy);
++int sas_port_port_reset(struct sas_phy* phy);
++int sas_port_phy_reset(struct sas_phy* phy);
+ 
+ void sas_porte_bytes_dmaed(struct sas_phy *phy);
+ void sas_porte_broadcast_rcvd(struct sas_phy *phy);
+@@ -75,5 +77,6 @@
+ 
+ void sas_hae_reset(struct sas_ha_struct *sas_ha);
+ void sas_hae_restart(struct sas_ha_struct *sas_ha);
++void notify_ha_event(struct sas_ha_struct *sas_ha, enum ha_event event);
+ 
+ #endif /* _SAS_INTERNAL_H_ */
+diff -u -r a/drivers/scsi/sas/sas_port.c b/drivers/scsi/sas/sas_port.c
+--- a/drivers/scsi/sas/sas_port.c	2006-10-11 07:01:11.679019299 -0500
++++ b/drivers/scsi/sas/sas_port.c	2006-10-11 06:59:10.431657470 -0500
+@@ -22,10 +22,13 @@
+  *
+  * $Id: sas-aic94xx-eh_handling_2.patch 14466 2006-10-11 12:19:45Z HoltyB $
+  */
++#include <linux/delay.h>
+ 
+ #include "sas_internal.h"
+ #include <scsi/sas/sas_discover.h>
+ 
++static void sas_deform_port_now(unsigned long _phy);
++
+ /* called only when num_phys increments, afterwards */
+ static void sas_create_port_sysfs_links(struct sas_phy *phy)
+ {
+@@ -60,6 +63,53 @@
+ 	}
+ }
+ 
++int sas_port_phy_reset(struct sas_phy* phy)
++{
++	struct sas_ha_struct *sas_ha = phy->ha;
++	int res;
++	
++	if ( sas_ha_in_reset_recovery(sas_ha) ) {
++		return 0;
++	}
++
++	SAS_DPRINTK("%s: resetting phy %d\n", __FUNCTION__, phy->id);
++	res = sas_ha->lldd_unpause_phy(phy, 1);
++
++	if (res) {
++		SAS_DPRINTK("%s: resetting phy %d FAILED... HAE_RESET\n",
++				__FUNCTION__, phy->id);
++		notify_ha_event(sas_ha, HAE_RESET);
++	}
++	
++	return res;
++}
++
++int sas_port_port_reset(struct sas_phy* phy)
++{
++	struct sas_port *port = phy->port;
++	struct sas_ha_struct *sas_ha = phy->ha;
++	unsigned long flags;
++	
++	if (!port) {
++		SAS_DPRINTK("%s: NULL port in phy %d\n", 
++				__FUNCTION__, phy->id);
++		return 1;
++	}
++		
++	spin_lock(&sas_ha->phy_port_lock);
++
++	SAS_DPRINTK("%s: resetting port %d\n", __FUNCTION__, port->id);
++	
++	spin_lock_irqsave(&port->phy_list_lock, flags);
++	list_for_each_entry(phy, &port->phy_list, port_phy_el)
++		sas_port_phy_reset(phy);
++	spin_unlock_irqrestore(&port->phy_list_lock, flags);
++
++	spin_unlock(&sas_ha->phy_port_lock);
++
++	return 0;
++}
++
+ /**
+  * sas_form_port -- add this phy to a port
+  * @phy: the phy of interest
+@@ -75,8 +125,10 @@
+ 
+ 	if (port) {
+ 		if (memcmp(port->attached_sas_addr, phy->attached_sas_addr,
+-			   SAS_ADDR_SIZE) == 0)
+-			sas_deform_port(phy);
++			   SAS_ADDR_SIZE) == 0) {
++			sas_deform_port_now((unsigned long)phy);
++            memcpy(phy->attached_sas_addr, port->attached_sas_addr, SAS_ADDR_SIZE);
++        }
+ 		else {
+ 			SAS_DPRINTK("%s: phy%d belongs to port%d already(%d)!\n",
+ 				    __FUNCTION__, phy->id, phy->port->id,
+@@ -145,21 +197,19 @@
+ 	sas_discover_event(phy->port, DISCE_DISCOVER_DOMAIN);
+ }
+ 
+-/**
+- * sas_deform_port -- remove this phy from the port it belongs to
+- * @phy: the phy of interest
+- *
+- * This is called when the physical link to the other phy has been
+- * lost (on this phy), in Event thread context. We cannot delay here.
+- */
+-void sas_deform_port(struct sas_phy *phy)
++static void sas_deform_port_now(unsigned long _phy)
+ {
++    struct sas_phy *phy = (struct sas_phy *)_phy;
+ 	struct sas_ha_struct *sas_ha = phy->ha;
+ 	struct sas_port *port = phy->port;
+ 
+ 	if (!port)
+ 		return;		  /* done by a phy event */
+ 
++	spin_lock(&sas_ha->phy_port_lock);
++    memset(&phy->timer, 0, sizeof(struct timer_list));
++	spin_unlock(&sas_ha->phy_port_lock);
++
+ 	if (port->port_dev)
+ 		port->port_dev->pathways--;
+ 
+@@ -183,10 +233,14 @@
+ 
+ 	list_del_init(&phy->port_phy_el);
+ 	phy->port = NULL;
++    memset(phy->attached_sas_addr, 0, SAS_ADDR_SIZE);
+ 	port->num_phys--;
+ 	port->phy_mask &= ~(1U << phy->id);
+ 
+-	if (port->num_phys == 0) {
++	SAS_DPRINTK("phy%d removed from port%d, phy_mask:0x%x\n", phy->id,
++		    port->id, port->phy_mask);
++	
++    if (port->num_phys == 0) {
+ 		INIT_LIST_HEAD(&port->phy_list);
+ 		memset(port->sas_addr, 0, SAS_ADDR_SIZE);
+ 		memset(port->attached_sas_addr, 0, SAS_ADDR_SIZE);
+@@ -202,10 +256,52 @@
+ 	return;
+ }
+ 
++/**
++ * sas_deform_port -- remove this phy from the port it belongs to
++ * @phy: the phy of interest
++ *
++ * This is called when the physical link to the other phy has been
++ * lost (on this phy), in Event thread context. We cannot delay here.
++ */
++
++void sas_deform_port(struct sas_phy *phy)
++{
++	struct sas_ha_struct *sas_ha = phy->ha;
++	struct sas_port *port = phy->port;
++
++	if (!port)
++		return;		  /* done by a phy event */
++
++    spin_lock(&sas_ha->phy_port_lock);
++    if (phy->timer.expires)
++        goto out_unlock;
++    
++    init_timer(&phy->timer);
++    phy->timer.expires     = jiffies + 2*HZ;
++    phy->timer.function    = sas_deform_port_now;
++    phy->timer.data        = (unsigned long)phy;
++    add_timer(&phy->timer);
++
++out_unlock:
++	spin_unlock(&sas_ha->phy_port_lock);
++}
++    
+ /* ---------- SAS port events ---------- */
+ 
+ void sas_porte_bytes_dmaed(struct sas_phy *phy)
+ {
++    struct sas_ha_struct *sas_ha = phy->ha;
++    spin_lock(&sas_ha->phy_port_lock);
++    while (phy->timer.expires) {
++        if ( del_timer(&phy->timer) )
++            memset(&phy->timer, 0, sizeof(struct timer_list));
++        else {
++            spin_unlock(&sas_ha->phy_port_lock);
++            msleep(100);
++            spin_lock(&sas_ha->phy_port_lock);
++        }
++    }
++	spin_unlock(&sas_ha->phy_port_lock);
+ 	sas_form_port(phy);
+ }
+ 
+@@ -386,7 +482,7 @@
+ void sas_unregister_ports(struct sas_ha_struct *sas_ha)
+ {
+ 	int i;
+-
++	
+ 	for (i = 0; i < sas_ha->num_phys; i++)
+ 		if (sas_ha->sas_phy[i]->port)
+ 			sas_deform_port(sas_ha->sas_phy[i]);
+diff -u -r a/drivers/scsi/sas/sas_scsi_host.c b/drivers/scsi/sas/sas_scsi_host.c
+--- a/drivers/scsi/sas/sas_scsi_host.c	2006-10-11 07:01:12.480942332 -0500
++++ b/drivers/scsi/sas/sas_scsi_host.c	2006-10-11 06:59:10.435657086 -0500
+@@ -43,7 +43,7 @@
+ module_param_named(no_uld, sas_no_uld, int, S_IRUGO);
+ MODULE_PARM_DESC(no_uld, "\n"
+ 		"\tPrevent upper level driver attach for disks, default:1\n");
+-int    sas_qdepth = 0;
++int    sas_qdepth = 1;
+ module_param_named(qdepth, sas_qdepth, int, S_IRUGO);
+ MODULE_PARM_DESC(qdepth, "\n"
+                "\tOverride LLDD queue depth. Default: 0 [no override]\n");
+@@ -293,7 +293,14 @@
+ 
+ 		cmd->scsi_done = scsi_done;
+ 
+-		if (lu->parent->dev_type == SATA_DEV) {
++		if ( lu->parent->dwt.options & SAS_DWT_BLOCKED ) {
++            cmd->result = DID_ABORT << 16; /* retry */
++            res = 0;
++            scsi_done(cmd);
++            goto out;
++        }
++        
++        if (lu->parent->dev_type == SATA_DEV) {
+ //			printk("queuecommand: sata dev 0x%08x cmd = 0x%04x\n", (int)lu->parent, cmd->cmnd[0]);
+ 			res = ata_sas_queuecmd(cmd, scsi_done, lu->parent->sata_dev.ap) ;
+ 			goto out;
+@@ -632,6 +639,7 @@
+ static enum scsi_eh_timer_return sas_scsi_timed_out(struct scsi_cmnd *cmd)
+ {
+ 	struct sas_task *task = TO_SAS_TASK(cmd);
++    struct sas_ha_struct *sas_ha = task->dev->port->ha;
+ 	unsigned long flags;
+ 
+ 	if (!task) {
+@@ -649,8 +657,11 @@
+ 	}
+ 	task->task_state_flags |= SAS_TASK_STATE_ABORTED;
+ 	spin_unlock_irqrestore(&task->task_state_lock, flags);
+-	sas_queue_device_work(task->dev, 
+-		(SAS_DWT_OPTION_ABORT_ALL_IO | SAS_DWT_OPTION_RESET_DEV));
++    
++    if ( !sas_ha_in_reset_recovery(sas_ha)) {
++        sas_queue_device_work(task->dev, 
++                (SAS_DWT_OPTION_ABORT_ALL_IO | SAS_DWT_OPTION_RESET_DEV));
++    }
+ 
+         SAS_DPRINTK(" %llX command  0x%p, task 0x%p, timed out: EH_DRIVER_HANDLED\n"
+                 ,SAS_ADDR(task->dev->sas_addr),
+@@ -758,7 +769,7 @@
+             SAS_DPRINTK("%s: %llX task %p Resetting dev\n", 
+                 __FUNCTION__, SAS_ADDR(dev->sas_addr),task);
+             sas_queue_device_work(dev, 
+-                    SAS_DWT_OPTION_RESET_DEV | SAS_DWT_OPTION_HARD_RESET );
++                    SAS_DWT_OPTION_RESET_DEV);
+             dev->err_count = 0;
+         }
+         else if ( ts->stat != SAS_ABORTED_TASK )
+diff -u -r a/drivers/scsi/scsi_error.c b/drivers/scsi/scsi_error.c
+--- a/drivers/scsi/scsi_error.c	2006-10-11 07:01:12.409949146 -0500
++++ b/drivers/scsi/scsi_error.c	2006-10-11 06:59:10.440656606 -0500
+@@ -148,6 +148,7 @@
+ 
+ 	return rtn;
+ }
++EXPORT_SYMBOL(scsi_delete_timer);
+ 
+ /**
+  * scsi_times_out - Timeout function for normal scsi commands.
+@@ -1366,7 +1367,7 @@
+  *    When we entered the error handler, we blocked all further i/o to
+  *    this device.  we need to 'reverse' this process.
+  **/
+-static void scsi_restart_operations(struct Scsi_Host *shost)
++void scsi_restart_operations(struct Scsi_Host *shost)
+ {
+ 	struct scsi_device *sdev;
+ 	unsigned long flags;
+@@ -1405,6 +1406,7 @@
+ 	 */
+ 	scsi_run_host_queues(shost);
+ }
++EXPORT_SYMBOL(scsi_restart_operations);
+ 
+ /**
+  * scsi_eh_ready_devs - check device ready state and recover if not.
+diff -u -r a/include/scsi/sas/sas_class.h b/include/scsi/sas/sas_class.h
+--- a/include/scsi/sas/sas_class.h	2006-10-11 07:01:12.413948762 -0500
++++ b/include/scsi/sas/sas_class.h	2006-10-11 06:59:10.449655742 -0500
+@@ -54,9 +54,10 @@
+  * update the other file too.
+  */
+ enum ha_event {
+-	HAE_RESET = 0U,
++	HAE_RESET =     0U,
++	HAE_RESTART =   1U,
+ };
+-#define HA_NUM_EVENTS 1
++#define HA_NUM_EVENTS 2
+ 
+ enum port_event {
+ 	PORTE_BYTES_DMAED     = 0U,
+@@ -64,16 +65,18 @@
+ 	PORTE_LINK_RESET_ERR  = 2,
+ 	PORTE_TIMER_EVENT     = 3,
+ 	PORTE_HARD_RESET      = 4,
++	PORTE_LINK_DOWN       = 5,
+ };
+-#define PORT_NUM_EVENTS 5
++#define PORT_NUM_EVENTS 6
+ 
+ enum phy_event {
+ 	PHYE_LOSS_OF_SIGNAL   = 0U,
+ 	PHYE_OOB_DONE         = 1,
+ 	PHYE_OOB_ERROR        = 2,
+ 	PHYE_SPINUP_HOLD      = 3, /* hot plug SATA, no COMWAKE sent */
++	PHYE_LINK_DOWN        = 4,
+ };
+-#define PHY_NUM_EVENTS 4
++#define PHY_NUM_EVENTS 5
+ 
+ enum discover_event {
+ 	DISCE_DISCOVER_DOMAIN   = 0U,
+@@ -111,6 +114,7 @@
+ 	struct list_head   phy_event_list;
+ 	struct sas_event   port_events[PORT_NUM_EVENTS];
+ 	struct sas_event   phy_events[PHY_NUM_EVENTS];
++    struct timer_list     timer;
+ 
+ 	int error;
+ 
+@@ -236,6 +240,8 @@
+ 	int   use_clustering;
+ };
+ 
++#define SAS_HA_STATE_BLOCKED    0x00000001
++
+ struct sas_ha_struct {
+ /* private: */
+ 	struct kset      sas_kset; /* "root", but in this impl. not global */
+@@ -252,6 +258,7 @@
+ 	u32              porte_mask; /* mask of phys for port events */
+ 	u32              phye_mask; /* mask of phys for phy events */
+         int              first_discovery_done;
++    u32              state_flags;
+ 	struct scsi_core core;
+ 
+ /* public: */
+@@ -323,6 +330,19 @@
+ 
+ void sas_hash_addr(u8 *hashed, const u8 *sas_addr);
+ 
++static inline int sas_ha_in_reset_recovery( struct sas_ha_struct *sas_ha )
++{
++    int res = 0;
++    unsigned long flags;
++
++    spin_lock_irqsave(&sas_ha->event_lock, flags);
++    if ( sas_ha->state_flags & SAS_HA_STATE_BLOCKED ) 
++        res = 1;
++    spin_unlock_irqrestore(&sas_ha->event_lock, flags);
++
++    return res;
++}
++
+ static inline void sas_stringify_sas_addr(char *p, const u8 *sas_addr)
+ {
+ 	int i;
+diff -u -r a/include/scsi/sas/sas_discover.h b/include/scsi/sas/sas_discover.h
+--- a/include/scsi/sas/sas_discover.h	2006-10-11 07:01:12.417948378 -0500
++++ b/include/scsi/sas/sas_discover.h	2006-10-11 06:59:10.452655454 -0500
+@@ -135,17 +135,20 @@
+ /* ---------- Domain device ---------- */
+ 
+ 
++/* Passed to command */
+ #define SAS_DWT_OPTION_RESET_DEV        0x00000001
+-#define SAS_DWT_OPTION_HARD_RESET       0x00000002
++#define SAS_DWT_OPTION_UNDEFINED        0x00000002
+ #define SAS_DWT_OPTION_ABORT_ALL_IO     0x00000004
+ #define SAS_DWT_OPTION_CLEAR_ALL_IO     0x00000008
+-#define SAS_DWT_OPTION_NCQ_SIGNAL       0x00000010
+-#define SAS_DWT_OPTION_NCQ_CLEAR        0x00000020
+-#define SAS_DWT_OPTION_PRE_REMOVE_DEV   0x00000040
+-
+-#define SAS_DWT_OPTION_QUEUED           0x80000000
+-#define SAS_DWT_OPTION_BLOCKED          0x40000000
+-#define SAS_DWT_TASK_INITIALIZED        0x20000000
++#define SAS_DWT_OPTION_NCQ_SIGNAL       0x00000020
++#define SAS_DWT_OPTION_NCQ_CLEAR        0x00000040
++#define SAS_DWT_OPTION_PRE_REMOVE_DEV   0x00000080
++#define SAS_DWT_OPTION_REINIT_DDB       0x00000100
++
++/* Internal flags */
++#define SAS_DWT_QUEUED                  0x80000000
++#define SAS_DWT_BLOCKED                 0x40000000
++#define SAS_DWT_INITIALIZED             0x10000000
+ 
+ struct dev_work_task {
+     struct workqueue_struct*    dev_work_queue;
+@@ -265,5 +268,6 @@
+ void sas_unregister_domain_devices(struct sas_port *port);
+ 
+ void sas_abort_all_ha_io(struct sas_ha_struct *sas_ha);
++void sas_reinit_all_ha_ddbs(struct sas_ha_struct *sas_ha);
+ int sas_queue_device_work ( struct domain_device *dev, u32 options );
+ #endif /* _SAS_DISCOVER_H_ */
+diff -u -r a/include/scsi/sas/sas_expander.h b/include/scsi/sas/sas_expander.h
+--- a/include/scsi/sas/sas_expander.h	2006-10-11 07:01:12.420948090 -0500
++++ b/include/scsi/sas/sas_expander.h	2006-10-11 06:59:10.455655166 -0500
+@@ -141,6 +141,7 @@
+ 					  int phy_id, struct smp_resp *rps_resp);
+ int sas_ex_phy_discover(struct domain_device *dev, int single);
+ 
++int sas_discover_expander(struct domain_device *dev);
+ 
+ 
+ 
+

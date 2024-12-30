@@ -1,0 +1,189 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+my @filenames;
+my %already_included;
+my $option_t;
+
+my @includes;                   # include list for .depend file.
+
+my @filename;                   # nested filename tracking.
+my $filename;                   # current file working on.
+
+my $working_file;               # main file started working on.
+
+my @option_Include;             # -Include options.  Directories to look for files.
+##############################################################################
+sub parse_input_parameters()
+{
+  while ($#ARGV >= 0) {
+    my $A = shift(@ARGV);
+# print STDERR "argument=$A\n";
+# Do -t option.
+    if ($A =~ /^-t(.*)/){
+      $A = $1;
+      if (!defined($A) || $A eq '') {
+        $A = shift(@ARGV);              # next argument.
+        if (!defined($A) || $A eq '') {
+          print STDERR "-t argument requires a file name to follow.\n";
+          exit(1);
+        }
+      }
+      if (defined($option_t) && $option_t ne '') {
+        print STDERR "-t argument specified twice ($option_t) and ($A)\n";
+        exit(1);
+      }
+      $option_t = $A;
+# Do -Include option.
+    } elsif ($A =~ /^-Include(.*)/){
+      $A = $1;
+      if (!defined($A) || $A eq '') {
+        $A = shift(@ARGV);                      # next argument.
+        if (!defined($A) || $A eq '') {
+          print STDERR "-Include argument requires a file name to follow.\n";
+          exit(1);
+        }
+      }
+      push(@option_Include, $A);
+# Otherwise assume it is a filename.
+    } else {
+      push(@filenames, $A);
+    }
+  }
+}
+
+
+##############################################################################
+sub ps_include($)
+{
+  my $f = $_[0];
+  if ($f !~ /^\// && ! -r $f) {         # don't change files starting with /
+    if (-r "../inc/$f") {               # if include directory has the file.
+      return ("../inc/$f");
+    } else {
+      foreach my $dir (@option_Include) {
+        if (-r "$dir/$f") {
+          return ("$dir/$f");
+        }
+      }
+    }
+  } else {
+    return($f);
+  }
+# print STDERR "Cannot find .include file: $f\n";
+  return ('');
+}
+
+
+##############################################################################
+# Check for all .includes in the passed in file.
+sub check_dot_include($);               # prototype for recusion
+
+sub check_dot_include($)
+{
+  my $newfilename = $_[0];
+
+# printf STDERR "check_dot_include($newfilename)\n";
+  if (defined($already_included{$newfilename})) {
+    return;
+  }
+  $already_included{$newfilename} = 0;
+
+  push(@filename, $filename);
+  $filename = $newfilename;
+
+  my($FILE);
+  if (!defined(open($FILE, "<$filename"))) {
+    print STDERR "Cannot open source file: $filename\n";
+    $filename = pop(@filename);
+    return;
+  }
+
+#### Main loop.
+  my $incomment = 0;
+
+  while (<$FILE>) {
+      chomp;
+      my $working = $_;
+
+#### Process the next line of an unterminated comment.
+      if ($incomment) {
+        if ($working =~ s/^ .*? (?<!\\) (?:\\\\)* \*\/ //x) {
+          $incomment = 0;
+        } else {
+          $working = '';
+        }
+      }
+
+#### Remove all comments from the input line.  This is tricky
+#### because of quotes and backslashes.
+      my $valid = '';
+      while ($working =~ s/^(.*?(?<!\\)(?:\\\\)*)(\#|\/\/|\"|\'|\/\*)//) {
+          $valid .= $1;
+          my $s = $2;
+          if ($s eq '#' || $s eq '/') {
+            $working = '';
+          } elsif ($s eq '\'' || $s eq '"') {
+            if ($working !~ s/^(.*?(?<!\\)(?:\\\\)*$s)//) {
+              print STDERR "Unterminated quotes: $filename:$.\n";
+	      exit 1;
+#--               $working = $valid = '';
+#--               last;
+            }
+            $valid .= $s . $1;
+          } elsif ($working !~ s/^.*?(?<!\\)(?:\\\\)*\*\///) {
+            $working = '';
+            $incomment = 1;
+            last;
+          }
+      }
+      $working = $valid . $working;
+
+#### Get the opcode.
+      if ($working =~ s/^\s*([.a-zA-Z0-9]+)//) {
+        my $opcode = $1;
+        if ($opcode eq '.include') {
+          if ($working =~ s/^\s*"(.+)"//) {
+            my $f = $1;
+            $f = ps_include($f);
+            if ($f ne '') {
+              if (!defined($already_included{$f})) {
+                push(@includes,$f);
+                check_dot_include($f);
+              }
+            }
+          }
+        }
+     }
+  }
+
+#### Clean up and exit.
+  close($FILE);
+  $filename = pop(@filename);
+}
+
+### main program
+parse_input_parameters();
+
+for my $w (@filenames) {          # Process files.
+  $working_file = $w;
+  check_dot_include($working_file);
+}
+
+
+if ($#includes >= 0) {
+  my $line = $option_t . ': Makefile ../inc/CT_defines.h';
+  foreach my $i (@includes) {
+    if ((length($line) + length($i) + 1) > (80-3)) {
+      print $line . ' \\' . "\n";
+      $line = ' ';
+    }
+    $line .= ' ' . $i;
+  }
+  if ($line ne ' ') {
+    print $line . "\n";
+  }
+}
+
+exit(0);

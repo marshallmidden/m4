@@ -1,0 +1,96 @@
+#!/bin/bash
+# $Id: xioFidScript 135922 2010-04-09 14:36:40Z mdr $
+#
+#   Script to tar/zip files to transfer
+#
+#   Mark D. Rustad, 07/08/2009
+#
+#   Copyright 2009 Xiotech Corporation. All rights reserved.
+
+#   WARNING: These constants must match those in ddr.c
+
+declare -r VD=/var/log/dump
+declare -r VL=/var/log
+declare -r VX=/var/log/xiotech
+declare -r XIO_ZIP_DIR="${VD}/xioZippedFiles"
+declare -r XIO_ZIPPED_FILE="${VD}/xioZippedFile.archive"
+
+
+###
+# fail - Output an error message and return an error code
+#
+# $1 = error code
+# $2 - $n = error message
+
+fail()
+{
+    local err=$1
+
+    shift
+    echo "$@" >>/dev/stderr
+    exit $err
+}
+
+# Main Code Starts Here.
+
+file=$1                 # Get the file from the argument list
+
+# If there is no file name, exit
+if [[ -z "${file}" ]]; then
+    fail 5 "No file name given"
+fi
+
+## NOTE: Every one of the file name patterns below must have a
+#       wildcard of some sort in it, so that it can become null
+#       if the file doesn't exist.
+
+case ${file} in
+# Platform application Monitor Logs
+XIO_PAM_LOGS) pats=('pam.log*'); fdir=${VX} ;;
+
+# Linux System Logs
+XIO_LINUX_LOGS) pats=('*messages*' 'boot.*msg*' 'warn*'); fdir=${VL} ;;
+
+# Linux Raid Logs
+XIO_RAID_LOGS) pats=('scpm*' 'sgraidmon.log*' 'mdevents*'); fdir=${VL} ;;
+
+# Platform core summaries
+XIO_CORE_SUMMARY) pats=('*.txt*' '*.hist*'); fdir=${VX} ;;
+
+# Platform Core files
+XIO_CORES) pats=('*.core.gz' '*.shm.gz'); fdir=${VD} ;;
+
+XIO_APP_LOGS) pats=('apps.xiolog*'); fdir=${VX} ;;
+
+XIO_QL_CORES) pats=('qldmp*.bin'); fdir=${VD} ;;
+
+# Placeholder
+DUMMY) pats=('NOTHING*'); fdir=. ;;
+
+*) pats=(${file}); fdir=/  ;;
+esac
+
+rm -f ${XIO_ZIPPED_FILE}    # If the zipped file already exists, delete it
+rm -rf ${XIO_ZIP_DIR}       # If the directory exists, delete it
+
+files=(`shopt -s nullglob; cd ${fdir}; echo ${pats[@]}`)
+
+# If there are no files in the list, exit.
+if [[ -z "${files[*]}" ]]; then
+    fail 11 "Found no files for ${file}"
+fi
+
+mkdir -p ${XIO_ZIP_DIR}     # Create the zip directory
+
+cd ${XIO_ZIP_DIR} ||        # Move into the new directory
+    fail 8 "Could not chdir to ${XIO_ZIP_DIR}"
+
+/bin/tar -cjf ${XIO_ZIPPED_FILE} -C ${fdir} ${files[@]} ||
+    echo "Tar command returned error" >>/dev/stderr
+
+test -f ${XIO_ZIPPED_FILE} ||
+    fail 15 "Creation of zipped tar file failed"
+
+exit 0
+
+# vi:sw=4 ts=4 expandtab

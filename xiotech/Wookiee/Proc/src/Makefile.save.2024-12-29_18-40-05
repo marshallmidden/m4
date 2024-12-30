@@ -1,0 +1,1300 @@
+# $Id: Makefile 161678 2013-09-18 19:25:16Z marshall_midden $
+# ----------------------------------------------------------------------------
+# WARNING: DO NOT CONVERT TABS TO SPACES IN THIS MODULE, ELSE THE COMPILE WILL
+#          FAIL WITH MISSING SEPARATOR ERRORS!
+# ----------------------------------------------------------------------------
+# M4_DEBUGGING_METHODOLOGY = Yes
+# M4_DEBUGGING_METHODOLOGY_FE = Yes
+# M4_DEBUGGING_METHODOLOGY_BE = Yes
+# ----------------------------------------------------------------------------
+MODEL ?= 3000
+TYPE ?= Debug
+# ----------------------------------------------------------------------------
+MAKEFILE = Makefile
+# Set locations of shared memory segments, and other mmap-ed areas.
+include ../../Makefile-${MODEL}.defs
+F_CFLAGS += ${MAKE_DEFS_CC}
+B_CFLAGS += ${MAKE_DEFS_CC}
+F_CFLAGS += ${ON64FLAGS}
+B_CFLAGS += ${ON64FLAGS}
+ifeq (${RUNON64},RUNON64)
+F_CFLAGS += -DRUNON64 -Wno-pointer-sign
+B_CFLAGS += -DRUNON64 -Wno-pointer-sign
+endif
+AFLAGS += -D FE_BASEADDR=${MAKE_DEFS_FE_start}
+AFLAGS += -D FE_SHARE_LTH=${MAKE_DEFS_FE_size}
+AFLAGS += -D BE_SHARE_LTH=${MAKE_DEFS_BE_size}
+AFLAGS += -D ${MAKE_DEFS_FE_SHARE_LIM}
+AFLAGS += -D ${MAKE_DEFS_BE_SHARE_LIM}
+AFLAGS += -D ${MAKE_DEFS_BE_ADDR_OFFSET}
+AFLAGS += -D BE_BASEADDR=${MAKE_DEFS_BE_start}
+AFLAGS += -D CCB_BASEADDR=${MAKE_DEFS_CCB_start}
+AFLAGS += -D MAKE_DEFS_CCB_size=${MAKE_DEFS_CCB_size}
+AFLAGS += -D NVSRAM=${MAKE_DEFS_NVR_start}
+AFLAGS += -D MAKE_DEFS_NVR_size=${MAKE_DEFS_NVR_size}
+AFLAGS += -D INFOREGION_BASE_ADDR=${MAKE_DEFS_INFO_start}
+AFLAGS += -D MAKE_DEFS_INFO_size=${MAKE_DEFS_INFO_size}
+AFLAGS += -D MODEL_${MODELNUM}=1
+ifneq (x${MAKE_DEFS_PORTS},x)
+AFLAGS += -D ${MAKE_DEFS_PORTS}
+endif
+ifneq (x${MAKE_DEFS_NO_MM_CARD},x)
+AFLAGS += -D ${MAKE_DEFS_NO_MM_CARD}
+endif
+# ----------------------------------------------------------------------------
+# For the x86 build, the next two lines are needed.
+CROSS =
+MACHINE = i386
+# ----------------------------------------------------------------------------
+# If doing a production run (little error checking), define PERF.
+# For performance, turn on PERF define, and do not generate extra checking code.
+# PERF = PERF
+ifeq (${PERF},PERF)
+AFLAGS += -assumes_works -DCT_assumes_works -DPERF
+F_CFLAGS += -DCT_assumes_works -DPERF
+B_CFLAGS += -DCT_assumes_works -DPERF
+else	# PERF
+# non-performance builds include the flightrecorder
+AFLAGS += -DFLIGHTRECORDER
+B_CFLAGS += -DFLIGHTRECORDER
+F_CFLAGS += -DFLIGHTRECORDER
+endif	# PERF
+# ----------------------------------------------------------------------------
+# Define GCOV if desiring to profile line usages (and do -pg profiling too).
+# NOTE: below, comment in either GCOV=FRONT or GCOV=BACK
+# A file gmon.out is created where the program runs. It is not uniquely named.
+# GCOV = FRONT
+# GCOV = BACK
+ifeq (${GCOV},FRONT)
+F_CFLAGS += -fprofile-arcs -ftest-coverage -pg -DGCOV # FE or BE, not both.
+F_AFLAGS += -DGCOV
+F_LD += -pg
+endif
+# - - - - - - - -
+# B_CFLAGS += -fmudflap
+# B_LD += -lmudflap
+# F_CFLAGS += -fmudflap
+# F_LD += -lmudflap
+# - - - - - - - -
+ifeq (${GCOV},BACK)
+B_CFLAGS += -fprofile-arcs -ftest-coverage -pg -DGCOV # FE or BE, not both.
+B_AFLAGS += -DGCOV
+B_LD += -pg
+endif
+# NOTE if not doing gcov, do -static on loader.
+ifneq (${GCCVER},431)
+ifeq (${F_LD},)
+F_LD += -static
+endif
+ifeq (${B_LD},)
+B_LD += -static
+endif
+endif
+# ----------------------------------------------------------------------------
+# The following turns off cpu affinity and real-time scheduling -- bad if fatal loops happen.
+# NOAFFINITY = NOAFFINITY
+ifeq (${NOAFFINITY},NOAFFINITY)
+F_CFLAGS += -DNOAFFINITY
+B_CFLAGS += -DNOAFFINITY
+endif
+# ----------------------------------------------------------------------------
+# Bruce and Marshall's special prototype handling. Use ?G_REG_PROTO_SPECIAL in proto file.
+AFLAGS += -g_reg_proto_special
+# Bruce and Marshall's register saving and restoring kludge.
+# AFLAGS += -CA_register_save_restore
+# AFLAGS += -AC_register_save_restore
+# ----------------------------------------------------------------------------
+# There is the ability to have a "tracelog" (type it in gdb) of all calls and
+# goto's. It keeps a tracelog of what labels were recently reached from where.
+# Use HISTORY_KEEP to keep each branch/return history. If you want the state
+# of all g and r registers also, use HISTORY_KEEP and HISTORY_REGS_KEEP (gdb
+# tracelogregs). To keep "time" (64 bit tsc register) for each entry (gdb
+# tracelogtsc). If you want "c" functions enter/exit recorded use
+# -finstrument-functions.
+
+M4_HISTORY = -DHISTORY_KEEP
+M4_HISTORY += -DHISTORY_REGS_KEEP
+# M4_HISTORY += -DHISTORY_TSC_KEEP
+M4_HISTORY_CYG += -finstrument-functions
+
+# The following sets r registers to pattern upon a "call", then on each use
+# of an r register, sees that the pattern isn't seen.
+M4_AFLAGS += -check_r_reg_pattern_match
+M4_CFLAGS += -DRREG_PATTERN_CHECK
+M4_AFLAGS += -D RREG_PATTERN_CHECK
+# Make stack larger for all the history stuff.
+M4_AFLAGS += -DC_STACK_SIZE=786432
+M4_HISTORY+= -DC_STACK_SIZE=786432
+# The following saves all memory stores in CT_HISTORY buffer.
+# M4_AFLAGS += -save_memory_stored
+# The following checks all load and stores to be within "local" memory.
+M4_AFLAGS += -check_local_memory
+
+ifneq (${PERF},PERF)
+  ifdef M4_DEBUGGING_METHODOLOGY
+	HISTORYS_FE = ${M4_HISTORY}
+	HISTORYS_BE = ${M4_HISTORY}
+	ifdef M4_HISTORY_CYG
+	  HISTORYS_CYG_FE = ${M4_HISTORY_CYG}
+	  HISTORYS_CYG_BE = ${M4_HISTORY_CYG}
+	endif
+  endif
+  ifdef M4_DEBUGGING_METHODOLOGY_FE
+	HISTORYS_FE = ${M4_HISTORY}
+	ifdef M4_HISTORY_CYG
+	  HISTORYS_CYG_FE = ${M4_HISTORY_CYG}
+	endif
+  endif
+  ifdef M4_DEBUGGING_METHODOLOGY_BE
+	HISTORYS_BE = ${M4_HISTORY}
+	ifdef M4_HISTORY_CYG
+	  HISTORYS_CYG_BE = ${M4_HISTORY_CYG}
+	endif
+  endif
+endif
+
+ifdef HISTORYS_FE
+F_AFLAGS += -debug_labels ${HISTORYS_FE}
+F_CFLAGS += ${HISTORYS_FE} ${HISTORYS_CYG_FE}
+endif
+ifdef HISTORYS_BE
+B_AFLAGS += -debug_labels ${HISTORYS_BE}
+B_CFLAGS += ${HISTORYS_BE} ${HISTORYS_CYG_BE}
+endif
+#-----------------------------------------------------------------------------
+# M4_AFLAGS += -D M4_GDB_RUNNING				# Ignore signal if running in gdb.
+#-----------------------------------------------------------------------------
+# A memory pool needs to have 4 parts: a) a PATTERN, b) possible zero on alloc,
+# c) TASK_STRESS_TEST, d) if needed, special initialization on get OR put.
+#
+# Used memory patterns:
+#						ABED (VLAR)		-- EDAB for byte swapping.
+#						ACED (TMT)		-- EDAC for byte swapping.
+#						BAAD (SCIO)	 	-- ADBA for byte swapping.
+#						BABE -- option -check_r_reg_pattern_match pattern. -- BEBA
+#						BADA (SCIO's VRP) -- DABA for byte swapping.
+#						BADE (RPN) 		-- DEBA for byte swapping.
+#						BEAD (RRP) 		-- ADBE for byte swapping.
+#						BEEF (SCMT)	 	-- EFBE for byte swapping.
+#						CAFE (IRP) 		-- FECA for byte swapping.
+#						CAFF (TLMT)		-- FFCA for byte swapping.
+#						CEED (RRB) 		-- EDCE for byte swapping.
+#						DAAD (ILT)    	-- ADDA for byte swapping.
+#						DAFE (RB - rbnode) -- FEDA for byte swapping.
+#						DAFF (MLMT)		-- FFDA for byte swapping.
+#						DECD (ISMT)		-- CDDE for byte swapping.
+#						DEED (VRP) 		-- EDDE for byte swapping.
+#						FADE (QRP)  	-- DEFA for byte swapping.
+#						FAFF (XLI)		-- FFFA for byte swapping.
+#						FEED (PRP) 		-- EDFE for byte swapping.
+#						0000 (DTMT)		-- Must be zero on freeing.
+#						0000 (LSMT)		-- Must be zero on freeing.
+#						0000 (LTMT)		-- Must be zero on freeing.
+#						0000 (TPMT)		-- Must be zero on freeing.
+# BABA -- UNUSED
+# BBBB -- UNUSED
+# BCBC -- UNUSED
+# BDBD -- UNUSED
+# BEBE -- UNUSED
+# BFBF -- UNUSED
+# CACA -- UNUSED
+# CBCB -- UNUSED
+# CCCC -- UNUSED
+# CDCD -- UNUSED
+# CECE -- UNUSED
+# CFCF -- UNUSED
+# DADA -- UNUSED
+# 						DBDB (RB - rbinode)
+#						DCDC -- Post-private memory pool allocation pattern
+# 						DDDD -- Pre-private memory pool allocation pattern
+#						DEDE (IMT)
+# 						DFDF (SCMTE)
+#						EAEA (CM)
+#						EBEB (COR)
+#						ECEC (SCD)
+#						EDED (DCD)
+# 						EEEE (PCB)
+# 						EFEF (wc_plholder)
+#						FAFA (ILMT)
+#						FBFB (VDMT)
+#						FCFC (RM)
+#						FDFD (SM)
+#						FEFE -- Freed shared and private memory allocation pattern.
+# Unchosen patterns:
+# DEAD 		- used to be (general purpose malloc), -- ADDE for byte swapping.	UNUSED
+# BEED 		- used to be (TPMT)		-- EDBE for byte swapping.					UNUSED
+# FABA 		- used to be (LTMT)		-- BAFA for byte swapping.					UNUSED
+# You get to choose new ones.
+#
+# Following turns on destructive memory patterns of various types upon free.
+M4_AFLAGS += -D M4_DEBUG_MEMORY_WITH_PATTERNS # Check memory for patterns--written in "c".
+M4_CFLAGS += -DM4_DEBUG_MEMORY_WITH_PATTERNS # Check memory for patterns--written in "c".
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# This flag will Check memory before and after allocations -- all of it to be ok.
+M4_AFLAGS += -D CHECK_MEMORY_ALL
+M4_CFLAGS += -DCHECK_MEMORY_ALL
+# This flag will set free memory to a pattern and check when allocating it.
+M4_CFLAGS += -DMEMSET_PATTERN_FREE
+# This flag will delay till necessary all memory frees, pattern setting/checking, etc.
+#- M4_CFLAGS += -DREALLY_DELAY_MEMORY_FREES
+#- M4_AFLAGS += -D REALLY_DELAY_MEMORY_FREES
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# This flag will always zero a pool -- for those that are left alone when allocated.
+# M4_CFLAGS += -DM4_DEBUG_POOL_MEMSET_0		# Set "pools" of memory to zero -- "opps" finder.
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# Following does a task switch whenever one "might" happen. (NOT FINISHED!)
+# M4_AFLAGS += -D TASK_STRESS_TEST
+# M4_CFLAGS += -DTASK_STRESS_TEST
+# ----------------------------------------------------------------------------
+# Turn on C_orc printing and logging.
+# M4_AFLAGS += -D M4_DEBUG_C_orc
+# M4_CFLAGS += -DM4_DEBUG_C_orc
+# M4_AFLAGS += -D M4_DEBUG_C_ctv
+# M4_CFLAGS += -DM4_DEBUG_C_ctv
+# M4_CFLAGS += -DM4_DEBUG_SS_CRC
+# ----------------------------------------------------------------------------
+# These are some changes that are not complete. By enabling this, I can run
+# longer when FE data structures are deleted than without, but it is NOT at
+# all complete. It may help someone in the future debug freed FE structures
+# that are used after they are freed.
+# M4_AFLAGS += -D M4_ADDITION
+# ----------------------------------------------------------------------------
+# Crash on lines starting with ? in i960 assembler.
+# M4_AFLAGS += -disable_question_mark
+# ----------------------------------------------------------------------------
+# More heavy duty debugging.
+# M4_AFLAGS += -D M4_DEBUG_HARD
+# M4_CFLAGS += -DM4_DEBUG_HARD
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#-- M4_AFLAGS += -D M4_DEBUG_CM
+#-- M4_CFLAGS += -DM4_DEBUG_CM
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_COR
+#-- M4_CFLAGS += -DM4_DEBUG_COR
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_DCD
+#-- M4_CFLAGS += -DM4_DEBUG_DCD
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_DTMT
+#-- M4_CFLAGS += -DM4_DEBUG_DTMT
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_ILT
+#-- M4_CFLAGS += -DM4_DEBUG_ILT
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_ILMT
+#-- M4_CFLAGS += -DM4_DEBUG_ILMT
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_IMT
+#-- M4_CFLAGS += -DM4_DEBUG_IMT
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_IRP
+#-- M4_CFLAGS += -DM4_DEBUG_IRP
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_ISMT
+#-- M4_CFLAGS += -DM4_DEBUG_ISMT
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_LSMT
+#-- M4_CFLAGS += -DM4_DEBUG_LSMT
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_LTMT
+#-- M4_CFLAGS += -DM4_DEBUG_LTMT
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_MLMT
+#-- M4_CFLAGS += -DM4_DEBUG_MLMT
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_PRP
+#-- M4_CFLAGS += -DM4_DEBUG_PRP
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_RPN
+#-- M4_CFLAGS += -DM4_DEBUG_RPN
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_RRB
+#-- M4_CFLAGS += -DM4_DEBUG_RRB
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_RRP
+#-- M4_CFLAGS += -DM4_DEBUG_RRP
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_RM
+#-- M4_CFLAGS += -DM4_DEBUG_RM
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_SCD
+#-- M4_CFLAGS += -DM4_DEBUG_SCD
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_SCIO
+#-- M4_CFLAGS += -DM4_DEBUG_SCIO
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_SCMTE
+#-- M4_CFLAGS += -DM4_DEBUG_SCMTE
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_SCMT
+#-- M4_CFLAGS += -DM4_DEBUG_SCMT
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_SM
+#-- M4_CFLAGS += -DM4_DEBUG_SM
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_TLMT
+#-- M4_CFLAGS += -DM4_DEBUG_TLMT
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_TMT
+#-- M4_CFLAGS += -DM4_DEBUG_TMT
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_TPMT
+#-- M4_CFLAGS += -DM4_DEBUG_TPMT
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_VDMT
+#-- M4_CFLAGS += -DM4_DEBUG_VDMT
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_VLAR
+#-- M4_CFLAGS += -DM4_DEBUG_VLAR
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_VRP
+#-- M4_CFLAGS += -DM4_DEBUG_VRP
+#--
+#-- M4_AFLAGS += -D M4_DEBUG_XLI
+#-- M4_CFLAGS += -DM4_DEBUG_XLI
+# ----------------------------------------------------------------------------
+ifneq (${PERF},PERF)
+# Following check for destination sgl on copy is big enough to hold source.
+  AFLAGS += -D M4_DEBUG_SGL
+
+  ifdef M4_DEBUGGING_METHODOLOGY
+	AFLAGS += ${M4_AFLAGS}
+	F_CFLAGS += ${M4_CFLAGS}
+	B_CFLAGS += ${M4_CFLAGS}
+  endif
+  ifdef M4_DEBUGGING_METHODOLOGY_FE
+	F_AFLAGS += ${M4_AFLAGS}
+	F_CFLAGS += ${M4_CFLAGS}
+  endif
+  ifdef M4_DEBUGGING_METHODOLOGY_BE
+	B_AFLAGS += ${M4_AFLAGS}
+	B_CFLAGS += ${M4_CFLAGS}
+  endif
+endif
+# ----------------------------------------------------------------------------
+# If you want to print out the full 16/15 bytes of serial number on disk bays.
+# B_CFLAGS += -DPRINT_SERIAL_NUMBER
+# ----------------------------------------------------------------------------
+# If you want to have every exchange of tasks printed. Also more debugging output.
+# a) Checks for c and i960 stacks merging/colliding/etc. on task switches.
+# b) When leaving/entering a task (exchange), check that pcb chain is ok.
+# c) Upon task termination, verify stacks for overlapping.
+# d) commented out: check stacks for overlapping 3 times during malloc's.
+# e) commented out: check stacks for overlapping when CT_history() called.
+# f) check stacks for overlapping when entering/exiting a "c" routine.
+# g) commented out: check pcb chain when entering/exiting a "c" routine.
+# CT2_DEBUG = CT2_DEBUG
+ifeq (${CT2_DEBUG},CT2_DEBUG)
+B_A_DEFINES += -DCT2_DEBUG
+B_C_DEFINES += -DCT2_DEBUG
+F_A_DEFINES += -DCT2_DEBUG
+F_C_DEFINES += -DCT2_DEBUG
+endif
+# ============================================================================
+cwd := $(shell pwd)
+WHERE := ${cwd}
+# -------------
+# Must have obj_${MODEL} directory for fe.ld and be.ld to find file f_front.CT.o and b_back.Ct.o.
+OBJDIRNAME := ../obj_${MODEL}${TYPE}
+OBJ := $(shell if [ -d ${OBJDIRNAME} ]; then echo "${OBJDIRNAME}/" ; \
+	else mkdir ${OBJDIRNAME} && echo "${OBJDIRNAME}/" ; fi)
+BTOOL := "${WHERE}/../BuildTool/"
+# -------------
+# TIME = /usr/bin/time
+HOSTCC = ${TIME} $(shell which gcc)
+CC = ${TIME} ${CROSS}gcc
+# C_INCLUDES += -nostdinc
+# C_INCLUDES += -fno-builtin
+C_INCLUDES += -I${WHERE}
+C_INCLUDES += -I${WHERE}/../inc
+C_INCLUDES += -I${WHERE}/../../Shared/Inc
+C_INCLUDES += -I${WHERE}/../../Linux/xio3d
+C_INCLUDES += -I${WHERE}/${OBJ}
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# Default VER to ENG -- note, command line overrides such assignments!
+VER = ENGR
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+C_GCC_FLAGS += -g
+ifeq (${PERF},PERF)
+C_GCC_FLAGS	+= -O4
+else
+ifeq (${GCOV},GCOV)
+C_GCC_FLAGS += -O0
+else
+# Optimization level -- last one on line wins.
+#......................................
+# Following increases "c" and i960 overlap stack -- NEEDED FOR -O0.
+AFLAGS += -D GCC_MINUS_O0_BIGGER_STACK
+C_GCC_FLAGS += -DGCC_MINUS_O0_BIGGER_STACK
+C_GCC_FLAGS += -O0
+#......................................
+# C_GCC_FLAGS += -O1
+# C_GCC_FLAGS += -Os   # See below (-O2).
+# C_GCC_FLAGS += -O2   # Works with -fno-strict-aliasing.
+# C_GCC_FLAGS += -O3   # Works with -fno-rename-registers.
+# C_GCC_FLAGS += -O4   # Works with -fno-rename-registers.
+endif
+endif
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# -O2
+#++++++++++++++++++
+#- C_GCC_FLAGS += -fstrict-aliasing    #### BREAKS it. ####
+C_GCC_FLAGS += -fno-strict-aliasing
+#++++++++++++++++++
+# -O3
+#++++++++++++++++++
+#- C_GCC_FLAGS += -frename-registers    #### BREAKS it. ####
+#--2024-12-12 C_GCC_FLAGS += -fno-rename-registers
+#++++++++++++++++++
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# Lots of warning messages.
+# C_GCC_FLAGS += -pedantic-errors	## This will not allow C++ style comments.
+C_GCC_FLAGS += -W
+C_GCC_FLAGS += -Wall
+C_GCC_FLAGS += -Werror
+C_GCC_FLAGS += -Wno-system-headers
+# C_GCC_FLAGS += -Wtraditional
+C_GCC_FLAGS += -Waggregate-return
+ifeq (${GCCVER},431)
+C_GCC_FLAGS += -Warray-bounds							# added in gcc 4.3.1
+C_GCC_FLAGS += -Wattributes								# added in gcc 4.3.1
+endif
+C_GCC_FLAGS += -Wbad-function-cast
+C_GCC_FLAGS += -Wcast-align
+C_GCC_FLAGS += -Wcast-qual
+C_GCC_FLAGS += -Wchar-subscripts
+C_GCC_FLAGS += -Wcomments
+# C_GCC_FLAGS += -Wconversion		## cannot have - volatile UINT8 != UINT8.
+C_GCC_FLAGS += -Wdeprecated-declarations
+## C_GCC_FLAGS += --param max-gcse-passes=2	# default 1 -- helps nothing.
+# C_GCC_FLAGS += --param max-gcse-memory=419430400	# - default (50m) 52,428,800 - try *8.
+# C_GCC_FLAGS += -Wdisabled-optimization	## GCSE disabled, and VRP disabled in FrontEnd.
+C_GCC_FLAGS += -Wendif-labels
+ifeq (${GCCVER},431)
+C_GCC_FLAGS += -Wextra									# added in gcc 4.3.1
+endif
+C_GCC_FLAGS += -Wfloat-equal
+C_GCC_FLAGS += -Wformat
+C_GCC_FLAGS += -Wformat-nonliteral
+C_GCC_FLAGS += -Wformat-security
+C_GCC_FLAGS += -Wimplicit-int
+C_GCC_FLAGS += -Wimport
+C_GCC_FLAGS += -Winline
+C_GCC_FLAGS += -Wlong-long
+ifeq (${GCCVER},431)
+C_GCC_FLAGS += -Wlogical-op								# added in gcc 4.3.1
+endif
+C_GCC_FLAGS += -Wmissing-braces
+C_GCC_FLAGS += -Wmissing-declarations
+C_GCC_FLAGS += -Wmissing-format-attribute
+C_GCC_FLAGS += -Wmissing-noreturn
+C_GCC_FLAGS += -Wmissing-prototypes
+C_GCC_FLAGS += -Wmultichar
+C_GCC_FLAGS += -Wnested-externs
+ifeq (${GCCVER},431)
+C_GCC_FLAGS += -Woverflow								# added in gcc 4.3.1
+endif
+# C_GCC_FLAGS += -Wpacked 			## cannot have this.
+# C_GCC_FLAGS += -Wpadded			## cannot have this warning turned on, link layer yells.
+C_GCC_FLAGS += -Wparentheses
+C_GCC_FLAGS += -Wpointer-arith
+C_GCC_FLAGS += -Wredundant-decls
+C_GCC_FLAGS += -Wreturn-type
+C_GCC_FLAGS += -Wshadow
+C_GCC_FLAGS += -Wsign-compare
+C_GCC_FLAGS += -Wstrict-aliasing
+ifeq (${GCCVER},431)
+C_GCC_FLAGS += -Wstrict-overflow						# added in gcc 4.3.1
+endif
+C_GCC_FLAGS += -Wstrict-prototypes
+C_GCC_FLAGS += -Wswitch
+# C_GCC_FLAGS += -Wswitch-default	## memset() gives warning about missing default on case.
+C_GCC_FLAGS += -Wswitch-enum
+C_GCC_FLAGS += -Wtrigraphs
+C_GCC_FLAGS += -Wundef
+ifeq (${PERF},PERF)
+C_GCC_FLAGS += -Wuninitialized
+endif
+C_GCC_FLAGS += -Wunknown-pragmas
+ifeq (${GCCVER},431)
+# C_GCC_FLAGS += -Wunreachable-code	## 2008-10-08 -- gives false positives with gcc 3.3.3 and 4.3.1.
+endif
+ifeq (${GCCVER},431)
+# C_GCC_FLAGS += -Wunsafe-loop-optimizations				# added in gcc 4.3.1
+endif
+C_GCC_FLAGS += -Wunused
+C_GCC_FLAGS += -Wunused-function
+C_GCC_FLAGS += -Wunused-label
+C_GCC_FLAGS += -Wunused-parameter
+C_GCC_FLAGS += -Wunused-value
+C_GCC_FLAGS += -Wunused-variable
+C_GCC_FLAGS += -Wwrite-strings
+ifeq (${GCCVER},431)
+C_GCC_FLAGS += -Wvolatile-register-var					# added in gcc 4.3.1
+endif
+
+#-- 2004-12-09 This is in a system header only: C_GCC_FLAGS += -Wfloat-equal
+# ---
+# Following will create .i (after c preprocessor) and .s (assembler) files.
+# C_GCC_FLAGS += -save-temps
+# Following will create all .o's, but they contain the generated assembler.
+# C_GCC_FLAGS += -S
+# Set the architecture type to pentium4 (Dell 2600, 7501's, Nocona Lindenhurst).
+C_GCC_FLAGS += -march=pentium4
+# NOTE: gcc version 3.3.3 has no difference between pentium4 and nocona.
+# C_GCC_FLAGS += -march=nocona
+# -------------
+# C_GCC_FLAGS += -fvolatile-static
+# C_GCC_FLAGS += -fvolatile-global
+# C_GCC_FLAGS += -fvolatile
+# -------------
+# Testing gcc 4.3.1 options
+# C_GCC_FLAGS += -fbounds-check
+#
+# -------------
+LD = ${TIME} gcc
+LIBS =
+LD += -Xlinker -E
+LD += -Xlinker -d
+LD += -Xlinker --no-strip-discarded
+LD += -Xlinker --discard-none
+LD += -Xlinker --no-undefined
+LD += -Xlinker --warn-common
+LD += -Xlinker --warn-constructors
+LD += -Xlinker --warn-multiple-gp
+LD += -Xlinker --warn-once
+LD += -Xlinker --error-unresolved-symbols
+#--- LD += -Xlinker --fatal-warnings
+LD += -Xlinker -z -Xlinker defs
+# LD += -nostdlib
+# LD += /usr/src/packages/BUILD/glibc-2.3/cc/csu/crt1.o
+# LD += /usr/src/packages/BUILD/glibc-2.3/cc/csu/crti.o
+# LD += /usr/src/packages/BUILD/glibc-2.3/cc/csu/crtbeginT.o
+# LIBS += /usr/src/packages/BUILD/glibc-2.3/cc/libc.a
+# LIBS += `${CC} -print-libgcc-file-name`
+# LIBS += /usr/src/packages/BUILD/glibc-2.3/cc/csu/crtn.o
+# -------------
+# Turn on various warning messages in code translator.
+# AFLAGS += -W all
+# AFLAGS += -W set_before_use
+# AFLAGS += -W code_label_in_data
+AFLAGS += -W multiple_global
+AFLAGS += -W org_pseudo_op
+# AFLAGS += -W data_in_text_section
+# AFLAGS += -W globl_nothing
+# AFLAGS += -W fp_r0_r2_changed
+# AFLAGS += -W external_and_constant
+AFLAGS += -W moving_to_data
+#- AFLAGS += -W external_routine_used_as_variable
+AFLAGS += -W data_label_in_goto
+AFLAGS += -W data_label_in_call
+#- AFLAGS += -W external_label_in_load_or_store
+#- AFLAGS += -W call_to_register
+#- AFLAGS += -W call_expression
+#- AFLAGS += -W goto_register
+#- AFLAGS += -W goto_expression
+# Type of assembler generating for (-mips or -i386, or pass it through for i960).
+AFLAGS += -${MACHINE}
+# We have changed FE/BE to not want a leading underscore on anything. (all unique)
+# AFLAGS += -no_leading_underscore
+# If you wish to debug the generated "c" instead of i960, uncomment following line.
+# AFLAGS += -no_line_numbers
+# The following puts in full path names for files, debugging in a different
+# directory than the one you compiled in.
+AFLAGS += -full_path_name
+# Following does not put "assembler" lines into the generated .c file.
+# AFLAGS += -no_comments
+# If the following is put in, put out asm labels for each goto: ct_${label}
+AFLAGS += -all_asm_labels
+#-----
+# The following are files to search for additional .include files.
+A_INCLUDE += -Include ${WHERE}/../../Shared/Inc -Include ${OBJ}
+#-----
+# Need to include these files in generated "c" from i960 assembler.
+AFLAGS += -I FW_Header.h
+AFLAGS += -I stdio.h
+AFLAGS += -I stdlib.h
+AFLAGS += -I sys/time.h
+AFLAGS += -I sys/mman.h
+# The following are either needed, or created via .def files, and nice for gdb debugging.
+AFLAGS += -I CA_CacheFE.h
+AFLAGS += -I GR_AutoSwap.h
+AFLAGS += -I GR_Error.h
+AFLAGS += -I GR_LocationManager.h
+AFLAGS += -I LL_LinuxLinkLayer.h
+AFLAGS += -I MP_Proc.h
+AFLAGS += -I MP_ProcProto.h
+AFLAGS += -I NV_Memory.h
+AFLAGS += -I async_nv.h
+AFLAGS += -I cimt.h
+AFLAGS += -I cm.h
+AFLAGS += -I copymap.h
+AFLAGS += -I cor.h
+AFLAGS += -I dcd.h
+AFLAGS += -I dev.h
+AFLAGS += -I dtmt.h
+AFLAGS += -I flightrecorder.h
+AFLAGS += -I fr.h
+AFLAGS += -I icimt.h
+AFLAGS += -I ilt.h
+AFLAGS += -I ilmt.h
+AFLAGS += -I li_pci.h
+AFLAGS += -I li_evt.h
+AFLAGS += -I lsmt.h
+AFLAGS += -I ltmt.h
+AFLAGS += -I mlmt.h
+AFLAGS += -I nva.h
+AFLAGS += -I raid5xor.h
+AFLAGS += -I pcb.h
+AFLAGS += -I pdd.h
+AFLAGS += -I pr.h
+AFLAGS += -I prp.h
+AFLAGS += -I qrp.h
+AFLAGS += -I qu.h
+AFLAGS += -I rpn.h
+AFLAGS += -I rrb.h
+AFLAGS += -I rrp.h
+AFLAGS += -I scd.h
+AFLAGS += -I scmt.h
+AFLAGS += -I scr.h
+AFLAGS += -I sgl.h
+AFLAGS += -I signal.h
+AFLAGS += -I srp.h
+AFLAGS += -I ss_nv.h
+AFLAGS += -I ssms.h
+AFLAGS += -I system.h
+AFLAGS += -I time.h
+AFLAGS += -I tlmt.h
+AFLAGS += -I tmt.h
+AFLAGS += -I vdd.h
+AFLAGS += -I vdmt.h
+AFLAGS += -I vlar.h
+AFLAGS += -I vrp.h
+AFLAGS += -I xdl.h
+AFLAGS += -I xli.h
+AFLAGS += -I ise.h
+AFLAGS += -I datagram.h
+AFLAGS += -I ldd.h
+AFLAGS += -I RL_PSD.h
+AFLAGS += -I rbr.h
+AFLAGS += -I wcache.h
+AFLAGS += -I r5s.h
+AFLAGS += -I ddr.h
+AFLAGS += -I daml.h
+#-- AFLAGS += -I imt.h			# Cannot include imt.h -- messy.
+AFLAGS += -I MR_Defs.h
+# The preprocessor for i960 assembler looks like the following line.
+AS_PRE = ${TIME} ${WHERE}/CT_analyze ${AFLAGS} ${A_INCLUDE} -o $@
+# -------------
+# Following is only for "c" files, NOT i960 assembler generated (*.CT.c.) files.
+C_CODEFLAGS += -Wno-cast-qual
+# ============================================================================
+# Following is for Link Layer located in different directory.
+VPATH = ${WHERE}/../../Shared/Src
+
+${OBJ}.gen:	$(wildcard ../inc/*.def) $(wildcard ../../Shared/Inc/*.def)
+	# $@
+	mkdir -p ${@D}
+	for f in $?; do ../../Bin/makeinc.pl -o ${@D} $$f; done
+	touch $@
+#-----
+${OBJ}b_%.o: ${OBJ}%.CT.c
+	# $@
+	@${CC} -o $@ ${CFLAGS} -c $<
+${OBJ}f_%.o: ${OBJ}%.CT.c
+	# $@
+	@${CC} -o $@ ${CFLAGS} -c $<
+# Following are for .c files, not generated .CT.c files.
+${OBJ}b_%.o: %.c
+	# $@
+	@${CC} -o $@ ${CFLAGS} ${C_CODEFLAGS} -c $<
+${OBJ}f_%.o: %.c
+	# $@
+	@${CC} -o $@ ${CFLAGS} ${C_CODEFLAGS} -c $<
+${OBJ}b_%.o: %.S
+	# $@
+	@${CC} -o $@ ${CFLAGS} ${C_CODEFLAGS} -c $<
+${OBJ}f_%.o: %.S
+	# $@
+	@${CC} -o $@ ${CFLAGS} ${C_CODEFLAGS} -c $<
+${OBJ}%.o: ${OBJ}%.c
+	# $@
+	@${CC} -o $@ ${CFLAGS} -c $<
+#-----
+# Set CFLAGS for frontend and backend targets.
+NOCYG := -fno-instrument-functions -fno-profile-arcs -fno-test-coverage
+${filter-out ${OBJ}b_L_XIO3D.o,${OBJ}b_%.o}: override CFLAGS = ${B_CFLAGS} -fpack-struct
+${filter-out ${OBJ}f_L_XIO3D.o,${OBJ}f_%.o}: override CFLAGS = ${F_CFLAGS} -fpack-struct
+${OBJ}be_main.o: override CFLAGS = ${B_CFLAGS} ${NOCYG} -fpack-struct
+${OBJ}fe_main.o: override CFLAGS = ${F_CFLAGS} ${NOCYG} -fpack-struct
+${OBJ}b_back.CTS.o: override CFLAGS = ${B_CFLAGS} -fpack-struct
+${OBJ}f_front.CTS.o: override CFLAGS = ${F_CFLAGS} -fpack-struct
+# ${OBJ}b_back.CT.o: override CFLAGS = ${filter-out -fmudflap,${B_CFLAGS}}
+# ${OBJ}f_front.CT.o: override CFLAGS = ${filter-out -fmudflap,${F_CFLAGS}}
+${OBJ}b_L_XIO3D.o: override CFLAGS = ${B_CFLAGS} ${NOCYG}
+${OBJ}f_L_XIO3D.o: override CFLAGS = ${F_CFLAGS} ${NOCYG}
+${OBJ}b_cyg.o: override CFLAGS = ${B_CFLAGS} ${NOCYG}
+${OBJ}f_cyg.o: override CFLAGS = ${F_CFLAGS} ${NOCYG}
+${OBJ}b_mem_pool.o: override CFLAGS = ${B_CFLAGS} ${NOCYG} -fpack-struct
+${OBJ}f_mem_pool.o: override CFLAGS = ${F_CFLAGS} ${NOCYG} -fpack-struct
+${OBJ}b_CT_history.o: override CFLAGS = ${B_CFLAGS} ${NOCYG}
+${OBJ}f_CT_history.o: override CFLAGS = ${F_CFLAGS} ${NOCYG}
+${OBJ}b_CT_SHARED.o: override CFLAGS = ${B_CFLAGS} ${NOCYG}
+${OBJ}f_CT_SHARED.o: override CFLAGS = ${F_CFLAGS} ${NOCYG}
+${OBJ}b_CT_variables.o: override CFLAGS = ${B_CFLAGS} ${NOCYG}
+${OBJ}f_CT_variables.o: override CFLAGS = ${F_CFLAGS} ${NOCYG}
+${OBJ}b_checkstackmemory.o: override CFLAGS = ${B_CFLAGS} ${NOCYG} -fpack-struct
+${OBJ}f_checkstackmemory.o: override CFLAGS = ${F_CFLAGS} ${NOCYG} -fpack-struct
+${OBJ}b_L_StackDump.o: override CFLAGS = ${B_CFLAGS} ${NOCYG} -fpack-struct
+${OBJ}f_L_StackDump.o: override CFLAGS = ${F_CFLAGS} ${NOCYG} -fpack-struct
+${OBJ}b_L_CrashDump.o: override CFLAGS = ${B_CFLAGS} ${NOCYG} -fpack-struct
+${OBJ}f_L_CrashDump.o: override CFLAGS = ${F_CFLAGS} ${NOCYG} -fpack-struct
+${OBJ}b_L_Signal.o: override CFLAGS = ${B_CFLAGS} ${NOCYG} -fpack-struct
+${OBJ}f_L_Signal.o: override CFLAGS = ${F_CFLAGS} ${NOCYG} -fpack-struct
+${OBJ}b_L_Misc.o: override CFLAGS = ${B_CFLAGS} ${NOCYG} -fpack-struct
+${OBJ}f_L_Misc.o: override CFLAGS = ${F_CFLAGS} ${NOCYG} -fpack-struct
+${OBJ}b_li_pci.o: override CFLAGS = ${B_CFLAGS} ${NOCYG} -fpack-struct
+${OBJ}f_li_pci.o: override CFLAGS = ${F_CFLAGS} ${NOCYG} -fpack-struct
+${OBJ}b_li_evt.o: override CFLAGS = ${B_CFLAGS} ${NOCYG} -fpack-struct
+${OBJ}f_li_evt.o: override CFLAGS = ${F_CFLAGS} ${NOCYG} -fpack-struct
+# ============================================================================
+.PHONY: all
+all: Front Back
+# ============================================================================
+.PHONY: help
+help:
+	@echo 'Cleaning targets:'
+	@echo '  clean  - remove most generated files but keep dependencies'
+	@echo '  cleandir - remove all generated files.'
+	@echo ''
+	@echo 'Configuration targets:'
+	@echo '  obj  - create directory obj, and henceforth put generated files there'
+	@echo ''
+	@echo 'Compilation targets:'
+	@echo '  all  - Compile Front and Back end.  *** default ***'
+	@echo '  Front  - Compile the Front end.'
+	@echo '  Back  - Compile the Back end.'
+	@echo ''
+	@echo 'Miscellaneous targets:'
+	@echo '  gdbf   - Debug core file for Front end.'
+	@echo '  gdbb   - Debug core file for Back end.'
+	@echo '  gdbccb   - Debug core file for CCB.'
+	@echo '  dddf   - Run ddd on Front end.'
+	@echo '  dddb   - Run ddd on Back end.'
+	@echo '  dddccb   - Run ddd on CCB.'
+	@echo '  run   - Run programs outputting to file (from here).'
+	@echo ''
+	@echo 'Suggested targets:'
+	@echo '  make cleandir obj all run'
+# ============================================================================
+${OBJ}f_CT_variables.o ${OBJ}b_CT_variables.o: CT_variables.c
+	# $@
+	@${CC} -o $@ ${CFLAGS} -c $<
+${OBJ}fe_main.o: fe_main.c
+	# $@
+	@${CC} -o $@ ${CFLAGS} -c $<
+${OBJ}be_main.o: be_main.c
+	# $@
+	@${CC} -o $@ ${CFLAGS} -c $<
+# ============================================================================
+# Frontend definitions for nested "make" (to change CFLAGS, etc), follows.
+F_C_OBJS := ${OBJ}f_debug.o ${OBJ}f_def.o ${OBJ}f_deffe.o \
+	${OBJ}f_def_isp.o ${OBJ}f_DLM_fe.o ${OBJ}f_ispc.o ${OBJ}f_msc.o \
+	${OBJ}f_wcrcvry.o ${OBJ}f_CT_variables.o ${OBJ}f_li_pci.o \
+	${OBJ}f_li_evt.o ${OBJ}f_MP_Proc.o ${OBJ}f_CA_CacheFE.o \
+	${OBJ}f_NV_Memory.o $(OBJ)f_WC_Cache.o \
+	${OBJ}f_iscsi_hash.o ${OBJ}f_iscsi_init.o ${OBJ}f_iscsi_pdu.o \
+	${OBJ}f_iscsi_session.o ${OBJ}f_iscsi_text.o ${OBJ}f_tsl.o \
+	${OBJ}f_iscsi_digest.o ${OBJ}f_iscsi_tmf.o \
+	${OBJ}f_chap_md5.o ${OBJ}f_chap_new.o ${OBJ}f_chap_mddriver.o ${OBJ}f_chap_base.o \
+	${OBJ}f_def_iscsi.o $(OBJ)f_fsl.o ${OBJ}f_iscsi_timer.o \
+	${OBJ}f_flightrecorder.o \
+	${OBJ}f_icl.o ${OBJ}f_isns.o ${OBJ}f_idriver.o ${OBJ}f_pr.o ${OBJ}f_def_pr.o \
+	${OBJ}f_WC_WRP.o ${OBJ}f_mag.o
+F_C_OBJS += ${OBJ}f_mem_pool.o ${OBJ}f_memory.o
+F_C_OBJS += ${OBJ}f_kern.o ${OBJ}f_pm.o
+ifdef HISTORYS_FE
+  F_C_OBJS += ${OBJ}f_CT_history.o
+endif
+ifdef HISTORYS_CYG_FE
+  F_C_OBJS += ${OBJ}f_cyg.o
+endif
+F_C_OBJS += ${OBJ}f_CT_SHARED.o ${OBJ}f_L_CrashDump.o
+# If necessary to check if stacks are being overflowed ...
+F_C_OBJS += ${OBJ}f_checkstackmemory.o
+F_C_DEFINES += -DFRONTEND
+F_C_DEFINES += -DPROC_CODE
+F_C_DEFINES += -DLINUX_VER
+F_A_DEFINES += -DFRONTEND -DTARGET -DFABRIC
+F_A_DEFINES += -DPROC_CODE
+F_A_DEFINES += -DLINUX_VER
+F_CFLAGS += ${F_C_DEFINES} ${C_INCLUDES} ${C_GCC_FLAGS}
+# -------------
+# For just checking r registers used before initialized.
+#- F_AFLAGS += -DC_STACK_SIZE=786432
+#- F_CFLAGS += -DC_STACK_SIZE=786432
+#- F_AFLAGS += -check_r_reg_pattern_match
+#- F_CFLAGS += -DRREG_PATTERN_CHECK
+#- F_C_OBJS += ${OBJ}f_CT_history.o
+# ----------------------------------------------------------------------------
+.PHONY: Front
+Front: ${OBJ}Front.t
+# ============================================================================
+# Backend definitions for nested "make" (to change CFLAGS, etc), follows..
+B_C_OBJS := ${OBJ}b_daml.o ${OBJ}b_def.o \
+	${OBJ}b_defbe.o ${OBJ}b_defrag.o ${OBJ}b_def_con.o ${OBJ}b_raid5xor.o \
+	${OBJ}b_def_lun.o \
+	${OBJ}b_msc.o ${OBJ}b_def_isp.o\
+	${OBJ}b_NVA_BE.o ${OBJ}b_nvram.o ${OBJ}b_rebuild.o \
+	${OBJ}b_online.o ${OBJ}b_p6.o ${OBJ}b_DEF_BEGetInfo.o \
+	${OBJ}b_CT_variables.o ${OBJ}b_li_pci.o ${OBJ}b_li_evt.o ${OBJ}b_MP_Proc.o \
+	${OBJ}b_def_iscsi.o ${OBJ}b_NV_Memory.o $(OBJ)b_WC_WRP.o \
+	${OBJ}b_GR_AutoSwap.o ${OBJ}b_GR_ErrorTrack.o ${OBJ}b_GR_ErrorHandle.o \
+	${OBJ}b_GR_Misc.o \
+	${OBJ}b_def_pr.o \
+	${OBJ}b_flightrecorder.o \
+	${OBJ}b_GR_LocationManager.o ${OBJ}b_apool.o \
+	${OBJ}b_cm_im.o \
+	${OBJ}b_async_nv.o ${OBJ}b_ss_nv.o ${OBJ}b_ss_ssms.o ${OBJ}b_ss_comp.o
+B_C_OBJS += ${OBJ}b_mem_pool.o ${OBJ}b_memory.o
+B_C_OBJS += ${OBJ}b_kern.o ${OBJ}b_raid.o ${OBJ}b_pm.o ${OBJ}b_virtual.o
+B_C_OBJS += ${OBJ}b_raid5.o ${OBJ}b_cm.o
+B_C_OBJS += ${OBJ}b_fabric.o ${OBJ}b_ispc.o ${OBJ}b_physical_isp.o
+
+ifeq (${MODEL},3000)
+B_C_OBJS += ${OBJ}b_ses.o
+endif
+ifeq (${MODEL},7400)
+B_C_OBJS += ${OBJ}b_ses.o
+endif
+ifeq (${MODEL},7000)
+B_C_OBJS += ${OBJ}b_ise-bay.o
+endif
+ifeq (${MODEL},4700)
+B_C_OBJS += ${OBJ}b_ise-bay.o
+endif
+ifdef HISTORYS_BE
+  B_C_OBJS += ${OBJ}b_CT_history.o
+endif
+ifdef HISTORYS_CYG_BE
+  B_C_OBJS += ${OBJ}b_cyg.o
+endif
+#	${OBJ}b_raid5xorTest.o
+B_C_OBJS += ${OBJ}b_CT_SHARED.o ${OBJ}b_L_CrashDump.o
+# If necessary to check if stacks are being overflowed ...
+B_C_OBJS += ${OBJ}b_checkstackmemory.o
+B_C_DEFINES += -DBACKEND
+B_C_DEFINES += -DPROC_CODE
+B_C_DEFINES += -DLINUX_VER
+B_A_DEFINES += -DBACKEND
+B_A_DEFINES += -DPROC_CODE
+B_A_DEFINES += -DLINUX_VER
+B_CFLAGS += ${B_C_DEFINES} ${C_INCLUDES} ${C_GCC_FLAGS}
+# -------------
+.PHONY: Back
+Back: ${OBJ}Back.t
+# ============================================================================
+# Frontend follows.
+F_ASM_CACHEFE := cachefe.as wcache.as rbi.as rb.as wcflush.as wcutils.as wcread.as wcrecvry.as
+F_ASM_CDRIVER := cdriver.as magdrvr.as
+F_ASM_DEFINEFE := definefe.as define.as
+F_ASM_DLMFE := dlmfe.as dlm.as
+F_ASM_IDRIVER := idriver.as apldrv.as lld.as itraces.as
+F_ASM_ISP := isp.as
+F_ASM_KERNEL := kernel.as misc.as error.as pci.as nva.as nvafe.as
+F_ASM_PM := pm.as pmfe.as
+#---
+F_ASM_ALL = ${F_ASM_KERNEL} ${F_ASM_CACHEFE} ${F_ASM_CDRIVER} ${F_ASM_DEFINEFE} \
+	${F_ASM_DLMFE} ${F_ASM_IDRIVER} ${F_ASM_ISP} ${F_ASM_PM}
+# -------------
+${OBJ}f_front.CT.c: ${F_ASM_ALL} fe_proto
+	# $@
+	@${AS_PRE} -P fe_proto ${F_AFLAGS} ${F_A_DEFINES} ${F_ASM_ALL}
+${OBJ}f_front.CTS.o: ${OBJ}f_front.CT.c
+${OBJ}f_front.CT.c ${OBJ}f_front.CTS.c: fe_proto
+${OBJ}f_front.CT.o: ${WHERE}/../../Shared/Inc/FW_Header.h
+# -------------
+FRONT_LINK := ${OBJ}f_FW_Header.o
+FRONT_LINK += ${OBJ}fe_main.o ${OBJ}f_front.CT.o ${OBJ}f_front.CTS.o ${F_C_OBJS}
+FRONT_LINK += ${OBJ}f_LL_LinuxLinkLayer.o ${OBJ}f_L_XIO3D.o ${OBJ}f_L_Misc.o ${OBJ}f_L_Signal.o
+FRONT_LINK += ${OBJ}f_L_StackDump.o
+#++ FRONT_LINK += ${OBJ}f_rb.o
+FRONT_LINK += ${OBJ}f_wcache.o
+
+${OBJ}Front.a: ${FRONT_LINK}
+	# $@
+	@ar cr $@ ${FRONT_LINK}
+${OBJ}fe.ld: fe.ld
+	sed -e "s'OBJ'${OBJDIRNAME}'" < $< > $@
+${OBJ}Front.t: ${OBJ}Front.a ${OBJ}fe.ld
+	# $@
+	@${LD} ${ON64FLAGS} -Xlinker -melf_i386 ${F_LD} -o $@ -Xlinker -Map -Xlinker ${OBJ}Front.map \
+		-Xlinker --defsym -Xlinker MAKE_DEFS_FE_LOAD=${MAKE_DEFS_FE_LOAD} \
+		-Xlinker --defsym -Xlinker MAKE_DEFS_FE_ONLY_MEMORY=${MAKE_DEFS_FE_ONLY_MEMORY} \
+		-Xlinker --script -Xlinker ${OBJ}fe.ld ${OBJ}fe_main.o ${OBJ}Front.a ${LIBS}
+	@${CROSS}nm -n -l $@ | \
+		grep -v '\(compiled\)\|\(\.o$$\)\|\( [aUw] \)\|\(\.\.ng$$\)\|\(LASH[RL]DI\)' | \
+		sort >${OBJ}Front.nm
+	# $@ complete
+#---------------
+f_gcov:
+	ln -sf CT_SHARED.c f_CT_SHARED.c
+	ln -sf CT_variables.c f_CT_variables.c
+	ln -sf debug.c f_debug.c
+	ln -sf def.c f_def.c
+	ln -sf deffe.c f_deffe.c
+	ln -sf def_isp.c f_def_isp.c
+	ln -sf def_iscsi.c f_def_iscsi.c
+	ln -sf DLM_fe.c f_DLM_fe.c
+	ln -sf fsl.c f_fsl.c
+	ln -sf ispc.c f_ispc.c
+	ln -sf pr.c f_pr.c
+	ln -sf idriver.c f_idriver.c
+	ln -sf def_pr.c f_def_pr.c
+	ln -sf ${WHERE}/../../Shared/Src/li_evt.c f_li_evt.c
+	ln -sf li_pci.c f_li_pci.c
+	ln -sf NV_Memory.c f_NV_Memory.c
+	ln -sf MP_Proc.c f_MP_Proc.c
+	ln -sf CA_CacheFE.c f_CA_CacheFE.c
+	ln -sf WC_Cache.c f_WC_Cache.c
+	ln -sf iscsi_hash.c f_iscsi_hash.c
+	ln -sf iscsi_init.c f_iscsi_init.c
+	ln -sf iscsi_pdu.c f_iscsi_pdu.c
+	ln -sf iscsi_session.c f_iscsi_session.c
+	ln -sf iscsi_text.c f_iscsi_text.c
+	ln -sf iscsi_digest.c f_iscsi_digest.c
+	ln -sf iscsi_tmf.c f_iscsi_tmf.c
+	ln -sf iscsi_timer.c f_iscsi_timer.c
+	ln -sf icl.c f_icl.c
+	ln -sf tsl.c f_tsl.c
+	ln -sf isns.c f_isns.c
+	ln -sf chap_new.c f_chap_new.c
+	ln -sf chap_md5.c f_chap_md5.c
+	ln -sf chap_mddriver.c f_chap_mddriver.c
+	ln -sf chap_base.c f_chap_base.c
+	ls -sf WC_WRP.c f_WC_WRP.c
+	ln -sf ${WHERE}/../../Shared/Src/LL_LinuxLinkLayer.c f_LL_LinuxLinkLayer.c
+	ln -sf ${WHERE}/../../Shared/Src/L_XIO3D.c f_L_XIO3D.c
+	ln -sf ${WHERE}/../../Shared/Src/L_Misc.c f_L_Misc.c
+	ln -sf ${WHERE}/../../Shared/Src/L_Signal.c f_L_Signal.c
+	ln -sf ${WHERE}/../../Shared/Src/L_StackDump.c f_L_StackDump.c
+	ln -sf msc.c f_msc.c
+	ln -sf wcrcvry.c f_wcrcvry.c
+	if [ ! -s "$(OBJ)gmon.out" ] ; then mv ${WHERE}/../../YetiApps/gmon.out $(OBJ)./; fi;
+	gcov -l -f -b -c -o ${OBJDIRNAME} fe_main.c f_*.c ${OBJ}f*.c 2>&1 >${OBJ}Front.GCOV.SUMMARY
+	grep '^ *[0-9]*: *[0-9]*:' f_*.gcov | sort -t: -r -n +1 > ${OBJ}Front.GCOV
+	gprof -bl ${OBJ}Front.t ${OBJ}gmon.out 2>&1 > ${OBJ}Front.GPROF
+#---------------
+b_gcov:
+	ln -sf ss_nv.c b_ss_nv.c
+	ln -sf apool.c b_apool.c
+	ln -sf daml.c b_daml.c
+	ln -sf def.c b_def.c
+	ln -sf defbe.c b_defbe.c
+	ln -sf defrag.c b_defrag.c
+	ln -sf def_con.c b_def_con.c
+	ln -sf raid5xor.c b_raid5xor.c
+	ln -sf raid5xorTest.c b_raid5xorTest.c
+	ln -sf def_isp.c b_def_isp.c
+	ln -sf def_iscsi.c b_def_iscsi.c
+	ln -sf def_lun.c b_def_lun.c
+	ln -sf def_pr.c b_def_pr.c
+	ln -sf fabric.c b_fabric.c
+	ln -sf physical_isp.c b_physical_isp.c
+	ln -sf ispc.c b_ispc.c
+	ln -sf msc.c b_msc.c
+	ln -sf NVA_BE.c b_NVA_BE.c
+	ln -sf nvram.c b_nvram.c
+	ln -sf rebuild.c b_rebuild.c
+	ln -sf ses.c b_ses.c
+	ln -sf ise-bay.c b_ise-bay.c
+	ln -sf tsl.c b_tsl.c
+	ln -sf online.c b_online.c
+	ln -sf p6.c b_p6.c
+	ln -sf DEF_BEGetInfo.c b_DEF_BEGetInfo.c
+	ln -sf CT_variables.c b_CT_variables.c
+	ln -sf li_pci.c b_li_pci.c
+	ln -sf NV_Memory.c b_NV_Memory.c
+	ln -sf MP_Proc.c b_MP_Proc.c
+	ln -sf GR_AutoSwap.c b_GR_AutoSwap.c
+	ln -sf GR_ErrorTrack.c b_GR_ErrorTrack.c
+	ln -sf GR_ErrorHandle.c b_GR_ErrorHandle.c
+	ln -sf GR_Misc.c b_GR_Misc.c
+	ln -sf WC_WRP.c b_WC_WRP.c
+	ln -sf GR_LocationManager.c b_GR_LocationManager.c
+	ln -sf async_nv.c b_async_nv.c
+	ln -sf ${WHERE}/../../Shared/Src/li_evt.c b_li_evt.c
+	ln -sf ${WHERE}/../../Shared/Src/LL_LinuxLinkLayer.c b_LL_LinuxLinkLayer.c
+	ln -sf ${WHERE}/../../Shared/Src/L_XIO3D.c b_L_XIO3D.c
+	ln -sf ${WHERE}/../../Shared/Src/L_Misc.c b_L_Misc.c
+	ln -sf ${WHERE}/../../Shared/Src/L_Signal.c b_L_Signal.c
+	ln -sf ${WHERE}/../../Shared/Src/L_StackDump.c b_L_StackDump.c
+	ln -sf CT_SHARED.c b_CT_SHARED.c
+	ln -sf cm_im.c b_cm_im.c
+	if [ ! -s "$(OBJ)gmon.out" ] ; then mv ${WHERE}/../../YetiApps/gmon.out $(OBJ)./; fi;
+	gcov -l -f -b -c -o ${OBJDIRNAME} be_main.c b_*.c ${OBJ}b*.c 2>&1 >${OBJ}Back.GCOV.SUMMARY
+	grep '^ *[0-9]*: *[0-9]*:' b_*.gcov | sort -t: -r -n +1 > ${OBJ}Back.GCOV
+	gprof -bl ${OBJ}Back.t 2>&1 ${OBJ}gmon.out > ${OBJ}Back.GPROF
+# ============================================================================
+# Backend follows.
+B_ASM_CCSM := ccsm.as CT_unsettable.as OCstate.as CCstate.as
+B_ASM_DEF_CON := def_con.as
+B_ASM_DEFINEBE := definebe.as define.as
+B_ASM_DLMBE := dlmbe.as dlm.as
+B_ASM_FSYS := fsys.as
+B_ASM_ISP := isp.as pci.as
+B_ASM_KERNEL := kernel.as misc.as miscbe.as error.as
+B_ASM_PM := pm.as pmbe.as
+B_ASM_LAD := lad_cm.as lad_pcm.as djk_cm.as CT_unsettable.as CCstate.as OCstate.as
+B_ASM_NVABE := nvabe.as nva.as
+B_ASM_ONLINE := online.as scrub.as
+B_ASM_PHYSICAL := physical.as
+B_ASM_RAID := raid.as
+B_ASM_RAID5 := raid5.as
+B_ASM_RAIDINIT := raidinit.as
+B_ASM_REBLD := rebld.as
+B_ASM_VIRTUAL := virtual.as
+#---
+B_ASM_ALL := ${B_ASM_KERNEL} ${B_ASM_CCSM} ${B_ASM_DEF_CON} ${B_ASM_DEFINEBE} \
+	${B_ASM_DLMBE} ${B_ASM_FSYS} ${B_ASM_PM} ${B_ASM_LAD} \
+	${B_ASM_MATHLIB} ${B_ASM_NVABE} ${B_ASM_ONLINE} \
+	${B_ASM_RAID} ${B_ASM_RAID5} ${B_ASM_RAIDINIT} \
+	${B_ASM_REBLD} ${B_ASM_VIRTUAL}
+# -------------
+B_ASM_ALL += ${B_ASM_ISP} ${B_ASM_PHYSICAL}
+${OBJ}b_back.CT.c: ${B_ASM_ALL} be_proto
+	# $@
+	@${AS_PRE} -P be_proto ${B_AFLAGS} ${B_A_DEFINES} ${B_ASM_ALL}
+${OBJ}b_back.CTS.o: ${OBJ}b_back.CT.c
+${OBJ}b_back.CT.c ${OBJ}b_back.CTS.c: be_proto
+${OBJ}b_back.CT.o: ${WHERE}/../../Shared/Inc/FW_Header.h
+# -------------
+BACK_LINK := ${OBJ}b_FW_Header.o
+BACK_LINK += ${OBJ}be_main.o ${OBJ}b_back.CT.o ${OBJ}b_back.CTS.o ${B_C_OBJS}
+BACK_LINK += ${OBJ}b_LL_LinuxLinkLayer.o ${OBJ}b_L_XIO3D.o ${OBJ}b_L_Misc.o ${OBJ}b_L_Signal.o
+BACK_LINK += ${OBJ}b_L_StackDump.o
+BACK_LINK += ${OBJ}b_raid.o
+${OBJ}Back.a: ${BACK_LINK}
+	# $@
+	@ar cr $@ ${BACK_LINK}
+${OBJ}be.ld: be.ld
+	sed -e "s'OBJ'${OBJDIRNAME}'" < $< > $@
+${OBJ}Back.t: ${OBJ}Back.a ${OBJ}be.ld ${OBJ}2400mid.bin ${OBJ}2400.bin ${OBJ}2500.bin ${OBJ}2500mid.bin
+	# $@
+	@${LD} ${ON64FLAGS} -Xlinker -melf_i386 ${B_LD} -o $@ -Xlinker -Map -Xlinker ${OBJ}Back.map \
+		-Xlinker --defsym -Xlinker MAKE_DEFS_BE_LOAD=${MAKE_DEFS_BE_LOAD} \
+		-Xlinker --defsym -Xlinker MAKE_DEFS_BE_ONLY_MEMORY=${MAKE_DEFS_BE_ONLY_MEMORY} \
+		-Xlinker --script -Xlinker ${OBJ}be.ld ${OBJ}be_main.o ${OBJ}Back.a ${LIBS}
+	@${CROSS}nm -n -l $@ | grep -v '\(compiled\)\|\(\.o$$\)\|\( [aUw] \)\|\(\.\.ng$$\)\|\(LASH[RL]DI\)' | sort >${OBJ}Back.nm
+	# $@ complete
+#
+${OBJ}%.bin: %.bin
+	cp $< $@
+#
+
+# ============================================================================
+# Dependencies.
+${OBJ}.f_%.c.depend: %.c ${MAKEFILE} ${OBJ}.gen
+	# $@
+	@${HOSTCC} -M ${F_CFLAGS} $< | sed 's;\(${patsubst %.c,%,${notdir $<}}\)\.o[ :]*;${OBJ}f_\1.o $@ : ${MAKEFILE} ;g' > $@
+	@[ -s $@ ] || rm -f $@
+${OBJ}.f_FW_Header.c.depend: ${OBJ}f_FW_Header.c ${MAKEFILE} ${OBJ}.gen
+	# $@
+	@${HOSTCC} -M ${F_CFLAGS} $< | sed 's;\(${patsubst %.c,%,${notdir $<}}\)\.o[ :]*;${OBJ}f_\1.o $@ : ${MAKEFILE} ;g' > $@
+	@[ -s $@ ] || rm -f $@
+${OBJ}.fe_main.c.depend: fe_main.c ${MAKEFILE} ${OBJ}.gen
+	# $@
+	@${HOSTCC} -M ${F_CFLAGS} $< | sed 's;\(${patsubst %.c,%,${notdir $<}}\)\.o[ :]*;${OBJ}\1.o $@ : ${MAKEFILE} ;g' > $@
+	@[ -s $@ ] || rm -f $@
+${OBJ}.f_front.CT.c.depend: ${F_ASM_ALL} ${MAKEFILE} ./CT_dot_include ${OBJ}.gen
+	# $@
+	@./CT_dot_include ${A_INCLUDE} -t "${OBJ}f_front.CT.c $@" ${F_ASM_ALL} > $@
+${OBJ}.f_front.CTS.c.depend: ${F_ASM_ALL} ${MAKEFILE} ./CT_dot_include ${OBJ}.gen
+	# $@
+	@./CT_dot_include ${A_INCLUDE} -t "${OBJ}f_front.CTS.c $@" ${F_ASM_ALL} > $@
+#---
+${OBJ}.b_%.c.depend: %.c ${MAKEFILE} ${OBJ}.gen
+	# $@
+	@${HOSTCC} -M ${B_CFLAGS} $< | sed 's;\(${patsubst %.c,%,${notdir $<}}\)\.o[ :]*;${OBJ}b_\1.o $@ : ${MAKEFILE} ;g' > $@
+	@[ -s $@ ] || rm -f $@
+${OBJ}.b_FW_Header.c.depend: ${OBJ}b_FW_Header.c ${MAKEFILE} ${OBJ}.gen
+	# $@
+	@${HOSTCC} -M ${B_CFLAGS} $< | sed 's;\(${patsubst %.c,%,${notdir $<}}\)\.o[ :]*;${OBJ}b_\1.o $@ : ${MAKEFILE} ;g' > $@
+	@[ -s $@ ] || rm -f $@
+${OBJ}.be_main.c.depend: be_main.c ${MAKEFILE} ${OBJ}.gen
+	# $@
+	@${HOSTCC} -M ${B_CFLAGS} $< | sed 's;\(${patsubst %.c,%,${notdir $<}}\)\.o[ :]*;${OBJ}\1.o $@ : ${MAKEFILE} ;g' > $@
+	@[ -s $@ ] || rm -f $@
+${OBJ}.b_back.CT.c.depend: ${B_ASM_ALL} ${MAKEFILE} ./CT_dot_include ${OBJ}.gen
+	# $@
+	@./CT_dot_include ${A_INCLUDE} -t "${OBJ}b_back.CT.c $@" ${B_ASM_ALL} > $@
+${OBJ}.b_back.CTS.c.depend: ${B_ASM_ALL} ${MAKEFILE} ./CT_dot_include ${OBJ}.gen
+	# $@
+	@./CT_dot_include ${A_INCLUDE} -t "${OBJ}b_back.CTS.c $@" ${B_ASM_ALL} > $@
+# ============================================================================
+.PHONY: clean
+clean:
+	rm -f *.i *.s ${OBJ}*.o ${OBJ}*.map	# -save-temps files
+	rm -f ${OBJ}Full*
+	rm -f ${OBJ}*.CT.c ${OBJ}*.CTS.c
+	rm -f ${OBJ}*.ima ${OBJ}AAA.Front ${OBJ}AAA.Back ${OBJ}AAA.CCB
+	rm -f core.* Front.t.core* Back.t.core* ${OBJ}core.* ${OBJ}Front.t.core* ${OBJ}Back.t.core*
+	rm -f *.gcov ${OBJ}*.da ${OBJ}*.bbg ${OBJ}gmon.out
+	rm -f ${OBJ}Back.GCOV.SUMMARY ${OBJ}Back.GCOV ${OBJ}Back.GPROF
+	rm -f ${OBJ}Front.GCOV.SUMMARY ${OBJ}Front.GCOV ${OBJ}Front.GPROF
+	rm -f f_*.c b_*.c			# symbolic links
+	rm -f AAA.Front AAA.Back ${OBJ}AAA.objdump.Front.t ${OBJ}AAA.objdump.Back.t ${OBJ}AAA.Back
+# Cleanup Frontend first.
+	rm -f ${OBJ}Front ${OBJ}Front.t ${OBJ}Front.ima ${OBJ}Front.nm ${OBJ}Front.a
+	rm -f ${OBJ}f_FW_Header.c		# Generated	file.
+	rm -f ${OBJ}f2400*.bin ${OBJ}2400*.ima	# Generated	files.
+# Cleanup Backend next.
+	rm -f ${OBJ}Back ${OBJ}Back.t ${OBJ}Back.ima ${OBJ}Back.nm ${OBJ}Back.a
+	rm -f ${OBJ}b_FW_Header.c		# Generated	file.
+# Possible ccb leftover file(s).
+	rm -f ccbrun.core* AAA.CCB
+.PHONY: cleandir
+cleandir: clean
+	rm -rf ../obj_${MODEL}*
+	rm -f .dat
+# ----------------------------------------------------------------------------
+.PHONY:	crashtest
+crashtest:
+	${CC} -g -DSTANDALONE=1 -P ${B_CFLAGS} -o crashtest L_CrashDump.c \
+		../../Shared/Src/L_StackDump.c
+# ----------------------------------------------------------------------------
+.PHONY: obj
+obj:
+	@if [ -d ${OBJDIRNAME} ]; then echo "directory ${OBJDIRNAME} exists" ; \
+		else mkdir ${OBJDIRNAME} ; echo "created directory ${OBJDIRNAME}" ; fi
+# ----------------------------------------------------------------------------
+.PHONY: run
+run: ${OBJ}Front.t ${OBJ}Back.t
+# NOTE: can't compile CCB with -pg and run it too.
+	root /bin/bash -c "${WHERE}/../../Linux/sharedmemory/zero"
+	root /bin/bash -c "${WHERE}/../../CCB/Src/${OBJDIRNAME}/ccbrun 2>${OBJ}AAA.CCB 1>&2 &"
+	sleep 1
+ifneq '' "${OBJ}"
+	cd ${OBJ} && root /bin/bash -c "./Front.t 2>AAA.Front 1>&2 &"
+	cd ${OBJ} && root /bin/bash -c "./Back.t 2>AAA.Back 1>&2 &"
+else
+	root /bin/bash -c "./Front.t 2>AAA.Front 1>&2 &"
+	root /bin/bash -c "./Back.t 2>AAA.Back 1>&2 &"
+endif
+.PHONY: gdbf
+gdbf:
+	root gdb ${OBJ}Front.t ${OBJ}Front.t.core*
+.PHONY: gdbb
+gdbb:
+	root gdb ${OBJ}Back.t ${OBJ}Back.t.core*
+.PHONY: gdbccb
+gdbccb:
+	root gdb -n ${WHERE}/../../CCB/Src/${OBJDIRNAME}/ccbrun ccbrun.core*
+.PHONY: dddf
+dddf: ${OBJ}Front.t
+	root ddd ${OBJ}Front.t
+.PHONY: dddb
+dddb: ${OBJ}Back.t
+	root ddd ${OBJ}Back.t
+.PHONY: dddccb
+dddccb:
+	root ddd ${WHERE}/../../CCB/Src/${OBJDIRNAME}/ccbrun
+.PHONY: objdumpf
+objdumpf:
+	objdump -dlS ${OBJ}Front.t >${OBJ}AAA.objdump.Front.t
+.PHONY: objdumpb
+objdumpb:
+	objdump -dlS ${OBJ}Back.t >${OBJ}AAA.objdump.Back.t
+# ----------------------------------------------------------------------------
+INCLUDE_BACK := ${BACK_LINK:${OBJ}%.o=${OBJ}.%.c.depend}
+INCLUDE_FRONT := ${FRONT_LINK:${OBJ}%.o=${OBJ}.%.c.depend}
+# ----------------------------------------------------------------------------
+${OBJ}f_FW_Header.c: ${WHERE}/../../Shared/Src/FW_HeaderSrc.c ${WHERE}/../../Tools/updfwhdr.pl $(filter-out $(OBJ).f_FW_Header.c.depend, ${INCLUDE_FRONT})
+	# $@
+	@perl ${WHERE}/../../Tools/updfwhdr.pl -v${VER} -i ../../FWRun-${MODEL}.ver ${WHERE}/../../Shared/Src/FW_HeaderSrc.c ${OBJ}f_FW_Header.c
+# -------------
+${OBJ}b_FW_Header.c: ${WHERE}/../../Shared/Src/FW_HeaderSrc.c ${WHERE}/../../Tools/updfwhdr.pl $(filter-out $(OBJ).b_FW_Header.c.depend, ${INCLUDE_BACK})
+	# $@
+	@perl ${WHERE}/../../Tools/updfwhdr.pl -v${VER} -i ../../FWRun-${MODEL}.ver ${WHERE}/../../Shared/Src/FW_HeaderSrc.c ${OBJ}b_FW_Header.c
+# ----------------------------------------------------------------------------
+#
+ifeq 'undefined' "$(origin MAKECMDGOALS)"
+SINCLUDE_Back := yes
+SINCLUDE_Front := yes
+endif
+ifeq 'all' "$(filter all,${MAKECMDGOALS})"
+SINCLUDE_Back := yes
+SINCLUDE_Front := yes
+endif
+ifeq 'Front' "$(filter Front,${MAKECMDGOALS})"
+SINCLUDE_Front := yes
+endif
+ifeq "${OBJ}Front.t" "$(filter ${OBJ}Front.t,${MAKECMDGOALS})"
+SINCLUDE_Front := yes
+endif
+ifeq "${OBJ}f_front.CT.c" "$(filter ${OBJ}f_front.CT.c,${MAKECMDGOALS})"
+SINCLUDE_Front := yes
+endif
+ifeq 'Back' "$(filter Back,${MAKECMDGOALS})"
+SINCLUDE_Back := yes
+endif
+ifeq "${OBJ}Back.t" "$(filter ${OBJ}Back.t,${MAKECMDGOALS})"
+SINCLUDE_Back := yes
+endif
+ifeq "${OBJ}b_back.CT.c" "$(filter ${OBJ}b_back.CT.c,${MAKECMDGOALS})"
+SINCLUDE_Back := yes
+endif
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+ALL_INCLUDE =
+ifeq 'yes' "${SINCLUDE_Back}"
+ALL_INCLUDE +=${INCLUDE_BACK}
+endif
+ifeq 'yes' "${SINCLUDE_Front}"
+ALL_INCLUDE +=${INCLUDE_FRONT}
+endif
+ifneq '' "$(strip ${ALL_INCLUDE})"
+# If you are debugging this, an "include" will print out the files missing,
+# then continue by trying to "make them", then include them. "sinclude" will
+# NOT print out any files missing, but will try to "make them". If one can
+# not be made, you will never see it with sinclude. But, the error messages
+# are confusing for normal use -- thus sinclude.
+sinclude ${ALL_INCLUDE}
+endif
+# ----------------------------------------------------------------------------
+FRONT_LINT := ${OBJ}f_FW_Header.c
+FRONT_LINT += fe_main.c
+FRONT_LINT += ${WHERE}/../../Shared/Src/LL_LinuxLinkLayer.c
+FRONT_LINT += ${WHERE}/../../Shared/Src/L_XIO3D.c
+FRONT_LINT += ${WHERE}/../../Shared/Src/L_Misc.c
+FRONT_LINT += ${WHERE}/../../Shared/Src/L_Signal.c
+FRONT_LINT += ${WHERE}/../../Shared/Src/L_StackDump.c
+FRONT_LINT += ${F_C_OBJS:${OBJ}f_%.o=%.c}
+FRONT_LINT := ${FRONT_LINT:li_evt.c=${WHERE}/../../Shared/Src/li_evt.c}
+FRONT_LINT += ${OBJ}f_front.CT.c ${OBJ}f_front.CTS.c
+FRONT_LINT_F_CFLAGS := ${F_CFLAGS:-W%=}
+FRONT_LINT_F_CFLAGS := ${FRONT_LINT_F_CFLAGS:-O%=}
+FRONT_LINT_F_CFLAGS := ${FRONT_LINT_F_CFLAGS:-g=}
+FRONT_LINT_F_CFLAGS := ${FRONT_LINT_F_CFLAGS:-f%=}
+FRONT_LINT_F_CFLAGS := ${FRONT_LINT_F_CFLAGS:-march%=}
+lint:
+	lint -limit 1000 -nof -unrecogcomments -macrovarprefixexclude \
+		+posixlib +longunsignedintegral \
+		-unqualifiedtrans -type -predboolint -shiftimplementation -mustfreeonly \
+		-dependenttrans -immediatetrans -nullpass -nullderef -nullstate -temptrans \
+		-mustfreefresh -kepttrans -compmempass -branchstate -globstate -compdef \
+		-paramuse -usedef -exitarg \
+		-retvalint \
+		-D"asm(a)=" -Dulong="unsigned long" -Dlint -D_GNU_SOURCE \
+		${C_INCLUDES} ${FRONT_LINT_F_CFLAGS} ${FRONT_LINT}
+# ----------------------------------------------------------------------------
+.PHONY: tag tags
+tag tags ctags:
+	ctags *.[hc] ../inc/*.h ../../Shared/*/*.[hc] ${OBJDIRNAME}/*.[hc]
+	etags *.[hc] ../inc/*.h ../../Shared/*/*.[hc] ${OBJDIRNAME}/*.[hc]
+# ----------------------------------------------------------------------------
+.PHONY: test
+test:
+	echo GCCVER=${GCCVER}
+# ----------------------------------------------------------------------------
+# vi:sw=4 ts=4 noexpandtab
+# End of Makefile

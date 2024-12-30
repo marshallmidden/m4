@@ -1,0 +1,46 @@
+--blank-lines-after-declarations
+--blank-lines-after-procedures
+--blank-lines-before-block-comments
+--break-after-boolean-operator
+--braces-after-if-line
+--braces-after-struct-decl-line
+--brace-indent0
+--blank-lines-after-commas
+--comment-indentation33
+--declaration-comment-column33
+--no-comment-delimiters-on-blank-lines
+--cuddle-do-while
+--dont-cuddle-else
+--continuation-indentation4
+--case-indentation4
+--else-endif-column8
+--no-space-after-casts
+--line-comments-indentation0
+--declaration-indentation12
+--dont-format-first-column-comments
+--indent-level4
+--no-parameter-indentation
+--line-length90
+--comment-line-length90
+--continue-at-parentheses
+-nlps
+--no-space-after-function-call-names
+--dont-break-procedure-type
+--start-left-side-of-comments
+--space-after-for
+--space-after-if
+--space-after-while
+--leave-optional-blank-lines
+--space-special-semicolon
+--no-tabs
+--no-space-after-parentheses
+--dont-break-function-decl-args
+--honour-newlines
+-T INT8
+-T INT16
+-T INT32
+-T INT64
+-T UINT8
+-T UINT16
+-T UINT32
+-T UINT64

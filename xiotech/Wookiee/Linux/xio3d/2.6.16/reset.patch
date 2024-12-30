@@ -1,0 +1,139 @@
+diff -rub obj-750.clean/drivers/scsi/sas/sas_discover.c obj-750/drivers/scsi/sas/sas_discover.c
+--- obj-750.clean/drivers/scsi/sas/sas_discover.c	2006-08-28 16:17:12.000000000 -0500
++++ obj-750/drivers/scsi/sas/sas_discover.c	2006-08-28 16:16:17.000000000 -0500
+@@ -542,6 +542,13 @@
+ 				    "stat:0x%x\n",
+ 				    task->task_status.resp,
+ 				    task->task_status.stat);
++
++            if ( task->task_status.stat == SAS_OPEN_REJECT ) {
++                SAS_DPRINTK("%s: %llX task %p OPEN REJECT... HARD RESET\n", 
++                        __FUNCTION__, SAS_ADDR(dev->sas_addr),task);
++                sas_execute_disable_enable_phy(dev);
++            }
++
+ 			goto ex_err;
+ 		}
+ 		res = task->task_status.stat;
+@@ -1324,7 +1331,6 @@
+     if (dev->dev_type == SATA_DEV) {
+         scsi_dev = dev->sata_dev.lu->uldd_dev;
+         if (scsi_dev && scsi_dev->request_queue) {
+-            
+             if (cancel)
+                 scsi_device_set_state(scsi_dev,SDEV_CANCEL);
+             else
+@@ -1334,7 +1340,6 @@
+         list_for_each_entry_safe(lu, n, &dev->end_dev.LU_list, list) {
+             scsi_dev = lu->uldd_dev;
+             if (scsi_dev && scsi_dev->request_queue) {
+-               
+                 if (cancel)
+                     scsi_device_set_state(scsi_dev,SDEV_CANCEL);
+                 else
+@@ -1352,6 +1357,7 @@
+ 
+     spin_lock_irqsave(&dev->io_list_lock,flags);
+     list_for_each_entry_safe(cmd, cmd_end, &dev->io_list, dev_io_list) {
++        cmd->task_status.abort_reason = SAS_TASK_CONTROLLED;
+         scsi_req_abort_cmd((struct scsi_cmnd*)cmd->uldd_task);
+     }
+     
+diff -rub obj-750.clean/drivers/scsi/sas/sas_expander.c obj-750/drivers/scsi/sas/sas_expander.c
+--- obj-750.clean/drivers/scsi/sas/sas_expander.c	2006-08-28 16:17:12.000000000 -0500
++++ obj-750/drivers/scsi/sas/sas_expander.c	2006-08-28 16:01:41.000000000 -0500
+@@ -2078,6 +2078,7 @@
+ 						   struct sas_phy,
+ 						   port_phy_el);
+         SAS_DPRINTK(" phy %d...", phy->id);
++		res = dev->port->ha->lldd_control_phy(phy,PHY_FUNC_HARD_RESET);
+ 		res = dev->port->ha->lldd_control_phy(phy,PHY_FUNC_DISABLE);
+ 		res = dev->port->ha->lldd_control_phy(phy,PHY_FUNC_LINK_RESET);
+         
+@@ -2090,6 +2091,7 @@
+ 
+         i = sas_ex_find_phy(dev->parent, dev->sas_addr, -1);
+         if (i != -1) {
++			res = smp_phy_control(dev->parent, i, PHY_FUNC_HARD_RESET);
+             res = smp_phy_control(dev->parent, i, PHY_FUNC_DISABLE);
+             res = smp_phy_control(dev->parent, i, PHY_FUNC_LINK_RESET);
+         }
+diff -rub obj-750.clean/drivers/scsi/sas/sas_scsi_host.c obj-750/drivers/scsi/sas/sas_scsi_host.c
+--- obj-750.clean/drivers/scsi/sas/sas_scsi_host.c	2006-08-28 16:17:12.000000000 -0500
++++ obj-750/drivers/scsi/sas/sas_scsi_host.c	2006-08-28 16:01:41.000000000 -0500
+@@ -427,6 +427,9 @@
+ 	SAS_DPRINTK("%s: aborting task 0x%p\n", __FUNCTION__, task);
+ 	res = task->dev->port->ha->lldd_abort_task(task);
+ 
++    if ( task->task_status.abort_reason == SAS_TASK_TIMED_OUT )
++        sas_execute_disable_enable_phy(task->dev);
++
+ 	spin_lock_irqsave(&task->task_state_lock, flags);
+ 	if (task->task_state_flags & SAS_TASK_STATE_DONE) {
+ 		spin_unlock_irqrestore(&task->task_state_lock, flags);
+@@ -498,13 +501,7 @@
+ 
+ 	return res;
+ }
+-static int sas_dev_reset(struct scsi_cmnd *cmd)
+-{
+-    struct LU *lu = cmd->device->hostdata;
+-    sas_execute_hard_reset(lu->parent);
+ 
+-    return 0;
+-}
+ static int sas_scsi_recover_host(struct Scsi_Host *shost)
+ {
+ 	struct sas_ha_struct *ha = SHOST_TO_SAS_HA(shost);
+@@ -744,6 +741,12 @@
+             
+         qc->err_mask |= ac_err_mask(rp->ending_fis[0x2]);
+ 
++        if ( ts->stat == SAS_OPEN_REJECT ) {
++            SAS_DPRINTK("%s: %llX task %p OPEN REJECT... HARD RESET\n", 
++                __FUNCTION__, SAS_ADDR(dev->sas_addr),task);
++            sas_execute_disable_enable_phy(dev);
++        }
++
+         if (task->task_state_flags & SAS_TASK_STATE_ABORTED)
+         {
+             if (qc->scsicmd != NULL)
+@@ -959,6 +962,7 @@
+ 
+ 				if (rc) {
+ 					ata_sas_port_destroy(ap);
++                    sas_execute_disable_enable_phy(dev);
+ 					return rc;
+ 				}
+ 
+@@ -1119,7 +1123,6 @@
+ 	.queuecommand = sas_queuecommand,
+ 	.eh_strategy_handler = sas_scsi_recover_host,
+ 	.eh_timed_out = sas_scsi_timed_out,
+-        .eh_device_reset_handler = sas_dev_reset,
+ 	.slave_alloc = sas_slave_alloc,
+ 	.slave_configure = sas_slave_configure,
+ 	.slave_destroy = sas_slave_destroy,
+diff -rub obj-750.clean/include/scsi/sas/sas_task.h obj-750/include/scsi/sas/sas_task.h
+--- obj-750.clean/include/scsi/sas/sas_task.h	2006-08-28 16:17:12.000000000 -0500
++++ obj-750/include/scsi/sas/sas_task.h	2006-08-28 16:01:34.000000000 -0500
+@@ -80,6 +80,11 @@
+ 	SAS_ABORTED_TASK,
+ };
+ 
++enum task_abort_reason {
++	SAS_TASK_TIMED_OUT    = 0,
++	SAS_TASK_CONTROLLED,
++};
++
+ /* When a task finishes with a response, the LLDD examines the
+  * response:
+  * 	- For an ATA task task_status_struct::stat is set to
+@@ -118,6 +123,7 @@
+ 	u8   buf[SAS_STATUS_BUF_SIZE];
+ 
+ 	u32  residual;
++    enum task_abort_reason abort_reason;
+ 	enum sas_open_rej_reason open_rej_reason;
+ };
+ 

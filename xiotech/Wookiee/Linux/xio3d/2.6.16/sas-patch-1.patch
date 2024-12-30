@@ -1,0 +1,104 @@
+Only in obj-750.new/drivers/scsi/sas: sas_discover.c~
+diff -rubB obj-750/drivers/scsi/sas/sas_expander.c obj-750.new/drivers/scsi/sas/sas_expander.c
+--- obj-750/drivers/scsi/sas/sas_expander.c	2006-07-28 14:03:34.499541069 -0500
++++ obj-750.new/drivers/scsi/sas/sas_expander.c	2006-07-28 14:15:24.367803918 -0500
+@@ -938,7 +938,11 @@
+ 				ex->ex_phy[i].phy_state= PHY_DEVICE_DISCOVERED;
+ 		}
+ 	}
+-
++        else{
++            ex_phy->phy_state = PHY_VACANT;    
++            ex_phy->attached_dev_type = NO_DEVICE;
++            memset(ex_phy->attached_sas_addr, 0, SAS_ADDR_SIZE);
++        }
+ 	return res;
+ }
+ 
+Only in obj-750.new/drivers/scsi/sas: sas_expander.c~
+diff -rubB obj-750/drivers/scsi/sas/sas_scsi_host.c obj-750.new/drivers/scsi/sas/sas_scsi_host.c
+--- obj-750/drivers/scsi/sas/sas_scsi_host.c	2006-07-28 14:03:34.506540401 -0500
++++ obj-750.new/drivers/scsi/sas/sas_scsi_host.c	2006-07-28 14:16:10.757377437 -0500
+@@ -522,17 +524,17 @@
+ 
+ 		switch (task_disp) {
+ 		case TASK_IS_DONE:
+-			SAS_DPRINTK("%s: task 0x%p is done\n", __FUNCTION__,
+-				    task);
++			SAS_DPRINTK("%s: cmd %p task 0x%p is done\n", __FUNCTION__,
++				    cmd,task);
+ 			task->task_done(task);
+ 			continue;
+ 		case TASK_IS_ABORTED:
+-			SAS_DPRINTK("%s: task 0x%p is aborted\n",
+-				    __FUNCTION__, task);
++                    SAS_DPRINTK("%s: cmd %p task 0x%p is aborted\n",
++                                __FUNCTION__, cmd,task);
+ 			task->task_done(task);
+ 			continue;
+ 		case TASK_IS_AT_LU:
+-			SAS_DPRINTK("task 0x%p is at LU: lu recover\n", task);
++                    SAS_DPRINTK("cmd %p task 0x%p is at LU: lu recover\n",cmd, task);
+ 			tmf_resp = sas_recover_lu(dev, lu);
+ 			if (tmf_resp == TMF_RESP_FUNC_COMPLETE) {
+ 				SAS_DPRINTK("dev %016llx LU %016llx is "
+@@ -547,8 +549,8 @@
+ 				    tmf_resp);
+ 			/* fallthrough */
+ 		case TASK_IS_NOT_AT_LU:
+-			SAS_DPRINTK("task 0x%p is not at LU: I_T recover\n",
+-				    task);
++                    SAS_DPRINTK("cmd %p task 0x%p is not at LU: I_T recover\n",
++                                cmd,task);
+ 			tmf_resp = sas_recover_I_T(dev);
+ 			if (tmf_resp == TMF_RESP_FUNC_COMPLETE) {
+ 				SAS_DPRINTK("I_T %016llx recovered\n",
+@@ -624,7 +626,8 @@
+ 	task->task_state_flags |= SAS_TASK_STATE_ABORTED;
+ 	spin_unlock_irqrestore(&task->task_state_lock, flags);
+ 
+-        SAS_DPRINTK("command %llX 0x%p, task 0x%p, timed out: EH_NOT_HANDLED\n",SAS_ADDR(task->dev->sas_addr),
++        SAS_DPRINTK(" %llX command  0x%p, task 0x%p, timed out: EH_NOT_HANDLED\n"
++                ,SAS_ADDR(task->dev->sas_addr),
+ 		    cmd, task);
+ 
+ 	return EH_NOT_HANDLED;
+@@ -699,9 +703,7 @@
+         struct domain_device *dev = task->dev;
+         struct task_status_struct *ts = &task->task_status;
+ 
+-        spin_lock_irqsave(&dev->io_list_lock,flags);
+-        list_del_init(&task->dev_io_list);
+-        spin_unlock_irqrestore(&dev->io_list_lock,flags);
++
+         if (qc->scsicmd != NULL)
+             ASSIGN_SAS_TASK(qc->scsicmd, NULL);
+ 	/*
+@@ -718,8 +720,17 @@
+ 
+             
+ 	qc->err_mask |= ac_err_mask(rp->sstatus);
+-
++        if (task->task_state_flags & SAS_TASK_STATE_ABORTED)
++        {
++            if (qc->scsicmd != NULL)
++                printk(KERN_INFO"sas_qc_done: cmd %p TO func %d \n",
++                       qc->scsicmd,timer_pending(&(qc->scsicmd->eh_timeout)));
++            qc->scsidone = scsi_finish_command;
++        }
+ 	ata_qc_complete(qc);
++        spin_lock_irqsave(&dev->io_list_lock,flags);
++        list_del_init(&task->dev_io_list);
++        spin_unlock_irqrestore(&dev->io_list_lock,flags);
+ 	sas_free_task(task);
+ }
+ 
+@@ -1153,6 +1164,7 @@
+ 
+ void sas_unregister_scsi_host(struct sas_ha_struct *sas_ha)
+ {
++    printk(KERN_NOTICE "sas_unregister_scsi_host\n");
+ 	scsi_remove_host(sas_ha->core.shost);
+ 	scsi_host_put(sas_ha->core.shost);
+ 	sas_ha->core.shost = NULL;
+Only in obj-750.new/drivers/scsi/sas: sas_scsi_host.c~

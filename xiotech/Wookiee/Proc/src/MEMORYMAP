@@ -1,0 +1,156 @@
+Point of interest in sizing memory.
+There can be up to 512 tasks running at once.   512*(32768+1024 [stacks]) = 17,301,504mb.
+                                  HISTORY_KEEP  512*(131072+1024)=67,633,152mb.
+------------------------------------------------------------------------------
+ccbrun
+(gdb) info sharedlibrary
+From        To          Syms Read   Shared Object Library
+0x4002c570  0x400341a4  Yes         /lib/tls/libpthread.so.0
+0x4004d2d0  0x40127ffc  Yes         /lib/tls/libc.so.6
+0x40000970  0x40012d2f  Yes         /lib/ld-linux.so.2
+
+0804966c T _init        /usr/src/packages/BUILD/glibc-2.3/cc/csu/crti.S:36
+08049dd0 T _start       ../sysdeps/i386/elf/start.S:47
+08049df4 t call_gmon_start      /usr/src/packages/BUILD/glibc-2.3/cc/csu/crti.S:12
+...
+081225c0 R CCBFlashSectors
+081244f0 A __fini_array_end
+081244f0 A __fini_array_start
+081244f0 A __init_array_end
+081244f0 A __init_array_start
+
+50003000 D __data_start
+...
+51ebebd0 B threadKeys
+51ebebd4 B xkWakeTasksId
+51ebebd8 A _end
+==============================================================================
+Back.t
+08048238 T _init        /usr/src/packages/BUILD/glibc-2.3/cc/csu/crti.S:36
+0804824f A CT_start
+08048250 T K$start      /f/m4/tmpdir/Bigfoot/Proc/src/obj/b_back.CT.c:21
+...
+08d03be0 A __stop___libc_freeres_ptrs
+
+58003000 A SHMEM_START
+...
+58008320 A SHMEM_END
+58008324 A BATTERY_BACKUP
+58008340 A PSTARTOFHEAP
+==============================================================================
+08048238 T _init        /usr/src/packages/BUILD/glibc-2.3/cc/csu/crti.S:36
+0804824f A CT_start
+...
+08cdbfc0 A _end
+08cdbfc0 A __stop___libc_freeres_ptrs
+
+48003000 A SHMEM_START
+48003000 ? IRAMBASE
+...
+48007b8e N sense_MPchgd
+48007bc0 A PSTARTOFHEAP
+==============================================================================
+------------------------------------------------------------------------------
+** Things to change:
+**	CCB/Src/Makefile:		-Xlinker -Tdata -Xlinker 0x50003000
+**	Proc/src/be.ld:			. = 0x58003000;
+**	Proc/src/fe.ld:			. = 0x48003000;
+**	Shared/Inc/LKM_layout.h:
+**	    #define FRONT_END_PCI_START     0x48000000      /**< FE process memory start    */
+**	    #define CCB_PCI_START           0x50000000      /**< CCB process memory start   */
+**	    #define BACK_END_PCI_START      0x58000000      /**< BE process memory start    */
+**	    #define NVRAM_BASE              0x60000000      /* Base of NVSRAM */
+**	    #define NVRAM_BASESIZE          0x00400000      /* Size of mapped NVRAM area */
+**	    #define PCI_MMIO_BASE           0x70000000      /* Base of PCI MMIO regs */
+**	    #define INFOREGION_BASE_ADDR    0x68000000
+**
+** Shared/Src/L_XIO3D.c  (see below)
+------------------------------------------------------------------------------
+** Length of above segments.
+** 	Proc/src/error.as:
+** 		c       r8 = (unsigned long)SHARELOC + DIMM128MEG;
+** 	Proc/src/kernel.as:
+** 		c       r6 = DIMM128MEG;        # Changing this requires change CT_SHARE.c
+**
+** Bigfoot/Proc/src/error.as:        c       r8 = (unsigned long)SHARELOC + DIMM128MEG;
+** Bigfoot/Proc/src/isp.as:        ldconst CCB_BASEADDR+DIMM128MEG,r11
+** Bigfoot/Proc/src/isp.as:        ldconst CCB_BASEADDR+DIMM128MEG,r9
+** Bigfoot/Proc/src/kernel.as:        .word   DIMM128MEG              # Check for 128Meg DIMM
+** Bigfoot/Proc/src/kernel.as:        c       r6 = DIMM128MEG;        # Changing this requires change CT_SHARE.c
+** Bigfoot/Proc/inc/system.inc:        .set    DIMM128MEG,0x08000000   # 128M DIMMs
+
+------------------------------------------------------------------------------
+kernel.as:  Setting up the values -- make computed?
+#
+# --- Memory Address Table
+#
+        .align  2                       # Word Alignment
+k_memmap:
+                                        # 1st word is the size to compare
+        .set    k_memmap_addr,0         # Address to store value
+        .set    k_memmap_value,k_memmap_addr+4 # Value to store at the address
+        .set    k_memmap_pair_size,k_memmap_value+4 # size of addr/value pair
+#
+# 512 Meg Entries
+#
+        .word   DIMM512MEG              # Check for 512Meg DIMM
+...
+------------------------------------------------------------------------------
+** Bigfoot/Shared/Inc/XIO_Const.h:#define SIZE_128MEG                 0x08000000
+** Bigfoot/Shared/Src/L_XIO3D.c:#ifndef SIZE_128MEG
+** Bigfoot/Shared/Src/L_XIO3D.c:#define SIZE_128MEG    (128 * 1024 * 1024)
+** Bigfoot/Shared/Src/L_XIO3D.c:#endif  /* SIZE_128MEG */
+** Bigfoot/Shared/Src/L_XIO3D.c:    i = L_special_munmap((void *)BE_BASE_ADDR, SIZE_128MEG);
+** Bigfoot/Shared/Src/L_XIO3D.c:    i = L_special_munmap((void *)FE_BASE_ADDR, SIZE_128MEG);
+** Bigfoot/Shared/Src/L_XIO3D.c:            dataStart+dataLength > (unsigned int)(CCB_BASE_ADDR+SIZE_128MEG)) {
+** Bigfoot/Shared/Src/L_XIO3D.c:                    (void *)(CCB_BASE_ADDR+SIZE_128MEG));
+** Bigfoot/Shared/Src/L_XIO3D.c:    i = L_special_munmap((void *)CCB_BASE_ADDR, SIZE_128MEG);
+**
+** GREP SIZE_128MEG
+** Bigfoot/CCB/Src/xk_init.c:    UINT32 localHeapSize    = SIZE_128MEG;
+** Bigfoot/CCB/Inc/xiotypes.inc:    .set SIZE_128MEG,       0x08000000
+** Bigfoot/CCB/Src/PI_Generic.c (2 times)
+------------------------------------------------------------------------------
+
+
+
+#!/bin/csh -x
+
+
+# files       display progress for input file
+setenv LD_DEBUG files
+
+ ./ccbrun
+
+#     25527:
+#     25527:     file=libpthread.so.0;  needed by ./ccbrun
+#     25527:     file=libpthread.so.0;  generating link map
+#     25527:       dynamic: 0x40025adc  base: 0x40018000   size: 0x0000fdec
+#     25527:         entry: 0x4001c9f0  phdr: 0x40018034  phnum:          9
+#     25527:
+#     25527:
+#     25527:     file=libc.so.6;  needed by ./ccbrun
+#     25527:     file=libc.so.6;  generating link map
+#     25527:       dynamic: 0x40138a5c  base: 0x40028000   size: 0x0011392c
+#     25527:         entry: 0x4003d340  phdr: 0x40028034  phnum:         10
+#     25527:
+#        linux-gate.so.1 =>  (0xffffe000)
+#        libpthread.so.0 => /lib/tls/libpthread.so.0 (0x40018000)
+#        libc.so.6 => /lib/tls/libc.so.6 (0x40028000)
+#        /lib/ld-linux.so.2 => /lib/ld-linux.so.2 (0x40000000)
+
+# Meaning:
+#	libpthread.so.0 is loaded into	0x40018000 for length	0x0000fdec
+# Next	libc.so.6			0x40028000		0x0011392c
+# Last	/lib/ld-linux.so.2		0x40000000 for unknown length. (less thatn 0x18000 for sure)
+#Thus last used address is		0x4013B92C
+# Malloc-ed memory starts after this.
+#    For CCB, the size of malloc-ed area is size of data.
+#     .data           0x0000000050003000     0xa9f0
+#   Therefore 5000D9F0.
+# So, for the malloc, the memory is 4014631C.  But, the memory allocator will grab extra, be aligned, etc.
+#  I'm guessing that 0x40200000 is safe.  That leaves 0xb9ce4 extra.  Sounds really good for guessing.
+#
+#-----------------------------------------------------------------------------
+
+So, try starting at 0x40200000 for FE.

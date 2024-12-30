@@ -1,0 +1,57 @@
+# functions shared by various models
+
+fail() {
+	echo
+	echo "ERROR ${1}"
+	echo "ERROR ${1}" >>${STAT}
+	exit 1
+}
+
+restore_fs() {
+	local dev fs type opt
+
+# When the following read reaches the end, we do all of the controller
+# setup steps, because this is the moment that all of the filesystems
+# are mounted and available.
+	read dev fs type opt || {
+		mkdir -p ${MNT}/mnt/{cdrom,disk,res} >/dev/null 2>&1
+		echo "Loading rpms"
+		load_rpms
+		echo -n "Setting up kernel"
+		setup_kernel
+		echo -n ", platform"
+		setup_platform
+		sync; sync; sync
+		echo -n " and GRUB"
+		setup_grub
+		echo "."
+		echo -n "Umounting "
+		return 0
+	}
+	cd ${MNT}
+	local dn="${dev/#\/dev\//}"
+	mount -t ${type} -o ${opt} ${dev} ./${fs} >>${LOG} 2>&1 ||
+		fail "mount of ${dn} failed"
+
+	echo -n "Restoring ${fs} onto ${dn}"
+	cd ${MNT}${fs}
+	bunzip2 -c /cdrom/${dn}.tar.bz2 | tar xpf - ||
+		fail "tar to ${dn} failed"
+	echo -n ", comparing ${fs} on ${dn}"
+	bunzip2 -c /cdrom/${dn}.tar.bz2 | tar df - ||
+		fail "tar compare of ${dn} failed"
+	echo " Good."
+	echo "Good compare of ${fs} on ${dn}" >>${STAT}
+	restore_fs	# Yeah recursive - allows umount in reverse order
+	sync; sync; sync
+	cd /
+	if [ "${fs}" != "/" ]; then	# Leave root filesystem mounted
+		echo -n " ${dn}"
+		umount ${dev} >>${LOG} 2>&1 ||
+			fail "umount of ${dn} failed"
+	else
+		echo "."
+	fi
+}
+
+# vi:sw=8 ts=8 noexpandtab

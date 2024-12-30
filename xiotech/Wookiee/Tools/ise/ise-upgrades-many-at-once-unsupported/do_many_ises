@@ -1,0 +1,907 @@
+#!/usr/bin/perl -w
+
+use Getopt::Std;
+
+#
+# -b  Base directory
+# -c  Configuration (production or development)
+# -d  DSC identifier
+# -p  Back-end switch admin password
+
+getopts('b:c:d:p:');
+
+# $Id: do_many_ises 129989 2010-03-01 17:50:26Z kevin_utecht $
+my $svn_revision = '$Rev: 129989 $';
+my @rev = split(/\s+/, $svn_revision);
+$svn_revision = $rev[1];
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# NOTE: if a VDisk exists that is /DO *NOT *APPLY/i -- we will not run on it.
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+#
+# Example (note, spaces outside of double quotes are allowed):
+# "/home/marshall_midden/ISE/r1.2.c3.4/controller.fw","V1.2 (RC3.4-476)-force"
+# "v1.2.4-0"
+# "V1.2 (RC3.4-476)"
+# "V1.2 (RC1.3-NOT)"
+# "V1.2 (RC2.6-NOT)"
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# Flag to say we are running on icon in production, or development (normal).
+my $production;
+# Where the ccbCL.pl script is located.
+my $ccbe_at;
+# The Ewok Description List is.
+my $dsc_file;
+# Define the OpStatus.txt and OpErrors.txt files
+my $opStatusFile;
+my $opErrorsFile;
+my $lastPercentComplete;
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+if (($opt_d) && ($opt_c) && ($opt_b)) {
+
+    $g_dsc_id = $opt_d;
+
+    $opErrorsFile = "$opt_b/OpErrors.txt";
+    $opStatusFile = "$opt_b/OpStatus.txt";
+
+    if ($opt_c eq "production") {
+        $dsc_file = `/bin/ls -t /var/xiotech/XioWebService/*Dsc_List*.*|head -1`;
+        $ccbe_at = "./CCBE";
+        $production = "production";
+    } 
+    else
+    {
+        $dsc_file = `/bin/echo *Dsc_List*.xml`;
+        $ccbe_at = "../../../CCBE";
+        $production = "development";
+    }
+}
+else {
+    die ("Usage: do_many_ises -c <production/development> -b <base-dir> -d <dsc-id> [-p <back-end switch admin password>]\n");
+}
+
+if ($opt_p) {
+    $g_sw_password = $opt_p;
+}
+else {
+    $g_sw_password = "UNDEFINED";
+}
+
+$lastPercentComplete = 0;
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# Command to run the ccbCL.pl script.
+my $run_ccbcl = "cd $ccbe_at ;/usr/bin/perl ccbCL.pl";
+
+
+# Output from ccbCL command that we want -- via egrep.
+#  163744     (0x00027fa0)  10.64.102.31      OPERATIONAL                MASTER     
+# IP address  : 10.64.102.4               IP address  : 10.64.102.5     
+# FW Version  : V1.2 (RC3.4-476)          WWN         : 0x20000014c3673745
+#    3     0x10           12288    0x00  0x0000        1        0         0          0    0xff  DoNotApply
+#   13     1   PD:14-01      14     1     0              0      101797888      101797888  0x00000000    1
+my $ccbcl_grep = "'OPERATIONAL *MASTER|IP address  : .*IP address  : | *FW Version *: .* *WWN|DO *NOT *APPLY| *[0-9][0-9]*   *[0-9]*  *PD:[0-9][0-9]-01  |^CCB_RUN |^ [0-9 ][0-9 ][0-9 ][0-9]     6  '";
+
+# Where the ise_upgrader expect script is located.
+my $ise_upgrader_at = ".";
+
+# Command to run the ise_upgrader script.
+my $run_ise_upgrader = "$ise_upgrader_at/ise_upgrader";
+
+# Command to run the chekc switch script.
+my $run_check_switch = "$ise_upgrader_at/check_switch";
+
+# Command to clean up when script is done
+my $run_cleanup = "";
+
+# Firmware for controller file.
+my $firmware_file = "upgrade.ue";
+
+# File that contains controller firmware file name, and firmware version name.
+# Following lines contain legal revisions that can upgrade to this release.
+# Anything with a -NOT in it is a placeholder for releases that can NOT be upgraded.
+my $firm_legal = "$ise_upgrader_at/ise.cfg";
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# Key is the DSC number, the value is IP's, comma separated.
+my %dsc;
+
+# Which firmware versions of the ISEs are legal to upgrade from?
+my @firmware_revisions_legal;
+my $this_firmware_file;
+my $this_firmware_revision;
+my $this_build;
+
+# Hash to convert brick SES thumbwheel (i.e. (IP&~1)/2) into PID (from pdisks output).
+my %ise_ip_to_pid;
+
+
+#-----------------------------------------------------------------------------
+# Define a bunch of subroutines, run them at the end of the file.
+#-----------------------------------------------------------------------------
+# Deletes any carriage returns and/or new-lines from the end of the input line.
+sub chompit($)
+{
+    my $line = $_[0];
+    $line =~ s/\n*\r*\n*$//;
+    return($line);
+}   # End of chompit
+
+
+#-----------------------------------------------------------------------------
+# Read $firm_legal to get @firmware_revisions_legal set.
+#-----------------------------------------------------------------------------
+sub read_firm_legal
+{
+    if (!defined(open(FILE, "<$firm_legal"))) {
+        die("Cannot open firmware upgrade description file $firm_legal\n");
+    }
+    while (<FILE>) {last;} # Get first line -- I had trouble getting this to work.
+    my $line = chompit($_);
+    if ($line =~ /^ *"([^"]+)" *, *"([^"]+)", *"([^"]+)" *$/) {
+        $this_firmware_file = $1;
+        $this_firmware_revision = $2;
+        $this_build = $3;
+    } else {
+        die("firmware upgrade description file $firm_legal not in correct format, line $..\n");
+    }
+#    while (<FILE>) {
+#        $line = chompit($_);
+#        if ($line =~ /^$/) {next;}
+#        if ($line =~ /^ *"(.*)" *$/) {
+#            push(@firmware_revisions_legal, $1);
+#        } else {
+#            die("firmware upgrade description file $firm_legal not in correct format, line $..\n");
+#        }
+#    }
+    close(FILE);
+}   # End of read_firm_legal
+
+
+
+#-----------------------------------------------------------------------------
+# Read $dsc_file to get $dsc{} hash array set.
+#-----------------------------------------------------------------------------
+sub read_Dsc_List
+{
+    if (!defined(open(FILE, "<$dsc_file"))) {
+        die("Cannot open Dsc_List file $dsc_file\n");
+    }
+    my $line;
+    my $id;
+    while (<FILE>) {
+        $line = chompit($_);
+        if ($line =~ /^.*<spaldsclist:id>(.*)<\/spaldsclist:id>/) {
+            $id = $1;                   # DSC ID number.
+        } elsif ($line =~ /^.*<xwstype:ip_addr>(.*)<\/xwstype:ip_addr>/) {
+            if (!defined($id)) {
+                die("Found ip_addr ($1) without a spaldsclist:id\n")
+            }
+
+            if ($id == $g_dsc_id) {
+                if (defined($dsc{$id})) {
+                    $dsc{$id} .= ' ' . $1;
+                } else {
+                    $dsc{$id} =  $1;
+                }
+            }
+        }
+    }
+    close(FILE);
+}   # End of read_Dsc_List
+
+
+
+#-----------------------------------------------------------------------------
+# Send the given STATUS mesage to CCBCL (Emprise 7000 controller logs)
+#-----------------------------------------------------------------------------
+sub send_ccbcl_status($$)
+{
+    my $controller = $_[0];
+    my $message = "$_[1]";
+    $message =~ s /%/pct/;
+
+    print STDERR "CCBCL($controller) STATUS - $message\n";
+    system( "$run_ccbcl '$controller' -e '\"logtextmessage -v 0 $message\"' >/dev/null" );
+}   # End of send_ccbcl_status
+
+
+
+#-----------------------------------------------------------------------------
+# Send the given WARNING mesage to CCBCL (Emprise 7000 controller logs)
+#-----------------------------------------------------------------------------
+sub send_ccbcl_WARNING($$)
+{
+    my $controller = $_[0];
+    my $message = "$_[1]";
+    $message =~ s /%/pct/;
+
+    print STDERR "CCBCL($controller) WARNING - $message\n";
+    system( "$run_ccbcl '$controller' -e '\"logtextmessage -v 1 $message\"' >/dev/null" );
+}   # End of send_ccbcl_WARNING
+
+
+
+#-----------------------------------------------------------------------------
+# Send the given ERROR mesage to CCBCL (Emprise 7000 controller logs)
+#-----------------------------------------------------------------------------
+sub send_ccbcl_ERROR($$)
+{
+    my $controller = $_[0];
+    my $message = "$_[1]";
+    $message =~ s /%/pct/;
+
+    print STDERR "CCBCL($controller) ERROR - $message\n";
+    system( "$run_ccbcl '$controller' -e '\"logtextmessage -v 2 $message\"' >/dev/null" );
+}   # End of send_ccbcl_status
+
+
+
+#-----------------------------------------------------------------------------
+# Send an updated Status and % complete to a the status file (so IWS can monitor)
+#-----------------------------------------------------------------------------
+sub send_updated_progress($$)
+{
+    my $status = $_[0];
+    my $percentComplete = "$_[1]";
+
+    open (STATUS_FILE, ">$opStatusFile") or print STDERR "Can't open file '$opStatusFile' $!";
+    print (STATUS_FILE "PercentComplete=$percentComplete\nStatus=$status");
+    close (STATUS_FILE);
+    
+    # Store the % complete for future use
+    $lastPercentComplete = $percentComplete;
+
+}# End of send_updated_progress
+
+
+
+#-----------------------------------------------------------------------------
+# Updates the % complete based on the time, iteration, etc. This writes the
+# status and % complete to a file so IWS can monitor it
+#------------------------------------------------------------------------------
+sub updateProgress($$$$$) {
+
+  my $startTime = $_[0];
+  my $totalEstimatedIterationTime = $_[1];
+  my $currentIteration = $_[2];
+  my $totalIterations = $_[3];
+  my $statusString = $_[4];
+  
+  
+  #To avoid divide-by-zero, do some parameter checking (just in case)
+  if ($totalEstimatedIterationTime == 0) {
+    $totalEstimatedIterationTime = 1;
+  }
+  if ($totalIterations == 0) {
+    $totalIterations = 1; 
+  }
+
+  # Update the % complete based on the new time
+  my $currentTime = time();
+  my $elapsedTime = $currentTime - $startTime;
+  my $percentComplete = ($elapsedTime / $totalEstimatedIterationTime) * 100;
+
+
+  #
+  # If there are 2 passes, than each 0-100% accounts for 0-50% and 50-100% respectively. So
+  # we need to scale back the % complete. Note that we don't simply scale the total estimated
+  # time to be 15 minutes * number of iterations.  Otherwise, we'd get to the point where
+  # a single hickup in an iteration could really mess up our % complete.  So, calculate per
+  # iteration instead. (trust me)
+  #
+
+  my $modifiedPercentComplete = $percentComplete / $totalIterations + (($currentIteration - 1) * 100.0 / $totalIterations);
+
+  print STDERR "Iteration: $currentIteration TotalIt: $totalIterations CurrentPercent: $percentComplete  Modified: $modifiedPercentComplete\n";
+  send_updated_progress($statusString, $modifiedPercentComplete);
+  
+  # Store the calculated value for later
+  $lastPercentComplete = $modifiedPercentComplete;
+}
+
+
+
+#-----------------------------------------------------------------------------
+# Send an Error message to the OpErrors.txt file so IWS can display it to the user
+#-----------------------------------------------------------------------------
+sub send_error_message($)
+{
+    my $message = $_[0];
+    
+    open (ERRORS_FILE, ">>$opErrorsFile") or print STDERR "Can't open file '$opErrorsFile' $!";
+    print (ERRORS_FILE "$message\n");
+    close (ERRORS_FILE);
+
+}   # End of send_error_message
+
+
+
+#-----------------------------------------------------------------------------
+# Determines if any errors were encountered yet
+#
+# \return 1 if errors exist, 0 if not
+#
+#-----------------------------------------------------------------------------
+sub didErrorsOccur
+{
+
+  #
+  # If any errors occurred, they woudl have been written to the errors file. so
+  # we can simply see if there i sany data in that file!
+  #
+
+  print STDERR "checking for errors...\n";
+  
+  my $errorsExist = 0;
+  if (-e "$opErrorsFile") {
+  
+    # File exists, so open it and see if there are any errors
+    open (ERROR_CHECK_FILE, "<$opErrorsFile") or print STDERR "Can't open file '$opErrorsFile' $!\n";
+    my @lines = <ERROR_CHECK_FILE>;
+    my $numLines = @lines;
+    close (ERROR_CHECK_FILE);
+     
+    if( $numLines > 0 )
+    {
+      return 1;
+    }
+    else
+    {
+      return 0;
+    }
+  }
+
+  return $errorsExist;
+  
+} # End of didErrorsOccur
+
+#-----------------------------------------------------------------------------
+# Use @controller_ips to get $master set.
+#-----------------------------------------------------------------------------
+sub get_master_and_ise_ips($)
+{
+    my @controller_ips = split(/\s+/, $_[0]);
+    my @ise_ips;
+    my $master;
+
+    # Log Applying ISE FW to both controllers (don't know if one is down).
+    foreach my $ip (@controller_ips) {
+        print STDERR "$ip:3000 - Applying ISE FW $this_firmware_revision-$this_build\n";
+    }
+
+    # Get master and other stuff, this allows for one to not be configured yet.
+    my $ips = join(':3000 ', @controller_ips) . ':3000';
+print STDERR "ips=$ips\n";
+
+    my $ccbe_output = `$run_ccbcl $ips -e 'a:fwv ; a:vcginfo ; isestatus ; raids; vdisks ; pdisks' | egrep -i $ccbcl_grep`;
+#print STDERR "ccbe_output=$ccbe_output";
+
+    my @ccbe_output = split(/\n/, $ccbe_output);
+# printf STDERR "ccbe_output=%s\n", join("\n\t", @ccbe_output);
+    my $newISE = 0;
+    my $last_ise_IPs;
+    my $first_fwv;
+    undef %ise_ip_to_pid;
+    my $number_correct_fwv = 0;
+    my $stop_on_error = 0;
+    my $ise_num = -1;
+    foreach my $i (@ccbe_output) {
+        # Check firmware version
+        if ($i =~ /^CCB_RUN /) {
+            # Firmware    Vers    Count   BldID  SysRls   Timestamp (GMT)
+            # ---------------------------------------------------------------
+            # CCB_RUN     Q020    0003    eng_    0850    10/01/2009 19:32:03
+            # BE_RUN      Q020    0002    mark    0850    10/01/2009 19:25:10
+            # FE_RUN      Q020    0001    mark    0850    10/01/2009 19:25:02
+            # ---------------------------------------------------------------
+            # 
+            # increment number_correct_fwv for 
+            # ENGR or 
+            # fw version >= 850
+            if ($i =~ / ENGR / ) {
+                $number_correct_fwv++;
+            } else {
+                my $version = int((split(/\s+/, $i))[4]);
+                $number_correct_fwv++ if ($version >= 850);
+            }
+        } elsif ($i =~ /^.* (\d+\.\d+\.\d+\.\d+) *OPERATIONAL *MASTER.*/i) {
+            #  163744     (0x00027fa0)  10.64.102.31      OPERATIONAL     MASTER 
+            if ($newISE != 0) {
+                send_ccbcl_ERROR($ips, "\$!ISE FW Update FAILED");
+                send_ccbcl_ERROR($ips, "\$!Did not find two FW Versions for MRCs $last_ise_IPs");
+                send_error_message("Failed to update ISE. Did not find two FW Versions for MRCs $last_ise_IPs");
+                return;
+            }
+            my $new_master = $1 . ':3000';
+            if (defined($master) && $master ne $new_master) {
+                send_ccbcl_WARNING($ips, "Improperly configured DCN-Two masters");
+                send_ccbcl_ERROR($ips, "ISE FW Update FAILED");
+                send_error_message("ISE FW Update FAILED. Improperly configured DCN-Two masters.");
+                print STDERR "The vcginfo controllers gave different master IP's ($master verses $new_master)\n";
+                return;
+            }
+            $master = $new_master;
+        } elsif ($i =~ /^ *IP address *: (\d+\.\d+\.\d+\.\d+) *IP address *: (\d+\.\d+\.\d+\.\d+)/) {
+        # IP address  : 10.64.102.4               IP address  : 10.64.102.5
+        #$i =~ /^ *IP address *: (\d+\.\d+\.\d+\.\d+) *IP address *: (\d+\.\d+\.\d+\.\d+)/;
+            if (!defined($master)) {
+                send_ccbcl_WARNING($ips, "Improperly configured DCN-No master");
+                send_ccbcl_ERROR($ips, "ISE FW Update FAILED");
+                send_error_message("ISE FW Update FAILED. Improperly configured DCN. No master.");
+                print STDERR "Did not get a master controller.\n";
+                return;
+            }
+            $last_ise_IPs = "$1 $2";
+            my @ise1 = split(/\./, $1);
+            my @ise2 = split(/\./, $2);
+#printf STDERR "IPs=%s, %s\n", join('.', @ise1), join('.', @ise2);
+            if ($#ise1 != 3 || $#ise2 != 3 ||
+                $ise1[0] != $ise2[0] || $ise1[1] != $ise2[1] || $ise1[2] != $ise2[2] ||
+                ($ise1[3] & 254) != ($ise2[3] & 254)) {
+                print STDERR "IP addresses of ISE are not reasonable ($1 and $2), skipping.\n";
+                send_ccbcl_WARNING($ips, "ISE IP(s) are bad($1 and $2) - cannot update");
+                send_error_message("ISE FW Update FAILED. ISE IP(s) are bad($1 and $2) - cannot update.");
+                $stop_on_error = 1;
+                $newISE = -1;               # Flag error condition.
+            } else {
+                push(@ise_ips, join('.', $ise1[0], $ise1[1], $ise2[2], $ise1[3] & 254));
+                $newISE = 1;
+            }
+            $ise_num = ($ise1[3] & 0x7e)/2;
+        } elsif ($i =~ /DO *NOT *APPLY/i) {
+#    3     0x10           12288    0x00  0x0000        1        0         0          0    0xff  DoNotApply
+            print STDERR "ISE FW Update DONOTAPPLY ($i)";
+            send_ccbcl_ERROR($ips, "\$!ISE FW Update - DONOTAPPLY detected");
+            return;             # DO NOT DO ANYTHING
+        } elsif ($i =~ / *([0-9]*)  *[0-9]*  *PD:([0-9][0-9])-01  /) {
+#   13     1   PD:14-01      14     1     0              0      101797888      101797888  0x00000000    1
+            my $pid = $1 + 0;
+            my $ses = $2 + 0;
+# print STDERR "PID $pid found for SES $ses\n"; 
+            if (defined($ise_ip_to_pid{$ses})) {
+                send_ccbcl_WARNING($ips, "Improperly configured DCN-Master Missing");
+                send_ccbcl_ERROR($ips, "ISE FW Update FAILED");
+                send_error_message("ISE FW Update FAILED. Improperly configured DCN. Master Missing.");
+                print STDERR "Did not get a master controller.\n";
+                $stop_on_error = 1;
+                return;
+            } else {
+                $ise_ip_to_pid{$ses} = $pid;
+            }
+        } else {
+# FW Version  : V1.2 (RC3.4-476)          WWN         : 0x20000014c3673744
+            if ($newISE <= 0) {                 # processing error condition.
+                next;
+            }
+# "v1.2.4-0"
+# "V1.2 (RC3.4-476)"
+            my $fwv;
+            my $build;
+            if ($i =~ /^\s*FW Version\s*:\s*V(\d+)\.(\d+)\s*\(RC(\d+)\.(\d+)-(\d+)\)\s+WWN/) {
+                # format is VM.m (RCr.u-build)
+                # convert it to MMmmCruu
+                $fwv = sprintf("%02x%02xC%0x%02x", $1, $2, $3, $4);
+                $build = $5;
+            }
+            elsif ($i =~ /^\s*FW Version\s*:\s*v(\d+)\.(\d+)\.(\d+)-(\d+)\s+WWN/) {
+                # format is vM.m.r-build
+                # convert it to MMmmrr00
+                $fwv = sprintf("%02x%02x%02x%02x", $1, $2, $3, 0);
+                $build = $4;
+            }
+            else
+            {
+                print STDERR "FW Version of ISE is not reasonable '$i', skipping $last_ise_IPs\n";
+                send_ccbcl_WARNING($ips, "ISE $ise_num: bad FW Version - cannot update");
+                send_error_message("Could not update ISE $ise_num. Bad FW Version.");
+                pop(@ise_ips);              # Do not do this brick.
+                $newISE = -1;               # Flag error condition.
+                $stop_on_error = 1;
+                $build = 0;
+                next;
+            }
+            if ($newISE == 1) {
+                $first_fwv = $fwv;
+                $newISE = 2;
+            } else {
+                if ($fwv ne $first_fwv) {
+                    print STDERR "Firmware version of MRCs do not match '$first_fwv' verses '$fwv', skipping $last_ise_IPs.\n";
+                    send_ccbcl_WARNING($ips, "ISE $ise_num: MRC FW Mismatch ($first_fwv != $fwv) - cannot update");
+                    send_error_message("Could not update ISE $ise_num. MRC FW Mismatch ($first_fwv != $fwv).");
+                    pop(@ise_ips);          # Do not do this brick.
+                    $stop_on_error = 1;
+                } else {
+                    # Do not upgrade to same version.
+                    # Check FW version and build number
+                    if ($fwv eq $this_firmware_revision && $build eq $this_build) {   
+                        print STDERR "ISE already at firmware version $this_firmware_revision-$this_build, skipping $last_ise_IPs\n";
+                        send_ccbcl_status($ips, "!\$ISE $ise_num: $fwv - Already OK");
+                        pop(@ise_ips);          # Do not do this brick.
+                        $newISE = -1;           # Flag error condition.
+                    }
+                }
+                $newISE = 0;
+            }
+        }
+    }
+
+    if ($number_correct_fwv != ($#controller_ips + 1)) {
+        my $s2 = '';
+        my $strng = sprintf("%d", $#controller_ips + 1);
+        if ($strng eq '2') {
+            $s2 = 's';
+        }
+        send_ccbcl_ERROR($ips, "ISE FW Update - did not get $strng firmware version $s2 of 8.50 or later - FAILED");
+        send_error_message("ISE FW Update - did not get $strng firmware version $s2 of 8.50 or later - FAILED");
+        print STDERR "Did not get " . $strng . " correct fwv for CCB, got $number_correct_fwv\n";
+        return;
+    }
+
+    if ($production eq 'production' && $stop_on_error != 0) {
+        send_ccbcl_ERROR($ips, "ISE FW Update - FAILED");
+        send_error_message("ISE FW Update - FAILED");
+        print STDERR "Previous error causes us to stop.\n";
+        return;
+    }
+
+    if (!defined($master)) {
+        send_ccbcl_ERROR($ips, "ISE FW Update - FAILED");
+        send_error_message("ISE FW Update - FAILED");
+        print STDERR "Did not find an active master controller\n";
+        return;
+    }
+
+    if ($#ise_ips < 0) {
+        send_ccbcl_WARNING($master, "ISE FW Update - Nothing to do");
+        print STDERR "Did not find any ISE's IP addresses\n";
+        return;
+    }
+# print STDERR "master=$master\n";
+# printf STDERR "ise_ips=%s\n", join(' ', @ise_ips);;
+    return ($master, @ise_ips);
+}   # end of get_master_and_ise_ips
+
+
+
+#-----------------------------------------------------------------------------
+# Do the real processing now.
+#-----------------------------------------------------------------------------
+
+
+# Get current working directory.
+my $cwd;
+if (defined($ENV{PWD})) {
+    $cwd = $ENV{PWD};
+} else {
+    $cwd = chompit(`pwd`);
+}
+# . . . . .
+print STDERR "cwd=$cwd\n";
+# . . . . .
+
+# Find out everything about this ISE upgrade firmware.
+read_firm_legal();
+# . . . . .
+print STDERR "svn_revision=$svn_revision\n";
+print STDERR "firmware_file=$this_firmware_file\n";
+print STDERR "firmware_revision=$this_firmware_revision\n";
+print STDERR "build=$this_build\n";
+#printf STDERR "legal to upgrade from=\"%s\"\n", join('", "', @firmware_revisions_legal);
+# . . . . .
+
+# Get %dsc set to all DSC's and IP addresses of their controllers.
+read_Dsc_List();
+# . . . . .
+foreach my $d (keys(%dsc)) {
+  printf STDERR "DSC #%s -> %s\n", $d, $dsc{$d};
+}
+# . . . . .
+
+
+#
+# Calculate the number of total ISE on the system (for % complete)
+#
+
+my $totalIseToUpdate = 0;
+foreach my $dscIt (keys(%dsc)) 
+{
+    # Use $dsc{} to get $master and @ise_ips set.
+    undef %ise_ip_to_pid;
+
+    printf STDERR "Applying ISE FW $this_firmware_revision-$this_build on DSC $dscIt\n";
+    
+    my ($tempVal1, @tempise_ips) = get_master_and_ise_ips($dsc{$dscIt});
+    
+    my $numIseInDsc = @tempise_ips;
+    $totalIseToUpdate = $totalIseToUpdate + $numIseInDsc;
+}
+
+
+
+#
+# Ensure that our params are all valid
+#
+
+my $completedIse = 0;
+if ($totalIseToUpdate < 1){
+    $completedIse = 1;
+    $totalIseToUpdate = 1; # to avoid divide-by-zero. Jumps to 100% complete
+}
+
+
+#
+# Loop through every ISE on the DSC
+#
+
+foreach my $j (keys(%dsc)) {
+
+    # Set the current percent complete
+    my $PercentComplete = $completedIse / $totalIseToUpdate * 100.0;
+    
+    # Use $dsc{} to get $master and @ise_ips set.
+    undef %ise_ip_to_pid;
+
+    my $status = 0;
+    
+    printf STDERR "Applying ISE FW $this_firmware_revision-$this_build on DSC $j\n";
+    
+    my ($master, @ise_ips) = get_master_and_ise_ips($dsc{$j});
+    
+    # NOTE: %ise_ip_to_pid set too by above call.
+    if (!defined($master)) {
+        print STDERR "DONOTAPPLY VDisk found (or many errors), ignoring DSC $j.\n";
+        next;
+    }
+    printf STDERR "DSC $j  master=$master  ise_ips=%s\n", join(' ', @ise_ips);
+    
+    send_ccbcl_WARNING($master, "Applying ISE FW $this_firmware_revision-$this_build on DSC $j\n");
+    send_updated_progress("Applying ISE FW $this_firmware_revision-$this_build on DSC $j", $lastPercentComplete);
+    
+    # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    # Turn off scrubbing that may be enabled on a 7000.
+    my $scrub_output = `$run_ccbcl $master -e 'scrubset disable default 0'`;
+    #print STDERR "scrub_output=$scrub_output";
+    # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    
+    # check switch fw version 
+    send_updated_progress("Validating back-end switch...", $lastPercentComplete);
+    my @controller_ips = split(/\s+/, $dsc{$j});
+    my @sip =  split(/\./, $controller_ips[0]);
+    my $swip = "$sip[0].$sip[1].$sip[2]";
+    my $iconip = "$sip[0].$sip[1].0.1";
+    my $number_switches = 0;
+    my $number_good_switches = 0;
+    for (my $lip = 192; $lip <= 199; $lip++) {
+        my $ip = "$swip" . "." . "$lip";
+        my $command = "$run_check_switch $master $ip $g_sw_password";
+        my $output = `$command`;
+        $status = $? >> 8;
+        if ($status == 2) {
+            ;       # Do nothing if no route to host message already done.
+            next;
+        } elsif ($status != 0) {
+            print STDERR "command failed ($status): $command\n";
+        } else {
+            send_ccbcl_status($master, "Switch at $ip is compatible\n");
+            #print STDERR $output;
+            $number_good_switches++;
+        }
+        $number_switches++;
+    }
+
+    if ($number_switches != $number_good_switches) {
+        my $num_bad_switches = $number_switches - $number_good_switches;
+        send_ccbcl_ERROR($master, "Found $num_bad_switches switch(es) on DSC $j that were either not operational or not accessible\n");
+        send_error_message("ISE FW Update failed. Found $num_bad_switches switch(es) on DSC $j that were either not operational or not accessible.");
+        next;
+    }
+    print STDERR "found $number_switches compatible switches.\n";
+    
+
+    #
+    # Switch-check is complete. Proceed to next steps
+    #
+    send_updated_progress("Applying ISE FW $this_firmware_revision-$this_build on DSC $j", $lastPercentComplete);
+    
+
+    my $finish_dsc = 1;
+    
+    my $iMaxConcurrentIse = $totalIseToUpdate / 2;
+    if($iMaxConcurrentIse == 0)
+    {
+      $iMaxConcurrentIse = 1; #just in case we only have 1 ISE
+    }
+
+
+    #Calculate how many iterations this will take
+    my $totalIterations = ($totalIseToUpdate / $iMaxConcurrentIse);
+    my $currentIteration = 0;
+    my $numConcurrentIse = 0;
+    
+    my @ise_batch;
+    
+    
+    #
+    # Loop through all ISE
+    #
+    
+    foreach my $k (@ise_ips) {
+    
+      if ($finish_dsc != 1) {
+        # Error must have occurred. Skip this ISE
+        next;
+      }
+
+      #
+      # We want to execute these in a batch when possible, so create a list
+      #
+      
+      push(@ise_batch, $k);
+      $numConcurrentIse++;
+      
+      
+      #
+      # Once we have enough ISE queued up (or we're on the last ISE), start updating them in a batch
+      #
+      
+      if (($numConcurrentIse >= $iMaxConcurrentIse) || (($completedIse + $numConcurrentIse) >= $totalIseToUpdate))
+      {
+        $currentIteration++;
+        
+        my $startTime = time();
+        my $totalEstimatedIterationTime = 60*16; #16 minutes per iteration
+        
+        my $stepNumber = 0;
+        my $upgradeMode = "VALIDATE_AND_LOAD";
+        while ($stepNumber < 3) {
+          
+          $stepNumber++;
+          if ($stepNumber == 1) {
+            $upgradeMode = "VALIDATE_AND_LOAD";
+          } elsif ($stepNumber == 2) {
+            $upgradeMode = "RUN_UPDATE";
+          } elsif ($stepNumber == 3) {
+            $upgradeMode = "WAIT_FOR_UPDATE";
+          }
+  
+          
+          foreach my $ise_to_update (@ise_batch) {
+          
+            my @ise = split(/\./, $ise_to_update);
+            my $ses = ($ise[3] & 0x7e)/2;       # mod 128, without last bit.
+            if($finish_dsc != 1) {
+                send_ccbcl_WARNING($master, "ISE $ses - Skipping Upgrade");
+                $completedIse++;
+                next;
+            }
+            if (!defined($ise_ip_to_pid{$ses})) {
+                send_ccbcl_WARNING($master, 'No luns found for SES' . "$ses");
+                send_ccbcl_ERROR($master, "ISE $ses - FW Update FAILED");
+                send_error_message("Failed to update ISE $ses. No luns found.");
+                print STDERR "Can not find a PID for SES $ses which is MRC(even) IP=$ise_to_update\n";
+                $completedIse++;
+                $finish_dsc = 0;
+            } else {
+
+                # During the Validation/LOAD phase, log that fact that we're updating the ISE
+                if ($upgradeMode eq "VALIDATE_AND_LOAD") {
+                  printf STDERR "MRC(even) IP=%s   SES=%d  ise_ip_to_pid=%d\n", join('.', @ise), $ses, $ise_ip_to_pid{$ses};
+                  send_ccbcl_WARNING($master, "ISE $ses - Applying ISE FW $this_firmware_revision-$this_build");
+                }
+                $command="$run_ise_upgrader $production $ise_to_update $master $firmware_file '$this_firmware_revision' '$this_build' '$upgradeMode' '$opErrorsFile'";
+                print STDERR "Executing '$command\n";
+                
+
+                #
+                # Launch a seperate thread to actually perform the update (let's u
+                #
+
+                my $pid = fork();
+                if ($pid != 0)
+                {
+                  # We're the parent, so just node the child's PID so we can monitor it below
+                }
+                else
+                {
+                  # We're the child. Execute the command and exit when done (parent will monitor)
+                  my $output = `$command`;
+                  my $status = $?;
+                  if ($status != 0) {
+                    send_ccbcl_WARNING($master, "ISE $ses - Failed applying FW\n");
+                    send_ccbcl_ERROR($master, "ISE $ses - FW Update FAILED ($status)\n");
+                    send_error_message("Failed to update ISE $ses. Status: $status.");
+                    print STDERR "command failed ($status): $command\n";
+                    $finish_dsc = 0;
+                  } else {
+                    print STDERR "\n";
+                    print STDERR "$output";
+                    
+                    # After the "Wait for update" phase, we've finished, so log the "finish" to the Emprise 7000 logs
+                    if ($upgradeMode eq "WAIT_FOR_UPDATE") {
+                      send_ccbcl_WARNING($master, "ISE $ses - Finished Applying ISE FW $this_firmware_revision-$this_build ($status)");
+                    }
+                  }
+
+                  exit(0);
+                }
+                
+                
+                
+                #
+                # Wait for the child process to complete, outputing % complete as needed
+                #
+            
+            
+                print STDERR "Waiting for child process $pid\n";
+                my $statusString = "Applying ISE FW $this_firmware_revision-$this_build to $numConcurrentIse ISE (batch $currentIteration of $totalIterations)";
+                if ($upgradeMode eq "VALIDATE_AND_LOAD") {
+                  $statusString = "Copying ISE firmware $this_firmware_revision-$this_build to $numConcurrentIse ISE (batch $currentIteration of $totalIterations)";
+                } elsif ($upgradeMode eq "RUN_UPDATE") {
+                  $statusString = "Initiating ISE firmware update $this_firmware_revision-$this_build on $numConcurrentIse ISE (batch $currentIteration of $totalIterations)";
+                } elsif ($upgradeMode eq "WAIT_FOR_UPDATE") {
+                  $statusString = "Applying ISE firmware $this_firmware_revision-$this_build to $numConcurrentIse ISE (batch $currentIteration of $totalIterations)";
+                }
+          
+                
+                
+                # This call returns instantly when using WNOHANG (value of 1) for waitpid
+                my $waitResult = waitpid($pid, 1);
+                while($waitResult == 0)
+                {
+                  sleep(10);
+                  updateProgress($startTime, $totalEstimatedIterationTime, $currentIteration, $totalIterations, $statusString);
+                  
+                  $waitResult = waitpid($pid, 1);
+                }
+
+                updateProgress($startTime, $totalEstimatedIterationTime, $currentIteration, $totalIterations, $statusString);
+                
+                print STDERR "Child process: $pid finished!\n";
+                
+                if (didErrorsOccur())
+                {
+                  print STDERR "At least one error has occurred. Aborting...\n";
+                  $finish_dsc = 0;
+                }
+            
+            }#if ise_to_pid mapping
+          }#for each ISE in the batch
+        }#for each step 
+        
+        
+        #
+        # The batch has been processed completely! Reset all of our counters
+        #
+        
+        print STDERR "Batch $currentIteration of $totalIterations has finished upgrading $numConcurrentIse ISE.\n";
+        $completedIse = $completedIse + $numConcurrentIse;
+        $numConcurrentIse = 0;
+        @ise_batch = ();
+        
+      }#if batch is ready
+      else {
+        my $batchNum = $currentIteration + 1;
+        print STDERR "ISE $k has been added as the $numConcurrentIse item in batch $batchNum of $totalIterations\n";
+      }
+    }#for each ISE in the system
+
+    send_ccbcl_WARNING($master, "Finished Applying ISE FW $this_firmware_revision-$this_build on DSC $j ($status)\n");
+}
+# . . . . .
+
+#-----------------------------------------------------------------------------
+
+close (STATUS_FILE);
+close (ERRORS_FILE);
+
+exit 0;
+
+###
+# Modelines:
+# Local Variables:
+# tab-width: 4
+# indent-tabs-mode: nil
+# End:
+# vi:sw=4 ts=4 expandtab

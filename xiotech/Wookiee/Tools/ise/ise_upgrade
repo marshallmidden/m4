@@ -1,0 +1,167 @@
+#!/usr/bin/expect --
+#
+#
+# Script to upgrade one or more ISEs. 
+# 
+# Usage: ise_upgrade [-f <upgrade file>] <ip address> [<ip address> ...]
+#
+# Where:
+#
+#  -f  Controller upgrade file (For exmaple, controller.fw).
+#
+#  <ip address>
+#    Specify one or more IP addresses of ISE controllers.
+#    Note - does not check for duplicates, or for repeated
+#    access to the same ISE via differing controllers.
+#    Controllers are accessed sequentially.
+#
+# Typical command line for two ISEs would be:
+#
+#  ise_upgrade -f controller.fw 10.64.102.150 10.64.102.164
+#
+
+log_user 1
+
+set wait_for_commit "Waiting for commit"
+# regular expression representing the ISE prompt.  Either "seaSH> " or "root:> "
+set ise_prompt "(seaSH|root:|root|oem:|oem)> "
+
+
+source "getopts"
+
+proc usage {} {
+  puts "Usage: ise_upgrade -f <upgrade file> <ip address> \[<ip address> ...]"
+  exit 1
+}
+
+#
+# Log into an ISE and start seash.
+#
+proc login { ise } {
+  global ise_prompt
+  #
+  # log into ISE.
+  #
+  spawn ssh "oem@$ise"
+  expect {
+    "password: "  {
+          send "oem\r"
+        }
+    "(yes/no)? "  {
+          send "yes\r"
+          exp_continue
+        }
+    timeout    {
+          exit 1
+        }
+
+    eof    {
+          exit 1
+        }
+  }
+
+  #
+  # Check it started.
+  #
+  expect {
+    -re $ise_prompt  {
+          return $spawn_id
+        }
+    timeout    { exit 1 }
+    eof    { exit 1}
+  }
+}
+
+#
+# start_upgrade -  Copy file to ISE then open a connection to kick-off upgrade.
+#
+proc start_upgrade { ise } {
+  global ise_prompt
+  global filename
+
+  # copy the file over to the ISE
+  spawn scp -q $filename oem@$ise:/upgrade/controller/controller.fw
+  expect {
+    "password: "  {
+          send "oem\r"
+        }
+    "(yes/no)? "  {
+          send "yes\r"
+          exp_continue
+        }
+    timeout    {
+          exit 1
+        }
+
+    eof    {
+          exit 1
+        }
+  }
+
+  expect eof
+
+  set spawn_id [login $ise]
+
+  # Start the upgrade.
+  send "upgrade --mrc=controller.fw\r"
+  expect -re $ise_prompt { }
+
+  close
+
+  wait
+}
+
+
+#
+# commit_upgrade -  Wait for progress of "Waiting for commit" then commit.
+#
+proc commit_upgrade { ise } {
+  global ise_prompt
+  global wait_for_commit
+
+  set spawn_id [login $ise]
+  set progress ""
+  while { [string compare $progress $wait_for_commit] != 0 } {
+    send "upgrade --status\r"
+    expect {
+      -re "Progress    : (\[A-Za-z]+ \[A-Za-z]+ \[A-Za-z]+)" {
+            set progress $expect_out(1,string)
+            exp_continue
+          }
+      -re $ise_prompt  { }
+    }
+  
+    if { [string compare $progress $wait_for_commit] != 0 } {
+      puts "Sleeping for 10 seconds."
+      sleep 10
+    }
+  }
+
+  # Commit the upgrade.
+  send "upgrade --commit\r"
+  expect -re $ise_prompt { }
+
+  send "exit\r"
+
+  close
+
+  wait
+}
+
+set timeout 10
+
+if {[getopts "f:" argv options] > 0} usage
+
+if {[info exists options(f)]} then {
+  set filename $options(f)
+}
+
+foreach ise $argv {
+  start_upgrade $ise
+}
+
+foreach ise $argv {
+  commit_upgrade $ise
+  sleep 45
+}
+

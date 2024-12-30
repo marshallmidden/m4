@@ -1,0 +1,427 @@
+#!/usr/bin/perl -w
+
+my $orig_line;
+my $line;
+
+my @raid;
+
+my @raid_type;
+my @raid_status;
+my @raid_astatus;
+my @raid_size;
+
+my @pid_cl;
+my @pid_devstat;
+my @pid_size;
+my @pid_type;
+my @pid_bay_slot;
+
+my @vid_size;
+my @vid_name;
+my @vid_raidcountingsize;
+
+my $vid = -1;			# Flag not inside VID processing yet.
+my $max_vid = 0;
+my $rid = -1;			# Flag not inside RID processing yet.
+
+my @psd_sda;
+my @psd_lth;
+
+#-----------------------------------------------------------------------------
+# Need new line that is RAID # -- to check for unattached raids.
+# Need to print PID's first -- for class check.
+# Need to print new RAID lines second. (not really, but will be easier.)
+#-----------------------------------------------------------------------------
+# RAID    0    0 size  781250000
+
+# Verify no duplicates - raid, and both numbers are the same.
+
+sub parse_raids
+{
+  my @sline = split(/\s+/, $line);
+  my $raid = $sline[1];
+  if ($raid != $sline[2])
+  {
+    printf STDERR "ERROR RAID $raid != $sline[2] ($line)\n";
+  }
+  if (defined($raid[$raid]))
+  {
+    printf STDERR "ERROR RAID $raid previously defined\n";
+  }
+  $raid[$raid] = $raid;
+}
+
+#-----------------------------------------------------------------------------
+# PID 189 bay 13-13 type 0 cl 0x01 devstat 0x10 size  781250000 pctRem  0 rbRemain          0 PD 13-13
+# PID 190 bay 02-00 type 1 cl 0x01 devstat 0x10 size  781250000 pctRem  0 rbRemain          0 PD 02-00
+# PID 191 bay 13-11 type 2 cl 0x01 devstat 0x10 size  781250000 pctRem  0 rbRemain          0 PD 13-11
+
+# Verify no duplicates - pid.
+# Check bay-slot <=> PD ..-..
+# Check devstat == 0x10.
+# Check pctRem == 0.
+# Check rbRemain == 0.
+# SIZE must be > 18gb-ish.
+# CL must be 0,1,2,3.
+
+sub parse_pids
+{
+  my @sline = split(/\s+/, $line);
+  my $pid = $sline[1];
+  if (defined($pid_cl[$pid]))
+  {
+    printf STDERR "ERROR PID $pid previously defined\n";
+  }
+
+  $pid_bay_slot[$pid] = $sline[3];
+  $pid_cl[$pid] = $sline[7];
+  if ($pid_cl[$pid] ne "0x00" && $pid_cl[$pid] ne "0x01" && $pid_cl[$pid] ne "0x02" && $pid_cl[$pid] ne "0x03")
+  {
+    printf STDERR "ERROR PID $pid cl ($pid_cl[$pid]) < 1 or > 3\n";
+  }
+  $pid_devstat[$pid] = $sline[9];
+  if ($pid_devstat[$pid] ne "0x10")
+  {
+    printf STDERR "ERROR PID $pid devstat ($pid_devstat[$pid]) != 0x10\n";
+  }
+  $pid_size[$pid] = $sline[11];
+  if ($sline[13] != 0)
+  {
+    printf STDERR "ERROR PID $pid pctRem ($sline[13]) != 0\n";
+  }
+  if ($sline[15] != 0)
+  {
+    printf STDERR "ERROR PID $pid rbRemain ($sline[15]) != 0\n";
+  }
+  if ($sline[17] ne $pid_bay_slot[$pid])
+  {
+    printf STDERR "ERROR PID $pid bay/slot ($pid_bay_slot[$pid]) != $sline[17]\n";
+  }
+  $pid_type[$pid] = $sline[5];
+}
+
+#-----------------------------------------------------------------------------
+# VID    0 st 0x10 size      524402688 mir 0x00 attr 0x8100 own 0 cp%   0 name         SYSTEM55
+
+# Verify no duplicates - vid.
+# Check st == 0x10.
+# Check mir == 0.
+# Check attr reasonable. (look up)
+# Check own == 0 or 1 or 0xff.
+# Check cp% == 0.
+# SIZE must be >= 10mb.
+
+
+sub parse_vids()
+{
+  my @sline = split(/\s+/, $line);
+  $vid = $sline[1];
+  $rid = -1;				# Not inside raid processing.
+  if (defined($vid_size[$vid]))
+  {
+    printf STDERR "ERROR VID $vid previously defined\n";
+  }
+  if ($max_vid < $vid)
+  {
+    $max_vid = $vid;
+  }
+  $vid_size[$vid] = $sline[5];
+
+  if ($sline[3] ne "0x10")
+  {
+    printf STDERR "ERROR VID $vid devstat ($sline[3]) != 0x10\n";
+  }
+  if ($sline[7] ne "0x00")
+  {
+    printf STDERR "ERROR VID $vid mirror ($sline[7]) != 0\n";
+  }
+
+#  if ($sline[9] != 0)	# HOW?
+#  {
+#    printf STDERR "ERROR VID $vid mirror ($sline[7]) != 0\n";
+#  }
+
+  if ($sline[11] < 0 || $sline[11] > 1)
+  {
+    printf STDERR "ERROR VID $vid owner ($sline[11]) != 0 or 1\n";
+  }
+  if ($sline[13] != 0)
+  {
+    printf STDERR "ERROR VID $vid copy percent ($sline[13]) != 0\n";
+  }
+
+  $vid_name[$vid] = $sline[15];
+  $vid_raidcountingsize[$vid] = 0;	# Count during RID processing, not to exceed $vid_size[$vid].
+}
+
+#-----------------------------------------------------------------------------
+#   RID   67 VID    0 Type 3 Status 0x10 aStatus 0x00 size      525238272
+
+# Verify no duplicates - rid.
+# Check st == 0x10.
+# Check aStatus == 0x00.
+# Check Type == 0,1,2,3,4.
+# SIZE must be >= 2mb.
+# Check that vid on rid line matches vid last processed.
+
+sub parse_rids()
+{
+  if ($vid == -1)
+  {
+    printf STDERR "ERROR VID $vid in RID processing.\n";
+    exit 1;
+  }
+
+  $line =~ s/^  //;
+  my @sline = split(/\s+/, $line);
+  $rid = $sline[1];
+
+  if (defined($rid_size[$rid]))
+  {
+    printf STDERR "ERROR RID $rid previously defined\n";
+  }
+  if (!defined $raid[$rid])
+  {
+    printf STDERR "ERROR RID $rid not in original RAID list\n";
+  }
+
+  if ($sline[3] != $vid)
+  {
+    printf STDERR "ERROR RID $rid vid ($sline[3]) != $vid\n";
+  }
+  if ($sline[5] < 0 || $sline[5] > 4)
+  {
+    printf STDERR "ERROR RID $rid type ($sline[5]) < 0 or > 4\n";
+  }
+  if ($sline[7] ne "0x10")
+  {
+    printf STDERR "ERROR RID $rid status ($sline[7]) != 0x10\n";
+  }
+  if ($sline[9] ne "0x00")
+  {
+    printf STDERR "ERROR RID $rid astatus ($sline[9]) != 0x00\n";
+  }
+  $rid_size[$rid] = $sline[11];
+  $vid_raidcountingsize[$vid] += $sline[11];	# Count during RID processing, not to exceed $vid_size[$vid].
+}
+
+#-----------------------------------------------------------------------------
+#     PSD 160 RID  67 Status 0x10 aStatus 0x00 sda  560674816 lth    4208640 rlth          0
+
+# Verify no duplicates - PSD.
+# Check that RID matches last RID passed.
+# Check aStatus == 0x00.
+# Check that Status == 0x10.
+# Save sda and length for later checking. (sort sda to minimum first)
+# All PSDs on a raid must match class. I.e. first flag, set in RID line.
+
+sub parse_psds()
+{
+  if ($rid == -1)
+  {
+    printf STDERR "ERROR RID $rid in PSD processing.\n";
+    exit 1;
+  }
+
+  $line =~ s/^    //;
+  my @sline = split(/\s+/, $line);
+  $psd = $sline[1];
+
+  if (!defined($pid_cl[$psd]))
+  {
+    printf STDERR "ERROR PID $psd not defined in PID list, parsing PSDs for RID $rid VID $vid\n";
+  }
+  if (defined($psd_rid[$rid][$psd]))
+  {
+    printf STDERR "ERROR RID $rid previously defined psd $psd\n";
+  }
+  $psd_rid[$rid][$psd] = 1;
+
+  if ($rid != $sline[3])
+  {
+    printf STDERR "ERROR in PSD $psd RID $rid does not match PSD raid $sline[3]\n";
+  }
+  if ($sline[5] ne "0x10")
+  {
+    printf STDERR "ERROR PSD $psd RID $rid status ($sline[5])is not 0x10\n";
+  }
+  if ($sline[7] ne "0x00")
+  {
+    printf STDERR "ERROR PSD $psd RID $rid astatus ($sline[7])is not 0x00\n";
+  }
+  
+  if (defined($psd_sda[$psd]))
+  {
+    $psd_sda[$psd] .= ',' . "$sline[9]";
+  }
+  else
+  {
+    $psd_sda[$psd] = "$sline[9]";
+  }
+  
+  if (defined($psd_lth[$psd]))
+  {
+    $psd_lth[$psd] .= ',' . "$sline[11]";
+  }
+  else
+  {
+    $psd_lth[$psd] = "$sline[11]";
+  }
+}
+
+#-----------------------------------------------------------------------------
+# Check no missing pids.
+# Go through all psd's and verify start/length do not overlap. Print out gaps.
+# Make sure doesn't go over the size of the pdisk.
+sub verify_pids
+{
+  my $i;
+  my $j;
+  my $k;
+
+  for ($i = 0; $i <= $max_vid; $i++)
+  {
+    if (defined($vid_raidcountingsize[$vid]))
+    {
+      if ($vid_raidcountingsize[$vid] < $vid_size[$vid])
+      {
+         printf STDERR "ERROR VID $vid raid counting size ($vid_raidcountingsize[$vid]) < $vid_size[$vid]\n";
+      }
+    }
+  }
+
+# sort psd_sda[pid] (and psd_lth[pid]).
+  for ($i = 0; $i <= $#psd_sda; $i++)
+  {
+    if (!defined($psd_sda[$i]))
+    {
+      if (defined($pid_size[$i]))
+      {
+        printf STDERR "No raids on PID $i type $pid_type[$i]  class(labeled) $pid_cl[$i]\n";
+      }
+      next;
+    }
+    my @sda = split(/,/, $psd_sda[$i]);
+    my @lth = split(/,/, $psd_lth[$i]);
+    if ($#sda == 0)
+    {
+      next;
+    }
+    # sort.
+    for ($j = 0; $j < $#sda; $j++)
+    {
+      for ($k = $j+1; $k <= $#sda; $k++)
+      {
+        if ($sda[$j] > $sda[$k])
+	{
+	  # swap the two.
+	  my $tmp = $sda[$j];
+	  $sda[$j] = $sda[$k];
+	  $sda[$k] = $tmp;
+	  $tmp = $lth[$j];
+	  $lth[$j] = $lth[$k];
+	  $lth[$k] = $tmp;
+	}
+      }
+    }
+    # Sorted, now check for overlap.
+    for ($j = 0; $j < $#sda; $j++)
+    {
+      if (($sda[$j] + $lth[$j]) > $sda[$j+1])
+      {
+        printf STDERR "ERROR PID $i has sda $sda[$j] + lth $lth[$j] > next sda $sda[$j+1]\n";
+      }
+    }
+    # Check last one larger than pdisk.
+    if (($sda[$#sda] + $lth[$#sda]) > $pid_size[$i])
+    {
+      printf STDERR "ERROR PID $i has sda $sda[$#sda] + lth $lth[$#sda] > pid size $pid_size[$i]\n";
+    }
+  }
+}
+#-----------------------------------------------------------------------------
+# Check no missing slots.
+# Go through all pids's and verify slots exist.
+sub verify_slots
+{
+  my $bay;
+  my $alphabay;
+  my @slots;
+  my $i;
+  my $k;
+
+# sort psd_sda[pid] (and psd_lth[pid]).
+  for ($bay = 0; $bay < 64; $bay++)
+  {
+    $alphabay = sprintf("%02.2d", $bay);
+    $flag_none = 0;
+    undef(@slots);
+    for ($i = 0; $i < $#pid_bay_slot; $i++)
+    {
+      if (defined($pid_bay_slot[$i]))
+      {
+        if (substr($pid_bay_slot[$i], 0, 2) eq $alphabay)
+	{
+	  $flag_none = 1;
+	  my $c = substr($pid_bay_slot[$i], 3, 1);
+	  $k = ($c - 0) * 10;
+	  $c = substr($pid_bay_slot[$i], 4, 1);
+	  $k += $c - 0;
+	  if (defined($slots[$k]))
+	  {
+	    printf STDERR "Bay $bay slot $k is defined twice.\n";
+	  }
+	  $slots[$k] = 1;
+	}
+      }
+    }
+    if ($flag_none == 0)
+    {
+#--      printf STDERR "Bay $bay is not present.\n";
+    }
+    else
+    {
+      for ($i = 0; $i < 16; $i++)
+      {
+        if (!defined($slots[$i]))
+        {
+          printf STDERR "MISSING Slot $k Bay $bay.\n";
+        }
+      }
+    }
+  }
+}
+
+#-----------------------------------------------------------------------------
+while (<STDIN>)
+{
+  $orig_line = $line = $_;
+  chomp($line);			# toss /n and /r, etc.
+
+  if ($line =~ /^VID /)
+  {
+     parse_vids();
+  }
+  elsif ($line =~ /^  RID /)
+  {
+     parse_rids();
+  }
+  elsif ($line =~ /^    PSD /)
+  {
+     parse_psds();
+  }
+  elsif ($line =~ /^PID /)
+  {
+     parse_pids();
+  }
+  elsif ($line =~ /^RAID /)
+  {
+     parse_raids();
+  }
+}
+
+verify_pids();
+verify_slots();
+
+#-----------------------------------------------------------------------------
+exit 0;

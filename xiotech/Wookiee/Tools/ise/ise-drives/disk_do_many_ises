@@ -1,0 +1,514 @@
+#!/usr/bin/perl -w
+
+use Getopt::Std;
+
+#
+# -b  Base directory
+# -c  Configuration (production or development)
+# -d  DSC identifier
+# -s  ISE IPs to skip (comma-seperated, no spaces, all ips for each ISE)
+
+getopts('b:c:d:p:s:');
+
+
+# $Id: disk_do_many_ises 156890 2011-07-13 07:06:22Z tom_marlin $
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# NOTE: if a VDisk exists that is named /DO *NOT *APPLY/--we will skip that DSC.
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+#
+# File that contains controller firmware file name, and firmware version name.
+# Following lines contain legal revisions that can upgrade to it.
+my $firm_legal = "ise_disk.cfg";
+# Example (note, spaces outside of double quotes are allowed):
+# "800837_0102_r12c34.ima","DP1000FC3-1","0102"
+# "100"
+# "101"
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# Flag to say we are running on icon in production, or development (normal).
+my $production;
+# Where the ccbCL.pl script is located.
+my $ccbe_at;
+# The Ewok Description List is.
+my $dsc_file;
+# Define the OpStatus.txt and OpErrors.txt files
+my $opStatusFile;
+my $opErrorsFile;
+# Define the "skip specific ISE string
+my $g_skip_ise;
+
+#Define an optional back-end-switch password string
+my $optionalPassword = "";
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+if (($opt_d) && ($opt_c) && ($opt_b)) {
+
+    $g_dsc_id = $opt_d;
+
+    $opErrorsFile = "$opt_b/OpErrors.txt";
+    $opStatusFile = "$opt_b/OpStatus.txt";
+
+    if ($opt_c eq "production") {
+        $dsc_file = `/bin/ls -t /var/xiotech/XioWebService/*Dsc_List*.*|head -1`;
+        $ccbe_at = "./CCBE";
+        $production = "production";
+    }
+    else
+    {
+        $dsc_file = `/bin/echo *Dsc_List*.xml`;
+        $ccbe_at = "../../../CCBE";
+        $production = "development";
+    }
+}
+else {
+    die ("Usage: disk_do_many_ises -c <production/development> -b <base-dir> -d <dsc-id>\n");
+}
+
+
+if ($opt_p) {
+  $optionalPassword = " -p $opt_p ";
+  print STDERR "Using user-supplied switch password.\n";
+}
+else
+{
+  print "User standard switch passwords.\n";
+}
+
+if ($opt_s) {
+  $g_skip_ise = $opt_s;
+  print STDERR "skipping ISE $opt_s\n";
+}
+else
+{
+  $g_skip_ise = "none";
+  print STDERR "Applying to all ISE.\n";
+}
+
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# Command to run the ccbCL.pl script.
+my $run_ccbcl = "cd $ccbe_at ;/usr/bin/perl ccbCL.pl";
+#
+# Where the ise_upgrader expect script is located.
+my $ise_upgrader_at = ".";
+#
+# Command to run the ise_upgrader script.
+my $run_ise_upgrader = "$ise_upgrader_at/ise_disk_upgrader";
+#
+# Firmware for disk file.
+my $firmware_file = "$ise_upgrader_at/disk.fw";
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# Key is the DSC number, the value is IP's, comma separated.
+my %dsc;
+
+# Which firmware versions of the ISEs are legal to upgrade from?
+my @firmware_revisions_legal;
+my $this_firmware_file;
+my $this_firmware_status_rev;
+my $this_firmware_revision;
+my $this_firmware_version;
+my @ise_fw_rev;
+
+#-----------------------------------------------------------------------------
+# Define a bunch of subroutines, run them at the end of the file.
+#-----------------------------------------------------------------------------
+# Deletes any carriage returns and/or new-lines from the end of the input line.
+sub chompit($)
+{
+    my $line = $_[0];
+    $line =~ s/\n*\r*\n*$//;
+    return($line);
+}   # End of chompit
+
+#-----------------------------------------------------------------------------
+# Read $firm_legal to get @firmware_revisions_legal set.
+
+sub read_firm_legal
+{
+    if (!defined(open(FILE, "<$firm_legal"))) {
+        die("Cannot open firmware upgrade description file $firm_legal\n");
+    }
+    while (<FILE>) {last;}              # Get first line -- I had trouble getting this to work.
+    my $line = chompit($_);
+    if ($line =~ /^ *"([^"]+)" *, *"([^"]+)" *, *"([^"]+)", *"([^"]+)" *$/) {
+        $this_firmware_file = $1;
+        $this_firmware_status_rev = $2;
+        $this_firmware_version = $3;
+        $this_firmware_revision = $4;
+    } else {
+        die("firmware upgrade description file $firm_legal not in correct format, line $..\n");
+    }
+    close(FILE);
+}   # End of read_firm_legal
+
+#-----------------------------------------------------------------------------
+# Read $dsc_file to get $dsc{} hash array set.
+
+sub read_Dsc_List
+{
+    if (!defined(open(FILE, "<$dsc_file"))) {
+        die("Cannot open Dsc_List file $dsc_file\n");
+    }
+    my $line;
+    my $id;
+    while (<FILE>) {
+        $line = chompit($_);
+        if ($line =~ /^.*<spaldsclist:id>(.*)<\/spaldsclist:id>/) {
+            $id = $1;                   # DSC ID number.
+        } elsif ($line =~ /^.*<xwstype:ip_addr>(.*)<\/xwstype:ip_addr>/) {
+            if (!defined($id)) {
+                die("Found ip_addr ($1) without a spaldsclist:id\n")
+            }
+
+            if ($id == $g_dsc_id) {
+                if (defined($dsc{$id})) {
+                    $dsc{$id} .= ' ' . $1;
+                } else {
+                    $dsc{$id} =  $1;
+                }
+            }
+        }
+    }
+    close(FILE);
+}   # End of read_Dsc_List
+
+#-----------------------------------------------------------------------------
+sub send_ccbcl_status($$$)
+{
+    my $severity = $_[0];
+    my $controller = $_[1];
+    my $message = "$_[2]";
+    $message =~ s /%/pct/;
+
+    printf STDERR "CCBCL($controller) $severity - %s\n", "$message";
+    system( "$run_ccbcl '$controller' -e '\"logtextmessage -v $severity $message\"' >/dev/null" );
+}   # End of send_ccbcl_status
+
+#-----------------------------------------------------------------------------
+sub send_updated_progress($$$)
+{
+    my $status = $_[0];
+    my $completedIse = "$_[1]";
+    my $totalIse = "$_[2]";
+
+    my $percent_complete = $completedIse / $totalIse * 100.0;
+   
+    open (STATUS_FILE, ">$opStatusFile") or print STDERR "Can't open file '$opStatusFile' $!"; 
+    print (STATUS_FILE "PercentComplete=$percent_complete\nStatus=$status");
+    close (STATUS_FILE);
+
+}   # End of send_updated_progress
+
+#-----------------------------------------------------------------------------
+sub send_error_message($)
+{
+    my $message = $_[0];
+    
+    open (ERRORS_FILE, ">>$opErrorsFile") or print STDERR "Can't open file '$opErrorsFile' $!";
+    print (ERRORS_FILE "$message\n");
+    close (ERRORS_FILE);
+
+}   # End of send_error_message
+
+#-----------------------------------------------------------------------------
+sub shouldIgnoreIse($)
+{
+  my $iseToCheck = $_[0];
+  my $stringIndex = index($g_skip_ise, $iseToCheck);
+
+  if ($stringIndex == -1) {
+    #ISE is not in the skip-list, so don't skip
+    return 0;
+  } else {
+    #ISE is in the skip-list
+    return 1;
+  }
+}
+
+#-----------------------------------------------------------------------------
+# Use @controller_ips to get $master set.
+
+sub get_master_and_ise_ips($)
+{
+    my @controller_ips = split(/\s+/, $_[0]);
+    my @ise_ips;
+    my $master;
+
+    # Log Applying ISE DriveFW to both controllers (don't know if one is down).
+    foreach my $ip (@controller_ips) {
+        send_ccbcl_status(0, $ip . ':3000', '!$Applying ISE DriveFW');
+    }
+
+    # Get master and other stuff, this allows for one to not be configured yet.
+    my $ips = join(':3000 ', @controller_ips) . ':3000';
+print STDERR "ips=$ips\n";
+    my $ccbcl_grep;
+    $ccbcl_grep .= "'" . 'OPERATIONAL *MASTER';
+    $ccbcl_grep .= '|' . 'IP address  : .*IP address  : ';
+    $ccbcl_grep .= '|' . 'DO *NOT *APPLY';
+    $ccbcl_grep .= '|' . '^ Serial #    : .* Model       : .*DP';
+    $ccbcl_grep .= '|' . '^ Part Number : .*  FW Version  : ';
+    $ccbcl_grep .= '|' . 'DataPac 0';
+    $ccbcl_grep .= '|' . 'DataPac 1';
+    $ccbcl_grep .= "'";
+
+print STDERR "$run_ccbcl $ips -e 'a:vcginfo ; isestatus ; vdisks' | egrep -i $ccbcl_grep\n";
+    my $ccbe_output = `$run_ccbcl $ips -e 'a:vcginfo ; isestatus ; vdisks' | egrep -i $ccbcl_grep`;
+print STDERR "ccbe_output=$ccbe_output";
+
+    my @ccbe_output = split(/\n/, $ccbe_output);
+# printf STDERR "ccbe_output=%s\n", join("\n\t", @ccbe_output);
+    my $newISE = 0;
+    my $last_ise_IPs;
+    my $stop_on_error = 0;
+    my $fwv_count = 0;
+    my $fwm_count = 0;
+    my $which_datapac = 0;
+    foreach my $i (@ccbe_output) {
+        if ($i =~ /^.* (\d+\.\d+\.\d+\.\d+) *OPERATIONAL *MASTER.*/i) {
+            if ($newISE != 0) {
+                send_ccbcl_status(2, $master, 'ISE DriveFW Update FAILED');
+                send_error_message("The last ISE did not have two Firmware Versions for the MRC's $last_ise_IPs");
+                print STDERR "The last ISE did not have two Firmware Versions for the MRC's $last_ise_IPs\n";
+                return;
+            }
+            my $new_master = $1 . ':3000';
+            if (defined($master) && $master ne $new_master) {
+                send_ccbcl_status(1, $master, 'Improperly configured DCN-Two masters');
+                send_ccbcl_status(2, $master, 'ISE DriveFW Update FAILED');
+                send_error_message("Cannot apply drive firmware. Multiple master controllers are reported:($master and $new_master)");
+                print STDERR "The vcginfo controllers gave different master IP's ($master verses $new_master)\n";
+                return;
+            }
+            $master = $new_master;
+        } elsif ($i =~ /^ *IP address *: (\d+\.\d+\.\d+\.\d+) *IP address *: (\d+\.\d+\.\d+\.\d+)/i) {
+            my $i1 = $1;
+            my $i2 = $2;
+            if (!defined($master)) {
+                send_ccbcl_status(1, $ips, 'Improperly configured DCN-No master');
+                send_ccbcl_status(2, $ips, 'ISE DriveFW Update FAILED');
+                send_error_message("Invalid configuration. The system does not have a master controller.");
+                return;
+            }
+            $last_ise_IPs = "$i1 $i2";
+            my @ise1 = split(/\./, $i1);
+            my @ise2 = split(/\./, $i2);
+# printf STDERR "IPs=%s, %s\n", join('.', @ise1), join('.', @ise2);
+            if ($#ise1 != 3 || $#ise2 != 3 ||
+                $ise1[0] != $ise2[0] || $ise1[1] != $ise2[1] || $ise1[2] != $ise2[2] ||
+                ($ise1[3] & 254) != ($ise2[3] & 254)) {
+                send_ccbcl_status(1, $master, 'ISE IP(s) are bad ' . "($i1 and $i2) - cannot update");
+                $stop_on_error = 1;
+                $newISE = -1;               # Flag error condition.
+            } else {
+                my $foundIseIp = join('.', $ise1[0], $ise1[1], $ise2[2], $ise1[3] & 254);
+                if (shouldIgnoreIse($foundIseIp)) {
+                  print STDERR "Explicitly skipping ISE $foundIseIp\n";
+                  send_ccbcl_status(0, $master, "Explicitly skipping ISE IP $foundIseIp");
+                } else {
+                  push(@ise_ips, join('.', $ise1[0], $ise1[1], $ise2[2], $ise1[3] & 254));
+                }
+                $newISE = 1;
+            }
+            $fwv_count = 0;                 # Number of DriveFW version strings found.
+            $fwm_count = 0;                 # Number of DriveFW model strings found.
+        } elsif ($i =~ /DO *NOT *APPLY/i) {
+            send_ccbcl_status(0, $master, '$!ISE DriveFW Update DONOTAPPLY');
+            return;             # DO NOT DO ANYTHING
+        } elsif ($i =~ /DataPac 0/) {
+            # intentionally left blank
+        } elsif ($i =~ /DataPac 1/) {
+            # intentionally left blank
+        } elsif ($i =~ /^ Serial #    : .* Model       : (.*)/) {
+            # intentionally left blank
+        } elsif ($i =~ /^ Part Number : .*  FW Version  : (.*)/) {
+            # intentionally left blank
+        } else {
+            print STDERR "Unrecognized string match from egrep of ccbCL.pl output '$i'\n";
+            send_ccbcl_status(2, $master, 'ISE DriveFW Update FAILED');
+            send_error_message("An internal error has occurred. Unrecognized string match from egrep of ccbCL.pl output '$i'");
+            return;
+        }
+    }
+
+    if ($production eq 'production' && $stop_on_error != 0) {
+        print STDERR "Stop on error detected.\n";
+        send_ccbcl_status(2, $master, 'ISE DriveFW Update FAILED');
+        send_error_message("ISE Drive firmware update failed.");
+        return;
+    }
+
+    if (!defined($master)) {
+        send_ccbcl_status(1, $ips, 'No active Master Controller');
+        send_ccbcl_status(2, $ips, 'ISE DriveFW Update FAILED');
+        send_error_message("ISE Drive firmware update failed. No active master controller.");
+        return;
+    }
+
+    if ($#ise_ips < 0) {
+        send_ccbcl_status(1, $master, 'ISE DriveFW Update - Nothing to do');
+        return;
+    }
+# print STDERR "master=$master\n";
+# printf STDERR "ise_ips=%s\n", join(' ', @ise_ips);;
+    return ($master, @ise_ips);
+}   # end of get_master_and_ise_ips
+
+#-----------------------------------------------------------------------------
+# Do the processing now.
+
+# Get current working directory.
+my $cwd;
+if (defined($ENV{PWD})) {
+    $cwd = $ENV{PWD};
+} else {
+    $cwd = chompit(`pwd`);
+}
+# . . . . .
+print STDERR "cwd=$cwd\n";
+# . . . . .
+
+# Find out everything about this ISE upgrade firmware.
+#read_firm_legal();
+# . . . . .
+#print STDERR "firmware_file=$this_firmware_file\n";
+#print STDERR "firmware_status_rev=$this_firmware_status_rev\n";
+#print STDERR "firmware_revision=$this_firmware_revision\n";
+#printf STDERR "legal to upgrade from=\"%s\"\n", join('", "', @firmware_revisions_legal);
+# . . . . .
+
+# Get %dsc set to all DSC's and IP addresses of their controllers.
+read_Dsc_List();
+# . . . . .
+foreach my $k (keys(%dsc)) {
+  printf STDERR "DSC #%s -> %s\n", $k, $dsc{$k};
+}
+# . . . . .
+
+
+
+#
+# Calculate the number of total ISE on the system (for % complete)
+#
+
+my $totalIseToUpdate = 0;
+foreach my $dscIt (keys(%dsc)) 
+{
+    # Use $dsc{} to get $master and @ise_ips set.
+    printf STDERR "Applying ISE Drive FW on DSC $dscIt\n";
+    
+    my ($masterCtrlr, @ise_ips) = get_master_and_ise_ips($dsc{$dscIt});
+
+    my $numIseInDsc = @ise_ips;
+    $totalIseToUpdate = $totalIseToUpdate + $numIseInDsc;
+
+
+    #
+    # Make sure that every ISE IP can be "pinged". This ensures that
+    # we don't upgrade 1/2 of our ISE only to find one with a bad IP
+    # or connectivity problems 3 hours into the upgrade.
+    #
+
+    foreach my $iseIp (@ise_ips) {
+
+      my $pingCommand = `ping -c 3 $iseIp`;
+      my $pingResult = $?;
+      if ($pingResult != 0) {
+        print STDERR "Unable to successfully ping ISE $iseIp. Aborting script.";
+        send_ccbcl_status(2, $masterCtrlr, "ISE FW Update failed. Cannot ping ISE at $iseIp.");
+        send_error_message("ISE Drive Firmware Updater failed. Cannot ping ISE at $iseIp. Please check network connectivity.");
+        exit 1;
+      }
+    }
+}
+
+
+
+#
+# Ensure that our params are all valid
+#
+
+my $completedIse = 0;
+if ($totalIseToUpdate < 1){
+    $completedIse = 1;
+    $totalIseToUpdate = 1; # to avoid divide-by-zero. Jumps to 100% complete
+}
+
+
+
+#
+# Loop through all DSCs, updating every ISE on each DSC
+#
+
+foreach my $j (keys(%dsc)) {
+
+    # Set the current percent complete
+    my $PercentComplete = $completedIse / $totalIseToUpdate * 100;
+    
+    # Use $dsc{} to get $master and @ise_ips set.
+    my ($master, @ise_ips) = get_master_and_ise_ips($dsc{$j});
+    if (!defined($master)) {
+        print STDERR "DONOTAPPLY VDisk found (or many errors), ignoring DSC $j.\n";
+        next;
+    }
+    printf STDERR "DSC $j  master=$master  ise_ips=%s\n", join(' ', @ise_ips);
+
+
+    #
+    # Update Every ISE on the DSC
+    #
+    
+    foreach my $k (@ise_ips) {
+    
+        # Update Percent complete first
+        my $PercentComplete = $completedIse / $totalIseToUpdate * 100.0;
+        print STDERR "Num Completed ISE: $completedIse  Total ISE: $totalIseToUpdate   Percent: $PercentComplete";
+
+        my @ise = split(/\./, $k);
+        my $ses = ($ise[3] & 0x7e)/2;       # mod 128, without last bit.
+        printf STDERR "$k: MRC(even) IP=%s   SES=%d\n", join('.', @ise), $ses;
+              
+
+        my $healthChecker = `./SystemStatusChecker -d $g_dsc_id -e $opErrorsFile -s $opStatusFile $optionalPassword`;
+        my $healthCheckResult = $?;
+        if ($healthCheckResult != 0) {
+          print STDERR "ISE Disk Updater aborting due to system health issues.\n";
+          send_ccbcl_ERROR($master, "ISE Disk Updater aborting due to system health issues.\n");
+          send_error_message("ISE Disk Upgrader aborting due to system health issues.");
+          exit 1;
+        } else {
+          print STDERR "System Status check complete. Systems is OK to proceed.";
+        }
+
+    
+        send_updated_progress("Applying ISE Drive Firmware to ISE $ses", $completedIse, $totalIseToUpdate);
+        my $command = "$run_ise_upgrader $production $k $master '$opErrorsFile'";
+        printf STDERR "$command\n";
+        my $output = `$command`;
+        my $status = $?;
+        if ($status != 0) {
+            send_ccbcl_status(2, $master, 'ISE DriveFW Update FAILED');
+            send_error_message("ISE Drive firmware update failed for ISE: $ses");
+            print STDERR "command failed ($status): $command\n";
+            exit 1;
+        } else {
+            send_ccbcl_status(0, $master, '$!ISE DriveFW Update DONE');
+            print STDERR $output;
+        }
+        
+        $completedIse++;
+    }
+    send_ccbcl_status(0, $master, '$!Finished Applying Disk FW');
+}
+# . . . . .
+
+
+exit 0;
+
+###
+# Modelines:
+# Local Variables:
+# tab-width: 4
+# indent-tabs-mode: nil
+# End:
+# vi:sw=4 ts=4 expandtab

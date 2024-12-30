@@ -1,0 +1,1203 @@
+diff -ru a/drivers/scsi/aic94xx/aic94xx_dev.c b/drivers/scsi/aic94xx/aic94xx_dev.c
+--- a/drivers/scsi/aic94xx/aic94xx_dev.c	2006-09-21 12:44:47.517776291 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_dev.c	2006-09-18 08:19:18.000000000 -0500
+@@ -30,6 +30,9 @@
+ #include "aic94xx_reg.h"
+ #include "aic94xx_sas.h"
+ 
++#include <linux/delay.h>	/*DWD*/
++
++
+ #define FIND_FREE_DDB(_ha) find_first_zero_bit((_ha)->hw_prof.ddb_bitmap, \
+ 					       (_ha)->hw_prof.max_ddbs)
+ #define SET_DDB(_ddb, _ha) set_bit(_ddb, (_ha)->hw_prof.ddb_bitmap)
+@@ -324,6 +331,8 @@
+ int asd_dev_found(struct domain_device *dev)
+ {
+ 	int res = 0;
++    u32  ddata, ddata1, ddata2, ddata3;
++    int i;
+ 
+ 	switch (dev->dev_type) {
+ 	case SATA_PM:
+@@ -338,6 +347,26 @@
+ 		else
+ 			res = asd_init_initiator_ddb(dev);
+ 	}
++    if (!res) {
++        asd_printk("ddb dump for dev %p, type %d\n", dev, dev->dev_type);
++        for (i = 0; i < 64; i += 16) {
++            ddata = asd_ddbsite_read_dword( dev->port->ha->lldd_ha,
++                                            (int) (unsigned long) dev->lldd_dev,
++                                            i );
++            ddata1 = asd_ddbsite_read_dword( dev->port->ha->lldd_ha,
++                                            (int) (unsigned long) dev->lldd_dev,
++                                            i+4 );
++            ddata2 = asd_ddbsite_read_dword( dev->port->ha->lldd_ha,
++                                            (int) (unsigned long) dev->lldd_dev,
++                                            i+8 );
++            ddata3 = asd_ddbsite_read_dword( dev->port->ha->lldd_ha,
++                                            (int) (unsigned long) dev->lldd_dev,
++                                            i+12 );
++            asd_printk("  %2d-%2d: 0x%08X 0x%08X 0x%08X 0x%08X\n", 
++                    i, i+15, ddata, ddata1, ddata2, ddata3);
++        }
++    }
++    msleep(100);
+ 	return res;
+ }
+ 
+diff -ru a/drivers/scsi/aic94xx/aic94xx_dump.c b/drivers/scsi/aic94xx/aic94xx_dump.c
+--- a/drivers/scsi/aic94xx/aic94xx_dump.c	2006-09-21 12:44:46.673856533 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_dump.c	2006-09-20 13:25:55.000000000 -0500
+@@ -956,4 +956,25 @@
+ 	}
+ }
+ 
++void asd_dump_hex(void* data, u32 len_bytes)
++{
++	int i = 0;
++    u32* nptr = (u32*)data;
++
++    asd_printk("dumping hex %u bytes\n", len_bytes);
++    for (i = 0; i < len_bytes; i+=16) {
++        asd_printk("  %08x %08x %08x %08x\n", 
++                nptr[i/4], nptr[(i/4)+1], nptr[(i/4)+2], nptr[(i/4)+3]);
++    }
++}
++
++void asd_dump(struct sas_ha_struct *sas_ha)
++{
++    struct asd_ha_struct *asd_ha = sas_ha->lldd_ha;
++
++    asd_dump_seq_state(asd_ha, asd_ha->hw_prof.enabled_phys);
++    asd_dump_ddb_0(asd_ha);
++    asd_dump_scb_sites(asd_ha);
++}
++
+ #endif /* ASD_DEBUG */
+diff -ru a/drivers/scsi/aic94xx/aic94xx_dump.h b/drivers/scsi/aic94xx/aic94xx_dump.h
+--- a/drivers/scsi/aic94xx/aic94xx_dump.h	2006-09-21 12:44:46.676856247 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_dump.h	2006-09-19 08:37:01.000000000 -0500
+@@ -37,6 +37,7 @@
+ void asd_dump_frame_rcvd(struct asd_phy *phy,
+ 			 struct done_list_struct *dl);
+ void asd_dump_scb_list(struct asd_ascb *ascb, int num);
++void asd_dump(struct sas_ha_struct *sas_ha);
+ #else /* ASD_DEBUG */
+ 
+ static inline void asd_dump_ddb_0(struct asd_ha_struct *asd_ha) { }
+@@ -48,6 +49,7 @@
+ static inline void asd_dump_frame_rcvd(struct asd_phy *phy,
+ 				       struct done_list_struct *dl) { }
+ static inline void asd_dump_scb_list(struct asd_ascb *ascb, int num) { }
++static inline void asd_dump(struct sas_ha_struct *sas_ha){ }
+ #endif /* ASD_DEBUG */
+ 
+ #endif /* _AIC94XX_DUMP_H_ */
+diff -ru a/drivers/scsi/aic94xx/aic94xx_hwi.c b/drivers/scsi/aic94xx/aic94xx_hwi.c
+--- a/drivers/scsi/aic94xx/aic94xx_hwi.c	2006-09-21 12:44:47.409786559 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_hwi.c	2006-09-21 06:36:25.528398701 -0500
+@@ -842,7 +842,8 @@
+ 
+ static inline void asd_arp2_err(struct asd_ha_struct *asd_ha, u32 dchstatus)
+ {
+-	static const char *halt_code[256] = {
++	int fault = 0;
++    static const char *halt_code[256] = {
+ 		"UNEXPECTED_INTERRUPT0",
+ 		"UNEXPECTED_INTERRUPT1",
+ 		"UNEXPECTED_INTERRUPT2",
+@@ -896,31 +897,62 @@
+ 			asd_printk("%s: CARP2INT:0x%x\n",
+ 				   pci_name(asd_ha->pcidev),
+ 				   arp2int);
++        fault = 1;
+ 	}
+ 	if (dchstatus & LSEQINT_MASK) {
+ 		int lseq;
+ 		u8  lseq_mask = dchstatus & LSEQINT_MASK;
+ 
+ 		for_each_sequencer(lseq_mask, lseq_mask, lseq) {
++            int reset = 0;
+ 			u32 arp2int = asd_read_reg_dword(asd_ha,
+ 							 LmARP2INT(lseq));
+-			if (arp2int & (ARP2WAITTO | ARP2ILLOPC | ARP2PERR
+-				       | ARP2CIOPERR)) {
+-				asd_printk("%s: LSEQ%d arp2int:0x%x\n",
+-					   pci_name(asd_ha->pcidev),
+-					   lseq, arp2int);
++			if (arp2int & ARP2HANDLED) {
++                if (arp2int & ARP2WAITTO ) {
++                    ++asd_ha->phys[lseq].sas_phy.ecounts.arp2waitto;
++                }
++                if (arp2int & ARP2ILLOPC ) {
++                    ++asd_ha->phys[lseq].sas_phy.ecounts.arp2illopc;
++                }
++                if (arp2int & ARP2PERR ) {
++                    ++asd_ha->phys[lseq].sas_phy.ecounts.arp2perr;
++                }
++                if (arp2int & ARP2CIOPERR ) {
++                    ++asd_ha->phys[lseq].sas_phy.ecounts.arp2cioperr;
++                }
++                if (arp2int & ARP2BREAK3 ) {
++                    ++asd_ha->phys[lseq].sas_phy.ecounts.arp2break3;
++                }
++                if (arp2int & ARP2BREAK2 ) {
++                    ++asd_ha->phys[lseq].sas_phy.ecounts.arp2break2;
++                }
++                if (arp2int & ARP2BREAK1 ) {
++                    ++asd_ha->phys[lseq].sas_phy.ecounts.arp2break1;
++                }
++                if (arp2int & ARP2BREAK0 ) {
++                    ++asd_ha->phys[lseq].sas_phy.ecounts.arp2break0;
++                }
++
++                asd_write_reg_dword(asd_ha, LmARP2INT(lseq), arp2int);
++                asd_unpause_phy(&asd_ha->phys[lseq].sas_phy, reset);
++               
+ 				/* XXX we should only do lseq reset */
+-			} else if (arp2int & ARP2HALTC)
++			} else if (arp2int & ARP2HALTC) {
+ 				asd_printk("%s: LSEQ%d halted: %s\n",
+ 					   pci_name(asd_ha->pcidev),
+ 					   lseq,halt_code[(arp2int>>16)&0xFF]);
+-			else
++                fault = 1;
++            }
++			else {
+ 				asd_printk("%s: LSEQ%d ARP2INT:0x%x\n",
+ 					   pci_name(asd_ha->pcidev), lseq,
+ 					   arp2int);
++                fault = 1;
++            }
+ 		}
+ 	}
+-	asd_chip_reset(asd_ha);
++    if (fault)
++	    asd_chip_reset(asd_ha);
+ }
+ 
+ /**
+@@ -1406,5 +1446,69 @@
+ 	if (k)
+ 		asd_ascb_free_list(ascb_list);
+ 
++    ssleep(1);
+ 	return k;
+ }
++
++#if 0
++
++int asd_enable_phys(struct asd_ha_struct *asd_ha, const u8 phy_mask)
++{
++	u8  phy_m;
++	u8  i;
++	int num = 0, k = 0, j = 0;
++	struct asd_ascb *ascb;
++	struct asd_ascb *ascb_list;
++
++	if (!phy_mask) {
++		asd_printk("%s called with phy_mask of 0!?\n", __FUNCTION__);
++		return 0;
++	}
++
++	for_each_phy(phy_mask, phy_m, i) {
++		num++;
++		asd_enable_phy(asd_ha, i);
++        j = 1;
++        ascb = asd_ascb_alloc_list(asd_ha, &j, GFP_KERNEL);
++        if ( !j ) {
++            asd_build_control_phy(ascb, i, ENABLE_PHY);
++            if ( !asd_post_ascb_list(asd_ha, ascb, 1) )
++                ++k;
++            else
++                asd_ascb_free_list(ascb);
++        }
++        msleep(300);
++	}
++	
++    ASD_DPRINTK("posted %d of %d control phy scbs\n", k, num);
++    k = num - k;
++
++#if 0
++    k = num;
++	ascb_list = asd_ascb_alloc_list(asd_ha, &k, GFP_KERNEL);
++	if (!ascb_list) {
++		asd_printk("no memory for control phy ascb list\n");
++		return -ENOMEM;
++	}
++	num -= k;
++    k = num;
++
++	ASD_DPRINTK("posting %d control phy scbs\n", num);
++	ascb = ascb_list;
++	for_each_phy(phy_mask, phy_m, i) {
++		asd_build_control_phy(ascb, i, ENABLE_PHY);
++		ascb = ascb_list;
++        ascb_list = list_entry(ascb->list.next, struct asd_ascb, list);
++        list_del_init(&ascb->list);
++
++        if ( !asd_post_ascb_list(asd_ha, ascb, 1) )
++            --k;
++        else
++            asd_ascb_free_list(ascb);
++        msleep(100);
++	}
++#endif
++    ssleep(1);
++
++	return k;
++#endif
+diff -ru a/drivers/scsi/aic94xx/aic94xx_init.c b/drivers/scsi/aic94xx/aic94xx_init.c
+--- a/drivers/scsi/aic94xx/aic94xx_init.c	2006-09-21 12:44:46.688855107 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_init.c	2006-09-19 11:38:16.000000000 -0500
+@@ -37,6 +37,7 @@
+ #include "aic94xx_reg.h"
+ #include "aic94xx_hwi.h"
+ #include "aic94xx_seq.h"
++#include "aic94xx_dump.h"
+ 
+ /* The format is "version.release.patchlevel" */
+ #define ASD_DRIVER_VERSION "1.0.6"
+@@ -518,6 +519,13 @@
+ 
+ 	asd_ha->sas_ha.lldd_control_phy = asd_control_phy;
+ 
++	asd_ha->sas_ha.lldd_unpause_phy = asd_unpause_phy;
++#if ASD_DEBUG
++    asd_ha->sas_ha.lldd_dump = asd_dump;
++#else
++    asd_ha->sas_ha.lldd_dump = NULL;
++#endif
++
+ 	return sas_register_ha(&asd_ha->sas_ha);
+ }
+ 
+diff -ru a/drivers/scsi/aic94xx/aic94xx_reg_def.h b/drivers/scsi/aic94xx/aic94xx_reg_def.h
+--- a/drivers/scsi/aic94xx/aic94xx_reg_def.h	2006-09-21 12:44:47.415785989 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_reg_def.h	2006-09-21 10:37:23.813095765 -0500
+@@ -34,6 +34,7 @@
+ #ifndef _AIC94XX_REG_DEF_H_
+ #define _AIC94XX_REG_DEF_H_
+ 
++// #define AIC_OUT_OF_SPEC
+ /*
+  * Common definitions.
+  */
+@@ -354,6 +355,9 @@
+ #define		EN_ARP2BREAK1		0x00000002
+ #define		EN_ARP2BREAK0		0x00000001
+ 
++#define     ARP2HANDLED     (ARP2WAITTO|ARP2ILLOPC|ARP2PERR|ARP2CIOPERR| \
++                             ARP2BREAK3|ARP2BREAK2|ARP2BREAK1|ARP2BREAK0)
++
+ #define ARP2BREAKADR01	0x0C
+ 
+ #define		BREAKADR1_MASK		0x0FFF0000
+@@ -1345,10 +1349,17 @@
+ #define 	EN_LmPMNAK		0x00000002
+ #define 	EN_LmDMAT		0x00000001
+ 
++#ifdef AIC_OUT_OF_SPEC
+ #define LmPRIMSTAT1EN_MASK		(EN_LmHARDRST | \
+ 					 EN_LmSYNCSRST | \
+ 					 EN_LmPMREQP | EN_LmPMREQS | \
+ 					 EN_LmPMACK | EN_LmPMNAK)
++#else
++#define LmPRIMSTAT1EN_MASK		(EN_LmHARDRST | \
++					 EN_LmERROR | EN_LmSYNCSRST | \
++					 EN_LmPMREQP | EN_LmPMREQS | \
++					 EN_LmPMACK | EN_LmPMNAK)
++#endif
+ 
+ #define LmSMSTATE(LinkNum) 		LmSEQ_PHY_REG(0, LinkNum, 0xE8)
+ 
+@@ -1801,6 +1812,8 @@
+ 
+ #define PCIC_FLASH_MBAR	0xB8
+ 
++#define PCIC_INTRPT_STAT 0xD4
++
+ #define PCIC_TP_CTRL	0xFC
+ 
+ /*
+@@ -1810,6 +1823,7 @@
+ 
+ #define	EXSICNFGR	(EXSI_REG_BASE_ADR + 0x00)
+ 
++#define		OCMINITIALIZED		0x80000000
+ #define		ASIEN			0x00400000
+ #define		HCMODE			0x00200000
+ #define		PCIDEF			0x00100000
+@@ -1964,6 +1978,16 @@
+ #define XSRAM_SIZE                        0x100000
+ 
+ /*
++ * NVRAM Registers, Address Range: (0x00000 - 0x3FFFF).
++ */
++#define		NVRAM_REG_BASE_ADR	0xBF800000
++#define		NVRAM_MAX_BASE_ADR	0x003FFFFF
++
++/* OCM base address */
++#define		OCM_BASE_ADDR		0xA0000000
++#define		OCM_MAX_SIZE		0x20000
++
++/*
+  * Sequencers (Central and Link) Scratch RAM page definitions.
+  */
+ 
+@@ -2206,7 +2230,7 @@
+ #define LmSEQ_PM_TABLE_PTR(LinkNum)		(LmSCRATCH(LinkNum) + 0x0110)
+ #define LmSEQ_SATA_INTERLOCK_TMR_SAVE(LinkNum)	(LmSCRATCH(LinkNum) + 0x0112)
+ #define LmSEQ_IP_BITL(LinkNum)			(LmSCRATCH(LinkNum) + 0x0114)
+-#define LmSEQ_COPY_SMP_CONN_TAG(LinkNum)	(LmSCRATCH(LinkNum) + 0x0116)
++#define LmSEQ_CMD_XMIT_TIMEOUT(LinkNum)	(LmSCRATCH(LinkNum) + 0x0116)
+ #define LmSEQ_P0M2_OFFS1AH(LinkNum)		(LmSCRATCH(LinkNum) + 0x011A)
+ 
+ /* Mode dependent scratch page 0 macros for modes 4/5 (non-common) */
+@@ -2343,6 +2367,7 @@
+ #define LmSEQ_CONCTL(LinkNum)		(LmSCRATCH(LinkNum) + 0x018C)
+ #define LmSEQ_CONSTAT(LinkNum)		(LmSCRATCH(LinkNum) + 0x018E)
+ #define LmSEQ_CONNECTION_MODES(LinkNum)	(LmSCRATCH(LinkNum) + 0x018F)
++#define LmSEQ_COPY_SMP_CONN_TAG(LinkNum)	(LmSCRATCH(LinkNum) + 0x0190)
+ #define LmSEQ_REG1_ISR(LinkNum)		(LmSCRATCH(LinkNum) + 0x0192)
+ #define LmSEQ_REG2_ISR(LinkNum)		(LmSCRATCH(LinkNum) + 0x0194)
+ #define LmSEQ_REG3_ISR(LinkNum)		(LmSCRATCH(LinkNum) + 0x0196)
+@@ -2360,7 +2385,7 @@
+ #define LmSEQ_EST_NEXUS_SCB_HEAD(LinkNum)	(LmSCRATCH(LinkNum) + 0x01AC)
+ #define LmSEQ_EST_NEXUS_SCB_TAIL(LinkNum)	(LmSCRATCH(LinkNum) + 0x01AD)
+ #define LmSEQ_EST_NEXUS_BUF_AVAIL(LinkNum)	(LmSCRATCH(LinkNum) + 0x01AE)
+-#define LmSEQ_TIMEOUT_CONST(LinkNum)		(LmSCRATCH(LinkNum) + 0x01B8)
++#define LmSEQ_TIMEOUT_CONST(LinkNum)		(LmSCRATCH(LinkNum) + 0x01B8) /* not in spec? */
+ #define LmSEQ_ISR_SAVE_SINDEX(LinkNum)	        (LmSCRATCH(LinkNum) + 0x01BC)
+ #define LmSEQ_ISR_SAVE_DINDEX(LinkNum)	        (LmSCRATCH(LinkNum) + 0x01BE)
+ 
+diff -ru a/drivers/scsi/aic94xx/aic94xx_reg.h b/drivers/scsi/aic94xx/aic94xx_reg.h
+--- a/drivers/scsi/aic94xx/aic94xx_reg.h	2006-09-21 12:44:46.700853966 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_reg.h	2006-09-16 10:52:48.000000000 -0500
+@@ -89,6 +89,19 @@
+ ASD_READ_OCM(u16,word, w);
+ ASD_READ_OCM(u32,dword,l);
+ 
++#define ASD_WRITE_OCM(type, ord, S)                                    \
++static inline void asd_write_ocm_##ord (struct asd_ha_struct *asd_ha,  \
++					 u32 offs, type val)          \
++{                                                                     \
++	struct asd_ha_addrspace *io_handle = &asd_ha->io_handle[1];   \
++	write##S (val, io_handle->addr + (unsigned long) offs);       \
++	return;                                                       \
++}
++
++ASD_WRITE_OCM(u8, byte, b);
++ASD_WRITE_OCM(u16,word, w);
++ASD_WRITE_OCM(u32,dword,l);
++
+ #define ASD_DDBSITE_READ(type, ord)                                        \
+ static inline type asd_ddbsite_read_##ord (struct asd_ha_struct *asd_ha,   \
+ 					   u16 ddb_site_no,                \
+diff -ru a/drivers/scsi/aic94xx/aic94xx_sas.h b/drivers/scsi/aic94xx/aic94xx_sas.h
+--- a/drivers/scsi/aic94xx/aic94xx_sas.h	2006-09-21 12:44:46.703853680 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_sas.h	2006-09-21 07:29:02.506085448 -0500
+@@ -717,8 +717,8 @@
+ 
+ 	struct sas_identify_frame *identify_frame;
+ 	struct asd_dma_tok  *id_frm_tok;
+-
+-	u8         frame_rcvd[ASD_EDB_SIZE];
++	
++    u8         frame_rcvd[ASD_EDB_SIZE];
+ };
+ 
+ 
+diff -ru a/drivers/scsi/aic94xx/aic94xx_scb.c b/drivers/scsi/aic94xx/aic94xx_scb.c
+--- a/drivers/scsi/aic94xx/aic94xx_scb.c	2006-09-21 12:44:47.784750907 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_scb.c	2006-09-20 13:44:16.000000000 -0500
+@@ -292,7 +292,7 @@
+ 		break;
+ 	}
+ }
+-
++extern void asd_dump_hex(void*, u32);
+ static inline void asd_req_task_abort_tasklet(struct asd_ascb *escb,
+ 					      struct done_list_struct *dl)
+ {
+@@ -308,6 +308,16 @@
+ 	} else {
+ 		struct sas_task *task;
+ 		struct scsi_cmnd *sc;
++        
++        ASD_DPRINTK("%s: index 0x%x, tascb dump\n", 
++                __FUNCTION__, le16_to_cpu(task_index));
++        asd_dump_hex(tascb, sizeof(*tascb));
++        
++        if (tascb->scb) {
++            ASD_DPRINTK("%s: index 0x%x, scb dump\n", 
++                    __FUNCTION__, le16_to_cpu(task_index));
++            asd_dump_hex(tascb->scb, sizeof(*tascb->scb));
++        }
+ 
+ 		task = tascb->uldd_task;
+ 		if (!task) {
+@@ -316,6 +326,11 @@
+ 			return;
+ 		}
+ 
++        ASD_DPRINTK("%s: index 0x%x, task dump\n", 
++                __FUNCTION__, le16_to_cpu(task_index));
++        asd_dump_hex(task, sizeof(*task));
++
++        task->task_status.abort_reason = SAS_TASK_CONTROLLED;
+ 		sc = task->uldd_task;
+ 		if (!sc) {
+ 			ASD_DPRINTK("%s: no scsi cmnd for task index: 0x%x\n",
+diff -ru a/drivers/scsi/aic94xx/aic94xx_sds.c b/drivers/scsi/aic94xx/aic94xx_sds.c
+--- a/drivers/scsi/aic94xx/aic94xx_sds.c	2006-09-21 12:44:47.886741209 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_sds.c	2006-09-18 17:30:46.000000000 -0500
+@@ -55,6 +55,60 @@
+ 	struct asd_ocm_dir_ent entry[15];
+ } __attribute__ ((packed));
+ 
++#define	OCM_DE_OCM_DIR			0x00
++#define	OCM_DE_WIN_DRVR			0x01
++#define	OCM_DE_BIOS_CHIM		0x02
++#define	OCM_DE_RAID_ENGN		0x03
++#define	OCM_DE_BIOS_INTL		0x04
++#define	OCM_DE_BIOS_CHIM_OSM		0x05
++#define	OCM_DE_BIOS_CHIM_DYNAMIC	0x06
++#define	OCM_DE_ADDC2C_RES0		0x07
++#define	OCM_DE_ADDC2C_RES1		0x08
++#define	OCM_DE_ADDC2C_RES2		0x09
++#define	OCM_DE_ADDC2C_RES3		0x0A
++
++#define OCM_INIT_DIR_ENTRIES	5
++/***************************************************************************
++*  OCM dircetory default
++***************************************************************************/
++static struct asd_ocm_dir OCMDirInit =
++{
++	.sig = {0x4D, 0x4F},	/* signature */
++	.num_de = OCM_INIT_DIR_ENTRIES,	/* no. of directory entries */
++};
++
++/***************************************************************************
++*  OCM dircetory Entries default
++***************************************************************************/
++static struct asd_ocm_dir_ent OCMDirEntriesInit[OCM_INIT_DIR_ENTRIES] =
++{
++	{
++		.type = (OCM_DE_ADDC2C_RES0),	/* Entry type  */
++		.offs = {128},			/* Offset */
++		.size = {0, 4},			/* size */
++	},
++	{
++		.type = (OCM_DE_ADDC2C_RES1),	/* Entry type  */
++		.offs = {128, 4},		/* Offset */
++		.size = {0, 4},			/* size */
++	},
++	{
++		.type = (OCM_DE_ADDC2C_RES2),	/* Entry type  */
++		.offs = {128, 8},		/* Offset */
++		.size = {0, 4},			/* size */
++	},
++	{
++		.type = (OCM_DE_ADDC2C_RES3),	/* Entry type  */
++		.offs = {128, 12},		/* Offset */
++		.size = {0, 4},			/* size */
++	},
++	{
++		.type = (OCM_DE_WIN_DRVR),	/* Entry type  */
++		.offs = {128, 16},		/* Offset */
++		.size = {128, 235, 1},		/* size */
++	},
++};
++
+ struct asd_bios_chim_struct {
+ 	char sig[4];
+ 	u8   major;          /* 1 */
+@@ -115,6 +169,28 @@
+ 	return 0;
+ }
+ 
++/**
++ * asd_write_ocm_seg - write an on chip memory (OCM) segment
++ * @asd_ha: pointer to the host adapter structure
++ * @buffer: where to read the write data
++ * @offs: offset into OCM to write to
++ * @size: how many bytes to write
++ *
++ * Return the number of bytes not written. Return 0 on success.
++ */
++static void asd_write_ocm_seg(struct asd_ha_struct *asd_ha, void *buffer,
++			    u32 offs, int size)
++{
++	u8 *p = buffer;
++	if (unlikely(asd_ha->iospace))
++		asd_write_reg_string(asd_ha, buffer, offs+OCM_BASE_ADDR, size);
++	else {
++		for ( ; size > 0; size--, offs++, p++)
++			asd_write_ocm_byte(asd_ha, offs, *p);
++	}
++	return;
++}
++
+ #define THREE_TO_NUM(X) ((X)[0] | ((X)[1] << 8) | ((X)[2] << 16))
+ 
+ static int asd_find_dir_entry(struct asd_ocm_dir *dir, u8 type,
+@@ -212,6 +288,67 @@
+ 	return err;
+ }
+ 
++static void
++asd_hwi_initialize_ocm_dir (struct asd_ha_struct *asd_ha)
++{
++	int i;
++
++	/* Zero OCM */
++	for (i = 0; i < OCM_MAX_SIZE; i += 4)
++		asd_write_ocm_dword(asd_ha, i, 0);
++
++	/* Write Dir */
++	asd_write_ocm_seg(asd_ha, &OCMDirInit, 0,
++			  sizeof(struct asd_ocm_dir));
++
++	/* Write Dir Entries */
++	for (i = 0; i < OCM_INIT_DIR_ENTRIES; i++)
++		asd_write_ocm_seg(asd_ha, &OCMDirEntriesInit[i],
++				  sizeof(struct asd_ocm_dir) +
++				  (i * sizeof(struct asd_ocm_dir_ent))
++				  , sizeof(struct asd_ocm_dir_ent));
++
++}
++
++static int
++asd_hwi_check_ocm_access (struct asd_ha_struct *asd_ha)
++{
++	struct pci_dev *pcidev = asd_ha->pcidev;
++	u32 reg;
++	int err = 0;
++	u32 v;
++
++	/* check if OCM has been initialized by BIOS */
++	reg = asd_read_reg_dword(asd_ha, EXSICNFGR);
++
++	if (!(reg & OCMINITIALIZED)) {
++		err = pci_read_config_dword(pcidev, PCIC_INTRPT_STAT, &v);
++		if (err) {
++			asd_printk("couldn't access PCIC_INTRPT_STAT of %s\n",
++					pci_name(pcidev));
++			goto out;
++		}
++
++		printk(KERN_INFO "OCM is not initialized by BIOS,"
++		       "reinitialize it and ignore it, current IntrptStatus"
++		       "is 0x%x\n", v);
++
++		if (v)
++			err = pci_write_config_dword(pcidev,
++						     PCIC_INTRPT_STAT, v);
++		if (err) {
++			asd_printk("couldn't write PCIC_INTRPT_STAT of %s\n",
++					pci_name(pcidev));
++			goto out;
++		}
++
++		asd_hwi_initialize_ocm_dir(asd_ha);
++
++	}
++out:
++	return err;
++}
++
+ /**
+  * asd_read_ocm - read on chip memory (OCM)
+  * @asd_ha: pointer to the host adapter structure
+@@ -221,6 +358,9 @@
+ 	int err;
+ 	struct asd_ocm_dir *dir;
+ 
++	if (asd_hwi_check_ocm_access(asd_ha))
++		return -1;
++
+ 	dir = kmalloc(sizeof(*dir), GFP_KERNEL);
+ 	if (!dir) {
+ 		asd_printk("no memory for ocm dir\n");
+@@ -695,11 +835,29 @@
+ 	int en_phys = 0;
+ 	int rep_phys = 0;
+ 	struct asd_manuf_phy_param *phy_param;
++	struct asd_manuf_phy_param dflt_phy_param;
+ 
+ 	phy_param = asd_find_ll_by_id(manuf_sec, 'P', 'M');
+ 	if (!phy_param) {
+ 		ASD_DPRINTK("ms: no phy parameters found\n");
+-		return -ENOENT;
++		ASD_DPRINTK("ms: Creating default phy parameters\n");
++		dflt_phy_param.sig[0] = 'P';
++		dflt_phy_param.sig[1] = 'M';
++		dflt_phy_param.maj = 0;
++		dflt_phy_param.min = 2;
++		dflt_phy_param.num_phy_desc = 8;
++		dflt_phy_param.phy_desc_size = sizeof(struct asd_manuf_phy_desc);
++		for (i =0; i < ASD_MAX_PHYS; i++) {
++			dflt_phy_param.phy_desc[i].state = 0;
++			dflt_phy_param.phy_desc[i].phy_id = i;
++			dflt_phy_param.phy_desc[i].phy_control_0 = 0xf6;
++			dflt_phy_param.phy_desc[i].phy_control_1 = 0x10;
++			dflt_phy_param.phy_desc[i].phy_control_2 = 0x43;
++			dflt_phy_param.phy_desc[i].phy_control_3 = 0xeb;
++		}
++
++		phy_param = &dflt_phy_param;
++
+ 	}
+ 
+ 	if (phy_param->maj != 0) {
+@@ -727,6 +885,11 @@
+ 			en_phys++;
+ 			break;
+ 		}
++        ASD_DPRINTK("ms: phy_controls 0-3: %2X %2X %2X %2X\n", 
++                pd->phy_control_0,
++                pd->phy_control_1,
++                pd->phy_control_2,
++                pd->phy_control_3);
+ 		asd_ha->hw_prof.phy_desc[i].phy_control_0 = pd->phy_control_0;
+ 		asd_ha->hw_prof.phy_desc[i].phy_control_1 = pd->phy_control_1;
+ 		asd_ha->hw_prof.phy_desc[i].phy_control_2 = pd->phy_control_2;
+@@ -887,15 +1050,29 @@
+ static int asd_process_ctrl_a_user(struct asd_ha_struct *asd_ha,
+ 				   struct asd_flash_dir *flash_dir)
+ {
+-	int err;
++	int err, i;
+ 	u32 offs, size;
+ 	struct asd_ll_el *el;
+ 	struct asd_ctrla_phy_settings *ps;
++	struct asd_ctrla_phy_settings dflt_ps;
+ 
+ 	err = asd_find_flash_de(flash_dir, FLASH_DE_CTRL_A_USER, &offs, &size);
+ 	if (err) {
+ 		ASD_DPRINTK("couldn't find CTRL-A user settings section\n");
+-		goto out;
++		ASD_DPRINTK("Creating default CTRL-A user settings section\n");
++
++		dflt_ps.id0 = 'h';
++		dflt_ps.num_phys = 8;
++		for (i =0; i < ASD_MAX_PHYS; i++) {
++			memcpy(dflt_ps.phy_ent[i].sas_addr,
++			       asd_ha->hw_prof.sas_addr, SAS_ADDR_SIZE);
++			dflt_ps.phy_ent[i].sas_link_rates = 0x98;
++			dflt_ps.phy_ent[i].flags = 0x0;
++			dflt_ps.phy_ent[i].sata_link_rates = 0x0;
++		}
++
++		size = sizeof(struct asd_ctrla_phy_settings);
++		ps = &dflt_ps;
+ 	}
+ 
+ 	if (size == 0)
+diff -ru a/drivers/scsi/aic94xx/aic94xx_seq.c b/drivers/scsi/aic94xx/aic94xx_seq.c
+--- a/drivers/scsi/aic94xx/aic94xx_seq.c	2006-09-21 12:44:46.714852635 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_seq.c	2006-09-21 10:53:03.103645386 -0500
+@@ -42,7 +42,12 @@
+  * plenty.
+  */
+ #define PAUSE_DELAY 1
+-#define PAUSE_TRIES 1000
++#define PAUSE_TRIES 2000
++
++static int asd_seq_start_lseq(struct asd_ha_struct *asd_ha, int lseq);
++static void asd_init_lseq_mip(struct asd_ha_struct *asd_ha, u8 lseq);
++static void asd_init_lseq_mdp(struct asd_ha_struct *asd_ha,  int lseq);
++static void asd_init_lseq_cio(struct asd_ha_struct *asd_ha, int lseq);
+ 
+ /* ---------- Pause/Unpause CSEQ/LSEQ ---------- */
+ 
+@@ -173,8 +178,8 @@
+ 		udelay(PAUSE_DELAY);
+ 	} while (--count > 0);
+ 
+-	ASD_DPRINTK("couldn't unpause LSEQ %d\n", lseq);
+-	return 0;
++/*	ASD_DPRINTK("couldn't unpause LSEQ %d\n", lseq); */
++	return -1;
+ }
+ 
+ 
+@@ -199,6 +204,24 @@
+ 	return err;
+ }
+ 
++int asd_unpause_phy(struct sas_phy* sas_phy, int reset) 
++{
++	int res;
++
++    if (reset) {
++        asd_seq_pause_lseq(sas_phy->ha->lldd_ha, sas_phy->id);
++//		asd_init_lseq_mip(sas_phy->ha->lldd_ha, sas_phy->id);
++//		asd_init_lseq_mdp(sas_phy->ha->lldd_ha, sas_phy->id);
++//      asd_init_lseq_cio(sas_phy->ha->lldd_ha, sas_phy->id);
++        ASD_DPRINTK("LSEQ %d, restarting\n", sas_phy->id);
++        res = asd_seq_start_lseq(sas_phy->ha->lldd_ha, sas_phy->id);
++    } else {
++        res = asd_seq_unpause_lseq(sas_phy->ha->lldd_ha, sas_phy->id);
++    }
++    
++    return res;
++}
++
+ /* ---------- Downloading CSEQ/LSEQ microcode ---------- */
+ 
+ static int asd_verify_cseq(struct asd_ha_struct *asd_ha, const u8 *_prog,
+@@ -627,6 +650,7 @@
+ 	asd_write_reg_word(asd_ha, LmSEQ_CONCTL(lseq), 0);
+ 	asd_write_reg_byte(asd_ha, LmSEQ_CONSTAT(lseq), 0);
+ 	asd_write_reg_byte(asd_ha, LmSEQ_CONNECTION_MODES(lseq), 0);
++	asd_write_reg_word(asd_ha, LmSEQ_COPY_SMP_CONN_TAG(lseq), 0);
+ 	asd_write_reg_word(asd_ha, LmSEQ_REG1_ISR(lseq), 0);
+ 	asd_write_reg_word(asd_ha, LmSEQ_REG2_ISR(lseq), 0);
+ 	asd_write_reg_word(asd_ha, LmSEQ_REG3_ISR(lseq), 0);
+@@ -645,7 +669,7 @@
+ 	asd_write_reg_byte(asd_ha, LmSEQ_EST_NEXUS_SCB_HEAD(lseq), 0);
+ 	asd_write_reg_byte(asd_ha, LmSEQ_EST_NEXUS_SCB_TAIL(lseq), 0);
+ 	asd_write_reg_byte(asd_ha, LmSEQ_EST_NEXUS_BUF_AVAIL(lseq), 0);
+-	asd_write_reg_dword(asd_ha, LmSEQ_TIMEOUT_CONST(lseq), 0);
++/* not in spec? */	asd_write_reg_dword(asd_ha, LmSEQ_TIMEOUT_CONST(lseq), 0);
+ 	asd_write_reg_word(asd_ha, LmSEQ_ISR_SAVE_SINDEX(lseq), 0);
+ 	asd_write_reg_word(asd_ha, LmSEQ_ISR_SAVE_DINDEX(lseq), 0);
+ 
+@@ -777,7 +801,7 @@
+ 	asd_write_reg_word(asd_ha, LmSEQ_PM_TABLE_PTR(lseq), 0);
+ 	asd_write_reg_word(asd_ha, LmSEQ_SATA_INTERLOCK_TMR_SAVE(lseq), 0);
+ 	asd_write_reg_word(asd_ha, LmSEQ_IP_BITL(lseq), 0);
+-	asd_write_reg_word(asd_ha, LmSEQ_COPY_SMP_CONN_TAG(lseq), 0);
++	asd_write_reg_word(asd_ha, LmSEQ_CMD_XMIT_TIMEOUT(lseq), 0);
+ 	asd_write_reg_byte(asd_ha, LmSEQ_P0M2_OFFS1AH(lseq), 0);
+ 
+ 	/* LSEQ Mode dependent, mode 4/5, page 0 setup. */
+@@ -834,7 +858,7 @@
+ 	asd_write_reg_byte(asd_ha, LmSEQ_SDB_NUM_TAGS(lseq), 0);
+ 	asd_write_reg_byte(asd_ha, LmSEQ_SDB_CURR_TAG(lseq), 0);
+ 
+-	/* LSEQ Mode Dependent 1, page 2 setup. */
++    /* LSEQ Mode Dependent 1, page 2 setup. */
+ 	asd_write_reg_dword(asd_ha, LmSEQ_TX_ID_ADDR_FRAME(lseq), 0);
+ 	asd_write_reg_dword(asd_ha, LmSEQ_TX_ID_ADDR_FRAME(lseq)+4, 0);
+ 	asd_write_reg_dword(asd_ha, LmSEQ_OPEN_TIMER_TERM_TS(lseq), 0);
+@@ -898,8 +922,9 @@
+ 
+ 		/* Workaround needed by SEQ to fix a SATA issue is to exclude
+ 		 * certain SCB sites from the free list. */
+-		if (!SCB_SITE_VALID(site_no))
++		if (!SCB_SITE_VALID(site_no)) {
+ 			continue;
++        }
+ 
+ 		if (asd_ha->seq.last_scb_site_no == 0)
+ 			asd_ha->seq.last_scb_site_no = site_no;
+@@ -986,8 +1011,14 @@
+ 	u8  *sas_addr;
+ 	int  i;
+ 
++	/* Enable Blind SG Move. */
++	asd_write_reg_dword(asd_ha, LmMODECTL(lseq), LmBLIND48);
++	asd_write_reg_word(asd_ha, LmM3SATATIMER(lseq),
++			   ASD_SATA_INTERLOCK_TIMEOUT);
++
+ 	/* Enable ARP2HALTC (ARP2 Halted from Halt Code Write). */
+-	asd_write_reg_dword(asd_ha, LmARP2INTEN(lseq), EN_ARP2HALTC);
++	//asd_write_reg_dword(asd_ha, LmARP2INTEN(lseq), EN_ARP2HALTC);
++	asd_write_reg_dword(asd_ha, LmARP2INTEN(lseq), (EN_ARP2HALTC | ARP2HANDLED));
+ 
+ 	asd_write_reg_byte(asd_ha, LmSCRATCHPAGE(lseq), 0);
+ 
+@@ -1029,14 +1060,23 @@
+ 	/* Initialize Mode 1 Transfer Level to 256. */
+ 	asd_write_reg_byte(asd_ha, LmMnXFRLVL(lseq, 1), LmMnXFRLVL_256);
+ 
+-	/* Initialize Program Count. */
++	/* Initialize Interrupt Vector[0-10] address in Mode 3.
++	 * See the comment on CSEQ_INT_* */
++	asd_write_reg_word(asd_ha, LmM3INTVEC0(lseq), LSEQ_INT_VEC0);
++	asd_write_reg_word(asd_ha, LmM3INTVEC1(lseq), LSEQ_INT_VEC1);
++	asd_write_reg_word(asd_ha, LmM3INTVEC2(lseq), LSEQ_INT_VEC2);
++	asd_write_reg_word(asd_ha, LmM3INTVEC3(lseq), LSEQ_INT_VEC3);
++	asd_write_reg_word(asd_ha, LmM3INTVEC4(lseq), LSEQ_INT_VEC4);
++	asd_write_reg_word(asd_ha, LmM3INTVEC5(lseq), LSEQ_INT_VEC5);
++	asd_write_reg_word(asd_ha, LmM3INTVEC6(lseq), LSEQ_INT_VEC6);
++	asd_write_reg_word(asd_ha, LmM3INTVEC7(lseq), LSEQ_INT_VEC7);
++	asd_write_reg_word(asd_ha, LmM3INTVEC8(lseq), LSEQ_INT_VEC8);
++	asd_write_reg_word(asd_ha, LmM3INTVEC9(lseq), LSEQ_INT_VEC9);
++	asd_write_reg_word(asd_ha, LmM3INTVEC10(lseq), LSEQ_INT_VEC10);
++	
++    /* Initialize Program Count. */
+ 	asd_write_reg_word(asd_ha, LmPRGMCNT(lseq), LSEQ_IDLE_LOOP_ENTRY);
+ 
+-	/* Enable Blind SG Move. */
+-	asd_write_reg_dword(asd_ha, LmMODECTL(lseq), LmBLIND48);
+-	asd_write_reg_word(asd_ha, LmM3SATATIMER(lseq),
+-			   ASD_SATA_INTERLOCK_TIMEOUT);
+-
+ 	(void) asd_read_reg_dword(asd_ha, LmREQMBX(lseq));
+ 
+ 	/* Clear Primitive Status 0 and 1. */
+@@ -1077,27 +1117,14 @@
+ 	/* Enable SATA Port Multiplier. */
+ 	asd_write_reg_byte(asd_ha, LmMnSATAFS(lseq, 1), 0x80);
+ 
+-	/* Initialize Interrupt Vector[0-10] address in Mode 3.
+-	 * See the comment on CSEQ_INT_* */
+-	asd_write_reg_word(asd_ha, LmM3INTVEC0(lseq), LSEQ_INT_VEC0);
+-	asd_write_reg_word(asd_ha, LmM3INTVEC1(lseq), LSEQ_INT_VEC1);
+-	asd_write_reg_word(asd_ha, LmM3INTVEC2(lseq), LSEQ_INT_VEC2);
+-	asd_write_reg_word(asd_ha, LmM3INTVEC3(lseq), LSEQ_INT_VEC3);
+-	asd_write_reg_word(asd_ha, LmM3INTVEC4(lseq), LSEQ_INT_VEC4);
+-	asd_write_reg_word(asd_ha, LmM3INTVEC5(lseq), LSEQ_INT_VEC5);
+-	asd_write_reg_word(asd_ha, LmM3INTVEC6(lseq), LSEQ_INT_VEC6);
+-	asd_write_reg_word(asd_ha, LmM3INTVEC7(lseq), LSEQ_INT_VEC7);
+-	asd_write_reg_word(asd_ha, LmM3INTVEC8(lseq), LSEQ_INT_VEC8);
+-	asd_write_reg_word(asd_ha, LmM3INTVEC9(lseq), LSEQ_INT_VEC9);
+-	asd_write_reg_word(asd_ha, LmM3INTVEC10(lseq), LSEQ_INT_VEC10);
+ 	/*
+ 	 * Program the Link LED control, applicable only for
+ 	 * Chip Rev. B or later.
+ 	 */
+ 	asd_write_reg_dword(asd_ha, LmCONTROL(lseq),
+ 			    (LEDTIMER | LEDMODE_TXRX | LEDTIMERS_100ms));
+-
+-	/* Set the Align Rate for SAS and STP mode. */
++	
++    /* Set the Align Rate for SAS and STP mode. */
+ 	asd_write_reg_byte(asd_ha, LmM1SASALIGN(lseq), SAS_ALIGN_DEFAULT);
+ 	asd_write_reg_byte(asd_ha, LmM1STPALIGN(lseq), STP_ALIGN_DEFAULT);
+ }
+diff -ru a/drivers/scsi/aic94xx/aic94xx_seq.h b/drivers/scsi/aic94xx/aic94xx_seq.h
+--- a/drivers/scsi/aic94xx/aic94xx_seq.h	2006-09-21 12:44:46.717852349 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_seq.h	2006-09-20 17:17:09.000000000 -0500
+@@ -32,6 +32,7 @@
+ int asd_unpause_cseq(struct asd_ha_struct *asd_ha);
+ int asd_pause_lseq(struct asd_ha_struct *asd_ha, u8 lseq_mask);
+ int asd_unpause_lseq(struct asd_ha_struct *asd_ha, u8 lseq_mask);
++int asd_unpause_phy(struct sas_phy* sas_phy, int reset);
+ int asd_init_seqs(struct asd_ha_struct *asd_ha);
+ int asd_start_seqs(struct asd_ha_struct *asd_ha);
+ 
+diff -ru a/drivers/scsi/sas/sas_discover.c b/drivers/scsi/sas/sas_discover.c
+--- a/drivers/scsi/sas/sas_discover.c	2006-09-21 12:44:47.897740163 -0500
++++ b/drivers/scsi/sas/sas_discover.c	2006-09-20 12:46:55.000000000 -0500
+@@ -866,12 +866,10 @@
+ cont1:
+ 	/* Get WWN */
+ 	if (dev->port->oob_mode != SATA_OOB_MODE) {
+-#ifdef notdef
+-		memcpy(dev->sas_addr, dev->sata_dev.rps_resp.rps.stp_sas_addr,
+-		       SAS_ADDR_SIZE);
+-#else
+ 		WARN_ON(SAS_ADDR(dev->sata_dev.rps_resp.rps.stp_sas_addr) == 0LL);
+-#endif
++        if ( SAS_ADDR(dev->sata_dev.rps_resp.rps.stp_sas_addr) != 0LL )
++    		memcpy(dev->sas_addr, dev->sata_dev.rps_resp.rps.stp_sas_addr,
++	    	       SAS_ADDR_SIZE);
+ 	} else if (dev->sata_dev.command_set == ATA_COMMAND_SET &&
+ 		   (le16_to_cpu(dev->sata_dev.identify_x[108]) & 0xF000)
+ 		   == 0x5000) {
+@@ -888,18 +886,18 @@
+ 	if (!dev->parent)
+ 		sas_sata_propagate_sas_addr(dev);
+ 
+-/*DWD*/	 {
+-		struct LU *lu = sas_alloc_lu();
++    /*DWD*/	 if (!dev->sata_dev.lu) {
++        struct LU *lu = sas_alloc_lu();
+ 
+-		if (lu) {
+-			lu->parent = dev;
+-			memset(lu->LUN, 0, 8);
+-			lu->lu_obj.kset = dev->dev_obj.kset;
+-			lu->lu_obj.parent = &dev->dev_obj;
+-			lu->lu_obj.ktype = dev->dev_obj.ktype;
+-			kobject_set_name(&lu->lu_obj, "%016llx", SAS_ADDR(lu->LUN));
+-			dev->sata_dev.lu = lu;
+-		}
++        if (lu) {
++            lu->parent = dev;
++            memset(lu->LUN, 0, 8);
++            lu->lu_obj.kset = dev->dev_obj.kset;
++            lu->lu_obj.parent = &dev->dev_obj;
++            lu->lu_obj.ktype = dev->dev_obj.ktype;
++            kobject_set_name(&lu->lu_obj, "%016llx", SAS_ADDR(lu->LUN));
++            dev->sata_dev.lu = lu;
++        }
+ 	}
+ 	/* XXX Hint: register this SATA device with SATL.
+ 	   When this returns, dev->sata_dev->lu is alive and
+@@ -1713,6 +1711,9 @@
+ 		list_del_init(head);
+ 		spin_unlock(&disc->disc_event_lock);
+ 
++        if ( !sas_ha->first_discovery_done )
++            ssleep(2); /* Let everything get moving */
++
+ 		switch (disc_ev) {
+ 		case DISCE_DISCOVER_DOMAIN:
+ 			if (try_module_get(sas_ha->lldd_module)) {
+diff -ru a/drivers/scsi/sas/sas_expander.c b/drivers/scsi/sas/sas_expander.c
+--- a/drivers/scsi/sas/sas_expander.c	2006-09-21 12:44:47.907739213 -0500
++++ b/drivers/scsi/sas/sas_expander.c	2006-09-20 12:48:48.000000000 -0500
+@@ -177,7 +177,6 @@
+     struct work_struct          work;
+     void*                       dev;
+     int                         phy_id;
+-    int                         reset_only;
+ };
+ 
+ struct workqueue_struct* smp_reset_work_queue = NULL;
+@@ -354,6 +353,14 @@
+                         SAS_DPRINTK("ex %016llx phy%02d dev %016llx: linkrate %1x\n", 
+                                 SAS_ADDR(dev->sas_addr), phy->phy_id, 
+                                 SAS_ADDR(phy->attached_sas_addr), phy->linkrate);
++
++                        if ( !dr->tproto ) {
++                            SAS_DPRINTK("ex %016llx phy%02d dev %016llx: BAD TPROTO... ASSUME STP\n", 
++                                    SAS_ADDR(dev->sas_addr), phy->phy_id, 
++                                    SAS_ADDR(phy->attached_sas_addr));
++                            phy->attached_tproto = SAS_PROTO_STP;
++                        }
++
+                         retries = 100;
+                         break;
+                     }
+@@ -2181,7 +2188,7 @@
+  * 	   SAS_TASK_UNDELIVERED (Task delivery or Target failure)
+  */
+ void sas_reset_phy_task( void* data);
+-int sas_execute_disable_enable_phy(struct domain_device *dev, int reset_only)
++int sas_execute_disable_enable_phy(struct domain_device *dev, int dont_queue)
+ {
+ 	int res = -ENOSYS;
+     int i = 0;
+@@ -2212,23 +2219,29 @@
+             INIT_WORK(&srwt->work, sas_reset_phy_task, srwt);
+             srwt->dev = dev->parent;
+             srwt->phy_id = i;
+-            srwt->reset_only = reset_only;
+ 
+             SAS_DPRINTK("%s: B. Adding task to workqueue for Phy %d\n", __FUNCTION__, srwt->phy_id);
+-            res = queue_work(smp_reset_work_queue, &srwt->work);
++
++            if (!dont_queue)
++                res = queue_work(smp_reset_work_queue, &srwt->work);
++            else {
++                sas_reset_phy_task(srwt);
++                res = 0;
++            }
+         }
+     }
+ 
+ 	return res;
+ }
+ 
+-#define SAS_RESET_PHY_TASK_JIFFIES   (5 * HZ)
+-static unsigned long  sas_reset_phy_task_last_ha_reset = 0;
+-void sas_reset_phy_task( void* data)
++void sas_reset_phy_task( void* data )
+ {
+     struct smp_reset_work_task* srwt = (struct smp_reset_work_task*)data;
+     struct domain_device*       dev = NULL;
+     int res = 0;
++	struct domain_device *child, *n;
++    struct ex_phy *phy;
++    struct sas_ha_struct *sas_ha;
+     
+     BUG_ON (!srwt || !srwt->dev || !(((struct domain_device*)srwt->dev)->port) );
+     if (!srwt || !srwt->dev || !(((struct domain_device*)srwt->dev)->port) ) {
+@@ -2236,27 +2249,40 @@
+         return;
+     }
+     dev = (struct domain_device*)srwt->dev;
++    sas_ha = dev->port->ha;
++    
++    SAS_DPRINTK("%s: Attempting Phy %d\n", __FUNCTION__, srwt->phy_id);
+ 
+-    if ( !srwt->reset_only ) {
+-        if (  (sas_reset_phy_task_last_ha_reset + SAS_RESET_PHY_TASK_JIFFIES) < jiffies ) {
+-            sas_reset_phy_task_last_ha_reset = jiffies;
+-#if 0
+-            SAS_DPRINTK("%s: Attempting Exp to Host reset all\n", __FUNCTION__);
+-            //smp_enable_phy(dev, 0, PHY_LINKRATE_G1);
+-            smp_enable_phy(dev, 0, 0);
+-            msleep(25); 
+-            smp_enable_phy(dev, 1, 0);
+-            msleep(25); 
+-            smp_enable_phy(dev, 2, 0);
+-            msleep(25); 
+-            smp_enable_phy(dev, 3, 0);
+-            msleep(100);
+-#endif
++    res = smp_enable_phy(dev, srwt->phy_id, 0);
++    msleep(300);
++    
++    sas_ex_phy_discover(dev, srwt->phy_id);
++    phy = &dev->ex_dev.ex_phy[srwt->phy_id];
++
++    list_for_each_entry_safe(child, n, &dev->ex_dev.children, siblings) {
++        if (SAS_ADDR(child->sas_addr) == SAS_ADDR(phy->attached_sas_addr)) {
++            if (child->dev_type == SATA_DEV) {
++                res = sas_get_report_phy_sata(dev, srwt->phy_id,
++                        &child->sata_dev.rps_resp);
++
++                if (res) {
++                    SAS_DPRINTK("report phy sata to %016llx:0x%x returned "
++                            "0x%x\n", SAS_ADDR(dev->sas_addr), srwt->phy_id, res);
++                    return;
++                }
++                memcpy(child->frame_rcvd, &child->sata_dev.rps_resp.rps.fis,
++                        sizeof(struct dev_to_host_fis));
++
++                if (sas_ha->lldd_dev_gone)
++                    sas_ha->lldd_dev_gone(child);
++                if (try_module_get(sas_ha->lldd_module)) {
++                    if (sas_ha->lldd_dev_found) 
++                        res = sas_ha->lldd_dev_found(child);
++                    module_put(sas_ha->lldd_module);
++                }
++            }
+         }
+     }
+-    SAS_DPRINTK("%s: Attempting Phy %d reset_only %d\n", 
+-            __FUNCTION__, srwt->phy_id, srwt->reset_only);
+-    res = smp_enable_phy(dev, srwt->phy_id, 0);
+     
+     if ( res )
+     {
+diff -ru a/drivers/scsi/sas/sas_init.c b/drivers/scsi/sas/sas_init.c
+--- a/drivers/scsi/sas/sas_init.c	2006-09-21 12:44:47.483779524 -0500
++++ b/drivers/scsi/sas/sas_init.c	2006-09-19 11:40:35.000000000 -0500
+@@ -61,6 +61,12 @@
+ {
+         return sprintf(buf,"%d\n",sas_ha->first_discovery_done);
+ }
++static ssize_t sas_ha_dump_data(struct sas_ha_struct *sas_ha, char *buf)
++{
++    if ( sas_ha->lldd_dump )
++        sas_ha->lldd_dump(sas_ha);
++    return 0;
++}
+ /* ---------- SAS HA Class ---------- */
+ 
+ #define to_sas_ha(_obj) container_of(to_kset(_obj),struct sas_ha_struct,ha_kset)
+@@ -89,6 +95,7 @@
+ 	__ATTR(ha_name, 0444, sas_ha_name_show, NULL),
+ 	__ATTR(device_name, 0444, sas_ha_addr_show, NULL),
+         __ATTR(first_scan_done, 0444, sas_ha_scan_show, NULL),
++        __ATTR(dump_data, 0444, sas_ha_dump_data, NULL),
+ 	__ATTR_NULL,
+ };
+ 
+diff -ru a/drivers/scsi/sas/sas_phy.c b/drivers/scsi/sas/sas_phy.c
+--- a/drivers/scsi/sas/sas_phy.c	2006-09-21 12:44:47.912738737 -0500
++++ b/drivers/scsi/sas/sas_phy.c	2006-09-20 17:41:50.000000000 -0500
+@@ -92,6 +92,14 @@
+ 			phy->ha->lldd_control_phy(phy, PHY_FUNC_DISABLE);
+         else if (buf[0] == '2')
+ 			phy->ha->lldd_control_phy(phy, PHY_FUNC_HARD_RESET);
++        else if (buf[0] == '8') {
++            if ( phy->ha->lldd_unpause_phy )
++                phy->ha->lldd_unpause_phy(phy, 0);
++        }
++        else if (buf[0] == '9') {
++            if ( phy->ha->lldd_unpause_phy )
++                phy->ha->lldd_unpause_phy(phy, 1);
++        }
+ 	}
+ 	return size;
+ }
+@@ -177,6 +185,35 @@
+ 	return sas_show_oob_mode(phy->oob_mode, buf);
+ }
+ 
++static ssize_t sas_phy_ec_mode_show(struct sas_phy *phy, char *buf)
++{
++	int res = 0;
++    if (!phy->enabled)
++		return 0;
++    res = sprintf(buf, "Phy %d Error Counts\n"
++            "   arp2waitto:    %u\n" 
++            "   arp2haltc:     %u\n" 
++            "   arp2illopc:    %u\n" 
++            "   arp2perr:      %u\n" 
++            "   arp2cioperr:   %u\n" 
++            "   arp2break3:    %u\n" 
++            "   arp2break2:    %u\n" 
++            "   arp2break1:    %u\n" 
++            "   arp2break0:    %u\n",
++            phy->id,
++            phy->ecounts.arp2waitto,
++            phy->ecounts.arp2haltc,
++            phy->ecounts.arp2illopc,
++            phy->ecounts.arp2perr,
++            phy->ecounts.arp2cioperr,
++            phy->ecounts.arp2break3,
++            phy->ecounts.arp2break2,
++            phy->ecounts.arp2break1,
++            phy->ecounts.arp2break0 );
++
++	return res;
++}
++
+ struct phy_attribute {
+ 	struct attribute attr;
+ 	ssize_t (*show)(struct sas_phy *phy, char *);
+@@ -195,6 +232,7 @@
+ 	__ATTR(linkrate, 0444, sas_phy_linkrate_show, NULL),
+ 	__ATTR(sas_addr, 0444, sas_phy_addr_show, NULL),
+ 	__ATTR(oob_mode, 0444, sas_phy_oob_mode_show, NULL),
++	__ATTR(err_counts, 0444, sas_phy_ec_mode_show, NULL),
+ 	__ATTR_NULL,
+ };
+ 
+diff -ru a/include/scsi/sas/sas_class.h b/include/scsi/sas/sas_class.h
+--- a/include/scsi/sas/sas_class.h	2006-09-21 12:44:47.330794070 -0500
++++ b/include/scsi/sas/sas_class.h	2006-09-20 17:41:09.000000000 -0500
+@@ -87,6 +87,18 @@
+ 	struct list_head el;
+ };
+ 
++struct sas_phy_errors {
++	u32     arp2waitto;
++    u32     arp2haltc;
++    u32     arp2illopc;
++    u32     arp2perr;
++    u32     arp2cioperr;
++    u32     arp2break3;
++    u32     arp2break2;
++    u32     arp2break1;
++    u32     arp2break0;
++};
++
+ /* The phy pretty much is controlled by the LLDD.
+  * The class only reads those fields.
+  */
+@@ -129,6 +141,8 @@
+ 	struct list_head port_phy_el; /* driver:RO */
+ 	struct sas_port      *port; /* Class:RW, driver: RO */
+ 
++    struct sas_phy_errors      ecounts;
++
+ 	struct sas_ha_struct *ha; /* may be set; the class sets it anyway */
+ 
+ 	void *lldd_phy;		  /* not touched by the sas_class_code */
+@@ -290,6 +304,11 @@
+ 
+ 	/* Phy management */
+ 	int (*lldd_control_phy)(struct sas_phy *, enum phy_func);
++	int (*lldd_unpause_phy)(struct sas_phy*, int);
++	
++    /* Debug */
++	void (*lldd_dump)(struct sas_ha_struct *);
++
+ 
+ 	void *lldd_ha;		  /* not touched by sas class code */
+ };
+

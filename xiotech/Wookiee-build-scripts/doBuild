@@ -1,0 +1,97 @@
+#!/bin/bash
+#
+# doBuild - Invoke a version-controlled build-specific build script.
+#
+# Copyright 2007 Xiotech Corporation. All rights reserved.
+#
+# Mark D. Rustad, 10/10/2007.
+#
+
+export SDIR=Wookiee-build-scripts
+build_home=~build
+
+if [[ "${BUILD_USER}" != "build" || "${USER}" != "build" ]]; then
+    echo "You must be logged in as build to run this."
+    echo "One way to do this is to use the command: \"su -l build\""
+    echo "BUILD_USER=${BUILD_USER}, USER=${USER}"
+    exit 1
+fi
+
+if [[ "`uname -p`" != "i686" || "`uname -n`" != "wookieebuildpc" ]]; then
+    echo "You do not appear to be on the correct machine."
+    echo "You should be on the wookieebuildpc machine."
+    exit 1
+fi
+
+cd ${build_home}
+
+usage() {
+    echo "$0 [-h] [-n] build [args...]"
+    echo ""
+    echo "-h    Display help"
+    echo "-n    Do not update ${SDIR}"
+    echo "build What build to perform (KRISPYKREMES, etc)"
+    echo "args  Arguments to build script"
+}
+
+fail() {
+    echo "$1"
+    exit 1
+}
+
+check() {
+    local cmd=`which $0`
+    local base=`basename ${cmd}`
+    test -f ${cmd} || fail "${cmd} not found"
+    test -f ${SDIR}/${base} || fail "${SDIR}/${base} not found"
+    if ! cmp ${cmd} ${SDIR}/${base}; then
+        echo "${cmd} did not match."
+        while { echo -n 'Continue? [Y/N/D(iff)/U(pdate)] '; read input; } do
+            case "${input}" in
+            Y) break;;
+            n|N) fail "build cancelled.";;
+            d|D) echo "Diff of files:"; diff -u ${cmd} ${SDIR}/${base};;
+            u|U) echo "Updating $0 from ${SDIR}/${base}"
+                 cp ${SDIR}/${base} $0 || fail "Copy failed"
+                 echo "Starting updated version... $0 ${args[@]}"
+                 exec $0 "${args[@]}"
+                 echo "Funny... should not get here\!"
+                 exit 1;;
+            esac
+        done
+    fi
+}
+
+update=1
+
+while [ "${1:0:1}" = "-" ]; do
+    opt="${1:1}"
+    shift 1
+    case "${opt}" in
+    h|H) usage; exit 0;;
+    n|N) update=0;;
+    *) fail "Unknown option: ${opt}";;
+    esac
+done
+
+if [ "${update}" -eq 1 ]; then
+    echo "Updating ${SDIR}"
+    (cd ${SDIR}; svn update) || fail "svn update in ${SDIR} failed"
+else
+    echo "Not updating ${SDIR}"
+fi
+
+args=("$@")
+check
+
+export PATH=${build_home}/${SDIR}:${PATH}
+script=${1}-build
+test "${1}" != "" -a -x ${SDIR}/${script} ||
+    fail "Script ${script} not found. SDIR=${SDIR}"
+shift 1
+
+echo "Starting script ${script}"
+${script} "$@" || fail "build script ${script} failed."
+echo "build script ${script} succeeded."
+
+# vi:sw=4 ts=4 expandtab

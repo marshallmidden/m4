@@ -1,0 +1,417 @@
+#!/usr/bin/expect --
+#
+# Script to check for back-end switch
+#
+#-----------------------------------------------------------------------------
+# Globals
+set g_sw_password "UNDEFINED"
+
+# Where the ccbCL.pl script is located.
+set ccbe_at "./CCBE"
+
+# Command to run the ccbCL.pl script.
+set run_ccbcl "cd $ccbe_at ;/usr/bin/perl ccbCL.pl"
+#-----------------------------------------------------------------------------
+
+# Regular expression representing the CN prompt.
+set cn_prompt "# $"
+
+set switch_id "MDS Switch"
+
+set match "4.2(1b)"
+
+# Like perl, the real execution continues anywhere ... define the proc's first.
+
+#=============================================================================
+#
+# Tell how to run this script.
+#
+proc usage {} {
+    send_error "Usage: check_switch <ip_address_MASTER_7000> <ip_switch>"
+    exit 1
+}
+# End of usage
+
+
+
+#=============================================================================
+#
+# Defines a "safe" version of "expect_out(0,string)"
+#
+#=============================================================================
+proc safe_expect_out_0 {} {
+  global expect_out
+  
+  if {[info exists expect_out(0,string)]} {
+    return $expect_out(0,string)
+  } else {
+    return ""
+  }
+}
+
+
+#=============================================================================
+proc send_ccbcl_status { level message } {
+    global run_ccbcl
+    global cn_ip
+    set msg3 [string map {\: "-"} $message]
+
+    send_error "ccbCL: $msg3\n"
+    system "$run_ccbcl '$cn_ip':3000 -e '\"logtextmessage -v $level $msg3\"' >/dev/null"
+#    system "$run_ccbcl '$cn_ip':3000 -e '\"logtextmessage -v 0 $message\"'"
+}
+# End of send_ccbcl_status
+
+#=============================================================================
+proc send_cmd_to_ccbcl { cmd } {
+    global run_ccbcl
+    global cn_ip
+    system "$run_ccbcl '$cn_ip' -e '\"$cmd\"'"
+}
+# End of send_cmd_to_ccbcl
+
+
+#=============================================================================
+proc login_now { user password do_ssh pwnum} {
+    global cn_prompt
+    global expect_out
+    global sw_ip
+    
+    #
+    # log into CN.
+    #
+    if {$do_ssh == 1} {
+        system "rm -f /root/.ssh/known_hosts"
+
+        spawn ssh "$user@$sw_ip"
+        send_error "spawned ssh $user@$sw_ip pw# $pwnum\n"
+    } else {
+        spawn telnet -l $user $sw_ip
+        send_error "spawned telnet -l $user $sw_ip pw# $pwnum\n"
+    }
+    expect {
+        -ex "assword: " {
+            send_error "login_now, sendind password <$expect_out(0,string)>\n"
+            send "$password\r"
+        }
+        -ex "(yes/no)? " {
+            send "yes\r"
+            send_error "login_now, sending yes <$expect_out(0,string)>\n"
+            exp_continue
+        }
+        -ex ": Connection refused" {
+            send_error "login_now <$expect_out(0,string)>\n"
+            return -1
+        }
+        -ex ": No route to host" {
+            send_error "login_now <$expect_out(0,string)>\n"
+            send_ccbcl_status 0 "!\$BES=$sw_ip - No route to host."
+# This value 2 is used in sw_do_many to not print out a message.
+            exit 2
+        }
+        timeout      {
+            send_error "login_now timeout <[safe_expect_out_0]>\n"
+            send_ccbcl_status 2 "!\$BES=$sw_ip - Login Timeout"
+            exit 3
+        }
+        eof          {
+            send_error "login_now eof $sw_ip <[safe_expect_out_0]>\n"
+            return 0
+        }
+        # print messages line by line (allows finding problems).
+        -re "^(\[^\r\n]*)\[\r\n]" {
+            send_error "login_now <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+
+#    send_error "login password sent\n"
+
+# Toss the rest until prompt found
+
+    expect {
+        -re "\[\r\n]*(\[^\r\n]*)$cn_prompt" {
+            set cn_prompt "$expect_out(1,string)$cn_prompt"
+            send_error "login prompt -$cn_prompt- looks good\n"
+            return $spawn_id
+        }
+        -ex "assword: " {
+            send_error "login_now <$expect_out(0,string)>\n"
+            return -1
+        }
+        -ex "Permission denied, please try again." {
+            send_error "login_now <$expect_out(0,string)>\n"
+            return -1
+        }
+        -ex "Login incorrect" {
+            send_error "login_now <$expect_out(0,string)>\n"
+            return -1
+        }
+        -ex "Access denied" {
+            send_error "login_now <$expect_out(0,string)>\n"
+            return -1
+        }
+        timeout         {
+            send_error "login_now timeout <[safe_expect_out_0]>\n"
+            send_ccbcl_status 2 "!\$BES=$sw_ip - Login Prompt Timeout"
+            exit 3
+        }
+        eof             {
+            send_error "login_now eof <[safe_expect_out_0]>\n"
+            send_ccbcl_status 2 "!\$BES=$sw_ip - Login Prompt Drop"
+            exit 4
+        }
+        # print messages line by line (allows finding problems).
+        -re "^(\[^\r\n]*)\[\r\n]" {
+            send_error "login_now Prompt <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+    send_error "prompt problem $sw_ip\n"
+    exit 5
+}
+# End of login_now
+
+#=============================================================================
+# Log into a switch.
+#
+proc login { use_pwd use_ssh} {
+    global use_this_passwd
+    global telnet_or_ssh
+    global sw_ip
+    global g_sw_password
+
+    set pwd(0) "@dmin123"
+    set pwd(1) "Made4you"
+    set pwd(2) "made4you"
+    set pwd(3) "@dm1n123"
+    set pwd(4) "@dmin1234"
+    set pwd(5) "admin123#"
+    set pwd(6) "adm1n123"
+    set pwd(7) "admin@123"
+    set pwd(8) "x10t3ch1"
+    set pwd(9) "x10t3ch!"
+    set pwd(10) "password"
+    set pwd(11) "xiotech"
+
+    if {$g_sw_password == "UNDEFINED"} {
+        set numpwds 12
+    } else {
+        set pwd(12) $g_sw_password;
+        set numpwds 13
+    }
+
+# Initialize to previous (if any);
+    set use_this_passwd $use_pwd
+    set telnet_or_ssh $use_ssh
+
+    for {} {$use_this_passwd < $numpwds} {incr use_this_passwd 1} {
+        for {} {$telnet_or_ssh < 2} {incr telnet_or_ssh 1} {
+            set tmp_spawn [login_now "admin" $pwd($use_this_passwd) $telnet_or_ssh $use_this_passwd]
+send_error "login first tmp_spawn=$tmp_spawn\n"
+            if {$tmp_spawn == -1} {
+                close
+                wait
+                continue;
+            }
+            if {$tmp_spawn != 0} {
+                break;
+            }
+        }
+send_error "login second tmp_spawn=$tmp_spawn\n"
+        if {$tmp_spawn == 0} {
+            send_ccbcl_status 0 "!\$BES=$sw_ip - No Switch present."
+            exit 6
+        }
+        if {$tmp_spawn == -1} {
+            set telnet_or_ssh 0
+            continue;
+        }
+        break;
+    }
+send_error "login third tmp_spawn=$tmp_spawn use_this_passwd=$use_this_passwd numpwds=$numpwds\n"
+    if {$use_this_passwd >= $numpwds} {
+        send_error "no valid passwords found\n"
+        exit 7
+    }
+    return $tmp_spawn
+}
+# End of login
+
+#=============================================================================
+# Send a terminal length 0 to the switch
+#
+proc send_terminal_length_0 {} {
+    global cn_prompt
+    global expect_out
+    global sw_ip
+
+# We know login worked if here, else command exits.
+    send_error "send terminal length 0\n"
+    send "terminal length 0\n"
+    expect {
+        -re $cn_prompt {
+            send_error "prompt gotten - terminal length 0\n"
+        }
+        timeout {
+            send_error "send_terminal_length_0 timeout <[safe_expect_out_0]>\n"
+            send_ccbcl_status 2 "!\$BES=$sw_ip - Terminal Length 0 Timeout"
+            exit 23
+        }
+        eof     {
+            send_error "send_terminal_length_0 eof <[safe_expect_out_0]>\n"
+            send_ccbcl_status 2 "!\$BES=$sw_ip - Terminal Length 0 Drop"
+            exit 24
+        }
+        # print messages line by line (allows finding problems).
+        -re "^(\[^\r\n]*)\[\r\n]" {
+            send_error "send_terminal_length_0 <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+}
+
+
+#=============================================================================
+# Send exit command to the switch
+#
+proc send_exit { } {
+    send "exit\r"
+    close
+    wait
+    send_error "send_exit complete\n"
+}
+# End of send_exit
+
+#
+# Send a show version command to the switch
+#
+proc send_show_version { } {
+    global cn_prompt
+    global switchkickstart
+    global switchsystem
+    global sw_ip
+
+    set switchkickstart "None"
+    set switchsystem "None"
+
+    
+    send_error "send show version\n"
+    send "show version\r"
+    expect {
+        -re "kickstart:.*version (\[^\r\n]+)" {
+            set switchkickstart $expect_out(1,string)
+        }
+        timeout {
+            send_exit
+            exit 8
+        }
+        eof     {
+            send_exit
+            exit 9
+        }
+        default { exp_continue }
+    }
+    send "show version\r"
+    expect {
+        -re "system:.*version (\[^\r\n]+)" {
+            set switchsystem $expect_out(1,string)
+        }
+        timeout {
+            send_exit
+            exit 8
+        }
+        eof     {
+            send_exit
+            exit 9
+        }
+        default { exp_continue }
+    }
+
+    send_exit
+}
+# End of send_show_version
+
+#=============================================================================
+#
+# Main program running here.
+#
+
+# Set default timeout to 60 seconds (10 seconds was occasionally failing)
+set timeout 60 
+
+# Get the controller IP.
+set cn_ip [lindex $argv 0]
+set sw_ip [lindex $argv 1]
+set g_sw_password [lindex $argv 2]
+
+send_error "Switch IP=$sw_ip, Looking for=$match.\n"
+
+set spawn_id [login 0 0]
+    
+# Following line sets the terminal to not do "--More--"
+send_terminal_length_0
+# following line gets the version
+send_show_version 
+
+# Delete any letters or parentheses in switch kickstart.
+set sw1 $switchkickstart
+#while {[regsub {[ A-Za-z)]} $sw1 {} sw1]} {}
+regsub {[(]} $sw1 {.} sw1
+while {[regsub {[.][.]} $sw1 {.} sw1]} {}
+regsub {[)]} $sw1 {} sw1
+
+# Delete any letters or parentheses in switch system
+set sws $switchsystem
+#while {[regsub {[ A-Za-z)]} $sws {} sws]} {}
+regsub {[(]} $sws {.} sws
+while {[regsub {[.][.]} $sws {.} sws]} {}
+regsub {[)]} $sws {} sws
+
+if { "$sw1" != "$sws" } {
+    send_ccbcl_status 2 "!\$Switch kickstart $sw1 and system $sws versions do not match!"
+    exit 40
+}
+
+
+set notb $match
+regsub {[(]} $notb {.} notb
+while {[regsub {[.][.]} $notb {.} notb]} {}
+regsub {[)]} $notb {} notb
+
+send_error "Version retrieved = $sw1, $sws\n"
+# Array of switchversion numbers.
+set sw2 [split $sw1 "."]
+set s0 [lindex $sw2 0]
+set s1 [lindex $sw2 1]
+set s2 [lindex $sw2 2]
+if { "$notb" != {} } {
+    set nb [split $notb "."]
+    set n0 [lindex $nb 0]
+    set n1 [lindex $nb 1]
+    set n2 [lindex $nb 2]
+    if {$s0 < $n0 || ($s0 == $n0 && ($s1 < $n1 || ($s1 == $n1 && $s2 < $n2)))} {
+          send_ccbcl_status 2 "!\$BES=$sw_ip - version $switchkickstart is before minimum required of $notb - aborting."
+          #                                                 
+          # Logout
+          exit 30
+    }
+}
+
+send_error "Correct version found\n"
+
+# and another example...this is how to skip a sw or use != to only do one sw
+# if { $sw_ip != "10.64.100.93" } {
+#   send_error "Skipping $sw_ip\n"
+#   exit 0
+# }
+
+exit 0
+
+###
+# Modelines:
+# Local Variables:
+# tab-width: 4
+# indent-tabs-mode: nil
+# End:
+# vi:sw=4 ts=4 expandtab

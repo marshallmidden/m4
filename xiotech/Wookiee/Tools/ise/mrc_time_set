@@ -1,0 +1,221 @@
+#!/usr/bin/expect --
+#
+# Script to set the time on one or more MRCs.
+#
+# The time is gotten from the linux box that is running the script.
+# This presumes that 
+#
+# Usage: mrc_time_set [test] [<ip address> ...]
+#
+# Where:
+#   test
+#       Test the "date" command on the linux system to be producing reasonable output.
+#
+#   <ip address>
+#       Specify one or more IP addresses of ISE MRCs. Note - does not
+#       check for duplicates. IPs are accessed sequentially.
+
+# Create debugging file A.exp_internal, no debugging to stdout (0).
+# exp_internal -f A.exp_internal 0
+# Stop recording to stdout.
+log_user 0
+
+# regular expression representing the ISE prompt.  Either "seaSH> " or "root:> "
+set mrc_prompt "(seaSH|root:|root|oem:|oem)> "
+set date "undefined"
+set time "undefined"
+set timezone "undefined"
+
+set error_mess(2) "Timeout while waiting for password prompt."
+set error_mess(3) "Connection terminated while waiting for password prompt."
+set error_mess(4) "Timeout while waiting for prompt after password sent."
+set error_mess(5) "Connection terminated while waiting for prompt after password sent."
+set error_mess(6) "Timeout while waiting for prompt after nseash started."
+set error_mess(7) "Connection terminated while waiting for prompt after nseash started."
+set error_mess(8) "Timeout while waiting for prompt after configure --time sent."
+set error_mess(9) "Connection terminated while waiting for prompt after configure --time sent."
+set error_mess(10) "Timeout while waiting for prompt after configure --date sent."
+set error_mess(11) "Connection terminated while waiting for prompt after configure --date sent."
+set error_mess(12) "Timeout while waiting for prompt after configure --timezone sent."
+set error_mess(13) "Connection terminated while waiting for prompt after configure --timezone sent."
+
+#-----------------------------------------------------------------------------
+# Print out a usage example if wrong or no arguments.
+proc usage {} {
+    puts "Usage: mrc_time_set \[test] \[<ip address> ...]"
+    puts "    Typical command line to test date command relatively new and working okay."
+    puts "        mrc_time_set test"
+    puts "    Typical command line to set date/time on IPs 123.45.67.89 and 123.45.67.90"
+    puts "        mrc_time_set 123.45.67.89 123.45.67.90"
+    exit 1
+}
+
+#-----------------------------------------------------------------------------
+# Log into an ISE and start seash.
+proc login { mrc_ip } {
+    global mrc_prompt
+    
+    # log into ISE.
+    spawn ssh "root@$mrc_ip"
+#    spawn ssh "oem@$mrc_ip"
+    expect {
+        "password: "    { send "federal\r" }
+#        "password: "    { send "oem\r" }
+        "(yes/no)? "    {
+                          send "yes\r"
+                          exp_continue
+        }
+        timeout         { return 2 }
+        eof             { return 3 }
+        # Ignore all other lines of output.
+        -re "(\[^\r\n]*)\[\r\n]" {
+            exp_continue
+        }
+    }
+    
+    # Start nseash.
+    expect {
+        "\# "   { send "nseash\r" }
+        timeout { return 4 }
+        eof     { return 5 }
+        # Ignore all other lines of output.
+        -re "(\[^\r\n]*)\[\r\n]" {
+            exp_continue
+        }
+    }
+
+    # Check it started.
+    expect {
+        -re $mrc_prompt { return $spawn_id }
+        timeout         { return 6 }
+        eof             { return 7 }
+        # Ignore all other lines of output.
+        -re "(\[^\r\n]*)\[\r\n]" {
+            exp_continue
+        }
+    }
+    abort
+}
+
+#-----------------------------------------------------------------------------
+# config_network -  Configure time settings.
+proc config_network { spawn_id mrc_ip } {
+    global mrc_prompt
+    global date
+    global time
+    global timezone
+
+    get_current_time
+
+    send "configure --time=$time\r"
+    expect {
+        -re $mrc_prompt {}
+        timeout { return 8 }
+        eof     { return 9 }
+        # Ignore all other lines of output.
+        -re "(\[^\r\n]*)\[\r\n]" {
+            exp_continue
+        }
+    }
+
+    send "configure --date=$date\r"
+    expect {
+        -re $mrc_prompt {}
+        timeout { return 10 }
+        eof     { return 11 }
+        # Ignore all other lines of output.
+        -re "(\[^\r\n]*)\[\r\n]" {
+            exp_continue
+        }
+    }
+
+    send "configure --timezone=$timezone\r"
+    expect {
+        -re $mrc_prompt {}
+        timeout { return 12 }
+        eof     { return 13 }
+        # Ignore all other lines of output.
+        -re "(\[^\r\n]*)\[\r\n]" {
+            exp_continue
+        }
+    }
+
+    puts "MRC with IP $mrc_ip set to: DATE:$date TIME: $time TIMEZONE:$timezone"
+    return 0
+}
+
+#-----------------------------------------------------------------------------
+# get_current_time - On machine running on, get the date, time, timezone.
+proc get_current_time {} {
+    global date
+    global time
+    global timezone
+
+    set now [clock seconds]
+    set timezone [clock format $now -format {%Z}]
+    if {[string match "EDT" $timezone]} {
+        set timezone "EST"
+    } elseif {[string match "CDT" $timezone]} {
+        set timezone "CST"
+    } elseif {[string match "MDT" $timezone]} {
+        set timezone "MST"
+    } elseif {[string match "PDT" $timezone]} {
+        set timezone "PST"
+    }
+    set date [clock format $now -format {%d-%b-%Y}]
+    set time [clock format $now -format {%T}]
+}
+
+#-----------------------------------------------------------------------------
+# session - Open connection to specified ISE, and do our business.
+proc session { mrc_ip } {
+    global error_mess
+    set spawn_id [login $mrc_ip]
+
+    if { $spawn_id > 1 && $spawn_id < 50} {
+        puts "Could not start ssh to $mrc_ip -- $error_mess($spawn_id)"
+    } else {
+        set check_error [config_network $spawn_id $mrc_ip]
+	if { $check_error > 1 && $check_error < 50 } {
+           puts "Error while talking to MRC IP $mrc_ip -- $error_mess($check_error)"
+	}
+        close
+        wait
+    }
+}
+
+#-----------------------------------------------------------------------------
+# Main program follows, globals exist.
+
+# Two minute timeout, typical TCP retransmission timeout -- for bad networks.
+# set timeout 120
+set timeout 10
+
+if {[string match "" $argv]} {
+    usage
+}
+
+if {[string match "test" $argv]} {
+    get_current_time
+    puts "date=$date time=$time timezone=$timezone"
+    exit 0
+}
+
+foreach mrc_ip $argv {
+    session $mrc_ip
+}
+puts "Done"
+exit 0
+
+#=============================================================================
+
+# Modelines:
+# Local Variables:
+# tab-width: 4
+# indent-tabs-mode: nil
+# End:
+# vi:sw=4 ts=4 expandtab
+
+# ==============================================================================
+login ... return is a number
+session ... prints error from config_network

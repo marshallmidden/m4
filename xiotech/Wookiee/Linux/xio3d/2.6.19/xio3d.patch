@@ -1,0 +1,120 @@
+# $Id: xio3d.patch 51161 2008-05-08 22:57:25Z mdr $
+
+#--- a/drivers/acpi/sleep/poweroff.c	2004-04-03 21:38:19.000000000 -0600
+#+++ obj/drivers/acpi/sleep/poweroff.c	2005-02-14 08:45:46.000000000 -0600
+#@@ -42,6 +43,10 @@
+# 
+# void acpi_power_off(void)
+# {
+#+#ifdef	CONFIG_XIO3D
+#+	extern void	xio3d_restore_hw_poweroff(void);
+#+	xio3d_restore_hw_poweroff();
+#+#endif
+# 	/* acpi_sleep_prepare(ACPI_STATE_S5) should have already been called */
+# 	printk("%s called\n", __FUNCTION__);
+# 	local_irq_disable();
+--- a/drivers/char/Kconfig	2004-08-04 10:14:42.000000000 -0500
++++ obj/drivers/char/Kconfig	2004-08-05 11:05:14.193420190 -0500
+@@ -62,6 +62,9 @@
+ 	depends on VT && !S390 && !UML
+ 	default y
+ 
++config ECC
++	tristate "ECC memory monitoring"
++ 
+ config VT_HW_CONSOLE_BINDING
+        bool "Support for binding and unbinding console drivers"
+        depends on HW_CONSOLE
+@@ -1018,6 +1021,28 @@
+ 	  exposed to the user.  If this applies to your hardware,
+ 	  say N here.
+ 
++config XIO3D
++	tristate "Xiotech driver support"
++	depends on X86_64 || X86
++	default n
++	select HUGETLBFS
++	help
++	  Provide driver support for the Xiotech storage application.
++
++config XIO3D_3000
++	bool "Xiotech 3D model 3000"
++	depends on XIO3D
++	default n
++	help
++	  Build support for Xiotech 3D model 3000.
++
++config XIO_7000
++	bool "Xiotech Emprise model 7000"
++	depends on XIO3D
++	default n
++	help
++	  Build support for Xiotech Emprise model 7000.
++
+ config HANGCHECK_TIMER
+ 	tristate "Hangcheck timer"
+ 	depends on X86 || IA64 || PPC64
+--- a/drivers/char/Makefile	2004-08-04 10:14:42.000000000 -0500
++++ obj/drivers/char/Makefile	2004-08-05 11:08:05.151981713 -0500
+@@ -14,6 +14,7 @@
+ obj-y				+= misc.o
+ obj-$(CONFIG_VT)		+= vt_ioctl.o vc_screen.o consolemap.o \
+ 				   consolemap_deftbl.o selection.o keyboard.o
++obj-$(CONFIG_ECC)		+= ecc.o
+ obj-$(CONFIG_HW_CONSOLE)	+= vt.o defkeymap.o
+ obj-$(CONFIG_MAGIC_SYSRQ)	+= sysrq.o
+ obj-$(CONFIG_ESPSERIAL)		+= esp.o
+@@ -97,6 +98,8 @@
+ obj-$(CONFIG_DRM)		+= drm/
+ obj-$(CONFIG_PCMCIA)		+= pcmcia/
+ obj-$(CONFIG_IPMI_HANDLER)	+= ipmi/
++obj-$(CONFIG_XIO3D) += xio3d.o
++CFLAGS_xio3d.o := -Wall -Werror
+ 
+ obj-$(CONFIG_HANGCHECK_TIMER)	+= hangcheck-timer.o
+ obj-$(CONFIG_TCG_TPM)		+= tpm/
+#--- a/drivers/pci/pci.c	2004-12-10 10:20:32.000000000 -0600
+#+++ obj/drivers/pci/pci.c	2004-12-22 18:01:53.000000000 -0600
+#@@ -580,6 +580,11 @@ pci_enable_device(struct pci_dev *dev)
+# {
+# 	int err;
+# 
+#+#ifdef	CONFIG_XIO3D
+#+	extern int xio3d_disable_pci_device(struct pci_dev *);
+#+	if (xio3d_disable_pci_device(dev))
+#+		return -ENODEV;
+#+#endif	/* CONFIG_XIO3D */
+# 	if (dev->is_enabled)
+# 		return 0;
+# 
+--- a/mm/hugetlb.c
++++ b/mm/hugetlb.c
+@@ -88,6 +88,18 @@ static struct page *dequeue_huge_page(struct
+ 	return page;
+ }
+ 
++struct page *get_huge_page(struct vm_area_struct *vma, unsigned long addr)
++{
++	struct page *page;
++
++	spin_lock(&hugetlb_lock);
++	page = dequeue_huge_page(vma, addr);
++	spin_unlock(&hugetlb_lock);
++	if (page)
++		set_page_refcounted(page);
++	return page;
++}
++
+ static void free_huge_page(struct page *page)
+ {
+ 	BUG_ON(page_count(page));
+--- a/include/linux/hugetlb.h
++++ b/include/linux/hugetlb.h
+@@ -26,6 +26,7 @@
+ 			unsigned long address, int write_access);
+ int hugetlb_reserve_pages(struct inode *inode, long from, long to);
+ void hugetlb_unreserve_pages(struct inode *inode, long offset, long freed);
++struct page *get_huge_page(struct vm_area_struct *vma, unsigned long addr);
+ 
+ extern unsigned long max_huge_pages;
+ extern const unsigned long hugetlb_zero, hugetlb_infinity;

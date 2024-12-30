@@ -1,0 +1,60 @@
+--- a/drivers/edac/i5400_edac.c.orig	2008-11-21 11:09:51.000000000 -0600
++++ b/drivers/edac/i5400_edac.c	2008-11-24 16:48:24.000000000 -0600
+@@ -50,6 +50,14 @@
+ #define MAX_DIMMS		(MAX_CHANNELS * 4)	/* Up to 4 DIMM's per channel */
+ #define MAX_CSROWS		(MAX_DIMMS * 2)		/* max possible csrows per channel */
+ 
++/* Device 0,
++ * Function 0: PCI Express PCI space
++ */
++
++#define		SSCTRL			0x47 /* Also in devices 1 - 9 */
++
++#define PCI_DEVICE_ID_INTEL_5400_DEV1	0x4021
++
+ /* Device 16,
+  * Function 0: System Address
+  * Function 1: Memory Branch Map, Control, Errors Register
+@@ -1237,6 +1245,33 @@ static void i5400_get_dimm_and_channel_c
+ }
+ 
+ /*
++ * i5400_stop_and_scream
++ * @pdev: device 0 of 5400
++ * @onoff: 0 turn turn stop and scream off, non-zero otherwise
++ */
++static void i5400_stop_and_scream(struct pci_dev *pdev, u8 onoff)
++{
++	int dev;
++	u8 value;
++
++	for (dev = 0; dev < 10; ++dev) {
++		if (pdev) {
++			pci_read_config_byte(pdev, SSCTRL, &value);
++			pci_write_config_byte(pdev, SSCTRL,
++				value | (onoff != 0));
++		}
++
++		if (dev)
++			pci_dev_put(pdev);
++
++		pdev = NULL;
++		if (dev < 9)
++			pdev = pci_get_device(PCI_VENDOR_ID_INTEL,
++				PCI_DEVICE_ID_INTEL_5400_DEV1 + dev, pdev);
++	}
++}
++
++/*
+  *	i5400_probe1	Probe for ONE instance of device to see if it is
+  *			present.
+  *	return:
+@@ -1299,6 +1334,8 @@ static int i5400_probe1(struct pci_dev *
+ 	if (i5400_get_devices(mci, dev_idx))
+ 		goto fail0;
+ 
++	i5400_stop_and_scream(pdev, 1);	/* Turn on stop and scream */
++
+ 	/* Time to get serious */
+ 	i5400_get_mc_regs(mci);	/* retrieve the hardware registers */
+ 

@@ -1,0 +1,212 @@
+#!/bin/bash -e
+###############################################################################
+#                         CONFIDENTIAL AND PROPRIETARY
+#          Copyright (C) 2007 Xiotech Corporation, All Rights Reserved
+###############################################################################
+#
+# $Id: auto_run 44277 2008-02-29 23:05:09Z mdr $
+#
+# \file     auto_run
+# \author   Ryan Melville
+#
+# Automatically checks a script out of Subversion into a
+# temporary directory and runs it.
+#
+# Behavior:
+#
+# - Takes a path to checkout and a sub-path to a script to execute.
+#   - Optionally, a machine on which to run can be specified.
+#   - Optionally, additional command line parameters and will all be passed
+#     to the executed script.
+# - Checks out the path to a temporary directory.
+# - Executes the script checked out to the temporary directory.
+# - Removes the temporary directory.
+#
+###############################################################################
+
+# Common tools
+
+SCRIPT_DIR=$(dirname $0)
+SCRIPT_NAME=$(basename $0)
+
+# Default variables
+
+USERNAME=`whoami`
+
+MACHINE=""
+CMD_PREFIX=""
+
+SVN=svn
+SVN_ROOT="svn://svn.xiotech.com/"
+
+# Process options
+#
+# -m    Remote machine on which to execute.
+
+while getopts "m:" opt; do
+    case ${opt} in
+    m)  MACHINE="${OPTARG}"; CMD_PREFIX="ssh ${USERNAME}@${MACHINE}";;
+    esac
+done
+shift $((${OPTIND} - 1))
+
+
+##
+# Function to display usage instructions
+
+Usage()
+{
+    echo "Automatically checks a script out of Subversion into a" \
+        "temporary directory and runs it."
+    echo "Usage: ${SCRIPT_NAME} [-m MACHINE] CHECKOUT_PATH" \
+        "SCRIPT_PATH [PARAMS TO SCRIPT]"
+    exit 1
+}
+
+
+# Check parameters
+#
+# $1    Path to checkout.
+# $2    Path to script to execute.
+
+if (( $# < 2 )); then
+    Usage
+fi
+
+CHECKOUT_PATH="$1"
+SCRIPT_PATH="$2"
+
+shift 2
+
+SCRIPT_PARAMS=( "$@" )
+
+
+##
+# Function to display message
+#
+# $1    Message
+
+Msg()
+{
+    local MSG="$1"
+    local NOW=`date +'%Y-%m-%d %H:%M:%S %Z'`
+
+    echo "${NOW} (${SCRIPT_NAME}): ${MSG}"
+}
+
+
+##
+# Function to end the script
+#
+# $1    Exit status
+
+EndScript()
+{
+    local EXIT_STATUS=$1
+
+    # Delete temporary directory
+    if [[ "" != "${TMP_DIR}" ]]; then
+        RemovePath "${TMP_DIR}"
+    fi
+
+    Msg "Ended"
+
+    exit ${EXIT_STATUS}
+}
+
+
+##
+# Function to fail the script
+#
+# $1    Message
+
+FailScript()
+{
+    local MSG="$1"
+
+    Msg "${MSG}"
+    Msg "Failed"
+
+    EndScript 1
+}
+
+
+##
+# Function to checkout a path
+#
+# $1    Path to checkout.
+
+CheckoutPath()
+{
+    local IN="$1"
+    local OUT="${IN}"
+
+    # Deduce the output path from the input path
+    if [[ "${out#eng/trunk}" != "${OUT}" ]]; then
+        # Starts w/ "eng/trunk"; remove "/trunk" from output path
+        OUT="${OUT/eng\/trunk/eng}"
+    elif [[ "${OUT#eng/branches}" != "${OUT}" ]]; then
+        # Starts w/ "eng/branches"; remove "/branches" and branch name from
+        # output path
+        OUT="eng/${OUT#eng/*/*/}"
+    elif [[ "${OUT#eng/tags}" != "${OUT}" ]]; then
+        # Starts w/ "eng/tags"; remove "/tags" and tag name from output path
+        OUT="eng/${OUT#eng/*/*/}"
+    fi
+
+    Msg "Checking out ${IN} to ${OUT}..."
+
+    ${CMD_PREFIX} ${SVN} co "${SVN_ROOT}/${IN}" "${TMP_DIR}/${OUT}" ||
+        FailScript "Unable to check out source: ${IN}"
+}
+
+
+##
+# Function to remove a path
+#
+# $1    Path to remove.
+
+RemovePath()
+{
+    local RM_PATH="$1"
+
+    Msg "Removing ${RM_PATH}..."
+
+    ${CMD_PREFIX} rm -rf "${RM_PATH}" ||
+        Msg "Unable to remove path: ${RM_PATH}"
+}
+
+
+# Intro
+
+Msg "Started"
+
+Msg "Command-line inputs..."
+Msg "...MACHINE       = ${MACHINE}"
+Msg "...CHECKOUT_PATH = ${CHECKOUT_PATH}"
+Msg "...SCRIPT_PATH   = ${SCRIPT_PATH}"
+Msg "...SCRIPT_PARAMS = ${SCRIPT_PARAMS[@]}"
+
+# Create temporary directory to house script
+
+TMP_DIR=`${CMD_PREFIX} mktemp -d` ||
+    FailScript "Unable to create temporary directory"
+
+Msg "Created temporary directory: ${TMP_DIR}"
+
+# Checkout path to temporary directory
+
+CheckoutPath "${CHECKOUT_PATH}"
+
+# Execute script in temporary directory
+
+Msg "Executing ${SCRIPT_PATH}..."
+
+${CMD_PREFIX} ${TMP_DIR}/${SCRIPT_PATH} "${SCRIPT_PARAMS[@]}" ||
+    FailScript "${SCRIPT_PATH} failed"
+
+# Done
+
+EndScript 0
+
+# vi:sw=4 ts=4 expandtab

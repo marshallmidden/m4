@@ -1,0 +1,1171 @@
+#!/usr/bin/expect --
+#
+# Script to update back-end cisco switch firmware 
+#
+# NOTE: the script is run through sed and the following replaced:
+#       MATCH
+#       NOTB
+#       NOTA -- currently unused
+#-----------------------------------------------------------------------------
+# Globals for keeping track of percent complete and status
+# Note: Script status is sent back to caller such than OpErrors.txt
+#       does not need updating in this script.
+
+send_error "Running script do_sw\n"
+
+set force_update 0 
+set total_switches 0
+set initial_percent 0
+set op_status ""
+set op_percent 0
+set op_status_file "OpStatus.txt"
+set g_sw_password "UNDEFINED"
+
+# Installation base directory
+set base_dir [pwd]
+
+# Where the ccbCL.pl script is located.
+set ccbe_at "./CCBE"
+
+# Command to run the ccbCL.pl script.
+set run_ccbcl "cd $ccbe_at ;/usr/bin/perl ccbCL.pl"
+#-----------------------------------------------------------------------------
+
+# Regular expression representing the CN prompt.
+set cn_prompt ""
+
+# Like perl, the real execution continues anywhere ... define the proc's first.
+
+
+#=============================================================================
+#
+# Defines a "safe" version of "expect_out(0,string)"
+#
+#=============================================================================
+proc safe_expect_out_0 {} {
+    global expect_out
+  
+    if {[info exists expect_out(0,string)]} {
+        return $expect_out(0,string)
+    } else {
+        return ""
+    }
+}
+
+
+#=============================================================================
+#
+# Defines an exit which is contingent on force_update being false.
+#
+#=============================================================================
+proc exit_if_able { exit_code } {
+    global force_update
+
+    if { $force_update == 0 } { 
+        exit $exit_code
+    }
+}
+
+
+#=============================================================================
+# Send exit command to the switch
+#
+proc send_exit { } {
+    global force_update
+
+    if { $force_update == 0 } { 
+        send "exit\r"
+        close
+        wait
+        send_error "send_exit complete\n"
+    }
+}
+# End of send_exit
+
+
+#=============================================================================
+#
+# Tell how to run this script.
+#
+proc usage {} {
+    send_error "Usage: do_sw <dsc ID> <ip_7000_master> <ip_switch> <ip_icon>"
+    send_error "  <initial_percent_complete> <total_num_of_switches>\n"
+    exit_if_able 1
+}
+# End of usage
+
+#=============================================================================
+proc send_ccbcl_WARNING { message } {
+    global run_ccbcl
+    global cn_ip
+    set msg3 [string map {\: "-"} $message]
+
+    send_error "ccbCL: $cn_ip:3000 $msg3\n"
+    system "$run_ccbcl '$cn_ip':3000 -e '\"logtextmessage -v 1 $msg3\"' >/dev/null"
+}
+# End of send_ccbcl_WARNING
+
+#=============================================================================
+proc send_ccbcl_ERROR { message } {
+    global run_ccbcl
+    global cn_ip
+    set msg3 [string map {\: "-"} $message]
+
+    send_error "ccbCL: $cn_ip:3000 $msg3\n"
+    system "$run_ccbcl '$cn_ip':3000 -e '\"logtextmessage -v 2 $msg3\"' >/dev/null"
+}
+# End of send_ccbcl_ERROR
+
+#=============================================================================
+proc send_ccbcl_status { message } {
+    global run_ccbcl
+    global cn_ip
+    set msg3 [string map {\: "-"} $message]
+
+    send_error "ccbCL: $cn_ip:3000 $msg3\n"
+    system "$run_ccbcl '$cn_ip':3000 -e '\"logtextmessage -v 0 $msg3\"' >/dev/null"
+}
+# End of send_ccbcl_status
+
+#=============================================================================
+proc update_progress_file {} {
+    global total_switches
+    global initial_percent
+    global op_status
+    global op_percent
+    global op_status_file
+
+    if {$total_switches <= 0} {
+      #should never happen...but can't be too careful
+      set total_switches 1
+    }
+
+    #
+    # Calculate overall percent complete -- on a 7000, this will include multiple switches, so we need
+    # to take that into consideration when we display a % complete
+    #
+
+    set modified_percent_complete [expr double($initial_percent + double(100.0 / $total_switches) * double($op_percent/100.0))]
+
+    system "echo -e \"PercentComplete=$modified_percent_complete\nStatus=$op_status\" > $op_status_file"
+}
+# End of update_progress_file
+
+#=============================================================================
+proc sleep_with_progress { duration start_percent end_percent } {
+    global op_percent
+
+    set start_time [timestamp]
+    set elapsed_time 0
+    while { $elapsed_time < $duration } {
+        sleep 5
+        set current_time [timestamp]
+        set elapsed_time [expr double($current_time - $start_time)]
+        set op_percent [expr double($start_percent + double($elapsed_time/$duration) * double($end_percent - $start_percent))]
+        update_progress_file
+    }
+}
+
+#=============================================================================
+proc send_cmd_to_ccbcl { cmd } {
+    global run_ccbcl
+    global cn_ip
+    system "$run_ccbcl '$cn_ip' -e '\"$cmd\"'"
+}
+# End of send_cmd_to_ccbcl
+
+#=============================================================================
+proc login_now { user password do_ssh pwnum} {
+    global cn_prompt
+    global expect_out
+    global sw_ip
+    
+    #
+    # log into CN.
+    #
+    if {$do_ssh == 1} {
+        system "rm -f /root/.ssh/known_hosts"
+
+        spawn ssh "$user@$sw_ip"
+        send_error "spawned ssh $user@$sw_ip pw# $pwnum\n"
+    } else {
+        spawn telnet -l $user $sw_ip
+        send_error "spawned telnet -l $user $sw_ip pw# $pwnum\n"
+    }
+    expect {
+        -ex "assword: " {
+            send_error "login_now, sending password <$expect_out(0,string)>\n"
+            send "$password\r"
+        }
+        -ex "(yes/no)? " {
+            send_error "login_now, sending yes <$expect_out(0,string)>\n"
+            send "yes\r"
+            exp_continue
+        }
+        -ex ": Connection refused" {
+            send_error "login_now <$expect_out(0,string)>\n"
+            return -1
+        }
+        -ex ": No route to host" {
+            send_error "login_now <$expect_out(0,string)>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - No route to host."
+            # This value 2 is used in sw_do_many to not print out a message.
+            exit_if_able 2
+        }
+        timeout      {
+            send_error "login_now timeout <[safe_expect_out_0]>\n"
+            send_ccbcl_ERROR "!\$BES=$sw_ip - Login Timeout"
+            exit_if_able 3
+        }
+        eof          {
+            send_error "login_now eof $sw_ip <[safe_expect_out_0]>\n"
+            return 0
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "login_now <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+
+# Toss the rest until prompt found
+
+    expect {
+        -re "\[\r\n]*(\[^\r\n]*)# $" {
+            set cn_prompt "$expect_out(1,string)"
+            send_error "login prompt -$cn_prompt- looks good\n"
+            return $spawn_id
+        }
+        -ex "assword: " {
+            send_error "login_now <$expect_out(0,string)>\n"
+            return -1
+        }
+        -ex "Permission denied, please try again." {
+            send_error "login_now <$expect_out(0,string)>\n"
+            return -1
+        }
+        -ex "Login incorrect" {
+            send_error "login_now <$expect_out(0,string)>\n"
+            return -1
+        }
+        -ex "Access denied" {
+            send_error "login_now <$expect_out(0,string)>\n"
+            return -1
+        }
+        timeout         {
+            send_error "login_now timeout <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - Login Prompt Timeout"
+            exit_if_able 3
+        }
+        eof             {
+            send_error "login_now eof <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - Login Prompt Drop"
+            exit_if_able 4
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "login_now Prompt <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+    send_error "prompt problem $sw_ip\n"
+    exit_if_able 5
+}
+# End of login_now
+
+#=============================================================================
+# Log into a switch.
+#
+proc login { use_pwd use_ssh} {
+    global use_this_passwd
+    global telnet_or_ssh
+    global sw_ip
+    global g_sw_password
+    global pwd
+
+    set pwd(0) "@dmin123"
+    set pwd(1) "Made4you"
+    set pwd(2) "made4you"
+    set pwd(3) "@dm1n123"
+    set pwd(4) "@dmin1234"
+    set pwd(5) "admin123#"
+    set pwd(6) "adm1n123"
+    set pwd(7) "admin@123"
+    set pwd(8) "x10t3ch1"
+    set pwd(9) "x10t3ch!"
+    set pwd(10) "password"
+    set pwd(11) "xiotech"
+
+    if {$g_sw_password == "UNDEFINED"} {
+        set numpwds 12
+    } else {
+        set pwd(12) $g_sw_password;
+        set numpwds 13
+    }
+
+# Initialize to previous (if any);
+    set use_this_passwd $use_pwd
+    set telnet_or_ssh $use_ssh
+
+    for {} {$use_this_passwd < $numpwds} {incr use_this_passwd 1} {
+        for {} {$telnet_or_ssh < 2} {incr telnet_or_ssh 1} {
+            set tmp_spawn [login_now "admin" $pwd($use_this_passwd) $telnet_or_ssh $use_this_passwd]
+send_error "login first tmp_spawn=$tmp_spawn\n"
+            if {$tmp_spawn == -1} {
+                close
+                wait
+                continue;
+            }
+            if {$tmp_spawn != 0} {
+                break;
+            }
+        }
+send_error "login second tmp_spawn=$tmp_spawn\n"
+        if {$tmp_spawn == 0} {
+            send_ccbcl_status "!\$BES=$sw_ip - No Switch present."
+            exit_if_able 6
+        }
+        if {$tmp_spawn == -1} {
+            set telnet_or_ssh 0
+            continue;
+        }
+        break;
+    }
+send_error "login third tmp_spawn=$tmp_spawn use_this_passwd=$use_this_passwd numpwds=$numpwds\n"
+    if {$use_this_passwd >= $numpwds} {
+        send_error "no valid passwords found\n"
+        exit_if_able 7
+    }
+    return $tmp_spawn
+}
+# End of login
+
+#=============================================================================
+# Send a terminal length 0 to the switch
+#
+proc send_terminal_length_0 {} {
+    global cn_prompt
+    global expect_out
+    global sw_ip
+
+# We know login worked if here, else command exits.
+    send_error "send terminal length 0\n"
+    send "terminal length 0\n"
+    expect {
+        -re "^$cn_prompt. $" {
+            send_error "prompt gotten -$cn_prompt- terminal length 0\n"
+        }
+        timeout {
+            send_error "send_terminal_length_0 timeout <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - Terminal Length 0 Timeout"
+            exit_if_able 23
+        }
+        eof     {
+            send_error "send_terminal_length_0 eof <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - Terminal Length 0 Drop"
+            exit_if_able 24
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "send_terminal_length_0 <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+}
+# End of send_terminal_length_0
+
+
+#=============================================================================
+# In rare cases, the bootflash will be locked read-only.  In this case, the 
+# bootflash needs to be formatted.
+#
+proc verify_bootflash {} {
+    global cn_prompt
+    global expect_out
+    global dsc_id 
+    global sw_ip
+    global timeout
+    global op_status
+    global force_update
+
+    send_error "verifying bootflash is formatted as read/write\n"
+
+    set format "%Y_%m_%d_%H_%M_%S"
+    set tmp_file "xiotech_[timestamp -format $format]"
+
+    send "copy run bootflash:$tmp_file\n"
+    expect {
+        -re "^$cn_prompt. $" {
+            send_error "prompt gotten -$cn_prompt- copy run bootflash:$tmp_file\n"
+        }
+        timeout {
+            send_error "copy run bootflash:$tmp_file timeout <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - copy file to bootflash Timeout"
+            exit_if_able 33
+        }
+        eof     {
+            send_error "copy run bootflash:$tmp_file eof <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - copy file to bootflash Drop"
+            exit_if_able 34
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "copy run bootflash:$tmp_file <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+
+    send "dir bootflash:\n"
+    set tmp_file_copied 0
+    expect {
+        -re "..:..:.. ....  (\[^ \r\n/]*$tmp_file)\r\n" {
+            send_error "found $tmp_file - no format of bootflash required\n"
+            set tmp_file_copied 1
+        }
+        -re "^$cn_prompt. $" {
+            send_error "missing $tmp_file - bootflash appears to be read-only\n"
+        }
+        timeout {
+            send_error "dir bootflash: timeout <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - dir bootflash Timeout"
+            exit_if_able 35
+        }
+        eof     {
+            send_error "dir bootflash: eof <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - dir bootflash Drop"
+            exit_if_able 36
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "dir bootflash: <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+
+    if {$tmp_file_copied != 1} {
+
+        # 
+        # Format bootflash
+        #
+
+        set force_update 1 
+        set savetimeout $timeout
+        set timeout 480
+
+        set op_status "Switch DSC$dsc_id@$sw_ip: Formatting bootflash..."
+        update_progress_file
+
+        send "format bootflash:\n"
+        expect {
+            -re "Do you want to continue. +.yes/no. +.n. +" {
+                send_error "format bootflash <$expect_out(0,string)>\n"
+                send_error "sending y - yes to format bootflash\n"
+                send "y\n"
+            }
+            -re "Do you want to continue. +.y/n. +.n. +" {
+                send_error "format bootflash <$expect_out(0,string)>\n"
+                send_error "sending y - yes to format bootflash\n"
+                send "y\n"
+            }
+            timeout {
+                send_error "format bootflash: timeout <[safe_expect_out_0]>\n"
+                send_ccbcl_status "!\$BES=$sw_ip - format bootflash Timeout"
+                exit_if_able 37
+            }
+            eof     {
+                send_error "format bootflash: eof <[safe_expect_out_0]>\n"
+                send_ccbcl_status "!\$BES=$sw_ip - format bootflash Drop"
+                exit_if_able 38
+            }
+            # print messages line by line (allows finding problems).
+            -re "(\[^\r\n]*)\[\r\n]" {
+                send_error "format bootflash: <$expect_out(1,string)>\n"
+                exp_continue
+            }
+        }
+     
+        # The switch notes: Formatting bootflash partition can take over 20 mins
+        # Setting timout to 25 minutes.
+        # We are committed to install, so no exitting out of the script.
+        set timeout 1500
+
+        expect {
+            -re "^$cn_prompt. $" {
+                send_error "prompt gotten -$cn_prompt- format bootflash:\n"
+            }
+            timeout {
+                send_error "format bootflash: timeout <[safe_expect_out_0]>\n"
+                send_ccbcl_status "!\$BES=$sw_ip - format bootflash Timeout"
+            }
+            eof     {
+                send_error "format bootflash: eof <[safe_expect_out_0]>\n"
+                send_ccbcl_status "!\$BES=$sw_ip - format bootflash Drop"
+            }
+            # print messages line by line (allows finding problems).
+            -re "(\[^\r\n]*)\[\r\n]" {
+                send_error "format bootflash: <$expect_out(1,string)>\n"
+                exp_continue
+            }
+        }
+
+        set timeout $savetimeout
+
+    } else {
+      
+        # 
+        # Delete the temporary file we created to test for read/write
+        #
+
+        send "delete bootflash:$tmp_file\n"
+        expect {
+            -re "^$cn_prompt. $" {
+                send_error "prompt gotten -$cn_prompt- delete bootflash:$tmp_file\n"
+            }
+            timeout {
+                send_error "delete file from bootflash: timeout <[safe_expect_out_0]>\n"
+                send_ccbcl_status "!\$BES=$sw_ip - delete file from bootflash Timeout"
+                exit_if_able 39
+            }
+            eof     {
+                send_error "delete file from bootflash: eof <[safe_expect_out_0]>\n"
+                send_ccbcl_status "!\$BES=$sw_ip - delete file from bootflash Drop"
+                exit_if_able 40
+            }
+            # print messages line by line (allows finding problems).
+            -re "(\[^\r\n]*)\[\r\n]" {
+                send_error "delete bootflash:$tmp_file <$expect_out(1,string)>\n"
+                exp_continue
+            }
+        }
+    }
+}
+# End of verify_bootflash
+
+#=============================================================================
+# "copy running-config startup-config" Just in case it needs doing before reboot.
+# Send "copy running-config startup-config" to the switch.
+#
+proc copy_running_startup {} {
+    global cn_prompt
+    global expect_out
+    global sw_ip
+    global timeout
+
+    set savetimeout $timeout
+    set timeout 480
+
+    send_error "send copy running-config startup-config\n"
+    send "copy running-config startup-config\n"
+    expect {
+        -re "^$cn_prompt. $" {
+            send_error "prompt gotten -$cn_prompt- copy_running_startup\n"
+        }
+        timeout {
+            send_error "copy_running_startup timeout <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - Copy Running Startup Timeout"
+            exit_if_able 21
+        }
+        eof     {
+            send_error "copy_running_startup eof <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - Copy Running Startup Drop"
+            exit_if_able 22
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "copy_running_startup <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+    set timeout $savetimeout
+}
+# End of copy_running_startup
+
+#=============================================================================
+# "clear ssh hosts" in icon gets re-imaged.
+#
+proc clear_ssh_hosts {} {
+    global cn_prompt
+    global expect_out
+    global sw_ip
+
+    send_error "send clear ssh hosts\n"
+    send "clear ssh hosts\n"
+    expect {
+        -re "^$cn_prompt. $" {
+            send_error "prompt gotten -$cn_prompt- clear_ssh_hosts\n"
+        }
+        timeout {
+            send_error "clear_ssh_hosts timeout <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - clear ssh hosts Timeout"
+            exit_if_able 31
+        }
+        eof     {
+            send_error "clear_ssh_hosts eof <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - clear ssh hosts Drop"
+            exit_if_able 32
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "clear_ssh_hosts <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+}
+# End of clear_ssh_hosts
+
+#=============================================================================
+# Send a show version command to the switch
+#
+proc send_show_version { } {
+    global switchversion
+    global kickstart_image_file
+    global system_image_file
+    global system_version
+    global cn_prompt
+    global expect_out
+    global sw_ip
+
+    set switchversion "None"
+    set kickstart_image_file "None"
+    set system_image_file "None"
+    set system_version "None"
+
+# We know login worked if here, else command exits.
+    send_error "send show version\n"
+    send "show version\n"
+    expect {
+        -re "  kickstart: (\[^\r\n]*)" {
+            set switchversion $expect_out(1,string)
+            send_error "Version retrieved=$switchversion for $sw_ip\n"
+            send_ccbcl_status "!\$BES=$sw_ip - $switchversion"
+            exp_continue
+        }
+        -re "  kickstart image file is: *bootflash:/(\[^\r\n]*)" {
+            set kickstart_image_file $expect_out(1,string)
+            send_error "Kickstart image file for $sw_ip is $kickstart_image_file\n"
+            exp_continue
+        }
+        -re "  system image file is: *bootflash:/(\[^\r\n]*)" {
+            set system_image_file $expect_out(1,string)
+            send_error "System image file for $sw_ip is $system_image_file\n"
+            exp_continue
+        }
+        -re "  System version: (\[^\r\n]*)" {
+            set system_version $expect_out(1,string)
+            send_error "System version for $sw_ip is $system_version\n"
+            exp_continue
+        }
+        timeout {
+            send_error "send_show_version timeout <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - Show Version Timeout"
+            exit_if_able 8
+        }
+        eof     {
+            send_error "send_show_version eof <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - Show Version Drop"
+            exit_if_able 9
+        }
+        -re "^$cn_prompt. $" {
+            send_error "prompt -$cn_prompt- gotten - show version\n"
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "send_show_version <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+
+    if {"$switchversion" == "None" || "$system_version" == "None"} {
+        send_error "No switch version -$switchversion- or system version -$system_version- found.\n"
+        send_ccbcl_ERROR "!\$BES=$sw_ip - Show Version, no switch version found"
+        # The script probably is not working!
+        exit_if_able 11
+    }
+
+    if {$kickstart_image_file == "None"} {
+        send_error "No kickstart image file found -- continue anyway.\n"
+    }
+
+    if {$system_image_file == "None"} {
+        send_error "No system image file found -- continue anyway.\n"
+    }
+}
+# End of send_show_version
+
+#=============================================================================
+# Send delete file command.
+#
+proc send_delete_file { filename } {
+    global sw_ip
+    global cn_prompt
+    global expect_out
+    global timeout
+
+    set savetimeout $timeout
+    set timeout 480
+
+    send_error "send_delete_file $filename\n"
+    send "del bootflash:$filename\n"
+    expect {
+        -ex "No such file or directory" {
+            send_error "send_delete_file <$expect_out(0,string)>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - No such file, $filename"
+            exp_continue
+        }
+        timeout {
+            send_error "send_delete_file timeout <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - Delete $filename Timeout"
+            exit_if_able 12
+        }
+        eof     {
+            send_error "send_delete_file eof <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - Delete $filename Drop"
+            exit_if_able 13
+        }
+        -re "^$cn_prompt. $" {
+            send_error "prompt gotten -$cn_prompt- send_delete_file\n"
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "send_delete_file <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+    set timeout $savetimeout
+}
+# End of send_delete_file
+
+#=============================================================================
+# Send dir file command.
+#
+proc send_dir_file { } {
+    global cn_prompt
+    global expect_out
+    global sw_ip
+    global kickstart_image_file
+    global system_image_file
+
+    set num_files 0
+    set found_kickstart 0
+    set found_system 0
+
+    send_error "sent dir bootflash:\n"
+    send "dir bootflash:\n"
+    expect {
+        -re "..:..:.. ....  (\[^ \r\n/]*kickstart\[^ \r\n/]*\.bin)\r\n" {
+            set files($num_files) $expect_out(1,string)
+            # Note: Do not delete current kickstart file.
+            if {$files($num_files) == $kickstart_image_file} {
+                send_error "skipping kickstart file=$files($num_files)\n"
+                set found_kickstart 1
+            } else {
+                send_error "kickstart file=$files($num_files)\n"
+                incr num_files 1
+            }
+            exp_continue
+        }
+        -re "..:..:.. ....  (\[^ \r\n/]*system\[^ \r\n/]*\.bin)\r\n" {
+            set files($num_files) $expect_out(1,string)
+            # Note: delete current system file "differently" than in for loop.
+            if {$files($num_files) == $system_image_file} {
+                send_error "already know system file=$files($num_files)\n"
+                set found_system 1
+            } else {
+                send_error "system file=$files($num_files)\n"
+                incr num_files 1
+            }
+            exp_continue
+        }
+        -re "..:..:.. ....  (\[^ \r\n/]*-mz\.\[^ \r\n/]*\.bin)\r\n" {
+            set files($num_files) $expect_out(1,string)
+            # Note: delete current system file "differently" than in for loop.
+            if {$files($num_files) == $system_image_file} {
+                send_error "already know system file=$files($num_files)\n"
+                set found_system 1
+            } else {
+                send_error "probably system file=$files($num_files)\n"
+                incr num_files 1
+            }
+            exp_continue
+        }
+        timeout {
+            send_error "send_dir_file timeout <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - dir Timeout"
+            exit_if_able 14
+        }
+        eof     {
+            send_error "send_dir_file eof <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - dir Drop"
+            exit_if_able 15
+        }
+        -ex " bytes total\r\n" {
+            send_error "send_dir_file (bytes total) <$expect_out(0,string)>\n"
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "send_dir_file <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+
+# Toss the rest until prompt found
+
+    expect {
+        -re "^$cn_prompt. $" {
+            send_error "send_dir_file -$cn_prompt- prompt found\n"
+            # Ah, done.
+        }
+        timeout {
+            send_error "send_dir_file timeout <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - dir Prompt Timeout"
+            exit_if_able 16
+        }
+        eof     {
+            send_error "send_dir_file eof <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - dir Prompt Drop"
+            exit_if_able 17
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "send_dir_file <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+
+    send_error "got $num_files files to delete\n"
+
+    for {set count 0} {$count < $num_files} {incr count 1} {
+        send_delete_file $files($count)
+    }
+    # Note: Do not delete current kickstart file. It might not be on bootflash:
+    # But delete system_image_file if seen on bootflash:
+    if {$found_system != 0} {
+        send_delete_file $system_image_file
+    }
+}
+# End of send_dir_file
+
+#=============================================================================
+# Send reload command to the switch
+#
+proc send_reload { } {
+    global sw_ip
+    global timeout
+
+    set savetimeout $timeout
+    set timeout 60
+
+    send_error "prompt found, send reload.\n"
+    send "reload\r"
+    expect {
+        -re "This command will reboot the system. .y/n.. +.n. " {
+            send_error "send_reload <$expect_out(0,string)>\n"
+            send_error "sending y to reboot system\n"
+            send "y\r"
+            exp_continue
+        }
+        timeout      {
+            send_error "send_reload timeout <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - send_reload Timeout"
+            close
+            wait
+        }
+        eof          {
+            send_error "send_reload eof <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - send_reload EOF"
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "send_reload <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+    send_error "send_reload complete\n"
+    set timeout $savetimeout
+}
+# End of send_reload
+
+#=============================================================================
+proc send_install_cmd { } {
+    global sw_ip
+    global cn_prompt
+    global expect_out
+    global timeout
+    global icon_ip
+    global base_dir
+
+    set savetimeout $timeout
+    set timeout 60
+
+    set username_cnt 0
+    set passwd_cnt 0
+    set install_cnt 0
+    set special_cnt 0
+
+    send_error "sending install all system scp://$icon_ip$base_dir/system.bin kickstart scp://$icon_ip$base_dir/kickstart.bin\n"
+    send "install all system scp://$icon_ip$base_dir/system.bin kickstart scp://$icon_ip$base_dir/kickstart.bin\r"
+    expect {
+        -ex "For scp://$icon_ip, please enter user name: " {
+            send_error "send_install_cmd <$expect_out(0,string)>\n"
+            send_error "sending user name=root\n"
+            send "root\r"
+            incr username_cnt 1
+            exp_continue
+        }
+        -ex "For scp://root\@$icon_ip, please enter password: " {
+            send_error "send_install_cmd <$expect_out(0,string)>\n"
+            send_error "sending password=........\n"
+            send "nextgen\r"
+            incr passwd_cnt 1
+            exp_continue
+        }
+        -ex "(yes/no)? " {
+            send_error "send_install_cmd <$expect_out(0,string)>\n"
+            send "yes\r"
+            exp_continue
+        }
+        -re "Do you want to continue with the installation .y/n.. *.n. " {
+            send_error "send_install_cmd <$expect_out(0,string)>\n"
+            send "y\r"
+            incr install_cnt 1
+            exp_continue
+        }
+        -ex ": No route to host" {
+            send_error "send_install_cmd <$expect_out(0,string)>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - send_install_cmd No route to host $icon_ip."
+            exit_if_able 20
+        }
+        timeout      {
+            send_error "send_install_cmd timeout $icon_ip <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - send_install_cmd finished, switch restarting $icon_ip"
+            set special_cnt 1
+            close
+            wait
+        }
+        eof          {
+            send_error "send_install_cmd eof $icon_ip <[safe_expect_out_0]>\n"
+            send_ccbcl_status "!\$BES=$sw_ip - send_install_cmd EOF $icon_ip"
+            set special_cnt 1
+        }
+        -ex "No space left on device" {
+            send_error "send_install_cmd <$expect_out(0,string)>\n"
+            send_ccbcl_ERROR "!\$BES=$sw_ip - send_install_cmd No space left on device bootflash"
+            exit_if_able 18
+        }
+        -re "^$cn_prompt. $" {
+            send_error "send_install_cmd -$cn_prompt- prompt found\n"
+        }
+        # print messages line by line (allows finding problems).
+        -re "(\[^\r\n]*)\[\r\n]" {
+            send_error "send_install_cmd <$expect_out(1,string)>\n"
+            exp_continue
+        }
+    }
+    set timeout $savetimeout
+
+    if {$username_cnt == 2 && $passwd_cnt == 2 && $install_cnt == 1} {
+        if {$special_cnt == 1} {
+            send_error "Ah, system auto-reloaded, continue.\n"
+        } else {
+            send_reload
+        }
+    } else {
+        send_error "Problems with install command - $username_cnt!=2 $passwd_cnt!=2 $install_cnt!=1\n"
+        send_ccbcl_ERROR "!\$BES=$sw_ip - Problems with install command $username_cnt $passwd_cnt $install_cnt - aborting"
+        exit_if_able 19
+    }
+}
+# End of send_install_cmd
+
+#=============================================================================
+# Main program running here.
+#
+# Set default timeout to 60 seconds (10 seconds would occasionally fail)
+set timeout 60 
+
+# Get the controller IP.
+set dsc_id [lindex $argv 0]
+set cn_ip [lindex $argv 1]
+set sw_ip [lindex $argv 2]
+set g_sw_password [lindex $argv 3]
+set icon_ip [lindex $argv 4]
+# Initial percent-complete for the script ot start at
+set initial_percent [lindex $argv 5]
+# Total number of switches in the system (for % complete)
+set total_switches [lindex $argv 6]
+
+set match "MATCH"
+set notb "NOTB"
+#-- set nota "nota"
+#-- send_error "Controller has IP ($cn_ip), Switch IP=$sw_ip, ICON IP=$icon_ip, match=$match, notb=$notb, nota=$nota.\n"
+send_error "Controller has IP ($cn_ip), Switch IP=$sw_ip, ICON IP=$icon_ip, match=$match, notb=$notb.\n"
+
+# Login to switch.
+set spawn_id [login 0 0]
+
+# Following line sets the terminal to not do "--More--"
+send_terminal_length_0
+
+# In rare cases, the bootflash will be locked read-only.  In this case, the bootflash needs to be formatted.
+set op_status "Switch DSC$dsc_id@$sw_ip: Verifying bootflash..."
+update_progress_file
+verify_bootflash
+
+# "copy running-config startup-config" Just in case it needs doing before reboot.
+set op_status "Switch DSC$dsc_id@$sw_ip: Copying configuration files..."
+update_progress_file
+copy_running_startup
+
+# "clear ssh hosts" So that if icon was re-imaged, we can get back in via "install all ... scp".
+set op_status "Switch DSC$dsc_id@$sw_ip: clear ssh hosts..."
+update_progress_file
+clear_ssh_hosts
+
+# Following line gets the version
+send_show_version
+
+if { $switchversion == "None" } {
+    send_error "Did not get a version? $switchversion\n"
+    send_ccbcl_ERROR "!\$BES=$sw_ip - did not get a version."
+# Logout
+    send_exit
+    exit_if_able 10
+}
+
+# Delete any letters or parentheses.
+set sw1 $switchversion
+while {[regsub {[ A-Za-z)]} $sw1 {} sw1]} {}
+regsub {[(]} $sw1 {.} sw1
+while {[regsub {[.][.]} $sw1 {.} sw1]} {}
+
+# If 0, must relogin and do a cisco 'reload' command after install.
+# If 1, reload command is automatically done after install.
+# If 2, then switch is at right version, but need a reload to be done.
+set reload 0
+
+# Array of switchversion numbers.
+set sw2 [split $sw1 "."]
+set s0 [lindex $sw2 0]
+set s1 [lindex $sw2 1]
+set s2 [lindex $sw2 2]
+if { "$notb" != {} } {
+    set nb [split $notb "."]
+    set n0 [lindex $nb 0]
+    set n1 [lindex $nb 1]
+    set n2 [lindex $nb 2]
+    if {$s0 < $n0 || ($s0 == $n0 && ($s1 < $n1 || ($s1 == $n1 && $s2 < $n2)))} {
+        send_error "$switchversion before version $notb - do not need to reload after install $sw_ip\n"
+        set reload 1
+    }
+}
+
+if { $force_update == 0 && $switchversion == "version $match" } {
+    if { $system_version == $match } {
+        send_error "Already at version $match - skipping $sw_ip\n"
+        send_ccbcl_status "!\$BES=$sw_ip - Already at version $match - skipping."
+        set reload 1
+    } else {
+        send_error "kickstart at version $match - running is $system_version, needs 'reload' command.\n"
+        send_ccbcl_status "!\$BES=$sw_ip has $system_version loaded, but needs 'reload' command."
+        set reload 2
+    }
+} else {
+    send_error "Do upgrade to version $match from $switchversion for $sw_ip\n"
+    send_ccbcl_status "!\$BES=$sw_ip Upgrade from $switchversion to version $match"
+
+    set op_status "Switch DSC$dsc_id@$sw_ip: Upgrading from $switchversion to $match..."
+    set op_percent "3"
+    update_progress_file
+
+    # Now delete old files filling up the bootflash.
+    send_dir_file
+    set op_status "Switch DSC$dsc_id@$sw_ip: Deleting old files on switch..."
+    sleep_with_progress 30 5 8
+    
+    # Now install the upgrade
+    # Possible reboot, or possible need to do system command "reload".
+    set op_status "Switch DSC$dsc_id@$sw_ip: Applying $match..."
+    update_progress_file
+    send_install_cmd
+
+    # Sleep 5 minutes.
+    send_error "Sleep five minutes waiting for switch to reboot and come back to operational...\n"
+    set op_status "Switch DSC$dsc_id@$sw_ip: Waiting for switch to reboot..."
+    if { $reload == 1 } {
+        # no reload command needed, so this reboot will account for most of the progress
+        sleep_with_progress 300 40 95 
+    } else {
+        sleep_with_progress 300 40 70 
+    }
+
+    # Display the new version - login using old password, guess methodology, might (and should) change.
+    set spawn_id [login $use_this_passwd 0]
+
+    # Following line sets the terminal to not do "--More--"
+    send_terminal_length_0
+
+    # Following line gets the version
+    set op_status "Switch DSC$dsc_id@$sw_ip: Retrieving version information..."
+    update_progress_file
+    send_show_version
+    send_error "FW $switchversion for $sw_ip\n"
+
+    if {$reload != 1} {
+        send_ccbcl_status "!\$BES=$sw_ip Now at $switchversion, sending 'reload' command."
+    } else {
+        send_ccbcl_WARNING "!\$BES=$sw_ip Now at $switchversion, no 'reload' command done."
+    }
+}
+
+# Here if either we have image and version already, but did not HARD boot
+# (i.e. reload), or the install command only did a softboot.
+
+if { $reload != 1 } {
+    # Send the reload command (and "y" to really do the reload).
+    set op_status "Switch DSC$dsc_id@$sw_ip: Sending reload command..."
+    update_progress_file
+    send_reload
+
+    # Sleep 5 minutes.
+    send_error "Sleep five minutes waiting for switch to reboot and come back to operational...\n"
+    set op_status "Switch DSC$dsc_id@$sw_ip: Waiting for switch to reboot..."
+    sleep_with_progress 300 73 95
+
+    # Display the new version - login using old password, guess methodology, might (and should) change.
+    set spawn_id [login $use_this_passwd 0]
+
+    # Following line sets the terminal to not do "--More--"
+    send_terminal_length_0
+
+    # Following line gets the version
+    set op_status "Switch DSC$dsc_id@$sw_ip: Retrieving version information..."
+    update_progress_file
+    send_show_version
+    set op_status "Switch DSC$dsc_id@$sw_ip: Firmware now at $switchversion..."
+    update_progress_file
+    send_error "FW $switchversion for $sw_ip\n"
+    send_ccbcl_WARNING "!\$BES=$sw_ip Now at $switchversion, after 'reload'."
+}
+
+# "clear ssh hosts" So that if icon was re-imaged, we can get back in via "install all ... scp".
+set op_status "Switch DSC$dsc_id@$sw_ip: clear ssh hosts..."
+update_progress_file
+clear_ssh_hosts
+
+# clear force_update.  send_exit does a check on force_update.
+set force_update 0
+
+# Logout of switch.
+send_exit
+
+exit 0
+
+#=============================================================================
+
+###
+# Modelines:
+# Local Variables:
+# tab-width: 4
+# indent-tabs-mode: nil
+# End:
+# vi:sw=4 ts=4 expandtab

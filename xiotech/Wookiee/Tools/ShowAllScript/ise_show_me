@@ -1,0 +1,357 @@
+#!/usr/bin/expect --
+#
+# Script to view ise command output on all ISEs under a 7000.
+#
+# Usage: ise_show_me
+#               <ise ip address(even)>
+#               <ip_address_MASTER_7000>
+#
+# Where:
+#
+#  <ise ip address(eve)>
+#    Specify one IP addresses of ISE controller MRC, the lower and even numbered one.
+#    Controllers are accessed sequentially, and MRC_1 is even and MRC_2 is MRC_1+1.
+#
+#  <ip_address_MASTER_7000>
+#    The IP address of the master controller for the 7000 that ISE is connected to.
+#
+# Typical command line might be:
+#    ./ise_show_me 10.64.102.4 10.64.102.31
+#
+#-----------------------------------------------------------------------------
+# Where the ccbCL.pl script is located.
+set ccbe_at "./CCBE"
+
+# Command to run the ccbCL.pl script.
+set run_ccbcl "cd $ccbe_at ;/usr/bin/perl ccbCL.pl"
+#-----------------------------------------------------------------------------
+
+# Regular expression representing the ISE prompt.  Either "seaSH> " or "root:> "
+set ise_prompt "(#|seaSH|root:|root|oem:|oem)>{0,1} "
+
+# Like perl, the real execution continues anywhere ... define the proc's first.
+
+#=============================================================================
+#
+# Tell how to run this script.
+#
+proc usage {} {
+    send_error "Usage: ise_show_me <ip_address_MRC_1> <ip_address_MASTER_7000>
+    exit 1
+}
+# End of usage
+
+#=============================================================================
+proc send_ccbcl_status { message } {
+    global run_ccbcl
+    global master_7000
+
+    send_error "ccbCL: $message\n"
+    system "$run_ccbcl '$master_7000' -e '\"logtextmessage -v 0 $message\"' >/dev/null"
+}
+
+proc send_cmd_to_ccbcl { cmd } {
+    global run_ccbcl
+    global master_7000
+    system "$run_ccbcl '$master_7000' -e '\"$cmd\"'"
+}
+    
+# End of send_ccbcl_status
+
+#=============================================================================
+proc login_now { ise user } {
+    global ise_prompt
+    
+    #
+    # log into ISE.
+    #
+    if {$user == "oem"} {
+        set password "oem"
+    } elseif {$user == "root"} {
+        set password "federal"
+    } else {
+        send_ccbcl_status "!\$ISE Login - Unknown user-$user"
+        exit 2
+    }
+    spawn ssh "$user@$ise"
+    expect {
+        "password: " {
+            send "$password\r"
+        }
+        "(yes/no)? " {
+            send "yes\r"
+            exp_continue
+        }
+        timeout      {
+            send_ccbcl_status "\$!ISE Login Timeout $ise"
+            exit 2 }
+        eof          {
+            send_error "login eof $ise\n"
+            return 0 }
+    }
+    send_error "login password sent\n"
+    #
+    # Check it started.
+    #
+    expect {
+        -re $ise_prompt {
+            send_error "login looks good\n"
+            return $spawn_id }
+        timeout         {
+            send_ccbcl_status "\$!ISE Login Prompt Timeout $ise"
+            exit 2 }
+        eof             {
+            send_ccbcl_status "\$!ISE Login Prompt Drop $ise"
+            exit 3 }
+    }
+    send_error "prompt problem $ise\n"
+    exit 1
+}
+# End of login_now
+
+#=============================================================================
+#
+# Log into an ISE with seash running (possibly say "yes" to come up).
+#
+proc login { ise user } {
+    global exit_now
+    set tmp_spawn [login_now $ise $user]
+    if {$tmp_spawn == 0} {
+        close
+        wait
+        sleep 120
+        set tmp_spawn [login_now $ise $user]
+        if {$tmp_spawn == 0} {
+            send_ccbcl_status "\$!Problems connecting to ISE"
+            if {$exit_now == 1} {
+              exit 3
+            } else {
+              return 0
+            }
+        }
+    }
+    return $tmp_spawn
+}
+# End of login
+
+
+#=============================================================================
+#
+# Send a command or commands to the ISE
+#
+proc send_cmd_to_ise { ise user cmd } {
+    global ise_prompt
+    send_error "ise=$ise\n"
+    send_user "\n--------------> ISE=$ise: CMD=$cmd\n\n"
+    if { $user == "nseash" } {
+       set spawn_id [login $ise "root"]
+       send "nseash\n"
+       expect {
+         -re $ise_prompt { }
+         timeout { exit 2 }
+         eof { exit 3 }
+       }
+    } else {
+       set spawn_id [login $ise $user]
+    }
+    if {$spawn_id == 0} {
+       return 0
+    }
+    send_error "sending cmd=$cmd\n"
+    send $cmd
+    expect {
+        -re "# $" { }
+        -re "oem:> $" { }
+        -re "oem> $" { }
+        -re "root:> $" { }
+        -re "administrator:> $" { }
+        timeout {
+            send_ccbcl_status "!\$ISE Status Comm Timeout"
+            exit 2
+        }
+        eof     {
+            send_ccbcl_status "!\$ISE Status Comm Drop"
+            exit 3
+        }
+        default { exp_continue }
+    }
+    send_error "command sent\n"
+    send "quit\r"
+    if { $user == "nseash" } {
+      expect {
+         -re $ise_prompt { }
+         timeout { exit 2 }
+         eof { exit 3 }
+      }
+      send "quit\r"
+    }
+    close
+    wait
+    send_error "send_cmd_to_ise complete\n"
+    return 1
+}
+# End of check_status_ise
+
+#=================CARRYOVER EXAMPLE OF HOW TO COPY A FILE================
+#
+# start_send -  Copy file to ISE then open a connection to kick-off upgrade.
+#
+proc start_send { ise } {
+    global ise_prompt
+    global filename
+    global timeout
+
+    # copy the file over to the ISE
+    send_error "scp -q $filename root@$ise:/upgrade/datapac\n"
+    spawn scp -q $filename root@$ise:/upgrade/datapac
+    expect {
+        "password: " { send "federal\r" }
+        "(yes/no)? " { send "yes\r" exp_continue }
+        timeout {
+            send_ccbcl_status "!\$Datapac File Copy Comm Timeout"
+            exit 2
+        }
+        eof     {
+            send_ccbcl_status "!\$Datapac File Copy Comm Drop"
+            exit 3
+        }
+    }
+    set savetimeout $timeout
+    set timeout 100
+    send_error "scp started.\n"
+    expect {
+        timeout {
+            send_ccbcl_status "!\$Datapac File Copy Wait Timeout"
+            exit 2
+        }
+        eof     {
+        }
+    }
+    wait
+    set timeout $savetimeout
+}
+# End of start_send
+
+
+#=============================================================================
+#
+# Main program running here.
+#
+set timeout 60
+
+# Get the IP of the even numbered MRC.
+set ise [lindex $argv 0]
+
+# Make sure the even and odd MRC's are known.
+set ip_nums [split $ise "."]
+set last_num [lindex $ip_nums 3]
+set new_num [expr $last_num&254]
+if { $new_num != $last_num} {
+    send_error "ISE IP address is not even\n"
+    exit 1
+}
+
+set bayID [expr ($new_num&127)/2]
+set ip_address_1 "[lindex $ip_nums 0].[lindex $ip_nums 1].[lindex $ip_nums 2].$new_num"
+set new_num [expr $new_num + 1]
+set ip_address_2 "[lindex $ip_nums 0].[lindex $ip_nums 1].[lindex $ip_nums 2].$new_num"
+send_error "Will talk to MRC1 ($ip_address_1) and MRC_2 ($ip_address_2).\n"
+
+# Get the 7000 controller IP.
+set master_7000 [lindex $argv 1]
+send_error "Running 7000 controller has IP ($master_7000).\n"
+
+# following should really be done once per DSC...but put it here for example
+# send_cmd_to_ccbcl "isestatus"
+
+# and another example...this is how to skip an ISE or use != to only do one ISE
+# if { $ip_address_1 == "172.16.1.16" } {
+#   send_error "Skipping $ip_address_1\n"
+#   exit 0
+# }
+
+# Figure out our time offsets (could actually synch up here also)
+set exit_now 0
+set got_ip_1 [send_cmd_to_ise $ip_address_1 "root" "date\r"]
+set got_ip_2 [send_cmd_to_ise $ip_address_2 "root" "date\r"]
+set exit_now 1
+
+#send commands to ise1
+if { $got_ip_1 == 1 } {
+send_cmd_to_ise $ip_address_1 "root" "/bin/echo cm%600 >/proc/acorn/debug\r"
+send_cmd_to_ise $ip_address_1 "root" "/bin/echo his%41 >/proc/acorn/debug\r"
+send_cmd_to_ise $ip_address_1 "root" "/bin/echo tjs ^ show mrc >/proc/acorn/debug\r"
+send_cmd_to_ise $ip_address_1 "oem" "show ise\r"
+send_cmd_to_ise $ip_address_1 "oem" "show mrc\r"
+send_cmd_to_ise $ip_address_1 "oem" "show datapac\r"
+send_cmd_to_ise $ip_address_1 "oem" "show powersupply\r"
+send_cmd_to_ise $ip_address_1 "oem" "show battery\r"
+send_cmd_to_ise $ip_address_1 "oem" "show network\r"
+send_cmd_to_ise $ip_address_1 "oem" "show pool\r"
+send_cmd_to_ise $ip_address_1 "nseash" "show hba\r"
+send_cmd_to_ise $ip_address_1 "oem" "show hosts\r"
+send_cmd_to_ise $ip_address_1 "oem" "show volumes\r"
+send_cmd_to_ise $ip_address_1 "oem" "show tasks\r"
+send_cmd_to_ise $ip_address_1 "oem" "show snmp\r"
+send_cmd_to_ise $ip_address_1 "oem" "show events\r"
+send_cmd_to_ise $ip_address_1 "oem" "show performance\r"
+send_cmd_to_ise $ip_address_1 "oem" "show drive\r"
+send_cmd_to_ise $ip_address_1 "oem" "configure\r"
+send_cmd_to_ise $ip_address_1 "oem" "upgrade --status\r"
+send_cmd_to_ise $ip_address_1 "oem" "add --status\r"
+send_cmd_to_ise $ip_address_1 "oem" "service\r"
+send_cmd_to_ise $ip_address_1 "root" "lfu display crash_event_ring\r"
+send_cmd_to_ise $ip_address_1 "root" "lfu display erm\r"
+send_cmd_to_ise $ip_address_1 "root" "df\r"
+send_cmd_to_ise $ip_address_1 "root" "ps\r"
+send_cmd_to_ise $ip_address_1 "root" "ifconfig\r"
+send_cmd_to_ise $ip_address_1 "root" "du /opt /etc /boot /upgrade /var /usr /home /tmp\r"
+send_cmd_to_ise $ip_address_1 "root" "tail -100 /var/log/fwEvent.log\r"
+send_cmd_to_ise $ip_address_1 "root" "tail -100 /var/log/upgrade.log\r"
+send_cmd_to_ise $ip_address_1 "root" "cat /var/log/messages.0 /var/log/messages |tail -400\r"
+send_cmd_to_ise $ip_address_1 "root" "ls -l /var/log\r"
+}
+if { $got_ip_2 == 1 } {
+#send commands to ise2
+send_cmd_to_ise $ip_address_2 "root" "/bin/echo cm%600 >/proc/acorn/debug\r"
+send_cmd_to_ise $ip_address_2 "root" "/bin/echo his%41 >/proc/acorn/debug\r"
+send_cmd_to_ise $ip_address_2 "root" "/bin/echo tjs ^ show mrc >/proc/acorn/debug\r"
+send_cmd_to_ise $ip_address_2 "oem" "show ise\r"
+send_cmd_to_ise $ip_address_2 "oem" "show mrc\r"
+send_cmd_to_ise $ip_address_2 "oem" "show datapac\r"
+send_cmd_to_ise $ip_address_2 "oem" "show powersupply\r"
+send_cmd_to_ise $ip_address_2 "oem" "show battery\r"
+send_cmd_to_ise $ip_address_2 "oem" "show network\r"
+send_cmd_to_ise $ip_address_2 "oem" "show pool\r"
+send_cmd_to_ise $ip_address_2 "nseash" "show hba\r"
+send_cmd_to_ise $ip_address_2 "oem" "show hosts\r"
+send_cmd_to_ise $ip_address_2 "oem" "show volumes\r"
+send_cmd_to_ise $ip_address_2 "oem" "show tasks\r"
+send_cmd_to_ise $ip_address_2 "oem" "show snmp\r"
+send_cmd_to_ise $ip_address_2 "oem" "show events\r"
+send_cmd_to_ise $ip_address_2 "oem" "show performance\r"
+send_cmd_to_ise $ip_address_2 "oem" "show drive\r"
+send_cmd_to_ise $ip_address_2 "oem" "configure\r"
+send_cmd_to_ise $ip_address_2 "oem" "upgrade --status\r"
+send_cmd_to_ise $ip_address_2 "oem" "add --status\r"
+send_cmd_to_ise $ip_address_2 "oem" "service\r"
+send_cmd_to_ise $ip_address_2 "root" "lfu display crash_event_ring\r"
+send_cmd_to_ise $ip_address_2 "root" "lfu display erm\r"
+send_cmd_to_ise $ip_address_2 "root" "df\r"
+send_cmd_to_ise $ip_address_2 "root" "ps\r"
+send_cmd_to_ise $ip_address_2 "root" "ifconfig\r"
+send_cmd_to_ise $ip_address_2 "root" "du /opt /etc /boot /upgrade /var /usr /home /tmp\r"
+send_cmd_to_ise $ip_address_2 "root" "tail -100 /var/log/fwEvent.log\r"
+send_cmd_to_ise $ip_address_2 "root" "tail -100 /var/log/upgrade.log\r"
+send_cmd_to_ise $ip_address_2 "root" "cat /var/log/messages.0 /var/log/messages |tail -400\r"
+send_cmd_to_ise $ip_address_2 "root" "ls -l /var/log\r"
+}
+exit 0
+
+###
+# Modelines:
+# Local Variables:
+# tab-width: 4
+# indent-tabs-mode: nil
+# End:
+# vi:sw=4 ts=4 expandtab

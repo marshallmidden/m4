@@ -1,0 +1,73 @@
+#!/bin/bash
+
+chk_enet() {
+	pcidev=bus-pci-0000:`echo $1 | sed -e 's@/@:@'`
+	enetdev=`getcfg-interface ${pcidev}`
+	test "${enetdev}" == "" && enetdev="$1"
+	echo "${enetdev}"
+}
+
+. /etc/sysconfig/xio3d
+
+export XIO_HW_TYPE
+
+# Up to 4 dual-port Qlogic cards.  Right two are BE (viewed from back).
+case ${XIO_HW_TYPE} in
+SMX6DH8-XG2)
+	echo "Recognized XIO_HW_TYPE=${XIO_HW_TYPE}"
+	export BEDEVS=07/01.0:07/01.1:06/01.0:06/01.1
+	FEDEVS=`chk_enet 03/01.0`:`chk_enet 03/01.1`
+	export FEDEVS=${FEDEVS}:`chk_enet 02/03.0`:`chk_enet 02/03.1`
+	;;
+SMX7DWE)
+	echo "Recognized XIO_HW_TYPE=${XIO_HW_TYPE}"
+	export BEDEVS=04/00.0:04/00.1:01/00.0:01/00.1
+	FEDEVS=`chk_enet 02/00.0`:`chk_enet 02/00.1`
+	export FEDEVS=${FEDEVS}:`chk_enet 07/00.0`:`chk_enet 07/00.1`
+	;;
+*)
+	echo "XIO_HW_TYPE=${XIO_HW_TYPE} not recognized"
+	exit 2
+	;;
+esac
+
+# Set MICROMEMORY variable by finding any MicroMemory board
+MICROMEMORY=`lspci -n | grep 'Class 0580: 1332:' | \
+	( IFS=' :' read dom bus dev rest; echo ${bus}/${dev} )`
+test "x${MICROMEMORY}" != "x" -a "x${MICROMEMORY}" != "x/" && export MICROMEMORY
+
+# Set CPU_SPEED environment variable
+CPU_SPEED=`grep 'cpu MHz' /proc/cpuinfo | head -1 | tr . ' ' | awk '{print $4}'`
+test "x${CPU_SPEED}" != "x" && export CPU_SPEED
+
+# Set CPUS environment variable
+CPUS=`grep physical /proc/cpuinfo | tr -cd \[0-9]`
+test "x${CPUS}" != "x" && export CPUS
+
+ulimit -c unlimited
+ulimit -d unlimited
+ulimit -f unlimited
+ulimit -l unlimited
+ulimit -m unlimited
+ulimit -s 512		# 512k is more than enough for most things!
+ulimit -v unlimited
+
+# Call logrotate to capture files before startup
+/usr/sbin/logrotate /etc/logrotate.conf
+
+# Clean up old archive files (now using BZip2)
+rm -f /var/log/*.gz
+rm -f /var/log/xiotech/apps.log
+rm -f /var/log/xiotech/*.gz
+
+# Create /var/db/iscsi for iscsid and cleanup the database if it exists
+mkdir -p /var/db/iscsi
+rm -f /var/db/iscsi/*
+
+# Start the xiotech application and direct the output through logtrim
+# Note: we are running as root.
+cd /opt/xiotech
+exec ./bvm 2>&1 | /sbin/logtrim -p /var/log/xiotech -f apps.xiolog
+echo "bvm exited (pam returned) - xio3d no longer running"
+
+# vi:sw=8 ts=8 noexpandtab

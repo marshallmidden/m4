@@ -1,0 +1,131 @@
+diff -rub obj-750.clean/drivers/scsi/sas/sas_discover.c obj-750/drivers/scsi/sas/sas_discover.c
+--- obj-750.clean/drivers/scsi/sas/sas_discover.c	2006-09-01 15:44:15.000000000 -0500
++++ obj-750/drivers/scsi/sas/sas_discover.c	2006-09-01 15:15:55.000000000 -0500
+@@ -1504,7 +1504,7 @@
+ 	BUG_ON(!list_empty(&dev->ex_dev.children));
+ 	sas_unregister_common_dev(dev);
+ }
+-
++extern int sas_ex_find_phy(struct domain_device *dev, u8 *sas_addr, int start);
+ /**
+  * sas_register_domain_devs -- register the domain devices with sysfs
+  * @port: the port to the domain
+@@ -1514,12 +1514,23 @@
+  */
+ static int sas_register_domain_devs(struct sas_port *port)
+ {
+-	struct domain_device *n, *dev;
++	struct domain_device *n, *dev, * parent;
+     int ret = 0;
++        struct expander_device *ex_dev= NULL;
++        struct ex_phy *phy =NULL;
++        int phy_id=0;
+ 
+ 	list_for_each_entry_safe(dev, n, &port->dev_list, dev_list_node) {
+ 		if (dev->dev_obj.dentry)
+ 			continue;
++                parent = NULL;
++                parent = dev->parent;
++                if (parent != NULL)
++                {
++                    ex_dev =&parent->ex_dev;
++                    phy_id= sas_ex_find_phy(dev->parent, dev->sas_addr, -1);
++                    phy = &ex_dev->ex_phy[phy_id];
++                }
+ 		switch (dev->dev_type) {
+ 		case SAS_END_DEV:
+ 			ret = sas_register_end_dev(dev);
+@@ -1537,6 +1548,13 @@
+ 				    __FUNCTION__, dev->dev_type);
+ 			break;
+ 		}
++                if (ret==-EAGAIN)
++                    SAS_DPRINTK("LOOK AT ME ret %02X ex_dev %p phy %p phyid %d\n",ret,ex_dev,phy,phy_id);
++                
++                if ((parent) && (ret==-EAGAIN))
++                {
++                    memset(phy->attached_sas_addr, 0, SAS_ADDR_SIZE);
++                }
+ 	}
+ 
+ 	return ret;
+@@ -1669,7 +1687,7 @@
+ 		switch (disc_ev) {
+ 		case DISCE_DISCOVER_DOMAIN:
+ 			if (try_module_get(sas_ha->lldd_module)) {
+-				if ( sas_discover_domain(port) == EAGAIN ) {
++				if ( sas_discover_domain(port) == -EAGAIN ) {
+                     SAS_DPRINTK("%s: sas_discover_domain EAGAIN\n", __FUNCTION__);
+                     sas_revalidate_domain(port);
+                 }
+@@ -1678,7 +1696,7 @@
+ 			break;
+ 		case DISCE_REVALIDATE_DOMAIN:
+ 			if (try_module_get(sas_ha->lldd_module)) {
+-				if ( sas_revalidate_domain(port) == EAGAIN ) {
++				if ( sas_revalidate_domain(port) == -EAGAIN ) {
+                     SAS_DPRINTK("%s: sas_revalidate_domain EAGAIN\n", __FUNCTION__);
+                     sas_revalidate_domain(port);
+                 }
+diff -rub obj-750.clean/drivers/scsi/sas/sas_expander.c obj-750/drivers/scsi/sas/sas_expander.c
+--- obj-750.clean/drivers/scsi/sas/sas_expander.c	2006-09-01 15:44:15.000000000 -0500
++++ obj-750/drivers/scsi/sas/sas_expander.c	2006-09-01 15:19:50.000000000 -0500
+@@ -36,7 +36,7 @@
+ static int sas_discover_expander(struct domain_device *dev);
+ static int sas_configure_routing(struct domain_device *dev, u8 *sas_addr);
+ static int sas_disable_routing(struct domain_device *dev,  u8 *sas_addr);
+-static int sas_ex_find_phy(struct domain_device *dev, u8 *sas_addr, int start);
++int sas_ex_find_phy(struct domain_device *dev, u8 *sas_addr, int start);
+ static int smp_phy_control(struct domain_device *dev, int phy_id,
+ 			   enum phy_func phy_func);
+ 
+@@ -657,7 +657,7 @@
+ 	phy->linkrate = PHY_DISABLED;
+ }
+ 
+-static int sas_ex_find_phy(struct domain_device *dev, u8 *sas_addr, int start)
++int sas_ex_find_phy(struct domain_device *dev, u8 *sas_addr, int start)
+ {
+ 	struct expander_device *ex = &dev->ex_dev;
+ 	int i;
+@@ -1828,6 +1828,7 @@
+ 	return res;
+ }
+ extern int sas_del_io_list(struct domain_device *dev, int cancel);
++
+ static int sas_rediscover_dev(struct domain_device *dev, int phy_id)
+ {
+ 	struct expander_device *ex = &dev->ex_dev;
+@@ -1837,6 +1838,7 @@
+ 	int res;
+ 
+ 	res = sas_get_phy_attached_sas_addr(dev, phy_id, attached_sas_addr);
++        
+ 	switch (res) {
+ 	case SMP_RESP_NO_PHY:
+ 		phy->phy_state = PHY_NOT_PRESENT;
+@@ -1939,10 +1941,13 @@
+ 			if (phy_id == -1)
+ 				break;
+ 			res = sas_rediscover(dev, phy_id);
++                        if (res == -EAGAIN)
++                            sas_execute_disable_enable_phy(dev,0);
+ 			i = phy_id + 1;
+ 		} while (i < ex->num_phys);
+ 	}
+ out:
++ 
+ 	return res;
+ }
+ 
+diff -rub obj-750.clean/drivers/scsi/sas/sas_scsi_host.c obj-750/drivers/scsi/sas/sas_scsi_host.c
+--- obj-750.clean/drivers/scsi/sas/sas_scsi_host.c	2006-09-01 15:44:15.000000000 -0500
++++ obj-750/drivers/scsi/sas/sas_scsi_host.c	2006-09-01 15:09:05.000000000 -0500
+@@ -975,7 +975,6 @@
+ 
+ 				if (rc) {
+ 					ata_sas_port_destroy(ap);
+-                    sas_execute_disable_enable_phy(dev, 0);
+ 					return rc;
+ 				}
+ 

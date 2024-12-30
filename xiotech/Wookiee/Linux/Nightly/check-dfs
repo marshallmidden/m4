@@ -1,0 +1,57 @@
+#! /bin/bash
+
+# This script is intended to be run to check EFS availability.
+# Exit of 0 means things are ok. It will try for 10 minutes before failing.
+
+NFS_SERVER=epitnfsp01.xiocorp.dom
+
+#-----------------------------------------------------------------------------
+# bash functions to check the various aspects of the Engineering File Server (DFS).
+#
+dfs_readable() {
+	if [[ $EUID -eq 0 ]] ; then
+		SUDO="sudo -u eng_build"
+	fi
+	$SUDO /usr/bin/test -d /dfs/Eng/Users
+}
+
+dfs_exported() {
+	export EXPORTS="`/usr/sbin/showmount -e $NFS_SERVER`"
+        echo "$EXPORTS" | grep -q '^/Eng'
+}
+
+dfs_reachable() {
+	ping -c 1 -w 1 $NFS_SERVER > /dev/null 2>&1
+}
+
+EXPORTS=
+
+#-----------------------------------------------------------------------------
+# Loop for 10 minutes, checking if it is up.
+# 10*60 = 600 seconds, or 10 minutes.
+retries=60
+STATE=
+while [ $retries -gt 0 ] ; do
+	retries=$(( $retries - 1 ))
+
+	if ! dfs_reachable ; then
+		STATE="un-ping-able"
+	elif ! dfs_exported ; then
+		STATE="no exports"
+	elif dfs_readable ; then
+		STATE="ok"
+		exit 0
+	elif [ $retries -gt 0 ] ; then
+		STATE="not readable"
+		# give automounter some time to work, and retry
+	else
+		# retries exhausted
+		echo "Engineering File Server State=$STATE"
+		exit 1
+        fi
+	sleep 10
+done
+
+# Should not get here.
+echo "Why are we here?"
+exit 2

@@ -1,0 +1,82 @@
+#!/bin/bash
+#
+# doWookieebuild - Invoke a version-controlled build script.
+#
+# Copyright 2007 Xiotech Corporation. All rights reserved.
+#
+# Mark D. Rustad, 4/5/2007.
+#
+
+scrdir=Wookiee-build-scripts
+
+usage() {
+    echo "$0 [-h] [-n] script [args...]"
+    echo ""
+    echo "-h display help"
+    echo "-n do not update ${scrdir}"
+    echo "script build script to invoke"
+    echo "args arguments to build script"
+}
+
+fail() {
+    echo "$1"
+    exit 1
+}
+
+check() {
+    local cmd=`which $0`
+    local base=`basename ${cmd}`
+    test -f ${cmd} || fail "${cmd} not found"
+    test -f ${scrdir}/${base} || fail "${scrdir}/${base} not found"
+    if ! cmp ${cmd} ${scrdir}/${base}; then
+        echo "${cmd} did not match."
+        while { echo -n 'Continue? [Y/N/D(iff)/U(pdate)] '; read input; } do
+            case "${input}" in
+            Y) break;;
+            n|N) echo "build cancelled."; exit 1;;
+            d|D) echo "Diff of files:"; diff -u ${cmd} ${scrdir}/${base};;
+            u|U) echo "Updating $0 from ${scrdir}/${base}"
+                 cp ${scrdir}/${base} $0 || fail "Copy failed"
+                 echo "Starting updated version... $0 ${args[@]}"
+                 exec $0 "${args[@]}"
+                 echo "Funny... should not get here!"
+                 exit 1;;
+            esac
+        done
+    fi
+}
+
+test "$#" -eq 0 && { echo "Parameters required"; usage; exit 1; }
+update=1
+
+while [ "${1:0:1}" = "-" ]; do
+    opt="${1:1}"
+    shift 1
+    case "${opt}" in
+    h|H) usage; exit 0;;
+    n|N) update=0;;
+    *) fail "Unknown option: ${opt}";;
+    esac
+done
+
+if [ "${update}" -eq 1 ]; then
+    echo "Updating ${scrdir}"
+    (cd ${scrdir}; svn update) || fail "svn update in ${scrdir} failed"
+else
+    echo "Not updating ${scrdir}"
+fi
+
+args=("$@")
+check
+
+export PATH=${PWD}/${scrdir}:${PATH}
+script=$1
+test "${script}" != "" -a -x ${scrdir}/${script} ||
+    fail "Script ${script} not found. scrdir=${scrdir}"
+shift 1
+
+echo "Starting script ${script}"
+${script} "$@" || fail "build script ${script} failed."
+echo "build script ${script} succeeded."
+
+# vi:sw=4 ts=4 expandtab

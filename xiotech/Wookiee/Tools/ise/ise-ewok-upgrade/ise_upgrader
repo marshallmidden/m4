@@ -1,0 +1,1203 @@
+#!/usr/bin/expect --
+#
+# $Id: ise_upgrader 164281 2014-09-17 22:52:15Z neal_eiden $
+#
+# Script to upgrade one or more ISEs.
+#
+# Usage: ise_upgrader <ise ip address(even)> <PID> <ip_address_MASTER_7000> <ise firmware file> <total_num_of_ise>
+#
+# Where:
+#
+#  <ise ip address(eve)>
+#    Specify one IP addresses of ISE controller MRC, the lower and even numbered one.
+#    Controllers are accessed sequentially, and MRC_1 is even and MRC_2 is MRC_1+1.
+#
+#  <PID>
+#    Specify the physical disk ID number (pdisks command of ccbCL.pl) to do stop I/O.
+#
+#  <ip_address_MASTER_7000>
+#    The IP address of the master controller for the 7000 that ISE is connected to.
+#
+#  <ise firmware file>
+#    Controller upgrade file (For exmaple, controller.fw).
+#
+# Typical command line might be:
+#    ./ise_upgrade 10.64.102.4 1 10.64.102.31 controller.fw "V1.2 (RC3.4-476)"
+#
+#-----------------------------------------------------------------------------
+#
+# Define the system configuration.  Normally, this is set to "E7000".
+# The "E5000" configuration is mainly for debugging.
+#
+#set configuration "E5000"
+set configuration "E7000"
+
+#
+# For debug use only.  If you don't know what these do, please don't
+# change them.
+#
+set ignore_ise_status       "false"
+
+if {$configuration != "E5000"} {
+    set production [lindex $argv 0]
+    if {$production == "production"} {
+        # Where the ccbCL.pl script is located.
+        set ccbe_at "./CCBE"
+    } else {
+        set ccbe_at "../../../CCBE"
+    }
+
+    # Command to run the ccbCL.pl script.
+    set run_ccbcl "cd $ccbe_at ;/usr/bin/perl ccbCL.pl"
+} else {
+    set run_ccbl "ERROR"
+}
+#-----------------------------------------------------------------------------
+
+# No user output from commands running.
+log_user 0
+# User output from commands running.
+# log_user 1
+
+# Regular expression representing the ISE prompt.  Either "seaSH> " or "root:> "
+set ise_prompt "(#|seaSH|root:|root|oem:|oem)>{0,1} "
+# Global for checking firmware versions.
+set mrc_1_fwv ""
+set mrc_2_fwv ""
+# Global indicating the upgrade start time on an ISE before the upgrade
+set initial_upgrade_start ""
+#Global Bay ID
+set bayID 0
+
+set version ""
+set build ""
+
+# Globals for keeping track of percent complete and status
+set totalIse 0
+set iseIndex 0
+set operationStatus "Connecting..."
+set operationPercent 0
+set opErrorsFile "OpErrors.txt"
+set opStatusFile "OpStatus.txt"
+
+# Like perl, the real execution continues anywhere ... define the proc's first.
+
+#=============================================================================
+#
+# Tell how to run this script.
+#
+proc usage {} {
+    global configuration
+    if {$configuration == "E5000"} {
+        send_error "Usage: ise_upgrader <ip_address_MRC_1> <ip_address_MRC_2>"
+        send_error " <ise firmware file> <version string> <build>\n"
+    } else {
+        send_error "Usage: ise_upgrader <ip_address_MRC_1> <PID> <ip_address_MASTER_7000> <ise_firmware_file> <version_string> <build> <current_percent_complete> <total_num_of_ise> <opErrorsFile> <opStatusFile>\n"
+    }
+    exit 1
+}
+# End of usage
+
+#=============================================================================
+proc send_ccbcl_status { message } {
+    global configuration
+    global run_ccbcl
+    global master_7000
+    global pid
+
+    if {$configuration == "E5000"} {
+        send_error "LOGMESSAGE: $message\n"
+    } else {
+        send_error "ccbCL: $message\n"
+        system "$run_ccbcl '$master_7000' -e '\"logtextmessage -v 0 $message\"' >/dev/null"
+    }
+}
+# End of send_ccbcl_status
+
+#=============================================================================
+proc send_ccbcl_WARNING { message } {
+    global configuration
+    global run_ccbcl
+    global master_7000
+    global pid
+
+    if {$configuration == "E5000"} {
+        send_error "WARNING: $message\n"
+    } else {
+        send_error "ccbCL: $message\n"
+        system "$run_ccbcl '$master_7000' -e '\"logtextmessage -v 1 $message\"' >/dev/null"
+    }
+}
+# End of send_ccbcl_status
+
+#=============================================================================
+proc update_progress_file {} {
+    global totalIse
+    global iseIndex
+    global operationStatus
+    global operationPercent
+    global opStatusFile
+
+    if {$totalIse <= 0} {
+      #should never happen...but can't be too careful
+      set totalIse 1
+    }
+ 
+    #
+    # Calculate overall percent complete (on a 7000, this will include multiple ISE, so we need
+    # to take that into consideration when we display a % complete
+    #
+ 
+    set modifiedStatus "ISE $iseIndex of $totalIse: $operationStatus"
+    
+    #
+    #                           |---------- Percent from finished ISE -----------| + |------- Scaled % of the current ISE ------|
+    #
+    set modifiedPercentComplete [expr double( double(($iseIndex - 1.0) / $totalIse) * 100.0) + double(1.0 / $totalIse) * $operationPercent]
+
+    # Write out the new status file
+    system "echo -e \"PercentComplete=$modifiedPercentComplete\nStatus=$modifiedStatus\" > $opStatusFile"
+}
+# End of update_progress_file
+
+#=============================================================================
+proc update_error_file {message} {
+    global opErrorsFile
+
+    # Append the error to the end of the OpErrors file    
+    system "echo -e \"$message\" >> $opErrorsFile"
+}
+# End of update_error_file
+
+
+
+#=============================================================================
+proc login_now { ise user } {
+    global ise_prompt
+
+    #
+    # log into ISE.
+    #
+    if {$user == "oem"} {
+        set password "oem"
+    } elseif {$user == "root"} {
+        set password "federal"
+    } else {
+        send_ccbcl_status "!\$ISE Login - Unknown user-$user"
+        send_ccbcl_status "!\$ISE FW Update FAILED"
+        update_error_file "ISE $ise: Login Failure- Unknown user-$user"
+        exit 2
+    }
+
+
+    #
+    # Spawn SSH into the ISE as the given user. Also, ignore the current known_hosts file
+    # We need to ignore the hosts file because we've seen at least 1 situations where the 
+    # ssh-key on the ISE had changed during the upgrade
+    #
+    # Using /dev/null as the known_hosts file will always avoid key problems
+    #
+
+    spawn ssh "$user@$ise" "-o UserKnownHostsFile=/dev/null"
+    expect {
+        "password: " {
+            send "$password\r"
+        }
+        "(yes/no)? " {
+            send "yes\r"
+            exp_continue
+        }
+        timeout      {
+            send_error "ssh login timeout occurred\n"
+            return 0 
+        }
+        eof          {
+            send_error "login eof $ise\n"
+            return 0 
+        }
+    }
+    #
+    # Check it started.
+    #
+    expect {
+        -re $ise_prompt {
+            return $spawn_id }
+        timeout
+        {
+            send_error "login_now timed out waiting for a login prompt. Login attempt failed.\n"
+            return 0 
+        }
+        eof             {
+            send_error "login prompt encountered EOF after entering password. Login attempt failed.\n"
+            return 0 
+        }
+    }
+    send_error "prompt problem $ise\n"
+    send_ccbcl_status "!\$ISE FW Update FAILED"
+    update_error_file "ISE $ise: Command prompt problem."
+    exit 1
+}
+# End of login_now
+
+#=============================================================================
+#
+# Log into an ISE with seash running (possibly say "yes" to come up).
+#
+proc login { ise user } {
+
+    send_error "Logging into ISE at: $ise\n"
+
+
+    #
+    # The ISE's data-path is guarenteed to come up in under 2 minutes, however
+    # the management path (including ssh, nseash) may take longer. Testing has
+    # encountered 2 cases where it took 5 minutes to completely come up
+    #
+    # Consequently, we'll keep trying to ssh into the ISE for up to 10 minutes
+    # waiting 1 minute between tries. If it fails after 10 minutes, then 
+    # something has likely gone very wrong, and we should fail
+    #
+
+    set tmp_spawn 0
+    set successfulLogin 0
+    set attemptNumber 0
+    set maxAttempts 10
+
+    while { ($successfulLogin == 0) && ($attemptNumber < $maxAttempts) } {     
+
+      set attemptNumber [expr $attemptNumber+1]
+      set tmp_spawn [login_now $ise $user]
+      if {$tmp_spawn == 0} {
+        send_error "Failed to login. Waiting 1 minute before retrying...\n"
+
+        #
+        # if login_now encountered an EOF, then it implicitly closed already
+        # however, if a timeout occurred, it did not. Use "catch" so that
+        # even if we double-close, things don't explode
+        #
+
+        catch {close}
+        wait
+
+        sleep 60
+
+      } else {
+
+        send_error "Successfully logged into $ise.\n"
+        set successfulLogin 1
+
+      }
+    }
+
+
+
+    #
+    # At this point, we've either time out (need to report an error), or
+    # the login was successful
+    #
+
+    if {$successfulLogin == 1} {
+      send_error "Login complete. Continuing...\n"
+    } else {    
+      send_error "Login failed after $maxAttempts attempts. Aborting...\n"
+      send_ccbcl_status "!\$Problems connecting to ISE"
+      send_ccbcl_status "!\$ISE FW Update FAILED"
+      update_error_file "Problems connecting to ISE $ise"
+      exit 3
+    }
+
+    return $tmp_spawn
+}
+# End of login
+
+
+
+#=============================================================================
+#
+# Check that the MRC is in reasonable state, and has correct firmware.
+#
+proc check_status_ise { ise } {
+    global ise_prompt
+    global mrc_1_fwv
+    global mrc_2_fwv
+    global ignore_ise_status
+    global isetime
+
+    set spawn_id [login $ise oem]
+
+    send "show ise\r"
+    set status ""
+    while { [string compare $status ""] == 0 } {
+        expect {
+            -re "Status           : (\[^\r\n]*)" {
+                set status $expect_out(1,string)
+            }
+            -re "Time(.*)" {
+                set str $expect_out(1,string)
+                send_error "line='$str'\n"
+            }
+            timeout {
+                send_ccbcl_status "!\$ISE Status Comm Timeout"
+                send_ccbcl_status "!\$ISE FW Update FAILED"
+                update_error_file " ISE $ise: ISE Status Comm Timeout."
+                exit 2
+            }
+            eof     {
+                send_ccbcl_status "!\$ISE Status Comm Drop"
+                send_ccbcl_status "!\$ISE FW Update FAILED"
+                update_error_file "ISE $ise: ISE Status Comm Drop."
+                exit 3
+            }
+        }
+    }
+    if {$ignore_ise_status == "false" && $status != "Operational (None)"} {
+        send_ccbcl_status "!\$ISE status not OK - $status"
+        send_ccbcl_status "!\$ISE FW Update FAILED"
+        update_error_file "ISE $ise: Cannot proceed while status is '$status'."
+        exit 1
+    }
+    expect {
+        -re $ise_prompt { }
+    }
+
+
+    send "show mrc\r"
+    expect {
+        -re "Firmware Ver.   : (\[^ \r\n]* \[^ \r\n]*)" {
+            set mrc_1_fwv $expect_out(1,string)
+        }
+        timeout {
+            send_ccbcl_status "!\$MRC1 FW Version Test Comm Timeout"
+            send_ccbcl_status "!\$ISE FW Update FAILED"
+            update_error_file "ISE $ise: MRC1 FW Version test Comm Timeout."
+            exit 2
+        }
+        eof     {
+            send_ccbcl_status "!\$MRC1 FW Version Test Comm Drop"
+            send_ccbcl_status "!\$ISE FW Update FAILED"
+            update_error_file "ISE $ise: MRC1 FW Version test Comm Drop."
+            exit 3
+        }
+    }
+    expect {
+        -re "Firmware Ver.   : (\[^ \r\n]* \[^ \r\n]*)" {
+            set mrc_2_fwv $expect_out(1,string)
+        }
+        timeout {
+            send_ccbcl_status "!\$MRC2 FW Version Test Comm Timeout"
+            send_ccbcl_status "!\$ISE FW Update FAILED"
+            update_error_file "ISE $ise: MRC2 FW version test communications timeout."
+            exit 2
+        }
+        eof     {
+            send_ccbcl_status "!\$MRC2 FW Version Test Comm Drop"
+            send_ccbcl_status "!\$ISE FW Update FAILED"
+            update_error_file "ISE $ise: MRC2 FW Version Test commmunications drop."
+            exit 3
+        }
+    }
+    expect {
+        -re $ise_prompt { }
+    }
+
+    # Check the FRU status.
+    send "add --status\r"
+    expect {
+        "MRC 1 is online." {  }
+        timeout {
+            send_ccbcl_status "!\$MRC1 Online Test Comm Timeout"
+            send_ccbcl_status "!\$ISE FW Update FAILED"
+            update_error_file "ISE $ise: MRC1 Online Test Comm Timeout."
+            exit 2
+        }
+        eof     {
+            send_ccbcl_status "!\$MRC1 Online Test Comm Drop"
+            send_ccbcl_status "!\$ISE FW Update FAILED"
+            update_error_file "ISE $ise: MRC1 Online Test Comm Drop."
+            exit 3
+        }
+    }
+    expect {
+        "MRC 2 is online." {  }
+        timeout {
+            send_ccbcl_status "!\$MRC2 Online Test Comm Timeout"
+            send_ccbcl_status "!\$ISE FW Update FAILED"
+            update_error_file "ISE $ise: MRC2 Online Test Comm Timeout."
+            exit 2
+        }
+        eof     {
+            send_ccbcl_status "!\$MRC2 Online Test Comm Drop"
+            send_ccbcl_status "!\$ISE FW Update FAILED"
+            update_error_file "ISE $ise: MRC2 Online Test Comm Drop."
+            exit 3
+        }
+    }
+    expect {
+        -re $ise_prompt { }
+    }
+
+    send "upgrade --status\r"
+    expect {
+        -re "Status      : (\[^\r\n]+)" {
+            set status "$expect_out(1,string)"
+            send_error "Upgrade status $status\n"
+        }
+        -re $ise_prompt  { }
+    }
+
+    
+    close
+    wait
+}
+# End of check_status_ise
+#=============================================================================
+#
+# Check that the ISE is the correct product type (1400 = ISE1 & 2400 = ISE2).
+#
+proc check_product_ise { ise filename } {
+    global ise_prompt
+    global mrc_1_fwv
+    global mrc_2_fwv
+    global ignore_ise_status
+    global isetime
+    global iseProduct
+    #set productbase "ISE1400"
+    set fileext [file extension $filename] 
+    
+    # Determine what product type by the .ue (ISE1) or .ue2 (ISE2) filename.
+    if {$fileext eq ".ue2"} {
+      set productbase "ISE2400"
+      } else {
+      set productbase "ISE1400"
+      }
+
+    set spawn_id [login $ise oem]
+
+    send "show ise\r"
+    set status ""
+            expect {
+            -re "Model            : (\[^ \r\n]*)" {
+                set iseProduct $expect_out(1,string)
+            }
+            timeout {
+                send_ccbcl_status "!\$ISE Status Comm Timeout"
+                send_ccbcl_status "!\$ISE FW Update FAILED"
+                update_error_file " ISE $ise: ISE Status Comm Timeout."
+                exit 2
+            }
+            eof     {
+                send_ccbcl_status "!\$ISE Status Comm Drop"
+                send_ccbcl_status "!\$ISE FW Update FAILED"
+                update_error_file "ISE $ise: ISE Status Comm Drop."
+                exit 3
+            }
+        }
+        # If the correct product is found continue.  Otherwise, return good to skip
+        if {$iseProduct ne $productbase} {
+        send_ccbcl_status "!\$ise Model: $iseProduct is of the wrong type for this firmware - Skipping"
+        exit 0
+        }
+   close
+   wait
+
+}
+# End of check_product_ise
+
+
+
+#=============================================================================
+#
+# start_send -  Copy file to ISE then open a connection to kick-off upgrade.
+#
+proc start_send { ise } {
+    global ise_prompt
+    global filename
+    global timeout
+    global bayID
+    global operationStatus
+
+    send_ccbcl_status "!\$Preparing ISE#$bayID for upgrade"
+    set operationStatus "Preparing ISE for upgrade"
+    update_progress_file
+
+    #
+    # We need to do a few things before copying over the firmware file.
+    # First, we need to clean out any residual state that may be left
+    # from the initial installation because of PTR-6060.  RHE: This moved to
+    # upgrade.ue along with fix for PTR-6525.
+    
+    # Second,
+    # we need to make sure there's no leftover junk in the upgrade
+    # directory so that we don't run out of space when copying the file.
+    
+
+    # (this is a quick operation, so don't wait the global large timeout
+    set oldTimeout $timeout
+    set timeout 360
+
+    set prep_result "success"
+    set spawn_id [login $ise root]
+    send "rm -f /upgrade/controller/*\r"
+    expect {
+        timeout { set prep_result "failed" }
+        -re $ise_prompt
+    }
+    close
+    wait
+
+    set timeout $oldTimeout
+
+    #
+    # If one of these steps failed we'd like to know, but it's not
+    # tragic.  The odds are high that we don't need to do them anyway.
+    #
+    if {$prep_result == "failed"} {
+        send_ccbcl_status "!\$One of the prep steps failed - continuing"
+    }
+
+    send_ccbcl_status "!\$Copying FW to ISE#$bayID MRC1"
+    set operationStatus "Copying firmware"
+    update_progress_file
+
+    #
+    # Now copy the firmware file
+    #
+    spawn scp -o UserKnownHostsFile=/dev/null -q $filename root@$ise:/upgrade/controller/$filename
+    expect {
+        "password: " { send "federal\r" }
+        "(yes/no)? " { send "yes\r" 
+                       exp_continue 
+        }
+        timeout {
+            send_ccbcl_status "!\$MRC File Copy Comm Timeout"
+            send_ccbcl_status "!\$ISE FW Update FAILED"
+            update_error_file "ISE $ise: MRC File Copy Comm Timeout."
+            exit 2
+        }
+        eof     {
+            send_ccbcl_status "!\$MRC File Copy Comm Drop"
+            send_ccbcl_status "!\$ISE FW Update FAILED"
+            update_error_file "ISE $ise: MRC File Copy Comm Drop."
+            exit 3
+        }
+    }
+    
+    set savetimeout $timeout
+    set timeout 480
+    expect {
+        timeout {
+            send_ccbcl_status "!\$MRC File Copy Wait Timeout"
+            send_ccbcl_status "!\$ISE FW Update FAILED"
+            update_error_file "ISE $ise: MRC File Copy Wait Timeout."
+            exit 2
+        }
+        eof     {
+        }
+    }
+# No close necessary, the eof above closed it.
+    wait
+    set timeout $savetimeout
+
+
+    # (this is a quick operation, so don't wait the global large timeout
+    set oldTimeout $timeout
+    set timeout 260
+
+    set prep_result "success"
+    set spawn_id [login $ise root]
+    # set executable bit
+    send "chmod +x /upgrade/controller/$filename\r"
+    expect {
+        timeout { set prep_result "failed" }
+        -re $ise_prompt
+    }
+    close
+    wait
+
+    set timeout $oldTimeout
+    
+}
+# End of start_send
+
+#=============================================================================
+#
+# Start the upgrade on the MRC.
+#
+proc start_upgrade { ise } {
+    global filename
+    global ise_prompt
+
+    set spawn_id [login $ise oem]
+
+    # Start the upgrade.
+    send "upgrade --mrc=$filename\r"
+    expect {
+        -re $ise_prompt { }
+        timeout {
+            send_ccbcl_status "!\$MRC Upgrade Comm Timeout"
+            send_ccbcl_status "!\$ISE FW Update FAILED"
+            update_error_file "ISE $ise: MRC Upgrade Comm Timeout."
+            exit 2
+        }
+        eof     {
+            send_ccbcl_status "!\$MRC Upgrade Comm Drop"
+            send_ccbcl_status "!\$ISE FW Update FAILED"
+            update_error_file "ISE $ise: MRC Upgrade Comm Drop."
+            exit 3
+        }
+    }
+    close
+    wait
+}
+# End of start_upgrade
+
+#=============================================================================
+#
+# Get the version of ISE firmware running on an MRC.
+#
+proc get_ise_fw_version { ise } {
+    global ise_prompt
+    global version
+    global build
+
+    set spawn_id [login $ise root]
+    set version "UNKNOWN"
+    set build "UNKNOWN"
+    send "cat /etc/version\r"
+    expect {
+        -re "PkgVersion=(\[^\r\n]+)" {
+            set version "$expect_out(1,string)"
+            exp_continue
+        }
+        -re "PkgBuildId=(\[^\r\n]+)" {
+            set build "$expect_out(1,string)"
+            exp_continue
+        }
+        -re $ise_prompt  { }
+    }
+
+    close
+    wait
+
+#    scan $version "%2x%2x%2x%2x" major minor release blank
+#    set version "v"
+#    set dot "."
+#    set dash "-"
+#    set version $version$major$dot$minor$dot$release$dash$build
+
+     scan $version "%2x%2x%2x%2x" major minor release blank
+     scan $major %2x hexdec
+     set major [format "%02x" $hexdec]
+     scan $minor %x hexdec
+     set minor [format "%02x" $hexdec]
+     scan $release %x hexdec
+     set release [format "%02x" $hexdec]
+     scan $blank %x hexdec
+     set blank [format "%02x" $hexdec]
+     set version $major$minor$release$blank
+
+    return 0
+}
+# End of get_ise_fw_version
+
+
+#=============================================================================
+#
+# Read the initial values from upgrade status. These will be used for 
+# verifying that a new upgrade has started.
+#
+proc get_initial_upgrade_start { ise } {
+    global ise_prompt
+
+    #
+    # Login as oem so that we can issue nseash commands.
+    #
+    set spawn_id [login $ise oem]
+    set initiated ""
+    send "upgrade --status\r"
+    expect {
+        -re "Initiated   : (\[^\r\n]+)" {
+            set initiated "$expect_out(1,string)"
+            exp_continue
+        }
+        -re $ise_prompt  { }
+    }
+
+    close
+    wait
+
+    return $initiated
+}
+# End of get_upgrade_start
+
+#=============================================================================
+#
+# Wait for the upgrade to complete.
+# Check along the way to see if the upgrade process encountered an error.
+# Returns a list containing the value of the status, progress, and error
+# fields from the "upgrade -status" output.
+#
+proc wait_for_upgrade { ise } {
+    global ise_prompt
+    global initial_upgrade_start
+    global operationStatus
+    global operationPercent
+
+    #
+    # Track the upgrade progress using "upgrade -status" commands.
+    # We need to examine both the "status" and "progress" values to
+    # know whether or not we've successfully completed the upgrade phase.
+    # Pull out the "error" field also, as it will be useful for
+    # diagnosing and repairing problems.
+    #
+    set progress "Not started yet"
+    set error "Not set"
+    set status "Not set"
+    set started "false"
+    set loops 0
+    while { 1==1 } {
+        #
+        # Login as oem so that we can issue nseash commands.
+        #
+        set spawn_id [login $ise oem]
+        send "upgrade --status\r"
+        expect {
+            -re "Status      : (\[^\r\n]+)" {
+                set status "$expect_out(1,string)"
+                set operationStatus $status
+                exp_continue
+            }
+            -re "Progress    : (\[^\r\n]+)" {
+                set progress $expect_out(1,string)
+                send_error "ISE Update progress : $progress\n"
+
+                #
+                # Get the percent complete (if it exists)
+                #
+
+                set startPercent [string last "(" $progress]
+                set endPercent [string last "%)" $progress]
+                set percentString "0"
+
+                if { ($startPercent >= 0) &&
+                     ($endPercent > 0) &&
+                     ($endPercent > $startPercent) &&
+                     ([expr $startPercent + 1] < [string length $progress]) &&
+                     ([expr $endPercent - 1] >= 0)} then {
+
+                        set percentString [string range $progress [expr $startPercent+1] [expr $endPercent-1]]
+                }
+
+
+                #
+                # Get the status string (if it exists)
+                #
+
+                set statusString ""
+                set endStatusString [expr $startPercent - 2];
+                if {$endStatusString < 0} then {
+                        set endStatusString [expr [string length $progress] - 1]
+                }
+                set statusString [string range $progress 0 $endStatusString]
+
+
+                # Output the status/percent complete strings to the logs
+                send_error "ISE Update:  Status='$statusString' Percent='$percentString'\n"
+                
+
+                #
+                # The ISE Update process has to major steps:
+                # 1) "Upgrading firmware" (0-100%)
+                # 2) "Upgrading backup firmware" (0-100%)
+                #
+                # Both of the steps seem to take approximately equal time. So, we'll treat the
+                # first step as 0-50% and the second half as 50-100%
+                #
+                
+                if { ([string compare "Upgrading firmware" $statusString] == 0)} then {
+                  set percentString [expr double($percentString / 2.0)]
+                } elseif { ([string compare "Updating backup firmware" $statusString] == 0)} then {
+                  set percentString [expr 50.0 + double($percentString / 2.0)]
+                }
+
+
+                #
+                # Store the status and percent complete 
+                #
+	
+                set operationStatus $statusString
+                set operationPercent $percentString
+
+
+                # Change 'progress' to reflect only the status string (for future use below)
+                set progress $statusString
+                exp_continue
+
+            }
+            -re "Error Code  : (\[^\r\n]+)" {
+                set error "$expect_out(1,string)"
+                exp_continue
+            }
+            -re "Initiated   : (\[^\r\n]+)" {
+                set initiated "$expect_out(1,string)"
+                if {$initiated!=$initial_upgrade_start} {
+                    set started "true"
+                }
+                exp_continue
+            }
+            -re $ise_prompt  { }
+        }
+        
+
+        #
+        # Update the progress/status file so that monitoring software can see the status
+        #
+        update_progress_file
+
+
+        #
+        # At the end of a successful upgrade or a successful cancel, the
+        # progress is "Complete" and the status is either "Upgrade successful"
+        # or "Upgrade canceled".  If we see either state, then it just means
+        # that the currentcurrent  upgrade hasn't started yet.
+        # TODO: Is this necessary?  Can we really get here that fast? (ts)
+        # Yes, with the new upgrade.ue we do. (rhe)
+        #
+        if {$started == "false"} {
+            set progress "Not started yet"
+        }
+
+        #
+        # Check to see if we encountered a failure.  If so, break out and
+        # return the error.
+        #
+        if {$progress == "Complete" && $status == "Upgrade failed"} {
+            break;
+        }
+
+        # Check for success
+        if {$progress == "Complete" && $status == "Upgrade successful"
+          && $started == "true"} {
+            break;
+        }
+
+        set progress2 [string map {\x25 "pct"} $progress]
+        send_ccbcl_status "!\$ISE - $progress2"
+
+
+        # We want to wait for 30 minutes at most. (30 second waits * 60 attempts)
+        # This *used* to be a 60 second sleep with 30 retries, but it was modified
+        # so that we can have more granular progress
+        sleep 30
+        set loops [expr $loops + 1]
+        if { $loops == 60 } {
+           send_ccbcl_status "!\$ISE FW Update Timed Out"
+           update_error_file "ISE $ise: FW Update Timed Out."
+           exit 5
+        }
+    }
+    close
+    wait
+    
+    #
+    # Update the progress/status file so that monitoring software can see the status
+    #
+    set operationStatus $status
+    update_progress_file
+
+
+    return [list $status $progress $error]
+}
+# End of wait_for_upgrade
+
+proc check_time_ise { ise } {
+    global ise_prompt
+
+    set mysecs [clock seconds]
+    
+    set mydate [clock format $mysecs -format "%d-%b-%Y" -gmt 0]
+    set mytime [clock format $mysecs -format "%H:%M:%S" -gmt 0]
+
+    send_error "Current time is: $mydate $mytime ($mysecs)\n"
+
+    set spawn_id [login $ise oem]
+    set isetime 0
+    send "show ise\r"
+    expect {
+        -re "Date/Time        : (\[^ \r\n]* \[^\r\n]*)" {
+            set isetime $expect_out(1,string)
+            send_ccbcl_status "!\$ISE time is: $isetime\n"
+        }
+        -re $ise_prompt { }
+    }
+
+    set isesecs [clock scan $isetime]
+    send_error "ISE time is: $isetime ($isesecs)\n"
+
+    if {$isesecs >= $mysecs} {
+        send_error "ISE time is ahead of our time.  Won't change\n"
+        close
+        wait
+        return
+    }
+
+    send_ccbcl_WARNING "!\$Will adjust ISE $ise time to: $mydate $mytime\n"
+    send "configure --date=$mydate --time=$mytime\r"
+    expect {
+        -re "Time Changed to.*\: (.*)\r" { }
+        -re $ise_prompt  { }
+    }
+
+    sleep 2
+
+    send "show ise\r"
+    expect {
+        -re $ise_prompt  { }
+    }
+    
+    send "show ise\r"
+    expect {
+        -re "Date/Time        : (\[^ \r\n]* \[^\r\n]*)" { 
+            set isetime $expect_out(1,string)
+        }
+        -re $ise_prompt  { }
+    }
+    
+    set mysecs [clock seconds]
+    set isesecs [clock scan $isetime]
+   
+    if {$isesecs < $mysecs-10} {
+        send_ccbcl_WARNING "!\$Failed to set time on ISE $ise\n"
+    }
+    send_ccbcl_status "!\$New ISE $ise time is: $isetime\n"
+    
+    close
+    wait
+}
+# End of check_time_ise
+
+#=============================================================================
+#
+# Main program running here.
+#
+set argc [llength $argv]
+if {$configuration == "E5000"} {
+    set numargs 5
+} else {
+    set numargs 11
+}
+if {$argc != $numargs} {
+    usage
+}
+
+#
+# Gather command line arguments.
+#
+if {$configuration == "E5000"} {
+    set ise0 [lindex $argv 0]           ;# IP of the even numbered MRC
+    set ise1 [lindex $argv 1]           ;# IP of the odd numbered MRC
+    set filename [lindex $argv 2]       ;# The firmware image file
+    set fwversion [lindex $argv 3]      ;# The version string of the FW image
+    set fwbuild [lindex $argv 4]          ;# The build
+} else {
+    set ise [lindex $argv 1]            ;# IP of the even numbered MRC
+    set pid [lindex $argv 2]            ;# The controller's physical ID number
+    set master_7000 [lindex $argv 3]    ;# The 7000 controller IP
+    set filename [lindex $argv 4]       ;# The firmware image file
+    set fwversion [lindex $argv 5]      ;# The version string of the FW image
+    set fwbuild [lindex $argv 6]        ;# The build
+    set iseIndex [lindex $argv 7]       ;# Index of the ISE that we're upgrading (X of Y)
+    set totalIse [lindex $argv 8]       ;# Total number of ISE on the system (for % complete)
+    set opErrorsFile [lindex $argv 9]   ;# OpErrors.txt file name
+    set opStatusFile [lindex $argv 10]  ;# OpStatus.txt file name
+}
+
+
+#
+# Under heavy load, we've seen ISE in which it takes over 5 minutes to get logged in!
+# So, setting timeout to 600 seconds (10 minutes) to ensure we don't prematurely bail out.
+#
+set timeout 600
+
+#
+# For E5000 configurations, we don't have the requirement that IP
+# addresses are consecutive.  Since we are given the two IP addresses
+# on the command line, we don't have to derive them here.
+#
+if {$configuration == "E5000"} {
+    set ip_address_1 $ise0
+    set ip_address_2 $ise1
+    set bayID 1
+    set master_7000 "ERROR"
+} else {
+    # Make sure the even and odd MRC's are known.
+    set ip_nums [split $ise "."]
+    set last_num [lindex $ip_nums 3]
+    set new_num [expr $last_num & 254]
+    if { $new_num != $last_num} {
+        send_error "ISE IP address is not even\n"
+        update_error_file "ISE IP address is not even."
+        exit 1
+    }
+
+    #
+    # Set up IDs and addresses for later use
+    #
+    set bayID [expr ($new_num&127)/2]
+    set ip_address_1 "[lindex $ip_nums 0].[lindex $ip_nums 1].[lindex $ip_nums 2].$new_num"
+    set new_num [expr $new_num + 1]
+    set ip_address_2 "[lindex $ip_nums 0].[lindex $ip_nums 1].[lindex $ip_nums 2].$new_num"
+}
+
+#send_error "Will load firmware to MRC_1 ($ip_address_1) and indirectly MRC_2 ($ip_address_2).\n"
+if {$configuration == "E7000"} {
+    #send_error "Running 7000 controller has IP ($master_7000).\n"
+}
+
+#
+# Check to make sure the firmware file exists and that we can access it
+#
+if {$filename != ""} {
+    if {[file readable $filename]} {
+        #send_error "Will load firmware $filename.\n"
+    } else {
+        send_error "Need firmware filename - $filename does not exist.\n"
+        update_error_file "Need firmware filename - $filename does not exist."
+        exit 1
+    }
+}
+
+
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# Make sure we are on the right product
+#
+# Make sure this is an ISE1 = ISE1400 or ISE2 = ISE2400(change here only)
+check_product_ise $ip_address_1 $filename
+
+# Make sure MRC_1 is reasonable
+check_status_ise $ip_address_1
+
+check_time_ise $ip_address_1
+
+# Make sure MRC_2 is reasonable
+check_status_ise $ip_address_2
+
+if {$filename == ""} {
+    send_user "Firmware for $ip_address_1 is '$mrc_1_fwv'\n"
+    send_ccbcl_status "!\$Firmware for $ip_address_1 is '$mrc_1_fwv'\n"
+    send_user "Firmware for $ip_address_2 is '$mrc_2_fwv'\n"
+    send_ccbcl_status "!\$Firmware for $ip_address_2 is '$mrc_2_fwv'\n"
+    exit 1
+}
+#- send_ccbcl_status "MRC $ip_address_1 appears ready"
+
+#- send_ccbcl_status "MRC $ip_address_2 appears ready"
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+#
+# If the upgrade phase encounters an error, it may be possible to repair
+# whatever went wrong and re-try the upgrade.  This is safe only for the
+# upgrade phase.  Once we've started the commit phase, we've passed the
+# point of no return.  For now, we're only allowing two attempts.
+#
+set max_attempts 4
+for {set attempt 1} {$attempt <= $max_attempts} {incr attempt} {
+    send_ccbcl_status "!\$Start ISE#$bayID Update"
+
+    get_ise_fw_version $ip_address_1
+    set start_version $version
+    set start_build $build
+    
+    send_ccbcl_status "!\$ISE#$bayID currently running $start_version-$start_build"
+    if {$start_version == $fwversion && $start_build == $fwbuild} {
+        send_ccbcl_status "!\$ISE#$bayID already running correct fw.  Upgrade not necessary"
+        exit 0
+        }
+
+    # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    # get the start time of the previous upgrade (if any)
+    set initial_upgrade_start [get_initial_upgrade_start $ip_address_1]
+    #send_ccbcl_status "!\$Last upgrade started at $initial_upgrade_start"
+
+    # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    # scp the file over to ise
+    start_send $ip_address_1
+    send_ccbcl_status "!\$Copy Completed to MRC#1 ($ip_address_1)"
+
+    # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    # start the upgrade process (long time)
+    send_ccbcl_status "!\$Upgrading ISE#$bayID via MRC#1 ($ip_address_1)"
+    start_upgrade $ip_address_1
+
+    # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    # Make sure the nvram on MRC_1 has gotten the information.
+    send_ccbcl_status "!\$Watching MRC#1 ($ip_address_1)"
+    set upgrade_state_1 [wait_for_upgrade $ip_address_1]
+
+    # Now look for problems
+    if {[lindex $upgrade_state_1 0] != "Upgrade successful"} {
+        send_ccbcl_status "!\$The upgrade failed\n"
+        send_ccbcl_status \
+            "!\$MRC1 ($ip_address_1) Status=   [lindex $upgrade_state_1 0]"
+        send_ccbcl_status \
+            "!\$MRC1 ($ip_address_1) Progress= [lindex $upgrade_state_1 1]"
+        send_ccbcl_status \
+            "!\$MRC1 ($ip_address_1) Error=    [lindex $upgrade_state_1 2]"
+        send_ccbcl_status "!\$Will try again in 60 seconds"
+        sleep 60
+        continue
+    }
+        
+    # get the version it's running now
+    get_ise_fw_version $ip_address_1
+    set end_version $version
+    set end_build $build
+    send_ccbcl_status "!\$ISE now running $end_version-$end_build"
+
+    if {$end_version!=$fwversion} {
+        send_ccbcl_status "!\$WARNING: Version number ($end_version) does not match expected ($fwversion)"
+        update_error_file "Warning: ISE $bayID version number ($end_version) does not match expected ($fwversion)"
+    }
+
+    if {$end_build!=$fwbuild} {
+        send_ccbcl_status "!\$WARNING: Build number ($end_build) does not match expected ($fwbuild)"
+        update_error_file "Warning: ISE $bayID build number ($end_build) does not match expected ($fwbuild)"
+    }
+    # If we got here, then we are good to go and we need to break out
+    # of the re-try loop.
+    break;
+}
+
+#
+# If we've used up all of our attempts, don't proceed, just exit
+#
+if {$attempt > $max_attempts} {
+    send_ccbcl_status "!\$ISE FW upgrade retry limit exceeded"
+    exit 4
+}
+
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# Check that MRC_1 has come back up.
+set spawn_id [login $ip_address_1 oem]
+close
+wait
+send_error "MRC_1 ($ip_address_1) appears to be running ok.\n"
+
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# Check that MRC_2 has come back up.
+set spawn_id [login $ip_address_2 oem]
+close
+wait
+send_error "MRC_2 ($ip_address_2) appears to be running ok.\n"
+
+send_ccbcl_status "!\$ISE#$bayID upgraded to $end_version-$end_build"
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+exit 0
+
+###
+# Modelines:
+# Local Variables:
+# tab-width: 4
+# indent-tabs-mode: nil
+# End:
+# vi:sw=4 ts=4 expandtab

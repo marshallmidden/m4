@@ -1,0 +1,310 @@
+--- a/drivers/hwmon/pc87427.c	2007-02-04 12:44:54.000000000 -0600
++++ obj-3000/drivers/hwmon/pc87427.c	2009-03-17 10:14:26.000000000 -0500
+@@ -43,7 +43,7 @@ static struct platform_device *pdev;
+ struct pc87427_data {
+ 	struct class_device *class_dev;
+ 	struct mutex lock;
+-	int address[2];
++	int address[3];
+ 	const char *name;
+ 
+ 	unsigned long last_updated;	/* in jiffies */
+@@ -51,6 +51,7 @@ struct pc87427_data {
+ 	u16 fan[8];			/* register values */
+ 	u16 fan_min[8];			/* register values */
+ 	u8 fan_status[8];		/* register values */
++	u8 gpio[6];			/* register values */
+ };
+ 
+ /*
+@@ -63,11 +64,20 @@ struct pc87427_data {
+ #define SIOREG_MAP	0x50	/* I/O or memory mapping */
+ #define SIOREG_IOBASE	0x60	/* I/O base address */
+ 
+-static const u8 logdev[2] = { 0x09, 0x14 };
+-static const char *logdev_str[2] = { DRVNAME " FMC", DRVNAME " HMC" };
+-#define LD_FAN		0
+-#define LD_IN		1
+-#define LD_TEMP		1
++
++enum { LD_FAN, LD_HMC, LD_GPIO };
++
++static const struct {
++	u8		num;
++	u8		len;
++	const char	*str;
++} logdevs[] = {
++	[LD_FAN] = { 0x09, 32, DRVNAME " FMC" },
++	[LD_HMC] = { 0x14, 32, DRVNAME " HMC" },
++	[LD_GPIO] = { 0x07, 25, DRVNAME " GPIO" },
++};
++
++#define	LD_NUM		ARRAY_SIZE(logdevs)
+ 
+ static inline void superio_outb(int sioaddr, int reg, int val)
+ {
+@@ -91,7 +101,6 @@ static inline void superio_exit(int sioa
+  * Logical devices
+  */
+ 
+-#define REGION_LENGTH		32
+ #define PC87427_REG_BANK	0x0f
+ #define BANK_FM(nr)		(nr)
+ #define BANK_FT(nr)		(0x08 + (nr))
+@@ -172,6 +181,31 @@ static inline u16 fan_to_reg(unsigned lo
+ 	return ((1350000UL + val / 2) / val) << 2;
+ }
+ 
++
++/*
++ * GPIO
++ */
++
++#define PC87427_REG_GPDI0 0x01
++#define PC87427_REG_GPDI1 0x03
++#define PC87427_REG_GPDI2 0x07
++#define PC87427_REG_GPDI3 0x09
++#define PC87427_REG_GPDI4 0x0b
++#define PC87427_REG_GPDI5 0x0f
++
++/* Dedicated function to read a gpio register.
++ * nr is from 0 to 5
++ */
++static void pc87427_read_gpio(struct pc87427_data *data, u8 nr)
++{
++	static const u8 gpdi_regs[] = {
++		PC87427_REG_GPDI0, PC87427_REG_GPDI1, PC87427_REG_GPDI2,
++		PC87427_REG_GPDI3, PC87427_REG_GPDI4, PC87427_REG_GPDI5,
++	};
++
++	data->gpio[nr] = pc87427_read8(data, LD_GPIO, gpdi_regs[nr]);
++}
++
+ /*
+  * Data interface
+  */
+@@ -192,6 +226,9 @@ static struct pc87427_data *pc87427_upda
+ 			continue;
+ 		pc87427_readall_fan(data, i);
+ 	}
++	/* GPIO */
++	for (i = 0; i < 6; ++i)
++		pc87427_read_gpio(data, i);
+ 	data->last_updated = jiffies;
+ 
+ done:
+@@ -264,6 +301,16 @@ static ssize_t set_fan_min(struct device
+ 	return count;
+ }
+ 
++static ssize_t show_gpio_input(struct device *dev, struct device_attribute
++			      *devattr, char *buf)
++{
++	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
++	struct pc87427_data *data = pc87427_update_device(dev);
++	int nr = attr->index;
++
++	return sprintf(buf, "%d\n", data->gpio[nr]);
++}
++
+ static SENSOR_DEVICE_ATTR(fan1_input, S_IRUGO, show_fan_input, NULL, 0);
+ static SENSOR_DEVICE_ATTR(fan2_input, S_IRUGO, show_fan_input, NULL, 1);
+ static SENSOR_DEVICE_ATTR(fan3_input, S_IRUGO, show_fan_input, NULL, 2);
+@@ -308,6 +355,13 @@ static SENSOR_DEVICE_ATTR(fan6_fault, S_
+ static SENSOR_DEVICE_ATTR(fan7_fault, S_IRUGO, show_fan_fault, NULL, 6);
+ static SENSOR_DEVICE_ATTR(fan8_fault, S_IRUGO, show_fan_fault, NULL, 7);
+ 
++static SENSOR_DEVICE_ATTR(gpio1_input, S_IRUGO, show_gpio_input, NULL, 0);
++static SENSOR_DEVICE_ATTR(gpio2_input, S_IRUGO, show_gpio_input, NULL, 1);
++static SENSOR_DEVICE_ATTR(gpio3_input, S_IRUGO, show_gpio_input, NULL, 2);
++static SENSOR_DEVICE_ATTR(gpio4_input, S_IRUGO, show_gpio_input, NULL, 3);
++static SENSOR_DEVICE_ATTR(gpio5_input, S_IRUGO, show_gpio_input, NULL, 4);
++static SENSOR_DEVICE_ATTR(gpio6_input, S_IRUGO, show_gpio_input, NULL, 5);
++
+ static struct attribute *pc87427_attributes_fan[8][5] = {
+ 	{
+ 		&sensor_dev_attr_fan1_input.dev_attr.attr,
+@@ -371,6 +425,20 @@ static const struct attribute_group pc87
+ 	{ .attrs = pc87427_attributes_fan[7] },
+ };
+ 
++static struct attribute *pc87427_attributes_gpio[] = {
++	&sensor_dev_attr_gpio1_input.dev_attr.attr,
++	&sensor_dev_attr_gpio2_input.dev_attr.attr,
++	&sensor_dev_attr_gpio3_input.dev_attr.attr,
++	&sensor_dev_attr_gpio4_input.dev_attr.attr,
++	&sensor_dev_attr_gpio5_input.dev_attr.attr,
++	&sensor_dev_attr_gpio6_input.dev_attr.attr,
++	NULL
++};
++
++static const struct attribute_group pc87427_group_gpio[] = {
++	{ .attrs = pc87427_attributes_gpio },
++};
++
+ static ssize_t show_name(struct device *dev, struct device_attribute
+ 			 *devattr, char *buf)
+ {
+@@ -378,6 +446,7 @@ static ssize_t show_name(struct device *
+ 
+ 	return sprintf(buf, "%s\n", data->name);
+ }
++
+ static DEVICE_ATTR(name, S_IRUGO, show_name, NULL);
+ 
+ 
+@@ -428,8 +497,13 @@ static int __devinit pc87427_probe(struc
+ 
+ 	/* This will need to be revisited when we add support for
+ 	   temperature and voltage monitoring. */
+-	res = platform_get_resource(pdev, IORESOURCE_IO, 0);
+-	data->address[0] = res->start;
++	for (i = 0; i < LD_NUM; ++i)
++	{
++		res = platform_get_resource(pdev, IORESOURCE_IO, i);
++		if (!res)
++			continue;
++		data->address[i] = res->start;
++	}
+ 
+ 	mutex_init(&data->lock);
+ 	data->name = "pc87427";
+@@ -446,6 +520,8 @@ static int __devinit pc87427_probe(struc
+ 					      &pc87427_group_fan[i])))
+ 			goto exit_remove_files;
+ 	}
++	if ((err = sysfs_create_group(&pdev->dev.kobj, &pc87427_group_gpio[0])))
++		goto exit_remove_gpio;
+ 
+ 	data->class_dev = hwmon_device_register(&pdev->dev);
+ 	if (IS_ERR(data->class_dev)) {
+@@ -456,6 +532,9 @@ static int __devinit pc87427_probe(struc
+ 
+ 	return 0;
+ 
++exit_remove_gpio:
++	sysfs_remove_group(&pdev->dev.kobj, &pc87427_group_gpio[0]);
++
+ exit_remove_files:
+ 	for (i = 0; i < 8; i++) {
+ 		if (!(data->fan_enabled & (1 << i)))
+@@ -482,6 +561,7 @@ static int __devexit pc87427_remove(stru
+ 			continue;
+ 		sysfs_remove_group(&pdev->dev.kobj, &pc87427_group_fan[i]);
+ 	}
++	sysfs_remove_group(&pdev->dev.kobj, &pc87427_group_gpio[0]);
+ 	kfree(data);
+ 
+ 	return 0;
+@@ -497,34 +577,43 @@ static struct platform_driver pc87427_dr
+ 	.remove		= __devexit_p(pc87427_remove),
+ };
+ 
+-static int __init pc87427_device_add(unsigned short address)
++static int __init pc87427_device_add(unsigned short *address)
+ {
+-	struct resource res = {
+-		.start	= address,
+-		.end	= address + REGION_LENGTH - 1,
+-		.name	= logdev_str[0],
+-		.flags	= IORESOURCE_IO,
+-	};
++	struct resource res[3];
++	int i;
+ 	int err;
+ 
+-	pdev = platform_device_alloc(DRVNAME, address);
++	memset(res, 0, sizeof(res));
++	pdev = platform_device_alloc(DRVNAME, address[0]);
+ 	if (!pdev) {
+ 		err = -ENOMEM;
+ 		printk(KERN_ERR DRVNAME ": Device allocation failed\n");
+ 		goto exit;
+ 	}
+ 
+-	err = platform_device_add_resources(pdev, &res, 1);
++	for (i = 0; i < LD_NUM; ++i)
++	{
++		if (!address[i])
++			break;
++
++		res[i].start = address[i];
++		res[i].end = address[i] + logdevs[i].len - 1;
++		res[i].name = logdevs[i].str;
++		res[i].flags = IORESOURCE_IO;
++	}
++
++	err = platform_device_add_resources(pdev, &res[0], i);
+ 	if (err) {
+-		printk(KERN_ERR DRVNAME ": Device resource addition failed "
++		printk(KERN_ERR DRVNAME
++			": Device resource addition failed "
+ 		       "(%d)\n", err);
+ 		goto exit_device_put;
+ 	}
+ 
+ 	err = platform_device_add(pdev);
+ 	if (err) {
+-		printk(KERN_ERR DRVNAME ": Device addition failed (%d)\n",
+-		       err);
++		printk(KERN_ERR DRVNAME
++			": Device addition failed (%d)\n", err);
+ 		goto exit_device_put;
+ 	}
+ 
+@@ -548,22 +637,22 @@ static int __init pc87427_find(int sioad
+ 		goto exit;
+ 	}
+ 
+-	for (i = 0; i < 2; i++) {
++	for (i = 0; i < LD_NUM; i++) {
+ 		address[i] = 0;
+ 		/* Select logical device */
+-		superio_outb(sioaddr, SIOREG_LDSEL, logdev[i]);
++		superio_outb(sioaddr, SIOREG_LDSEL, logdevs[i].num);
+ 
+ 		val = superio_inb(sioaddr, SIOREG_ACT);
+ 		if (!(val & 0x01)) {
+ 			printk(KERN_INFO DRVNAME ": Logical device 0x%02x "
+-			       "not activated\n", logdev[i]);
++			       "not activated\n", logdevs[i].num);
+ 			continue;
+ 		}
+ 
+ 		val = superio_inb(sioaddr, SIOREG_MAP);
+ 		if (val & 0x01) {
+ 			printk(KERN_WARNING DRVNAME ": Logical device 0x%02x "
+-			       "is memory-mapped, can't use\n", logdev[i]);
++			       "is memory-mapped, can't use\n", logdevs[i].num);
+ 			continue;
+ 		}
+ 
+@@ -571,7 +660,7 @@ static int __init pc87427_find(int sioad
+ 		    | superio_inb(sioaddr, SIOREG_IOBASE + 1);
+ 		if (!val) {
+ 			printk(KERN_INFO DRVNAME ": I/O base address not set "
+-			       "for logical device 0x%02x\n", logdev[i]);
++			       "for logical device 0x%02x\n", logdevs[i].num);
+ 			continue;
+ 		}
+ 		address[i] = val;
+@@ -585,8 +674,9 @@ exit:
+ static int __init pc87427_init(void)
+ {
+ 	int err;
+-	unsigned short address[2];
++	unsigned short address[3];
+ 
++	memset(address, 0, sizeof(address));
+ 	if (pc87427_find(0x2e, address)
+ 	 && pc87427_find(0x4e, address))
+ 		return -ENODEV;
+@@ -601,7 +691,7 @@ static int __init pc87427_init(void)
+ 		goto exit;
+ 
+ 	/* Sets global pdev as a side effect */
+-	err = pc87427_device_add(address[0]);
++	err = pc87427_device_add(address);
+ 	if (err)
+ 		goto exit_driver;
+ 

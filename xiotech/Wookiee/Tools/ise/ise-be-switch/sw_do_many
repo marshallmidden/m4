@@ -1,0 +1,569 @@
+#!/usr/bin/perl -w
+
+use Getopt::Std;
+
+getopts('d:p:');
+
+# Variables that make this update a Custom Update Package.
+my $op_status_file = "OpStatus.txt";
+my $op_errors_file = "OpErrors.txt";
+my $percent_complete = 0;
+my $total_switches_to_update = 0;
+
+if ($opt_d) {
+    $g_dsc_id = $opt_d;
+}
+else {
+  die ("Usage: sw_do_many -d dsc-id [-p <back-end switch admin password>]\n");
+}
+
+if ($opt_p) {
+    $g_sw_password = $opt_p;
+}
+else {
+    $g_sw_password = "UNDEFINED";
+}
+
+# Where the ccbCL.pl script is located.
+my $ccbe_at;
+# The Ewok Description List is.
+my $dsc_file;
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+$dsc_file = `/bin/ls -t /var/xiotech/XioWebService/*Dsc_List*.*|head -1`;
+$ccbe_at = "./CCBE";
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# Command to run the ccbCL.pl script.
+my $run_ccbcl = "cd $ccbe_at ;/usr/bin/perl ccbCL.pl";
+#
+# Command to run the switch updater script.
+my $run_do_sw = "./do_sw";
+#
+# Command to run the chekc switch script.
+my $run_check_sw = "./check_sw";
+#
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# Key is the DSC number, the value is IP's, comma separated.
+my %dsc;
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+my $command;
+my $output;
+my $status;
+#-----------------------------------------------------------------------------
+# Define a bunch of subroutines, run them at the end of the file.
+#-----------------------------------------------------------------------------
+# Deletes any carriage returns and/or new-lines from the end of the input line.
+sub chompit($)
+{
+    my $line = $_[0];
+    $line =~ s/\n*\r*\n*$//;
+    return($line);
+}   # End of chompit
+
+#-----------------------------------------------------------------------------
+# Read $dsc_file to get $dsc{} hash array set.
+
+sub read_Dsc_List
+{
+    if (!defined(open(FILE, "<$dsc_file"))) {
+        die("Cannot open Dsc_List file $dsc_file\n");
+    }
+    my $line;
+    my $id;
+    while (<FILE>) {
+        $line = chompit($_);
+        if ($line =~ /^.*<spaldsclist:id>(.*)<\/spaldsclist:id>/) {
+            $id = $1;                   # DSC ID number.
+        } elsif ($line =~ /^.*<xwstype:ip_addr>(.*)<\/xwstype:ip_addr>/) {
+            if (!defined($id)) {
+                die("Found ip_addr ($1) without a spaldsclist:id\n")
+            }
+
+            if ($id == $g_dsc_id) {
+                if (defined($dsc{$id})) {
+                    $dsc{$id} .= ' ' . $1;
+                } else {
+                    $dsc{$id} =  $1;
+                }
+            }
+        }
+    }
+    close(FILE);
+}   # End of read_Dsc_List
+
+#-----------------------------------------------------------------------------
+# Severity: 0 = Info.  1 = Warning.  2 = ERROR.  3 = DEBUG.
+# (1, $dsc{$j}, 'BE Switch upgrade - not good running 7000");
+sub send_all_ccbcl_status($$$)
+{
+    my $severity = $_[0];
+    my @controller_ips = split(/\s+/, $_[1]);
+    my $message = "$_[2]";
+    $message =~ s /%/pct/;
+    foreach my $ip (@controller_ips) {
+        send_ccbcl_status($severity, $ip . ':3000', $message);
+    }
+}   # End of send_all_ccbcl_status
+
+#-----------------------------------------------------------------------------
+sub send_ccbcl_status($$$)
+{
+    my $severity = $_[0];
+    my $controller = $_[1];
+    my $message = "$_[2]";
+    $message =~ s /%/pct/;
+
+    printf STDERR "CCBCL($controller) $severity - %s\n", "$message";
+    system( "$run_ccbcl '$controller' -e '\"logtextmessage -v $severity $message\"' >/dev/null" );
+}   # End of send_ccbcl_status
+
+#-----------------------------------------------------------------------------
+sub send_updated_progress($$)
+{
+    my $status = $_[0];
+    my $perc_complete = "$_[1]";
+
+    open (STATUS_FILE, ">$op_status_file") or print STDERR "Can't open file '$op_status_file' $!";
+    print (STATUS_FILE "PercentComplete=$perc_complete\nStatus=$status");
+    close (STATUS_FILE);
+}   # End of send_updated_progress
+
+#-----------------------------------------------------------------------------
+sub send_error_message($)
+{
+    my $message = $_[0];
+
+    open (ERRORS_FILE, ">>$op_errors_file") or print STDERR "Can't open file '$op_errors_file' $!";
+    print (ERRORS_FILE "$message\n");
+    close (ERRORS_FILE);
+}   # End of send_error_message
+
+
+#-----------------------------------------------------------------------------
+# Use @controller_ips to get $master set.
+
+sub get_master($)
+{
+    my @controller_ips = split(/\s+/, $_[0]);
+    my $master;
+    my $slave;
+    my $m_ip; # = "1.1.1.1";
+
+    # Get master and other stuff, this allows for one to not be configured yet.
+    my $ips = join(':3000 ', @controller_ips) . ':3000';
+print STDERR "ips=$ips\n";
+    my $ccbcl_grep;
+    $ccbcl_grep .= "'" . 'OPERATIONAL *MASTER';
+    $ccbcl_grep .= "|" . 'OPERATIONAL *SLAVE';
+    $ccbcl_grep .= "'";
+
+print STDERR          "$run_ccbcl $ips -e 'a:vcginfo' | egrep -i $ccbcl_grep\n";
+    my $ccbe_output = `$run_ccbcl $ips -e 'a:vcginfo' | egrep -i $ccbcl_grep`;
+print STDERR "ccbe_output=$ccbe_output";
+
+    my @ccbe_output = split(/\n/, $ccbe_output);
+# printf STDERR "ccbe_output=%s\n", join("\n\t", @ccbe_output);
+    foreach my $i (@ccbe_output) {
+        if ($i =~ /^.* (\d+\.\d+\.\d+\.\d+) *OPERATIONAL *MASTER.*/i) {
+            $m_ip = $1;
+            $master = $1 . ':3000';
+        }
+        if ($i =~ /^.* (\d+\.\d+\.\d+\.\d+) *OPERATIONAL *SLAVE.*/i) {
+            $slave = $1 . ':3000';
+        }
+    }
+# print STDERR "master=$master, slave=$slave\n";
+    return ($master, $m_ip);
+}   # end of get_master
+
+#-----------------------------------------------------------------------------
+# Use @controller_ips to make sure is a 7000 controller.
+
+sub check_is_7000($)
+{
+    my @controller_ips = split(/\s+/, $_[0]);
+
+    # Log Applying BE Switch FW to both controllers (don't know if one is down).
+    foreach my $ip (@controller_ips) {
+        send_ccbcl_status(0, $ip . ':3000', '!$Applying BE Switch FW MATCH');
+
+        my $ccbe_output = `$run_ccbcl ${ip}:3000 -e quit`;
+print STDERR "ccbe_output=$ccbe_output";
+        my @ccbe_output = split(/\n/, $ccbe_output);
+
+        my $model;
+
+        # Check each (might be only 1) controller to see if it is a 7000, and up.
+        foreach my $i (@ccbe_output) {
+            # Check controller model.
+            if ($i =~ /^Login to (.*) controller at \(.*\) successful, connection ID:/) {
+                $model = $1;
+print STDERR "model=$model ip=$ip\n";
+                # If connection is not to a 7000, do not attempt upgrade.
+                if ($model ne "7000") {
+                    return (1);
+                }
+            }
+        }
+        # If can not connect to controller, do not attempt upgrade.
+        if (!defined($model)) {
+print STDERR "model=not defined ip=$ip\n";
+            return (1);
+        }
+    }
+    return(0);
+}   # End of check_is_7000
+
+#-----------------------------------------------------------------------------
+sub get_status_msg($)
+{
+    my $status = $_[0];
+    my $status_msg = 'upgrade stopped for unknown reason';
+
+    if ($status == 40)
+    {
+        $status_msg = 'delete file from bootflash command, dropped connection';
+    }
+    elsif ($status == 39)
+    {
+        $status_msg = 'delete file from bootflash command, timeout';
+    }
+    elsif ($status == 38)
+    {
+        $status_msg = 'format bootflash command, dropped connection';
+    }
+    elsif ($status == 37)
+    {
+        $status_msg = 'format bootflash command, timeout';
+    }
+    elsif ($status == 36)
+    {
+        $status_msg = 'dir bootflash command, dropped connection';
+    }
+    elsif ($status == 35)
+    {
+        $status_msg = 'dir bootflash command, timeout';
+    }
+    elsif ($status == 34)
+    {
+        $status_msg = 'copy file to bootflash command, dropped connection';
+    }
+    elsif ($status == 33)
+    {
+        $status_msg = 'copy file to bootflash command, timeout';
+    }
+    elsif ($status == 32)
+    {
+        $status_msg = 'clear ssh hosts command, dropped connection';
+    }
+    elsif ($status == 31)
+    {
+        $status_msg = 'clear ssh hosts command, timeout';
+    }
+    elsif ($status == 30)
+    {
+        $status_msg = 'end from config command, dropped connection';
+    }
+    elsif ($status == 29)
+    {
+        $status_msg = 'end from config command, timeout';
+    }
+    elsif ($status == 28)
+    {
+        $status_msg = 'username admin password command, dropped connection';
+    }
+    elsif ($status == 27)
+    {
+        $status_msg = 'username admin password command, timeout';
+    }
+    elsif ($status == 26)
+    {
+        $status_msg = 'config terminal command, dropped connection';
+    }
+    elsif ($status == 25)
+    {
+        $status_msg = 'config terminal command, timeout';
+    }
+    elsif ($status == 24)
+    {
+        $status_msg = 'send terminal length 0 command, dropped connection';
+    }
+    elsif ($status == 23)
+    {
+        $status_msg = 'send terminal length 0 command, timeout';
+    }
+    elsif ($status == 22)
+    {
+        $status_msg = 'copy running startup command, dropped connection';
+    }
+    elsif ($status == 21)
+    {
+        $status_msg = 'copy running startup command, timeout';
+    }
+    elsif ($status == 20)
+    {
+        $status_msg = 'install command, no route to host';
+    }
+    elsif ($status == 19)
+    {
+        $status_msg = 'install command, problems occurred';
+    }
+    elsif ($status == 18)
+    {
+        $status_msg = 'install command, no space left on device bootflash';
+    }
+    elsif ($status == 17)
+    {
+        $status_msg = 'After dir command, dropped connection';
+    }
+    elsif ($status == 16)
+    {
+        $status_msg = 'After dir command, prompt timeout';
+    }
+    elsif ($status == 15)
+    {
+        $status_msg = 'dir command, dropped connection';
+    }
+    elsif ($status == 14)
+    {
+        $status_msg = 'dir command, timeout';
+    }
+    elsif ($status == 13)
+    {
+        $status_msg = 'delete file command, dropped connection';
+    }
+    elsif ($status == 12)
+    {
+        $status_msg = 'delete file command, timeout';
+    }
+    elsif ($status == 11)
+    {
+        $status_msg = 'show version command, no version found';
+        # The script probably is not working!
+    }
+    elsif ($status == 10)
+    {
+        $status_msg = 'show version command, did not get a version';
+    }
+    elsif ($status == 9)
+    {
+        $status_msg = 'show version command, dropped connection';
+    }
+    elsif ($status == 8)
+    {
+        $status_msg = 'show version command, timeout';
+    }
+    elsif ($status == 7)
+    {
+        $status_msg = 'no valid password found';
+    }
+    elsif ($status == 6)
+    {
+        $status_msg = 'no switch present';
+    }
+    elsif ($status == 5)
+    {
+        # Can't get this error -- unless major expect script problems.
+        $status_msg = 'trouble with switch prompt';
+    }
+    elsif ($status == 4)
+    {
+        $status_msg = 'trouble with login, dropped connection';
+    }
+    elsif ($status == 3)
+    {
+        $status_msg = 'trouble with login';
+    }
+# Note: 2 does not need to be handled, no route to host -- used to say no switch is present at that IP address.
+    elsif ($status == 1)
+    {
+        $status_msg = 'script do_sw run incorrectly';
+    }
+
+    return($status_msg);
+}   # End of get_status_msg
+
+
+
+#-----------------------------------------------------------------------------
+# Do the processing now.
+
+# Get %dsc set to all DSC's and IP addresses of their controllers.
+read_Dsc_List();
+# . . . . .
+foreach my $k (keys(%dsc)) {
+    printf STDERR "DSC #%s -> %s\n", $k, $dsc{$k};
+    $percent_complete = 2;
+
+##
+## Requirement #1, subsystem is operation and configured correctly.
+##
+
+    send_all_ccbcl_status(0, $dsc{$k}, '!$BE Switch upgrade - Pre-checking system status.');
+
+    # Make sure that the system is still in a good state!
+    print STDERR "Executing SystemStatusChecker: ./SystemStatusChecker -d $g_dsc_id -e $op_errors_file -s $op_status_file\n";
+    my $healthChecker = `./SystemStatusChecker -d $g_dsc_id -e $op_errors_file -s $op_status_file`;
+    my $healthCheckResult = $?;
+    if ($healthCheckResult != 0) {
+        print STDERR "BE Switch Upgrader - aborting due to system health issues.\n";
+        send_all_ccbcl_status(2, $dsc{$k}, '!$BE Switch upgrade - unable to perform upgrade due to system health issues.');
+        send_error_message("Unable to perform upgrade due to system health issues.");
+        undef($dsc{$k}); # Do not use this DSC in the future.
+        next; #skip the rest of this loop
+    } else {
+        print STDERR "System Status check complete. Systems is OK to proceed.";
+    }
+
+##
+## Requirement #2, must be a 7000.
+##
+
+    my $ok = check_is_7000($dsc{$k});
+    if ($ok != 0) {
+        send_all_ccbcl_status(1, $dsc{$k}, '!$BE Switch upgrade - Not a 7000 system, skipping DSC.');
+        undef($dsc{$k}); # Do not use this DSC in the future.
+        next;
+    }
+
+    my ($master, $m_ip) = get_master($dsc{$k});
+    if (!defined($m_ip)) {
+        undef($dsc{$k}); # Do not use this DSC in the future.
+        next;
+    }
+
+
+##
+## Count switches for this DSC
+##
+
+    my @controller_ips = split(/\s+/, $dsc{$k});
+    my @sip =  split(/\./, $controller_ips[0]);
+    my $swip = "$sip[0].$sip[1].$sip[2]";
+    my $any_switches = 0;
+    for (my $lip = 192; $lip <= 199; $lip++) {
+        my $ip = "$swip" . "." . "$lip";
+        send_updated_progress("Checking for switch DSC$k\@$ip...", $percent_complete);
+        my $command = "$run_check_sw $master $ip $g_sw_password";
+        my $output = `$command`;
+        $status = $? >> 8;
+        if ($status == 2) {
+            next;       # Do nothing if no route to host message already done.
+        } elsif ($status == 100) {
+            # warm booted switch detected (exit code 100 from check_sw).  Exit out.
+            send_updated_progress('Aborting due to misconfigured switch', 100);
+            send_ccbcl_status(2, $master, '!$BE Switch MATCH UPGRADE FAILED FOR ' . "$ip - switch is in warm boot, non-upgradeable state.  Contact Customer Support." );
+            send_error_message("DSC$k\@$ip: Upgrade failed. Switch is in warm boot, non-upgradeable state. Contact Customer Support");
+            die("Switch DSC$k\@$ip: MATCH upgrade FAILED. Switch not ready for update\n");
+        } elsif ($status == 1) {
+            $total_switches_to_update++;
+        } elsif ($status != 0) {
+            my $status_msg = get_status_msg($status);
+            send_updated_progress('Aborting: ' . '$status_msg', 100);
+            send_ccbcl_status(2, $master, '!$BE Switch MATCH UPGRADE FAILED FOR ' . "$ip - $status - $status_msg");
+            send_error_message("Switch DSC$k\@$ip: MATCH upgrade FAILED. $status_msg");
+            die("Switch DSC$k\@$ip: MATCH upgrade FAILED. $status_msg\n");
+        }
+        $any_switches++;
+    }
+ 
+    if ($any_switches == 0)  {
+        send_ccbcl_status(2, $master, '!$BE Switch MATCH UPGRADE FAILED, No switches found.');
+        $percent_complete = 100;
+        send_updated_progress('No back-end switches to update', $percent_complete);
+        send_error_message("DSC$k: Upgrade failed. No back-end switches found.");
+    }
+
+    if ($total_switches_to_update <= 0)  {
+        send_ccbcl_status(1, $master, '$!BE Switch MATCH upgrade for all switches finished.');
+        $percent_complete = 100;
+        send_updated_progress('No back-end switches to update', $percent_complete);
+    }
+}
+
+#
+# Loop through all switches, updating switches on each DSC as needed
+#
+
+if ($total_switches_to_update > 0)  {
+    foreach my $j (keys(%dsc)) {
+        my $completed_switches = 0;
+        my ($master, $m_ip) = get_master($dsc{$j});
+
+        printf STDERR "DSC $j  master=$master\n";
+        my @controller_ips = split(/\s+/, $dsc{$j});
+        my @sip =  split(/\./, $controller_ips[0]);
+        my $swip = "$sip[0].$sip[1].$sip[2]";
+        my $iconip = chompit(`cat /etc/sysconfig/xssa.conf | grep CP_NETIP | cut -d '"' -f 2`);
+
+        send_ccbcl_status(1, $master, '!$Running BE Switch MATCH Upgrade - started');
+
+        for (my $lip = 192; $lip <= 199; $lip++) {
+            my $ip = "$swip" . "." . "$lip";
+            print STDERR "BES IP=$ip\n";
+        
+            $command = "$run_do_sw $j $m_ip $ip $g_sw_password $iconip $percent_complete $total_switches_to_update";
+            $output = `$command`;
+            $status = $? >> 8;
+            if ($status == 2) {
+                next;       # Do nothing if no route to host message already done.
+            } elsif ($status != 0) {
+                my $status_msg = get_status_msg($status);
+                send_ccbcl_status(2, $master, '!$BE Switch MATCH UPGRADE FAILED FOR ' . "$ip - $status - $status_msg");
+                send_error_message("Switch DSC$j@$ip: MATCH upgrade FAILED. $status_msg");
+                die("Switch DSC$j@$ip: MATCH upgrade FAILED. $status_msg\n")
+            } else {
+                send_ccbcl_status(0, $master, '!$BE Switch MATCH upgrade successful for ' . "$ip");
+                $completed_switches++;
+                $percent_complete = 100 * ($completed_switches / $total_switches_to_update);
+                send_updated_progress("Switch DSC$j\@$ip: MATCH upgrade successful", $percent_complete);
+            }
+
+##
+## Requirement #3, Do not continue to next switch if system health NOT ok, check 3 times.
+##
+            my $time_count;
+            for ($time_count = 0; $time_count < 3; $time_count++)
+            {
+                send_ccbcl_status(0, $master, '!$BE Switch upgrade - Post-checking system status after upgrade, #' . ($time_count + 1) . '.');
+    
+                # Make sure that the system is still in a good state!
+                print STDERR "Executing SystemStatusChecker: ./SystemStatusChecker -d $g_dsc_id\n";
+                my $healthChecker = `./SystemStatusChecker -d $g_dsc_id`;
+                my $healthCheckResult = $?;
+                if ($healthCheckResult != 0) {
+                    if ($time_count == 2)
+                    {
+                        print STDERR "BE Switch Upgrader - aborting due to system health issues.\n";
+                        send_error_message("Aborting due to system health issues.");
+                        send_ccbcl_status(1, $master, '$!BE Switch MATCH UPGRADE aborted due to system health issues.');
+                        die("Aborting due to system health issues\n")
+                    } else {
+                        print STDERR "BE Switch Upgrader - health issues detected, wait 2 minutes and check again.\n";
+                        send_ccbcl_status(2, $master, '!$BE Switch upgrade - detected health issues - check again in 2 minutes.');
+                        sleep(120);
+                    }
+                } else {
+                    print STDERR "System Status check complete. Systems is OK to proceed.";
+                    last;
+                }
+            }
+            if ($time_count >= 3)
+            {
+                last;               # Error occurred -- BE did not dual connect.
+            }
+
+        }   # end of for each switch IP
+
+        send_ccbcl_status(1, $master, '$!BE Switch MATCH upgrade for all switches finished.');
+    }   # End of foreach dsc
+}
+
+exit 0;
+#-----------------------------------------------------------------------------
+###
+# Modelines:
+# Local Variables:
+# tab-width: 4
+# indent-tabs-mode: nil
+# End:
+# vi:sw=4 ts=4 expandtab

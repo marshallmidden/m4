@@ -1,0 +1,223 @@
+#!/bin/bash
+# $Id: boot.local 143949 2010-07-09 19:15:01Z mdr $
+# System setup script for 3D. Create device nodes and modify kernel paramters
+
+do_dev() {
+	# Make sure the module is loaded
+	devline=`grep $1 /proc/devices`
+	if [ "${devline}" = "" ]; then
+		echo "No $1 device detected"
+	# Make the device node if necessary
+	elif [ ! -c /dev/$2 -o "$pkern" != "$kern" ]; then
+		echo Creating device node $2
+		rm -f /dev/$2
+		major=`echo "${devline}" | awk '{print $1}'`
+		mknod --mode=644 /dev/$2 $3 ${major} $4
+
+		chgrp root /dev/$2	# Set permissions
+	fi
+}
+
+make_devs() {
+	dev=$1
+	typ=$2
+	major=$3
+	perm=$4
+	owner=$5
+	num=$6
+	for i in `seq 0 $num`; do
+		node=/dev/${dev}${i}
+		if [ ! -c ${node} ]; then
+			rm -rf ${node}
+			echo "Creating device node ${node}"
+			mknod --mode=${perm} ${node} ${typ} ${major} ${i} ||
+				echo "Failed to create ${node}"
+			chown ${owner} ${node}
+		fi
+	done
+}
+
+rename_enets() {
+	ip link set dev eth0 name xxx0
+	for pci in $*; do
+		cat /etc/sysconfig/network/busdevices | sed -e 's/#.*$//' |
+		while read bus name x
+		do
+			if [ "${bus}" = "bus-pci-${pci}" ]; then
+				dev=`getcfg-interface ${bus}`
+				if [ "${dev}" != "" ]; then
+					ip link set ${dev} name ${name}
+					echo "Changed ${bus} ${dev} to ${name}"
+				fi
+			fi
+		done
+	done
+}
+
+kernel_cleanup() {
+	local kern1=/boot/`readlink /boot/vmlinuz-3d`
+	local kern2=/boot/`readlink /boot/vmlinuz-3d.prev`
+
+	echo "Kernels ${kern1}, ${kern2}"
+	for fn in /boot/vmlinuz-2.*; do
+		if [ "${fn}" != "${kern1}" -a "${fn}" != "${kern2}" ]; then
+			echo "Deleting ${fn}"
+			rm -rf ${fn}
+		else
+			echo "Keeping ${fn}"
+		fi
+	done
+
+	local mod=/lib/modules
+	local kmod1=${mod}/${kern1#/boot/vmlinuz-}
+	local kmod2=${mod}/${kern2#/boot/vmlinuz-}
+
+	for fn in ${mod}/2.*; do
+		if [ "${fn}" != "${kmod1}" -a "${fn}" != "${kmod2}" ]; then
+			echo "Deleting ${fn}"
+			rm -rf ${fn}
+		else
+			echo "Keeping ${fn}"
+		fi
+	done
+}
+
+cp_if_changed() {
+	[[ -f $1 ]] || return 0;
+	if cmp $1 $2 2>/dev/null; then
+		return 0
+	fi
+	cp $1 $2
+	return 1;
+}
+
+
+## The main part of the script begins here
+
+setterm -blank 0 -powersave off	# Prevent video from blanking
+
+sysctl -p
+
+mkdir -p /etc/dump
+
+rm -rf /tmp/docore
+echo -ne '#!/bin/bash\nexec /usr/bin/gzip > /var/log/dump/${0##*/}.core.gz\n' \
+	> /tmp/docore
+chmod +x /tmp/docore
+cp_if_changed /tmp/docore /etc/docore
+rm -rf /tmp/docore
+
+for f in `cat /etc/corelist`; do
+	if [[ ! -f /etc/dump/${f} || ! /etc/dump/${f} -ef /etc/docore ]]; then
+		echo Linking /etc/dump/${f} to /etc/docore
+		rm -f /etc/dump/${f}
+		ln /etc/docore /etc/dump/${f}
+	fi
+done
+
+sysctl -w kernel.core_pattern="|/etc/dump/%e"
+
+rm -rf /var/log/dump/{lost+found/*,*.core,*.bz2}
+
+test -d /sys/module/edac_mc/parameters &&
+{
+	echo "Enabling edac panic on ue & PCI checking"
+	echo 1 > /sys/module/edac_mc/parameters/panic_on_ue
+	echo 1 > /sys/module/edac_mc/parameters/check_pci_parity
+	echo 1 > /sys/module/edac_mc/parameters/panic_on_pci_parity
+}
+
+echo "/bin/true" > /proc/sys/kernel/hotplug
+
+echo 1 > /proc/scsi/sg/allow_dio
+
+test "`chkconfig powersaved`" != "powersaved  off" &&
+	chkconfig powersaved off	# Force powersaved off
+test "`chkconfig irq_balancer`" != "irq_balancer  off" &&
+	chkconfig irq_balancer off	# Force irq_balancer off
+test "`chkconfig slpd 2>/dev/null`" != "slpd  off" &&
+	chkconfig slpd off 2>/dev/null	# Force irq_balancer off
+
+mkdir -p /opt/xiotech/xiodata
+mkdir -p /huge
+mem=( `grep 'MemTotal:' /proc/meminfo` )
+if [[ ${mem[1]} < 2000000 ]]; then
+	echo "ERROR ${mem[1]} kB DRAM insufficient"
+	rm -rf /opt/xiotech/release/platformApps-4000-*
+	rm -rf /opt/xiotech/release/platformApps-4700-*
+	if [[ "`ls /opt/xiotech/release`" == "" ]]; then
+		sync; sync;
+		sleep 1
+		poweroff -f
+		sleep 1
+	fi
+else
+	mount -t hugetlbfs none /huge &&
+		/sbin/shmalloc /huge/be /huge/fe /huge/ccb ||
+		echo "Shared memory not allocated"
+fi
+rm -rf /opt/xiotech/release/platformApps-3000-*
+rm -rf /opt/xiotech/release/platformApps-4000-*
+sysctl -w vm.nr_hugepages=0
+
+pkern=""
+test -f /var/log/kernbuild && pkern="`cat /var/log/kernbuild`"
+kern="`uname -rv`"
+# $pkern holds previous kernel ID string, $kern holds current
+
+rm -rf /dev/{disk,generic,ir*,isdn*,vcs*,mpu*,xd*,ttyW*,vid*,vt*,vbi*,capi*}
+rm -rf /dev/{dmfm*,dmmidi*,dpti*,dri,mixer*,midi*,rmidi*}
+rm -rf /dev/{ttyACM*,ttyI*,ttySL*,ttyUB*,tpqic*,win*}
+rm -rf /dev/hd[a-t][2-6][0-9]
+rm -rf /dev/{adb*,adm*,amidi*,audio*,bttv*,ataraid,cbd,cciss,compaq,dos_*}
+rm -rf /dev/{dsp*,evms,raw,fujitsu,i2o,ida,modems,mvideo,ntpqic*,pcd*,pd*}
+rm -rf /dev/{radio*,rd,snd,stalio*,usb/{auer*,da*,dc*,ez*,scanner*}}
+rm -rf /dev/{adsp*,{n,}{os,}st[0-7]*,nrmt0,rmt0,nvidia*,optcd*,nb*,ubd*,ippp*}
+rm -rf /dev/{hd[e-o]*,temperature,hfmodem,cu*,scd*,pppox*,phone*,mcdx*}
+rm -rf /dev/{sbpcd*,slram*,sndstat,tty[a-oq-z]*,pty[a-oq-z]*}
+rm -rf /etc/{modprobe.conf,sensors.conf}
+rm -rf /root/{rstcdbld,hycdbld}
+rm -f /XIOtech /.viminfo /boot/memtest.bin
+
+do_dev ipmidev ipmi0 c 0
+do_dev xio3d xio3d0 c 0
+make_devs sg c 21 640 root:disk 63
+
+test -d /sys/module/iscsi_tcp || modprobe iscsi_tcp
+
+kernel_cleanup		# Remove kernels and modules no longer needed
+
+test "$pkern" != "$kern" && echo "$kern" > /var/log/kernbuild
+
+enetpci=`lspci | grep "Ethernet controller:" | sed -e 's/ .*$//'`
+echo Enets=${enetpci}
+
+. /etc/sysconfig/xio3d	# Get hardware type
+
+test -d /sys/module/ipmi_watchdog/parameters &&
+{
+	echo "Changing ipmi watchdog timeout to 60 seconds"
+	echo "60" > /sys/module/ipmi_watchdog/parameters/timeout
+}
+
+echo -n "V" > /dev/watchdog || :	# Disable watchdog, if running
+
+cp_if_changed /boot/grub/menu.lst{-${XIO_HW_TYPE},} ||
+	{ echo "updated boot script - rebooting"; sync; sync; sleep 1; reboot; }
+
+cp_if_changed /etc/sysconfig/network/busdevices{-${XIO_HW_TYPE},} || :
+
+rename_enets ${enetpci}
+
+test -f /etc/sysconfig/network/ifcfg-eth0 ||
+	echo "# Empty File" > /etc/sysconfig/network/ifcfg-eth0
+
+IFS=" :.	"
+digit=`ifconfig eth0 | grep "inet addr" | { read a b c d e f z
+	echo $f; }`
+test "$digit" = "" && digit=`ifconfig eth0 |
+	{ read a b c d e f g h i j k z; echo x$k; }`
+hostname xio3d-$digit
+unset IFS digit pkern kern
+
+# vi:sw=8 ts=8 noexpandtab

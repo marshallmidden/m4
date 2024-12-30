@@ -1,0 +1,270 @@
+--- a/drivers/hwmon/w83627hf.c	2008-10-09 17:13:53.000000000 -0500
++++ obj-7000/drivers/hwmon/w83627hf.c	2009-01-16 17:05:06.000000000 -0600
+@@ -51,6 +51,8 @@
+ #include <asm/io.h>
+ #include "lm75.h"
+ 
++#define X7DWE	1
++
+ static u16 force_addr;
+ module_param(force_addr, ushort, 0);
+ MODULE_PARM_DESC(force_addr,
+@@ -237,6 +239,7 @@
+ #define IN_TO_REG(val)  (SENSORS_LIMIT((((val) + 8)/16),0,255))
+ #define IN_FROM_REG(val) ((val) * 16)
+ 
++#ifndef X7DWE
+ static inline u8 FAN_TO_REG(long rpm, int div)
+ {
+ 	if (rpm == 0)
+@@ -271,6 +274,7 @@					#3
+ #define BEEP_MASK_TO_REG(val)		((val) & 0xffffff)
+ #define BEEP_ENABLE_TO_REG(val)		((val)?1:0)
+ #define BEEP_ENABLE_FROM_REG(val)	((val)?1:0)
++#endif /* !X7DWE */
+ 
+ #define DIV_FROM_REG(val) (1 << (val))
+ 
+@@ -299,6 +303,7 @@					#4
+ 	char valid;		/* !=0 if following fields are valid */
+ 	unsigned long last_updated;	/* In jiffies */
+ 
++#ifndef X7DWE
+ 	struct i2c_client *lm75;	/* for secondary I2C addresses */
+ 	/* pointer to array of 2 subclients */
+ 
+@@ -326,6 +331,9 @@ struct w83627hf_data {		#5
+ 				   Other Betas unimplemented */
+ 	u8 vrm;
+ 	u8 vrm_ovt;		/* Register value, 627THF/637HF/687THF only */
++#else
++	u8 gpio;		/* Register value, 627hf only */
++#endif /* !X7DWE */
+ };
+ 
+ 
+@@ -332,7 +340,9 @@					#6
+ static int w83627hf_detect(struct i2c_adapter *adapter);
+ static int w83627hf_detach_client(struct i2c_client *client);
+ 
++#ifndef X7DWE
+ static int w83627hf_read_value(struct i2c_client *client, u16 reg);
++#endif	/* !X7DWE */
+ static int w83627hf_write_value(struct i2c_client *client, u16 reg, u16 value);
+ static struct w83627hf_data *w83627hf_update_device(struct device *dev);
+ static void w83627hf_init_client(struct i2c_client *client);
+@@ -346,6 +356,7 @@					#7
+ 	.detach_client	= w83627hf_detach_client,
+ };
+ 
++#ifndef X7DWE
+ /* following are the sysfs callback functions */
+ #define show_in_reg(reg) \
+ static ssize_t show_##reg (struct device *dev, char *buf, int nr) \
+@@ -929,6 +940,7 @@					#8
+ sysfs_sensor(1);
+ sysfs_sensor(2);
+ sysfs_sensor(3);
++#endif /* !X7DWE */
+ 
+ static int __init w83627hf_find(int sioaddr, unsigned short *addr)
+ {
+@@ -961,6 +973,7 @@					#9
+ 	return 0;
+ }
+ 
++#ifndef X7DWE
+ static struct attribute *w83627hf_attributes[] = {
+ 	&dev_attr_in0_input.attr,
+ 	&dev_attr_in0_min.attr,
+@@ -1006,11 +1019,28 @@					#10
+ 
+ 	NULL
+ };
++#else
++
++static ssize_t
++show_ps_state(struct device *dev, struct device_attribute *attr, char *buf)
++{
++	struct w83627hf_data *data = w83627hf_update_device(dev);
++
++	return sprintf(buf, "%d\n", (data->gpio >> 1) & 1);
++}
++static DEVICE_ATTR(ps_state, S_IRUGO, show_ps_state, NULL);
++
++static struct attribute *w83627hf_attributes[] = {
++	&dev_attr_ps_state.attr,
++	NULL
++};
++#endif /* !X7DWE */
+ 
+ static const struct attribute_group w83627hf_group = {
+ 	.attrs = w83627hf_attributes,
+ };
+ 
++#ifndef X7DWE
+ static struct attribute *w83627hf_attributes_opt[] = {
+ 	&dev_attr_in1_input.attr,
+ 	&dev_attr_in1_min.attr,
+@@ -1039,6 +1069,7 @@					#11
+ static const struct attribute_group w83627hf_group_opt = {
+ 	.attrs = w83627hf_attributes_opt,
+ };
++#endif /* !X7DWE */
+ 
+ static int w83627hf_detect(struct i2c_adapter *adapter)
+ {
+#@@ -1283,7 +1317,11 @@ static int w83627hf_detect(struct i2c_
+# 	struct w83627hf_sio_data *sio_data = dev->platform_data;
+# 	struct w83627hf_data *data;
+# 	struct resource *res;
+#+#ifndef	X7DWE
+# 	int err, i;
+#+#else
+#+	int err;
+#+#endif /* !X7DWE */
+# 
+# 	static const char *names[] = {
+# 		"w83627hf",
+@@ -1129,20 +1160,21 @@ static int w83627hf_detect(struct i2c_	#12
+ 	if ((err = i2c_attach_client(new_client)))
+ 		goto ERROR2;
+ 
+-	data->lm75 = NULL;
+-
+ 	/* Initialize the chip */
+ 	w83627hf_init_client(new_client);
+ 
++#ifndef X7DWE
+ 	/* A few vars need to be filled upon startup */
+	data->fan_min[0] = w83627hf_read_value(new_client, W83781D_REG_FAN_MIN(1));
+	data->fan_min[1] = w83627hf_read_value(new_client, W83781D_REG_FAN_MIN(2));
+	data->fan_min[2] = w83627hf_read_value(new_client, W83781D_REG_FAN_MIN(3));
++#endif /* !X7DWE */
+ 
+ 	/* Register common device attributes */
+ 	if ((err = sysfs_create_group(&new_client->dev.kobj, &w83627hf_group)))
+ 		goto ERROR3;
+ 
++#ifndef X7DWE
+ 	/* Register chip-specific device attributes */
+ 	if (kind == w83627hf || kind == w83697hf)
+ 		if ((err = device_create_file(&new_client->dev,
+@@ -1193,6 +1225,7 @@ static int w83627hf_detect(struct i2c_	#13
+ 		if ((err = device_create_file(&new_client->dev,
+ 					&dev_attr_pwm3)))
+ 			goto ERROR4;
++#endif /* !X7DWE */
+ 
+ 	data->class_dev = hwmon_device_register(&new_client->dev);
+ 	if (IS_ERR(data->class_dev)) {
+@@ -1204,7 +1234,9 @@ static int w83627hf_detect(struct 	#14
+ 
+       ERROR4:
+ 	sysfs_remove_group(&new_client->dev.kobj, &w83627hf_group);
++#ifndef X7DWE
+ 	sysfs_remove_group(&new_client->dev.kobj, &w83627hf_group_opt);
++#endif	/* !X7DWE */
+       ERROR3:
+ 	i2c_detach_client(new_client);
+       ERROR2:
+@@ -1223,7 +1255,9 @@ static int w83627hf_remove(struct		#15
+ 	hwmon_device_unregister(data->class_dev);
+ 
+ 	sysfs_remove_group(&client->dev.kobj, &w83627hf_group);
++#ifndef X7DWE
+ 	sysfs_remove_group(&client->dev.kobj, &w83627hf_group_opt);
++#endif	/* !X7DWE */
+ 
+ 	if ((err = i2c_detach_client(client)))
+ 		return err;
+@@ -1234,6 +1268,7 @@						#16
+ 	return 0;
+ }
+ 
++#ifndef X7DWE
+ 
+ /*
+    ISA access must always be locked explicitly!
+@@ -1332,6 +1367,7 @@ exit:					#17
+ 	superio_exit();
+ 	return res;
+ }
++#endif	/* !X7DWE */
+ 
+ static int w83627hf_write_value(struct i2c_client *client, u16 reg, u16 value)
+ {
+@@ -1367,8 +1403,24 @@ static int w83627hf_write_value(struct i	#18
+ 	return 0;
+ }
+ 
++#ifdef	X7DWE
++static int w83627hf_read_gpio(void)
++{
++	int res = 0xff;
++
++	superio_enter();
++	superio_select(W83627HF_LD_GPIO5);
++
++	res = superio_inb(W83687THF_VID_DATA);
++
++	superio_exit();
++	return res;
++}
++#endif	/* X7DWE */
++
+ static void w83627hf_init_client(struct i2c_client *client)
+ {
++#ifndef X7DWE
+ 	struct w83627hf_data *data = i2c_get_clientdata(client);
+ 	int i;
+ 	int type = data->type;
+@@ -1396,6 +1438,7 @@
+ 		   disabling this bit helps some people not get beeped */
+ 		w83627hf_write_value(client, W83781D_REG_BEEP_INTS2, 0);
+ 	}
++#endif /* !X7DWE */
+ 
+ 	/* Minimize conflicts with other winbond i2c-only clients...  */
+ 	/* disable i2c subclients... how to disable main i2c client?? */
+@@ -1403,6 +1456,7 @@ static void w83627hf_init_devi		#19
+ 	w83627hf_write_value(client, W83781D_REG_I2C_SUBADDR, 0x89);
+ 	w83627hf_write_value(client, W83781D_REG_I2C_ADDR, force_i2c);
+ 
++#ifndef X7DWE
+ 	/* Read VID only once */
+ 	if (w83627hf == data->type || w83637hf == data->type) {
+ 		int lo = w83627hf_read_value(client, W83781D_REG_VID_FANDIV);
+@@ -1468,18 +1504,22 @@ static void w83627hf_init_client(	#20
+ 			    (w83627hf_read_value(client,
+ 						W83781D_REG_CONFIG) & 0xf7)
+ 			    | 0x01);
++#endif	/* !X7DWE */
+ }
+ 
+ static struct w83627hf_data *w83627hf_update_device(struct device *dev)
+ {
+ 	struct i2c_client *client = to_i2c_client(dev);
+ 	struct w83627hf_data *data = i2c_get_clientdata(client);
++#ifndef X7DWE
+ 	int i;
++#endif	/* !X7DWE */
+ 
+ 	mutex_lock(&data->update_lock);
+ 
+ 	if (time_after(jiffies, data->last_updated + HZ + HZ / 2)
+ 	    || !data->valid) {
++#ifndef X7DWE
+ 		for (i = 0; i <= 8; i++) {
+ 			/* skip missing sensors */
+ 			if (((data->type == w83697hf) && (i == 1)) ||
+@@ -1555,6 +1595,9 @@ static struct w83627hf_data *w83627hf_up	#22
+ 		data->beep_mask = ((i & 0x7f) << 8) |
+ 		    w83627hf_read_value(client, W83781D_REG_BEEP_INTS1) |
+ 		    w83627hf_read_value(client, W83781D_REG_BEEP_INTS3) << 16;
++#else
++		data->gpio = w83627hf_read_gpio();
++#endif /* !X7DWE */
+ 		data->last_updated = jiffies;
+ 		data->valid = 1;
+ 	}

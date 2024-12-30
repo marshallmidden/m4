@@ -1,0 +1,157 @@
+#!/bin/bash -e
+#
+# make-FRIEDEGGS-mfg-cd - Make FRIEDEGGS manufacturing tools cd.
+#
+# Copyright 2007 Xiotech Corporation. All rights reserved.
+#
+# Mark D. Rustad, 3/13/2007
+#
+# make-FRIEDEGGS-mfg-cd [-h] [-v version] [-w where] -m model
+#           -n part-number -r rel
+
+usage() {
+    echo "$0 [-h] [-v version] [-w where] -m model -n part-number"
+    echo "        -r rel"
+    echo ""
+    echo "-h display help"
+    echo "-v version of code to build, ie. F100"
+    echo "-w where to put results of build"
+    echo "-m model to build (or ALL)"
+    echo "-n part number for CD"
+    echo "-r release number, eg. 0505"
+}
+
+fail() {
+    echo "$0: $1"
+    usage
+    exit 1
+}
+
+test "$#" -eq 0 && fail "Parameters required";
+ver=
+where=
+model=3000
+partno=
+rel=
+
+while getopts "hm:n:r:v:w:" option; do
+    case "${option}" in
+        h) usage; exit 1;;
+        m) model="${OPTARG}";;
+        n) partno="${OPTARG}";;
+        r) rel="${OPTARG}";;
+        v) ver="${OPTARG}";;
+        w) where="${OPTARG}";;
+        :) fail "Required parameter for option ${OPTARG} missing.";;
+        \?) usage; exit 1;;
+        *) fail "Unknown option '${option}'";;
+    esac
+done
+
+shift $((OPTIND - 1))
+
+test "${ver}" = "" && ver=ENGR
+uver="`echo ${ver}|tr [:lower:] [:upper:]`"
+
+where="`echo "${where}"|tr [:lower:] [:upper:]`"
+test "${where}" = "" && where=Engr
+
+test "${model}" = "" && fail "model not specified"
+moddir=${model}
+test "${model}" = "3000" && moddir=Yeti
+test "${partno}" = "" && fail "part number not specified"
+test "${rel}" = "" && fail "Release not specified"
+
+echo "Make FRIEDEGGS manufacturing tools CD"
+echo ""
+echo "----------"
+echo "About to build manufacturing tools CD:"
+echo "    ver=${ver} where=${where}, model=${model}"
+echo "    partno=${partno} rel=${rel}"
+echo ""
+
+while { echo -n "Ready [Y/N]? "; read input; } do
+    test "${input}" = "Y" && break
+    test "${input}" = "n" -o "${input}" = "N" &&
+        fail "build cancelled.";
+done
+
+test -d "${partno}" &&
+    {   echo "Work directory, ${partno}, already exists"
+        while { echo -n "Continue, blowing it away [Y/N]? "; read input; } do
+            test "${input}" = "Y" && { echo "Continuing..."; break; }
+            test "${input}" = "N" && { echo "Quitting..."; exit 0; }
+        done
+    }
+
+isoname=PS-TOOLS-${model}-${rel}.iso
+kloc=/k/Release/${moddir}/${where}
+
+test -f ${kloc}/cd/${isoname} &&
+    {   echo "iso, ${isoname}, already exists"
+        while { echo -n "Continue, blowing it away [Y/N]? "; read input; } do
+            test "${input}" = "Y" && { echo "Continuing..."; break; }
+            test "${input}" = "N" && { echo "Quitting..."; exit 0; }
+        done
+    }
+
+echo "*** Beginning FRIEDEGGS manufacturing tools CD build ***"
+
+rm -rf ${partno} ${kloc}/cd/${isoname}
+mkdir -p ${partno}/PN-${partno}
+: > ${partno}/PN-${partno}/PN-${partno}
+cp -r ${kloc}/Perf/${ver}/CCBE ${partno}/PN-${partno} ||
+    fail "Failed to get CCBE"
+cp ${kloc}/Perf/${ver}/*.rpm2 ${partno}/PN-${partno} ||
+    fail "Failed to get rpm2"
+cp ${kloc}/Perf/${ver}/*.zip ${partno}/PN-${partno} ||
+    fail "Failed to get zip"
+(cd ${partno}/PN-${partno} &&
+    svn export svn://svn.xiotech.com/eng/trunk/storage/Wookiee/Test Test) ||
+    fail "Failed to get Test directory"
+
+cd ${partno}
+cvs co projects/Drives || fail "Failed to get Drives"
+mv projects/Drives PN-${partno}
+
+tooldir=${kloc}/Perf/${ver}/Tools
+if [ -f ${tooldir}/DeviceConfiguration.txt ]; then
+    cp ${tooldir}/DeviceConfiguration.txt PN-${partno}/Drives
+elif [ -f ${tooldir}/DeviceConfiguration${model}.txt ]; then
+    cp ${tooldir}/DeviceConfiguration${model}.txt PN-${partno}/Drives
+else
+    fail "Can't find DeviceConfiguration file"
+fi
+if [ "${model}" = "3000" ]; then
+    if [ -f ${tooldir}/deviceconfigurationICON.txt ]; then
+        cp ${tooldir}/deviceconfigurationICON.txt PN-${partno}/Drives
+    else
+        fail "Can't find deviceconfigurationICON.txt file"
+    fi
+fi
+
+cat - > ${partno}-isoinfo << EOF
+# PN-${partno} disk information
+COPY=COPYRT
+APPI=${model} model mfg tools CD
+PREP=Xiotech Corporation, www.xiotech.com
+PUBL=Xiotech Corporation, www.xiotech.com
+SYSI=${model}
+VOLI=PN-${partno}
+VOLS=PN-${partno}
+EOF
+
+year=`date +%Y`
+cat - > PN-${partno}/COPYRT << EOF
+Copyright ${year} Xiotech Corporation. All rights reserved.
+EOF
+
+export MKISOFSRC=${partno}-isoinfo
+mkisofs -J -r -volset-size 1 -volset-seqno 1 -iso-level 4 \
+    -m CVS -m '.svn' -m '.*.swp' -o ${isoname} PN-${partno}
+
+cd ..
+
+echo "MFG tools CD for model ${model} rel. ${rel} part no. ${partno} created"
+
+# vi:sw=4 ts=4 expandtab

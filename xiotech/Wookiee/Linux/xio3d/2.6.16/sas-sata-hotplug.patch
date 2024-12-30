@@ -1,0 +1,650 @@
+diff -ur ../../../../../clean/Wookiee/Linux/xio3d/2.6.16/obj-750/drivers/scsi/sas/sas_discover.c obj-750/drivers/scsi/sas/sas_discover.c
+--- a/drivers/scsi/sas/sas_discover.c	2006-08-17 15:35:16.008235214 -0500
++++ b/drivers/scsi/sas/sas_discover.c	2006-08-16 15:09:27.000000000 -0500
+@@ -25,6 +25,7 @@
+ 
+ #include <linux/pci.h>
+ #include <linux/scatterlist.h>
++#include <linux/delay.h>	/*DWD*/
+ #include <scsi/scsi_host.h>
+ #include <scsi/scsi_eh.h>
+ #include <scsi/scsi_cmnd.h>
+@@ -1223,7 +1224,7 @@
+ 
+ 	sas_get_ata_command_set(dev);
+ 
+-	res = sas_notify_lldd_dev_found(dev);
++    res = sas_notify_lldd_dev_found(dev);
+ 	if (res)
+ 		return res;
+ 
+@@ -1308,70 +1309,85 @@
+ 	kobject_unregister(&dev->dev_obj);
+ }
+ 
+-int sas_del_io_list(struct domain_device *dev)
++extern int scsi_internal_device_block(struct scsi_device *sdev);
++extern int scsi_internal_device_unblock(struct scsi_device *sdev);
++
++int sas_del_io_list(struct domain_device *dev, int cancel)
+ {
+-//    struct sas_task *task;
+-//    struct list_head *ntask;
+-    struct sas_ha_struct *ha = dev->port->ha;
+     unsigned long flags;
+     struct LU *lu, *n;
++    struct scsi_device *scsi_dev = NULL;
++    struct sas_task *cmd, *cmd_end;
++
+     SAS_DPRINTK("%s:  ENTER %p \n", __FUNCTION__, dev);
+-    /*return if no ios*/
+-    if (list_empty(&dev->io_list))
+-        return 0;
+-            
+-//     list_for_each_entry_supersafe(task,ntask,&dev->io_list,dev_io_list) {
+-//         SAS_DPRINTK("%s: task %p in list \n", __FUNCTION__,task);
+-//     }
+-    
+-    if (dev->dev_type == SATA_DEV )
+-        ha->lldd_clear_task_set(dev,dev->sata_dev.lu->LUN);
+-    else{
+-    list_for_each_entry_safe(lu, n, &dev->end_dev.LU_list, list) {
+-            SAS_DPRINTK("   CLEARINGING TASKSET \n");
+-            ha->lldd_clear_task_set(dev,lu->LUN);
++
++    if (dev->dev_type == SATA_DEV) {
++        scsi_dev = dev->sata_dev.lu->uldd_dev;
++        if (scsi_dev && scsi_dev->request_queue) {
++            scsi_internal_device_block(scsi_dev);
++            if (cancel)
++                scsi_device_set_state(scsi_dev,SDEV_CANCEL);
+         }
++    } else if (dev->dev_type == SAS_END_DEV){
++        list_for_each_entry_safe(lu, n, &dev->end_dev.LU_list, list) {
++            scsi_dev = lu->uldd_dev;
++            if (scsi_dev && scsi_dev->request_queue) {
++                scsi_internal_device_block(scsi_dev);
++                if (cancel)
++                    scsi_device_set_state(scsi_dev,SDEV_CANCEL);
++            }
++        }
++    } else {
++        SAS_DPRINTK("%s: invalid devtype: %d \n", 
++                __FUNCTION__, dev->dev_type);
++        return 0;
+     }
+-    
++
++    if (list_empty(&dev->io_list))
++        goto leave_release;
++
+     spin_lock_irqsave(&dev->io_list_lock,flags);
++    list_for_each_entry_safe(cmd, cmd_end, &dev->io_list, dev_io_list) {
++        scsi_req_abort_cmd((struct scsi_cmnd*)cmd->uldd_task);
++    }
++    
+     while (!list_empty(&dev->io_list)){
+         spin_unlock_irqrestore(&dev->io_list_lock,flags);
+         schedule();
+         spin_lock_irqsave(&dev->io_list_lock,flags);
+     }
+     spin_unlock_irqrestore(&dev->io_list_lock,flags);
+-    SAS_DPRINTK("%s:  DONE \n", __FUNCTION__);
+-    return 0;
+- }
+-static int sas_register_end_dev(struct domain_device *dev)
+-{
+-	struct LU *lu;
+-
+-	kobject_register(&dev->dev_obj);
+-	kset_register(&dev->end_dev.LU_kset);
+ 
+-	list_for_each_entry(lu, &dev->end_dev.LU_list, list) {
+-                kobject_get(&dev->dev_obj);
+-		kobject_register(&lu->lu_obj);
+-		sas_register_with_scsi(lu);
+-	}
++leave_release:
++    if (!cancel) {
++        if (dev->dev_type == SATA_DEV) {
++            scsi_dev = dev->sata_dev.lu->uldd_dev;
++            if (scsi_dev && scsi_dev->request_queue) {
++                scsi_internal_device_unblock(scsi_dev);
++            }
++        }
+ 
+-	return 0;
++        else {
++            list_for_each_entry_safe(lu, n, &dev->end_dev.LU_list, list) {
++                scsi_dev = lu->uldd_dev;
++                if (scsi_dev && scsi_dev->request_queue) {
++                    scsi_internal_device_unblock(scsi_dev);
++                }
++            }
++        }
++    }
++    
++    SAS_DPRINTK("%s:  DONE \n", __FUNCTION__);
++    return 0;
+ }
+ 
+ static void sas_unregister_end_dev(struct domain_device *dev)
+ {
+ 	struct LU *lu, *n;
+-        struct scsi_device *scsi_dev ;
+-       
+ 
+-        SAS_DPRINTK("%s:ENTER \n", __FUNCTION__);
+-        list_for_each_entry_safe(lu, n, &dev->end_dev.LU_list, list) {
+-            scsi_dev = lu->uldd_dev;
+-            scsi_device_set_state(scsi_dev,SDEV_CANCEL);
+-        }
+-        
+-        sas_del_io_list(dev);
++    SAS_DPRINTK("%s:ENTER \n", __FUNCTION__);
++
++    sas_del_io_list(dev, 1);
+ 
+ 	list_for_each_entry_safe(lu, n, &dev->end_dev.LU_list, list) {
+                
+@@ -1384,6 +1400,59 @@
+ 	sas_unregister_common_dev(dev);
+ }
+ 
++static int sas_register_end_dev(struct domain_device *dev)
++{
++	struct LU *lu, *n, *failed;
++
++	kobject_register(&dev->dev_obj);
++	kset_register(&dev->end_dev.LU_kset);
++
++    list_for_each_entry(lu, &dev->end_dev.LU_list, list) {
++        kobject_get(&dev->dev_obj);
++        kobject_register(&lu->lu_obj);
++
++        if ( sas_register_with_scsi(lu) ) {
++            failed = lu;
++            list_for_each_entry_safe(lu, n, &dev->end_dev.LU_list, list) {
++            
++                if ( failed != lu )
++		            sas_unregister_with_scsi(lu);
++                else {
++                    lu->uldd_dev = NULL;
++                    kobject_put(&lu->lu_obj);
++                }
++		        
++                list_del_init(&lu->list);
++		        kobject_unregister(&lu->lu_obj);
++                kobject_put(&dev->dev_obj);
++                
++                if (failed == lu)
++                    break;
++            }
++            kset_unregister(&dev->end_dev.LU_kset);
++            sas_unregister_common_dev(dev);
++            SAS_DPRINTK("%s:EXIT EAGAIN\n", __FUNCTION__);
++            return  -EAGAIN;
++        }
++    }
++    SAS_DPRINTK("%s:EXIT\n", __FUNCTION__);
++    return 0;
++}
++
++static void sas_unregister_sata(struct domain_device *dev)
++{
++    SAS_DPRINTK("%s:ENTER \n", __FUNCTION__);
++    
++    /* do i need to poke the sata layer here*/
++    sas_del_io_list(dev, 1);
++    
++    if (dev->sata_dev.lu) {
++        sas_unregister_with_scsi(dev->sata_dev.lu);
++        kobject_unregister(&dev->sata_dev.lu->lu_obj);
++    }
++    sas_unregister_common_dev(dev);
++}
++
+ static int sas_register_sata(struct domain_device *dev)
+ {
+ 	/* XXX Hint: Register the SATL supported LU with SCSI.
+@@ -1392,28 +1461,18 @@
+ 	*/
+ 	kobject_register(&dev->dev_obj);
+ 	kobject_register(&dev->sata_dev.lu->lu_obj);
+-	sas_register_with_scsi(dev->sata_dev.lu);
+-	return 0;
+-}
+ 
+-static void sas_unregister_sata(struct domain_device *dev)
+-{
+-	/* XXX Hint: See hint above.
+-	if (dev->sata_dev->lu)
+-		sas_unregister_with_scsi(dev->sata_dev->lu);
+-	*/
+-        struct scsi_device *scsi_dev ;
+-        if (dev->sata_dev.lu)
+-        {
+-            scsi_dev = dev->sata_dev.lu->uldd_dev;
+-            scsi_device_set_state(scsi_dev,SDEV_CANCEL);
+-        }
+-        /* do i need to poke the sata layer here*/
+-        sas_del_io_list(dev);
+-	if (dev->sata_dev.lu)
+-		sas_unregister_with_scsi(dev->sata_dev.lu);
++    if ( sas_register_with_scsi(dev->sata_dev.lu) ) {
++        dev->sata_dev.lu->uldd_dev = NULL;
++        dev->sata_dev.ap = NULL;
+         kobject_unregister(&dev->sata_dev.lu->lu_obj);
+-	sas_unregister_common_dev(dev);
++        sas_unregister_common_dev(dev);
++        SAS_DPRINTK("%s:EXIT EAGAIN\n", __FUNCTION__);
++        return -EAGAIN;
++    }
++
++    SAS_DPRINTK("%s:EXIT\n", __FUNCTION__);
++    return 0;
+ }
+ 
+ /**
+@@ -1445,22 +1504,23 @@
+  */
+ static int sas_register_domain_devs(struct sas_port *port)
+ {
+-	struct domain_device *dev;
++	struct domain_device *n, *dev;
++    int ret = 0;
+ 
+-	list_for_each_entry(dev, &port->dev_list, dev_list_node) {
++	list_for_each_entry_safe(dev, n, &port->dev_list, dev_list_node) {
+ 		if (dev->dev_obj.dentry)
+ 			continue;
+ 		switch (dev->dev_type) {
+ 		case SAS_END_DEV:
+-			sas_register_end_dev(dev);
++			ret = sas_register_end_dev(dev);
+ 			break;
+ 		case EDGE_DEV:
+ 		case FANOUT_DEV:
+-			sas_register_ex_dev(dev);
++			ret = sas_register_ex_dev(dev);
+ 			break;
+ 		case SATA_DEV:
+ 		case SATA_PM:
+-			sas_register_sata(dev);
++			ret = sas_register_sata(dev);
+ 			break;
+ 		default:
+ 			SAS_DPRINTK("%s: unknown device type %d\n",
+@@ -1469,7 +1529,7 @@
+ 		}
+ 	}
+ 
+-	return 0;
++	return ret;
+ }
+ 
+ void sas_unregister_dev(struct domain_device *dev)
+@@ -1549,7 +1609,7 @@
+ 		kfree(port->port_dev); /* not kobject_register-ed yet */
+ 		port->port_dev = NULL;
+ 	} else
+-		sas_register_domain_devs(port);
++		error = sas_register_domain_devs(port);
+ 
+ 	SAS_DPRINTK("DONE DISCOVERY on port %d, pid:%d, result:%d\n", port->id,
+ 		    current->pid, error);
+@@ -1566,7 +1626,7 @@
+ 	if (port->port_dev) {
+ 		res = sas_ex_revalidate_domain(port->port_dev);
+ 		if (!res)
+-			sas_register_domain_devs(port);
++			res = sas_register_domain_devs(port);
+ 	}
+ 	SAS_DPRINTK("done REVALIDATING DOMAIN on port %d, pid:%d, res 0x%x\n",
+ 		    port->id, current->pid, res);
+@@ -1599,13 +1659,19 @@
+ 		switch (disc_ev) {
+ 		case DISCE_DISCOVER_DOMAIN:
+ 			if (try_module_get(sas_ha->lldd_module)) {
+-				sas_discover_domain(port);
++				if ( sas_discover_domain(port) == EAGAIN ) {
++                    SAS_DPRINTK("%s: sas_discover_domain EAGAIN\n", __FUNCTION__);
++                    sas_revalidate_domain(port);
++                }
+ 				module_put(sas_ha->lldd_module);
+ 			}
+ 			break;
+ 		case DISCE_REVALIDATE_DOMAIN:
+ 			if (try_module_get(sas_ha->lldd_module)) {
+-				sas_revalidate_domain(port);
++				if ( sas_revalidate_domain(port) == EAGAIN ) {
++                    SAS_DPRINTK("%s: sas_revalidate_domain EAGAIN\n", __FUNCTION__);
++                    sas_revalidate_domain(port);
++                }
+ 				module_put(sas_ha->lldd_module);
+ 			}
+ 			break;
+diff -ur ../../../../../clean/Wookiee/Linux/xio3d/2.6.16/obj-750/drivers/scsi/sas/sas_expander.c obj-750/drivers/scsi/sas/sas_expander.c
+--- a/drivers/scsi/sas/sas_expander.c	2006-08-17 15:35:16.059230345 -0500
++++ b/drivers/scsi/sas/sas_expander.c	2006-08-17 15:11:46.681825829 -0500
+@@ -35,6 +35,9 @@
+ static int sas_discover_expander(struct domain_device *dev);
+ static int sas_configure_routing(struct domain_device *dev, u8 *sas_addr);
+ static int sas_disable_routing(struct domain_device *dev,  u8 *sas_addr);
++static int sas_ex_find_phy(struct domain_device *dev, u8 *sas_addr, int start);
++static int smp_phy_control(struct domain_device *dev, int phy_id,
++			   enum phy_func phy_func);
+ 
+ static ssize_t smp_portal_read(struct kobject *, char *, loff_t, size_t);
+ static ssize_t smp_portal_write(struct kobject *, char *, loff_t, size_t);
+@@ -320,6 +323,14 @@
+ 	phy->virtual = dr->virtual;
+ 	phy->last_da_index = -1;
+ 
++    /* Check for valid addr */
++    if ( dev->port->ha->first_discovery_done && (SAS_ADDR(phy->attached_sas_addr) == 0) ) {
++        SAS_DPRINTK("ex %016llx attempting to reset phy%02d: BOGUS ADDR 0\n",
++                SAS_ADDR(dev->sas_addr), phy->phy_id );
++        sas_execute_disable_enable_phy(dev);
++    }
++
++
+ 	SAS_DPRINTK("ex %016llx phy%02d:%c attached: %016llx\n",
+ 		    SAS_ADDR(dev->sas_addr), phy->phy_id,
+ 		    phy->routing_attr == TABLE_ROUTING ? 'T' :
+@@ -662,6 +673,8 @@
+ static void sas_ex_disable_port(struct domain_device *dev, u8 *sas_addr)
+ {
+ 	int i = sas_ex_find_phy(dev, sas_addr, -1);
++    
++    SAS_DPRINTK("%s: found phy %d\n",__FUNCTION__, i);
+ 
+ 	if (i != -1)
+ 		sas_ex_disable_phy(dev, i);
+@@ -758,12 +771,14 @@
+ 
+ 	if ((phy->attached_tproto & SAS_PROTO_STP) || phy->attached_sata_dev) {
+             
+-                res = smp_phy_control(parent, phy_id, PHY_FUNC_LINK_RESET);
+-                if (res)  {
+-                    kfree(child);
+-                    return NULL;
+-                }
+-                mdelay(100) ;
++        SAS_DPRINTK("%s: SOFT RESET SATA DEV: phy %d\n", __FUNCTION__, phy_id);
++        res = smp_phy_control(parent, phy_id, PHY_FUNC_LINK_RESET);
++        if (res)  {
++            kfree(child);
++            return NULL;
++        }
++        mdelay(100);
++
+ 		child->dev_type = SATA_DEV;
+ 		if (phy->attached_tproto & SAS_PROTO_STP)
+ 			child->tproto = phy->attached_tproto;
+@@ -1800,11 +1815,12 @@
+ out:
+ 	return res;
+ }
+-extern int sas_del_io_list(struct domain_device *dev);
++extern int sas_del_io_list(struct domain_device *dev, int cancel);
+ static int sas_rediscover_dev(struct domain_device *dev, int phy_id)
+ {
+ 	struct expander_device *ex = &dev->ex_dev;
+ 	struct ex_phy *phy = &ex->ex_phy[phy_id];
++	struct domain_device *child, *n;
+ 	u8 attached_sas_addr[8];
+ 	int res;
+ 
+@@ -1828,23 +1844,28 @@
+ 		goto out;
+ 	}
+ 
+-	if (SAS_ADDR(attached_sas_addr) == 0) {
+-		phy->phy_state = PHY_EMPTY;
+-		sas_unregister_devs_sas_addr(dev, phy_id);
+-	} else if (SAS_ADDR(attached_sas_addr) ==
+-		   SAS_ADDR(phy->attached_sas_addr)) {
+-		SAS_DPRINTK("ex %016llx phy 0x%x broadcast flutter\n",
+-			    SAS_ADDR(dev->sas_addr), phy_id);
+-                struct domain_device *child, *n;
+-                struct expander_device *ex_dev = &dev->ex_dev;
+-                list_for_each_entry_safe(child, n, &ex_dev->children, siblings) {
+-                    if (SAS_ADDR(child->sas_addr) ==
+-                        SAS_ADDR(phy->attached_sas_addr)) {
+-                            sas_del_io_list(child);
+-                        }
+-                   }
+-	} else
+-		res = sas_discover_new(dev, phy_id);
++    if (SAS_ADDR(attached_sas_addr) == 0) {
++        phy->phy_state = PHY_EMPTY;
++        sas_unregister_devs_sas_addr(dev, phy_id);
++    } else if (SAS_ADDR(attached_sas_addr) ==
++            SAS_ADDR(phy->attached_sas_addr)) {
++        SAS_DPRINTK("ex %016llx phy 0x%x broadcast flutter\n",
++                SAS_ADDR(dev->sas_addr), phy_id);
++	
++        list_for_each_entry_safe(child, n, &ex->children, siblings) {
++            if (SAS_ADDR(child->sas_addr) ==
++                    SAS_ADDR(phy->attached_sas_addr)) {
++                if (child->dev_type == SATA_DEV) {
++                    if ( (jiffies - child->time_jiffies_created) >
++                            SAS_FLUTTER_DELAY_JIFFIES ) { 
++                        sas_del_io_list(child, 0);
++                        child->time_jiffies_created = jiffies;
++                    } 
++                }
++            }
++        }
++    } else
++        res = sas_discover_new(dev, phy_id);
+ out:
+ 	return res;
+ }
+@@ -1996,12 +2017,16 @@
+ int sas_execute_hard_reset(struct domain_device *dev)
+ {
+ 	int res = -ENOSYS;
++    
++    SAS_DPRINTK("%s: HARD RESET ...", __FUNCTION__);
+ 
+ 	if (!dev->parent) {
+ 		struct sas_phy *phy = container_of(dev->port->phy_list.next,
+ 						   struct sas_phy,
+ 						   port_phy_el);
++        SAS_DPRINTK(" phy %d...\n", phy->id);
+ 		res = dev->port->ha->lldd_control_phy(phy,PHY_FUNC_HARD_RESET);
++        
+ 	} else {
+ 		int i = 0;
+ 
+@@ -2013,7 +2038,73 @@
+ 		if (i != -1)
+ 			res = smp_phy_control(dev->parent, i,
+ 					      PHY_FUNC_HARD_RESET);
++            SAS_DPRINTK(" phy %d...\n", i);
++	}
++
++    if ( res )
++    {
++        SAS_DPRINTK("FAILED (%d)\n", res);
++    }
++    else
++    {
++        SAS_DPRINTK("SUCCESS\n");
++    }
++
++
++	return res;
++}
++
++/* ---------- Disable/Enable Phy ---------- */
++
++/**
++ * sas_execute_disable_enable_phy -- Disable / Enable Phy
++ * @dev: device of intereset
++ *
++ * Perform/send a Transport Reset event notification to the device of
++ * interest.  Return 0 if successful, error otherwise.
++ * Errors: -ENOSYS (unsupported)
++ * 	   -ENOMEM (out of memory)
++ * 	   SAS_QUEUE_FULL (controller's queue is full)
++ * 	   SAS_TASK_UNDELIVERED (Task delivery or Target failure)
++ */
++int sas_execute_disable_enable_phy(struct domain_device *dev)
++{
++	int res = -ENOSYS;
++    
++    SAS_DPRINTK("%s: Disable Enable Phy ...", __FUNCTION__);
++
++	if (!dev->parent) {
++		struct sas_phy *phy = container_of(dev->port->phy_list.next,
++						   struct sas_phy,
++						   port_phy_el);
++        SAS_DPRINTK(" phy %d...", phy->id);
++		res = dev->port->ha->lldd_control_phy(phy,PHY_FUNC_DISABLE);
++		res = dev->port->ha->lldd_control_phy(phy,PHY_FUNC_LINK_RESET);
++        
++	} else {
++		int i = 0;
++
++		if (dev->parent->dev_type != EDGE_DEV &&
++		    dev->parent->dev_type != FANOUT_DEV)
++			return -ENOSYS;
++
++        i = sas_ex_find_phy(dev->parent, dev->sas_addr, -1);
++        if (i != -1) {
++            res = smp_phy_control(dev->parent, i, PHY_FUNC_DISABLE);
++            res = smp_phy_control(dev->parent, i, PHY_FUNC_LINK_RESET);
++        }
++        SAS_DPRINTK(" phy %d...", i);
+ 	}
+ 
++    if ( res )
++    {
++        SAS_DPRINTK("FAILED (%d)\n", res);
++    }
++    else
++    {
++        SAS_DPRINTK("SUCCESS\n");
++    }
++
++
+ 	return res;
+ }
+diff -ur ../../../../../clean/Wookiee/Linux/xio3d/2.6.16/obj-750/drivers/scsi/sas/sas_scsi_host.c obj-750/drivers/scsi/sas/sas_scsi_host.c
+--- a/drivers/scsi/sas/sas_scsi_host.c	2006-08-17 15:35:16.040232159 -0500
++++ b/drivers/scsi/sas/sas_scsi_host.c	2006-08-16 08:48:49.000000000 -0500
+@@ -67,6 +67,11 @@
+ 	err = scsi_add_device(lu->parent->port->ha->core.shost,
+ 			      lu->map.channel, lu->map.id,
+ 			      SCSI_LUN(lu->LUN));
++
++    if (err)
++        SAS_DPRINTK("%s: scsi_add_device rc=(%d)\n", 
++                __FUNCTION__, err);
++
+ 	return err;
+ }
+ 
+@@ -76,6 +81,8 @@
+ 		struct scsi_device *scsi_dev = lu->uldd_dev;
+ 		scsi_remove_device(scsi_dev);
+ 	}
++    
++    sas_release_scsi_id(lu->parent->port, lu->map.id);
+ }
+ 
+ /* ---------- SCSI Host glue ---------- */
+@@ -683,6 +690,9 @@
+             else
+                 hs = DID_NO_CONNECT;
+             break;
++        case SAS_PROTO_RESPONSE:
++          
++            break;
+         case SAS_ABORTED_TASK:
+             hs = DID_ABORT;
+             break;
+@@ -700,23 +710,29 @@
+         struct domain_device *dev = task->dev;
+         struct task_status_struct *ts = &task->task_status;
+ 
++        int i;
+ 
+         if (qc->scsicmd != NULL)
+             ASSIGN_SAS_TASK(qc->scsicmd, NULL);
+-	/*
+-	 * TODO - qc->err_mask.
+-	 */
++
+         if (qc->scsicmd != NULL)
+             qc->scsicmd->result = SAM_STAT_GOOD;
+         if  ((ts->resp) ||(ts->stat)) {
+-            SAS_DPRINTK("sas_qc_done: %llX task %p resp %02X stat %02X sstatus %02X  serror %02X\n",SAS_ADDR(dev->sas_addr),
+-                        task,ts->resp,ts->stat, rp->sstatus,rp->serror);
++            SAS_DPRINTK("sas_qc_done: %llX task %p resp %02X stat %02X sstatus %02X  serror %02X\n",
++                        SAS_ADDR(dev->sas_addr),task,ts->resp,ts->stat, rp->sstatus,rp->serror);
++            SAS_DPRINTK("       scontrol %02X sactive %02X \n",
++                        rp->scontrol,rp->sactive);
++            for (i=0; i <24; i++)
++                printk(KERN_INFO"%02hX ",rp->ending_fis[i]);
++            memcpy (&dev->frame_rcvd[0] , &rp->ending_fis[0],24);
++            printk(KERN_INFO"\n");
+              if (qc->scsicmd != NULL)
+                 sata_xlate_err_codes(ts,qc->scsicmd);
+         }
+ 
+             
+-	qc->err_mask |= ac_err_mask(rp->sstatus);
++        qc->err_mask |= ac_err_mask(rp->ending_fis[0x2]);
++
+         if (task->task_state_flags & SAS_TASK_STATE_ABORTED)
+         {
+             if (qc->scsicmd != NULL)
+diff -ur ../../../../../clean/Wookiee/Linux/xio3d/2.6.16/obj-750/include/scsi/sas/sas_discover.h obj-750/include/scsi/sas/sas_discover.h
+--- a/include/scsi/sas/sas_discover.h	2006-08-17 15:35:15.926243041 -0500
++++ b/include/scsi/sas/sas_discover.h	2006-08-17 15:18:01.442067994 -0500
+@@ -63,6 +63,7 @@
+ 
+ /* See sas_discover.c before changing these.
+  */
++#define SAS_FLUTTER_DELAY_JIFFIES   (2 * HZ)
+ 
+ /* ---------- SAS end device ---------- */
+ 
+@@ -148,10 +149,10 @@
+ 	struct sas_port *port;	  /* shortcut to root of the tree */
+ 
+ 	struct list_head dev_list_node;
+-
++    
+         struct list_head io_list;
+-
+         spinlock_t io_list_lock;
++        unsigned long time_jiffies_created;
+         
+ 	enum sas_proto    iproto;
+ 	enum sas_proto    tproto;
+@@ -203,6 +204,7 @@
+ 	INIT_LIST_HEAD(&dev->dev_list_node);
+         INIT_LIST_HEAD(&dev->io_list);
+         spin_lock_init(&dev->io_list_lock);
++        dev->time_jiffies_created = jiffies;
+ 	switch (dev->dev_type) {
+ 	case SAS_END_DEV:
+ 		INIT_LIST_HEAD(&dev->end_dev.LU_list);
+diff -ur ../../../../../clean/Wookiee/Linux/xio3d/2.6.16/obj-750/include/scsi/sas/sas_expander.h obj-750/include/scsi/sas/sas_expander.h
+--- a/include/scsi/sas/sas_expander.h	2006-08-17 15:35:14.819348713 -0500
++++ b/include/scsi/sas/sas_expander.h	2006-08-16 09:39:29.000000000 -0500
+@@ -133,6 +133,6 @@
+ 
+ int  sas_ex_revalidate_domain(struct domain_device *port_dev);
+ 
+-int  sas_execute_hard_reset(struct domain_device *dev);
+-
++int sas_execute_hard_reset(struct domain_device *dev);
++int sas_execute_disable_enable_phy(struct domain_device *dev);
+ #endif /* _SAS_EXPANDER_H_ */
+

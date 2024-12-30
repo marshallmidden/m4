@@ -1,0 +1,386 @@
+diff -rpu ./drivers/scsi/aic94xx/aic94xx_hwi.c /home/andyw/linux-2.6.16-rc3-LT4/drivers/scsi/aic94xx/aic94xx_hwi.c
+--- a/drivers/scsi/aic94xx/aic94xx_hwi.c	2006-07-05 14:14:50.308308133 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_hwi.c	2006-07-03 13:11:10.000000000 -0500
+@@ -637,6 +637,7 @@ static void asd_init_hw_phy_defaults(str
+ int asd_init_hw(struct asd_ha_struct *asd_ha)
+ {
+ 	int err;
++	u32 v;
+ 
+ 	err = asd_init_sw(asd_ha);
+ 	if (err)
+@@ -648,6 +649,20 @@ int asd_init_hw(struct asd_ha_struct *as
+ */
+ 	asd_init_hw_phy_defaults(asd_ha);
+ 
++	err = pci_read_config_dword(asd_ha->pcidev, PCIC_HSTPCIX_CNTRL, &v);
++	if (err) {
++		asd_printk("couldn't read PCIC_HSTPCIX_CNTRL of %s\n",
++			   pci_name(asd_ha->pcidev));
++		return err;
++	}
++	pci_write_config_dword(asd_ha->pcidev, PCIC_HSTPCIX_CNTRL,
++					v | SC_TMR_DIS);
++	if (err) {
++		asd_printk("couldn't disable split completion timer of %s\n",
++			   pci_name(asd_ha->pcidev));
++		return err;
++	}
++
+ 	err = asd_read_ocm(asd_ha);
+ 	if (err) {
+ 		asd_printk("couldn't read ocm(%d)\n", err);
+diff -rpu ./drivers/scsi/aic94xx/aic94xx_reg_def.h /home/andyw/linux-2.6.16-rc3-LT4/drivers/scsi/aic94xx/aic94xx_reg_def.h
+--- a/drivers/scsi/aic94xx/aic94xx_reg_def.h	2006-07-05 14:14:50.328306208 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_reg_def.h	2006-07-03 13:07:30.000000000 -0500
+@@ -1791,6 +1791,7 @@
+ #define PCIC_HSTPCIX_CNTRL	0xA0
+ 
+ #define 	REWIND_DIS		0x0800
++#define		SC_TMR_DIS		0x04000000
+ 
+ #define PCIC_MBAR0_MASK	0xA8
+ #define		PCIC_MBAR0_SIZE_MASK 	0x1FFFE000
+diff -rpu ./drivers/scsi/libata-core.c /home/andyw/linux-2.6.16-rc3-LT4/drivers/scsi/libata-core.c
+--- a/drivers/scsi/libata-core.c	2006-07-05 14:14:50.479291676 -0500
++++ b/drivers/scsi/libata-core.c	2006-07-03 15:52:34.000000000 -0500
+@@ -1348,7 +1348,6 @@ static void ata_dev_config_ncq(struct at
+ #else
+ 	hdepth = 32;
+ #endif
+-/*DWD*/	printk("queue depth %d/%d\n", dev->max_depth, hdepth);
+ 	dev->flags |= ATA_DFLAG_NCQ;
+ 	snprintf(desc, desc_sz, "NCQ (depth %d)", min(dev->max_depth, hdepth));
+ }
+diff -rpu ./drivers/scsi/libata-scsi.c /home/andyw/linux-2.6.16-rc3-LT4/drivers/scsi/libata-scsi.c
+--- a/drivers/scsi/libata-scsi.c	2006-07-05 14:14:51.158226328 -0500
++++ b/drivers/scsi/libata-scsi.c	2006-06-30 15:32:19.000000000 -0500
+@@ -345,7 +345,6 @@ struct ata_queued_cmd *ata_scsi_qc_new(s
+ 
+ 	qc = ata_qc_new_init(ap, dev);
+ 	if (qc) {
+-//*DWD*/		printk("Z");
+ 		qc->scsicmd = cmd;
+ 		qc->scsidone = done;
+ 
+@@ -357,7 +356,6 @@ struct ata_queued_cmd *ata_scsi_qc_new(s
+ 			qc->n_elem = 1;
+ 		}
+ 	} else {
+-//*DWD*/		printk("z");
+ 		cmd->result = (DID_OK << 16) | (QUEUE_FULL << 1);
+ 		done(cmd);
+ 	}
+@@ -2841,9 +2839,11 @@ int ata_sas_slave_configure(struct scsi_
+ 	if (!ata_id_is_sata(ap->device->id))
+ 		blk_queue_max_sectors(sdev->request_queue, ATA_MAX_SECTORS);
+ 
++#ifdef notdef
+ /*DWD*/	sdev->tagged_supported =1;
+ /*DWD*/	scsi_set_tag_type(sdev, MSG_SIMPLE_TAG);
+ /*DWD*/	scsi_activate_tcq(sdev, 16);
++#endif
+ 	return 0;
+ }
+ EXPORT_SYMBOL_GPL(ata_sas_slave_configure);
+@@ -2875,7 +2875,6 @@ int ata_sas_queuecmd(struct scsi_cmnd *c
+ 		return 0;
+ 	}
+ 
+-//*DWD*/	printk("X") ;
+ 	__ata_scsi_queuecmd(cmd, done, ap, ap->device);
+ 	return 0;
+ }
+diff -rpu ./drivers/scsi/sas/sas_discover.c /home/andyw/linux-2.6.16-rc3-LT4/drivers/scsi/sas/sas_discover.c
+--- a/drivers/scsi/sas/sas_discover.c	2006-07-05 14:16:08.364795499 -0500
++++ b/drivers/scsi/sas/sas_discover.c	2006-06-30 15:31:21.000000000 -0500
+@@ -817,8 +817,12 @@ static int sas_discover_sata_dev(struct 
+ cont1:
+ 	/* Get WWN */
+ 	if (dev->port->oob_mode != SATA_OOB_MODE) {
++#ifdef notdef
+ 		memcpy(dev->sas_addr, dev->sata_dev.rps_resp.rps.stp_sas_addr,
+ 		       SAS_ADDR_SIZE);
++#else
++		WARN_ON(SAS_ADDR(dev->sata_dev.rps_resp.rps.stp_sas_addr) == 0LL);
++#endif
+ 	} else if (dev->sata_dev.command_set == ATA_COMMAND_SET &&
+ 		   (le16_to_cpu(dev->sata_dev.identify_x[108]) & 0xF000)
+ 		   == 0x5000) {
+@@ -1299,7 +1303,7 @@ static int sas_del_io_list(struct domain
+     struct sas_ha_struct *ha = dev->port->ha;
+     unsigned long flags;
+     struct LU *lu, *n;
+-    SAS_DPRINTK("%s:  ENTER \n", __FUNCTION__);
++    SAS_DPRINTK("%s:  ENTER %p \n", __FUNCTION__, dev);
+     /*return if no ios*/
+     if (list_empty(&dev->io_list))
+         return 0;
+@@ -1391,7 +1395,7 @@ static void sas_unregister_sata(struct d
+         sas_del_io_list(dev);
+ 	if (dev->sata_dev.lu)
+ 		sas_unregister_with_scsi(dev->sata_dev.lu);
+-
++        kobject_unregister(&dev->sata_dev.lu->lu_obj);
+ 	sas_unregister_common_dev(dev);
+ }
+ 
+@@ -1473,7 +1477,7 @@ void sas_unregister_dev(struct domain_de
+ 	}
+ }
+ 
+-static void sas_unregister_domain_devices(struct sas_port *port)
++void sas_unregister_domain_devices(struct sas_port *port)
+ {
+ 	struct domain_device *dev, *n;
+ 
+@@ -1554,7 +1558,7 @@ static int sas_revalidate_domain(struct 
+ 
+ /* ---------- Threads and events ---------- */
+ 
+-static DECLARE_COMPLETION(disc_comp_start);
++static DECLARE_COMPLETION(disc_th_comp);
+ 
+ static int sas_discover_thread(void *_sas_port)
+ {
+@@ -1566,7 +1570,7 @@ static int sas_discover_thread(void *_sa
+ 
+ 	spin_lock(&disc->disc_event_lock);
+ 	disc->disc_thread = current;
+-	complete(&disc_comp_start);
++	complete(&disc_th_comp);
+ 	while (!disc->disc_thread_quit && !list_empty(&disc->disc_event_list)){
+ 		struct list_head *head = disc->disc_event_list.next;
+ 		enum discover_event disc_ev = container_of(head,
+@@ -1607,10 +1611,10 @@ static int sas_create_discover_thread(st
+ {
+ 	int i;
+ 
+-	init_completion(&disc_comp_start);
++	init_completion(&disc_th_comp);
+ 	i = kernel_thread(sas_discover_thread, port, 0);
+ 	if (i >= 0)
+-		wait_for_completion(&disc_comp_start);
++		wait_for_completion(&disc_th_comp);
+ 
+ 	return i < 0 ? i : 0;
+ }
+@@ -1648,8 +1652,10 @@ void sas_kill_disc_thread(struct sas_por
+ 	spin_lock(&disc->disc_event_lock);
+ 	disc->disc_thread_quit = 1;
+ 	if (disc->disc_thread) {
++		init_completion(&disc_th_comp);
+ 		wake_up_process(disc->disc_thread);
+ 		spin_unlock(&disc->disc_event_lock);
++		wait_for_completion(&disc_th_comp);
+ 		down_interruptible(&disc->disc_sema);
+ 		return;
+ 	}
+diff -rpu ./drivers/scsi/sas/sas_event.c /home/andyw/linux-2.6.16-rc3-LT4/drivers/scsi/sas/sas_event.c
+--- a/drivers/scsi/sas/sas_event.c	2006-07-05 14:14:50.544285420 -0500
++++ b/drivers/scsi/sas/sas_event.c	2006-06-30 15:32:44.000000000 -0500
+@@ -299,5 +299,6 @@ void sas_kill_event_thread(struct sas_ha
+ 	wait_for_completion(&event_th_comp);
+ 
+ 	for (i = 0; i < sas_ha->num_phys; i++)
+-		sas_kill_disc_thread(sas_ha->sas_port[i]);
++		if (sas_ha->sas_phy[i]->port)
++			sas_kill_disc_thread(sas_ha->sas_phy[i]->port);
+ }
+diff -rpu ./drivers/scsi/sas/sas_init.c /home/andyw/linux-2.6.16-rc3-LT4/drivers/scsi/sas/sas_init.c
+--- a/drivers/scsi/sas/sas_init.c	2006-07-05 14:14:51.123229696 -0500
++++ b/drivers/scsi/sas/sas_init.c	2006-06-25 17:40:53.000000000 -0500
+@@ -188,11 +184,11 @@ int sas_unregister_ha(struct sas_ha_stru
+ 		sas_shutdown_queue(sas_ha);
+ 	}
+ 
+-	sas_kill_event_thread(sas_ha);
+-
+ 	sas_unregister_ports(sas_ha);
+ 	sas_unregister_phys(sas_ha);
+ 
++	sas_kill_event_thread(sas_ha);
++
+ 	kset_unregister(&sas_ha->ha_kset);
+ 	kset_unregister(&sas_ha->sas_kset);
+ 
+diff -rpu ./drivers/scsi/sas/sas_port.c /home/andyw/linux-2.6.16-rc3-LT4/drivers/scsi/sas/sas_port.c
+--- a/drivers/scsi/sas/sas_port.c	2006-07-05 14:14:50.565283399 -0500
++++ b/drivers/scsi/sas/sas_port.c	2006-06-30 15:33:22.000000000 -0500
+@@ -164,9 +164,13 @@ void sas_deform_port(struct sas_phy *phy
+ 		port->port_dev->pathways--;
+ 
+ 	if (port->num_phys == 1) {
++#ifdef notdef
+ 		init_completion(&port->port_gone_completion);
+ 		sas_discover_event(port, DISCE_PORT_GONE);
+ 		wait_for_completion(&port->port_gone_completion);
++#else
++		sas_unregister_domain_devices(port);
++#endif
+ 	}
+ 
+ 	if (sas_ha->lldd_port_deformed)
+diff -rpu ./drivers/scsi/sas/sas_scsi_host.c /home/andyw/linux-2.6.16-rc3-LT4/drivers/scsi/sas/sas_scsi_host.c
+--- a/drivers/scsi/sas/sas_scsi_host.c	2006-07-05 14:14:51.095232391 -0500
++++ b/drivers/scsi/sas/sas_scsi_host.c	2006-06-30 15:34:01.000000000 -0500
+@@ -633,6 +615,8 @@ static enum scsi_eh_timer_return sas_scs
+ /* ---------- Initialization and Host Registration ---------- */
+ static void sas_ata_phy_reset(struct ata_port *ap)
+ {
++	struct domain_device *dev = ap->private_data;
++
+ 	ap->device[0].class = ATA_DEV_ATA;
+ }
+ 
+@@ -641,9 +625,7 @@ static void sas_qc_done(struct sas_task 
+ 	struct ata_queued_cmd *qc = task->private;
+ 	struct ata_task_resp *rp = (struct ata_task_resp *)&(task->task_status.buf[0]);
+ 
+-//*DWD*/	printk("sas_qc_done: task 0x%08x, qc = 0x%08x, ap = 0x%08x, dev = 0x%08x/0x%08x\n", (int)task, (int)qc, (int)ap, (int)dev, (int)ap->private_data);
+ 
+-//*DWD*/	printk("sas_qc_done: flags 0x%08x, resp = 0x%08x, stat = 0x%08x\n", task->task_state_flags, task->task_status.resp, task->task_status.stat);
+ 	/*
+ 	 * TODO - qc->err_mask.
+ 	 */
+@@ -661,7 +643,6 @@ static int sas_qc_issue(struct ata_queue
+ 	struct domain_device *dev = ap->private_data;
+ 	struct dev_to_host_fis *d2h_fis = (struct dev_to_host_fis *)&dev->frame_rcvd[0];
+ 
+-//*DWD*/	printk("sas_qc_issue: qc = 0x%08x, ap 0x%08x, dev 0x%08x, len = %d/%d\n", (int)qc, (int)ap, (int)dev, qc->nsect, qc->nbytes);
+ 
+ 	task = sas_alloc_task(GFP_ATOMIC);
+ 	if (!task)
+@@ -675,7 +656,7 @@ static int sas_qc_issue(struct ata_queue
+ 	task->ata_task.fis.lbal = qc->tf.lbal;
+ 	task->ata_task.fis.lbam = qc->tf.lbam;
+ 	task->ata_task.fis.lbah = qc->tf.lbah;
+-	task->ata_task.fis.device = d2h_fis->device | 0xe0;
++	task->ata_task.fis.device = d2h_fis->device | 0x40;
+ 	task->ata_task.fis.lbal_exp = qc->tf.hob_lbal;
+ 	task->ata_task.fis.lbam_exp = qc->tf.hob_lbam;
+ 	task->ata_task.fis.lbah_exp = qc->tf.hob_lbah;
+@@ -690,6 +671,10 @@ static int sas_qc_issue(struct ata_queue
+ 	case ATA_PROT_PIO:
+ 		break ;
+ 
++	case ATA_PROT_NCQ:
++		task->ata_task.use_ncq = 1;
++		/* Drop through */
++
+ 	case ATA_PROT_DMA:
+ 		task->ata_task.dma_xfer = 1;
+ 		break;
+@@ -713,7 +698,6 @@ static int sas_qc_issue(struct ata_queue
+ 	task->task_done = sas_qc_done;
+ 
+ 	res = dev->port->ha->lldd_execute_task(task, 1, GFP_ATOMIC);
+-//*DWD*/	printk("sas_qc_issue: Issued task 0x%08x, res = %d\n", (int)task, res);
+ 
+ out:
+ 	return res;
+@@ -724,7 +708,6 @@ static uint8_t sas_ata_check_status(stru
+ 	struct domain_device *dev = ap->private_data;
+ 	struct dev_to_host_fis *d2h_fis = (struct dev_to_host_fis *) &dev->frame_rcvd[0] ;
+ 
+-//*DWD*/	printk("sas_ata_check_status: ap 0x%08x, dev 0x%08x, status = 0x%02x\n", (int)ap, (int)dev, d2h_fis->status);
+ 	
+ 	return d2h_fis->status;
+ }
+@@ -767,13 +750,20 @@ static struct ata_port_operations sas_sa
+ };
+ 
+ static struct ata_port_info sata_port_info = {
+-	.host_flags = ATA_FLAG_SATA | ATA_FLAG_NO_LEGACY | ATA_FLAG_SATA_RESET | ATA_FLAG_MMIO | ATA_FLAG_PIO_DMA | ATA_FLAG_NO_PRD,
++	.host_flags = ATA_FLAG_SATA | ATA_FLAG_NO_LEGACY | ATA_FLAG_SATA_RESET | ATA_FLAG_MMIO | ATA_FLAG_PIO_DMA | ATA_FLAG_NO_PRD | ATA_FLAG_NCQ,
+ 	.pio_mask = 0x10,
+ 	.mwdma_mask = 0x07,
+ 	.udma_mask = 0x7f,
+ 	.port_ops = &sas_sata_ops
+ };
+ 
++static int
++sas_scsi_ioctl(struct scsi_device *scsidev, int cmd, void __user *arg)
++{
++	printk("fubar !\n");
++	return __ata_scsi_ioctl(scsidev, cmd, arg);
++}
++
+ /**
+  * sas_slave_alloc -- configure an LU which SCSI Core wants to poke at
+  * @scsi_dev: pointer to scsi device
+@@ -822,9 +812,8 @@ static int sas_slave_alloc(struct scsi_d
+ 
+ 				ap = ata_sas_port_alloc(dev->port->ha->pcidev, &sata_port_info, scsi_dev->host);
+ 			
+-				if (!ap) {
++				if (!ap)
+ 					return -ENOMEM;
+-				}
+ 
+ 				dev->sata_dev.ap = ap;
+ 				ap->private_data = dev;
+@@ -848,6 +837,10 @@ out_loop:
+ 		SAS_DPRINTK("sas device not found! How is this possible?\n");
+ 		return -ENODEV;
+ 	}
++	if (lu->inquiry_valid_data_len && (lu->inquiry_data[0] & 0x1f) == 0) {
++		scsi_dev->sdev_bflags = 0x100000;
++		printk(KERN_ERR "sas: No ULD for you!\n");
++	}
+ 	kobject_get(&lu->lu_obj);
+ 	return 0;
+ }
+@@ -871,9 +864,7 @@ static int sas_slave_configure(struct sc
+ 
+ 	if (dev->dev_type == SATA_DEV) {
+ 		ata_sas_slave_configure(scsi_dev, dev->sata_dev.ap);
+-	}
+-
+-	if (scsi_dev->inquiry_len > 7) {
++	} else if (scsi_dev->inquiry_len > 7) {
+ 		u8 bq = (scsi_dev->inquiry[6] & 0x80) ? 1 : 0;
+ 		u8 cq = (scsi_dev->inquiry[7] & 0x02) ? 1 : 0;
+ 
+@@ -999,6 +990,7 @@ static const struct scsi_host_template s
+ 	.change_queue_depth = sas_change_queue_depth,
+ 	.change_queue_type = sas_change_queue_type,
+ 	.bios_param = sas_bios_param,
++	.ioctl = sas_scsi_ioctl,
+ 	/* .can_queue is initialized */
+ 	.this_id = -1,
+ 	/* .cmd_per_lun is initilized to .can_queue */
+diff -rpu ./include/scsi/sas/sas_discover.h /home/andyw/linux-2.6.16-rc3-LT4/include/scsi/sas/sas_discover.h
+--- a/include/scsi/sas/sas_discover.h	2006-07-05 14:40:04.450715975 -0500
++++ b/include/scsi/sas/sas_discover.h	2006-07-05 15:04:44.544869088 -0500
+@@ -235,4 +235,6 @@ void sas_unregister_with_scsi(struct LU 
+ 
+ void sas_unregister_devices(struct sas_ha_struct *sas_ha);
+ 
++void sas_unregister_domain_devices(struct sas_port *port);
++
+ #endif /* _SAS_DISCOVER_H_ */
+diff -rpu ./drivers/scsi/aic94xx/aic94xx_task.c /home/andyw/linux-2.6.16-rc3-LT4/drivers/scsi/aic94xx/aic94xx_task.c
+--- a/drivers/scsi/aic94xx/aic94xx_task.c	2006-07-05 15:34:48.662197830 -0500
++++ b/drivers/scsi/aic94xx/aic94xx_task.c	2006-07-05 15:35:49.877322661 -0500
+@@ -45,20 +45,6 @@ static inline void asd_can_dequeue(struc
+ 	spin_unlock_irqrestore(&asd_ha->seq.pend_q_lock, flags);
+ }
+ 
+-/*DWD*/
+-static void dump_task(struct sas_task *task)
+-{
+-	printk("dump task: 0x%08x\n", (int)task);
+-	printk("  dev = 0x%08x state_flags 0x%08x proto 0x%02x\n", (int)task->dev, task->task_state_flags, task->task_proto);
+-	printk("  scatter = 0x%08x numscatter %d xferlen %d dir 0x%1x\n", (int)task->scatter, task->num_scatter, task->total_xfer_len, task->data_dir);
+-	printk("  FIS: type = %02x flags = %02x command = %02x features = %02x\n", task->ata_task.fis.fis_type, task->ata_task.fis.flags, task->ata_task.fis.command, task->ata_task.fis.features);
+-	printk("       lbal = %02x lbam = %02x lbah = %02x device = %02x\n", task->ata_task.fis.lbal, task->ata_task.fis.lbam, task->ata_task.fis.lbah, task->ata_task.fis.device);
+-	printk("       lbal_exp = %02x lbam_exp = %02x lbah_exp = %02x features_exp = %02x\n", task->ata_task.fis.lbal_exp, task->ata_task.fis.lbam_exp, task->ata_task.fis.lbah_exp, task->ata_task.fis.features_exp);
+-	printk("       sect = %02x sect_exp = %02x r_a = %02x ctl = %02x\n", task->ata_task.fis.sector_count, task->ata_task.fis.sector_count_exp, task->ata_task.fis._r_a, task->ata_task.fis.control);
+-	printk("  dma_xfer = %d retry %d ncq %d set_affil %d stp_affil %d update %d\n", task->ata_task.dma_xfer, task->ata_task.retry_count, task->ata_task.use_ncq, task->ata_task.set_affil_pol, task->ata_task.stp_affil_pol, task->ata_task.device_control_reg_update);
+-	printk("  STATUS: resp = 0x%02x stat = 0x%02x valid = %d resid = %d\n", task->task_status.resp, task->task_status.stat, task->task_status.buf_valid_size, task->task_status.residual);
+-}
+-/*DWD*/
+ /* PCI_DMA_... to our direction translation.
+  */
+ static const u8 data_dir_flags[] = {

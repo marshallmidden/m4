@@ -1,0 +1,801 @@
+#!/bin/bash -e
+###############################################################################
+#                         CONFIDENTIAL AND PROPRIETARY
+#          Copyright (C) 2006-2008 Xiotech Corporation, All Rights Reserved
+###############################################################################
+#
+# \file     build_proj
+# \author   Ryan Melville
+#
+# Builds or tests a project based on a settings file.
+#
+# Behavior:
+#
+# - Takes a build ID and project settings file as input.
+#   - Optionally, a branch name can be specified.
+#   - Optionally, a project configuration can be specified.
+# - Loads settings file.
+# - If building:
+#   - Creates date/time stamped build directory.
+#   - Keeps a build log.
+#   - Sends a "build started" notification.
+#   - Checks out source paths and increments build ID when needed.
+#   - Invokes 'make' to build the project.
+#   - Renames the build directory upon failed build.
+#   - Updates the "latest" links upon successful build.
+#   - Sends a "build finished" notification.
+# - If testing:
+#   - Finds the latest build directory for the project.
+#   - Keeps a test log.
+#   - Sends a "test started" notification.
+#   - Invokes 'make' to test the project.
+#   - Collates test reports into a test report summary.
+#   - Updates the "stable" links upon successful testing.
+#   - Sends a "test finished" notification.
+# - Publishes output.
+# - Removes files/directories as specified in the project settings file (to save disk space).
+#
+# \todo
+#
+# - implement automatic stable link update
+# - test building on a branch
+#
+###############################################################################
+
+# Common tools
+
+SCRIPT_DIR=$(dirname $0)
+SCRIPT_NAME=$(basename $0)
+
+# Default variables
+
+TASK="Build"
+
+REMOVE=""
+
+BRANCH=""
+_BRANCH=""
+
+REVISION=""
+
+PROJ_CONFIG=""
+_PROJ_CONFIG=""
+
+FINISHED_TARGETS=""
+
+MACHINE=`hostname`
+
+SVN_ROOT="svn://svn.xiotech.com/"
+
+REPOS_REV="$(svn info ${SVN_ROOT} | grep '^Revision' | sed -e 's/Revision: *//')"
+
+LOG_FAILURE_PATTERNS=( ": warning: " ": error: " " : warning " " : error ")
+
+declare -a PUB_LINK_TARGET
+
+declare -a PUB_LINK_NAME
+
+
+# Process options
+#
+# -b    Branch name.
+# -c    Project configuration.
+# -d    Test previously built "latest" project instead of building project.
+# -r    Revision number.
+# -x    Remove paths/patterns in project settings file at conclusion.
+
+while getopts "b:c:dr:x" opt; do
+    case ${opt} in
+    b)  BRANCH="${OPTARG}"; _BRANCH="_${BRANCH}";;
+    c)  PROJ_CONFIG="${OPTARG}"; _PROJ_CONFIG="_${PROJ_CONFIG}";;
+    d)  TASK="Test";;
+    r)  REVISION="${OPTARG}";;
+    x)  REMOVE="1";;
+    esac
+done
+shift $((${OPTIND} - 1))
+
+##
+# Function to display usage instructions
+
+Usage()
+{
+    echo "Build or test a project based on a settings file."
+    echo "Usage: ${SCRIPT_NAME} [-d] [-x] [-b BRANCH] [-c PROJ_CONFIG]" \
+        "[-r REVISION] BUILD_ID SETTINGS_FILE"
+    exit 1
+}
+
+
+# Check parameters
+#
+# $1    Build ID.
+# $2    Settings file.
+
+if (( $# != 2 )); then
+    Usage
+fi
+
+BUILD_ID="$1"
+SETTINGS_FILE="$2"
+
+
+##
+# Function to evaluate the variable name created from the concatenation
+# of two variable names
+#
+# $1    First variable name
+# $2    Second variable name
+
+ConcatenateVars()
+{
+    eval "echo \$$1$2"
+}
+
+
+##
+# Function to convert a path to an absolute path
+#
+# $1    Path to convert (relative or absolute dir or file)
+
+ToAbsPath()
+{
+    local REL_PATH="$1"
+    local REL_DIR=""
+    local FILE=""
+
+    if [[ -d "${REL_PATH}" ]]; then
+        REL_DIR=${REL_PATH}
+        FILE=""
+    else
+        REL_DIR=`dirname ${REL_PATH}`
+        FILE="/`basename ${REL_PATH}`"
+    fi
+
+    pushd . > /dev/null
+    cd -P "${REL_DIR}"
+
+    echo "`pwd -P`${FILE}"
+
+    popd > /dev/null
+}
+
+
+##
+# Function to (re)set the build directory variable and all down stream variables
+#
+# $1    New BUILD_DIR value.
+
+SetBuildDir()
+{
+    BUILD_DIR="$1"
+    REL_BUILD_DIR="${BUILD_DIR#${PROJ_ROOT}/}"
+
+    BUILD_INPUT="${BUILD_DIR}/Input"
+    REL_BUILD_INPUT="${BUILD_INPUT#${PROJ_ROOT}/}"
+
+    BUILD_OUTPUT="${BUILD_DIR}/Output"
+    REL_BUILD_OUTPUT="${BUILD_OUTPUT#${PROJ_ROOT}/}"
+
+    LOG_FILE_PATH="${BUILD_DIR}/${TASK}.log"
+
+    TEST_REPORT_SUMMARY="${BUILD_OUTPUT}/test_report_summary.txt"
+}
+
+
+##
+# Function to display message
+#
+# $*    Message
+
+Msg()
+{
+    local MSG="$*"
+    local NOW=`date +'%Y-%m-%d %H:%M:%S %Z'`
+
+    echo "${NOW} (${SCRIPT_NAME}): ${MSG}"
+}
+
+
+##
+# Function to send finished notification
+
+SendFinishedNotification()
+{
+    local RESULT_SUBJECT=""
+    local RESULT_BODY=""
+
+    if [[ 0 == ${EXIT_STATUS} ]]; then
+        RESULT_SUBJECT="${TASK} Succeeded"
+
+        if [[ "Build" == ${TASK} ]]; then
+            RESULT_BODY="Targets built:\n${FINISHED_TARGETS}"
+            local OUTPUT_LISTING=`ls --format=single-column ${BUILD_OUTPUT}`
+            RESULT_BODY="${RESULT_BODY}\n\n\nBuild output from ${MACHINE}:${BUILD_OUTPUT}:\n\n${OUTPUT_LISTING}"
+        else
+            grep -q -a "Fail" ${TEST_REPORT_SUMMARY} &&
+                RESULT_SUBJECT="Test Failed"
+            local OUTPUT_LISTING=`cat "${TEST_REPORT_SUMMARY}"`
+            RESULT_BODY="Test output from ${BUILD_OUTPUT}:\n\n${OUTPUT_LISTING}"
+        fi
+    else
+        RESULT_SUBJECT="${TASK} Failed"
+
+        CAUSES=""
+        TMP_CAUSES=""
+
+        for WP in "${LOG_FAILURE_PATTERNS[@]}"; do
+            TMP_CAUSES=`grep -a "${WP}" "${LOG_FILE_PATH}"`
+
+            if [[ "" != "${TMP_CAUSES}" ]]; then
+                CAUSES="${CAUSES}\n${TMP_CAUSES}"
+            fi
+        done
+
+        RESULT_BODY="Possible failure causes:\n\n"
+
+        if [[ "" == "${CAUSES}" ]]; then
+            RESULT_BODY="${RESULT_BODY}[None Found]"
+        else
+            RESULT_BODY="${RESULT_BODY}${CAUSES}"
+        fi
+    fi
+
+    RESULT_BODY="${RESULT_BODY}\n\n\nSee ${MACHINE}:${LOG_FILE_PATH} for more information."
+
+    echo -e "${RESULT_BODY}" | Notif "${RESULT_SUBJECT}"
+}
+
+
+##
+# Function to end the script
+#
+# $1       Exit status
+
+EndScript()
+{
+    local EXIT_STATUS=$1
+
+    if [[ "" != "${BUILD_DIR}" ]]; then
+        # Send finished notification
+
+        SendFinishedNotification
+
+        # Remove paths and patterns
+
+        if [[ "1" == "${REMOVE}" ]]; then
+            # Remove paths
+            RemoveAllPaths
+
+            # Remove all .svn sub-directories to save disk space
+            if [[ "" != "${RM_SVN}" ]]; then
+                RemoveMatchingPaths "${BUILD_INPUT}" .svn
+            fi
+
+            # Remove patterns
+            RemoveAllMatchingPaths
+        fi
+    fi
+
+    Msg "Ended"
+
+    exit ${EXIT_STATUS}
+}
+
+
+##
+# Function to fail the script
+#
+# $*    Message
+
+FailScript()
+{
+    local MSG="$*"
+
+    Msg "${MSG}"
+    Msg "Failed"
+
+    # Append "_FAILED" to the build directory name
+    if [[ "Build" == "${TASK}" && "" != "${BUILD_DIR_BASE}" ]]; then
+        local NEW_BUILD_DIR="${BUILD_DIR_BASE}_FAILED"
+
+        mv "${BUILD_DIR}" "${NEW_BUILD_DIR}" &&
+            SetBuildDir "${NEW_BUILD_DIR}"
+    fi
+
+    EndScript 1
+}
+
+
+##
+# Function to create a symbolic link
+#
+# $1    Link target.
+# $2    Link name.
+
+CreateLink()
+{
+    local LINK_TARGET="$1"
+    local LINK_NAME="$2"
+
+    Msg "Linking ${LINK_NAME} to ${LINK_TARGET}..."
+
+    ln -f -s -n ${LINK_TARGET} ${LINK_NAME} ||
+        FailScript "Unable to create link ${LINK_NAME}"
+}
+
+
+##
+# Function to create a publishable symbolic link
+#
+# $1    Link target.
+# $2    Link name.
+
+CreatePubLink()
+{
+    local LINK_TARGET="$1"
+    local LINK_NAME="$2"
+
+    PUB_LINK_TARGET[${#PUB_LINK_TARGET[@]}]=${LINK_TARGET}
+    PUB_LINK_NAME[${#PUB_LINK_NAME[@]}]=${LINK_NAME}
+
+    CreateLink ${LINK_TARGET} ${LINK_NAME}
+}
+
+
+##
+# Function to publish build
+
+Publish()
+{
+    local ABS_PROJ_ROOT=`ToAbsPath ${PROJ_ROOT}`
+    local ABS_BUILD_DIR=`ToAbsPath ${BUILD_DIR}`
+    local PUBLISH_DIR="${PUBLISH_ROOT}${ABS_BUILD_DIR}"
+    local LT
+    local LN
+
+    if [[ "" == "${PUBLISH_ROOT}" ]]; then
+        # Do not need to publish
+
+        Msg "Not publishing (no PUBLISH_ROOT specified)"
+    elif ! mkdir -p ${PUBLISH_DIR}; then
+        # Create publish directory
+
+        Msg "Unable to create publishing directory: ${PUBLISH_DIR}"
+    else
+        # Publish build output or test report summary
+
+        if [[ "Build" == "${TASK}" ]]; then
+            cp -r -L "${BUILD_OUTPUT}" "${PUBLISH_DIR}" ||
+                Msg "Unable to publish output directory"
+        else
+            cp -L "${TEST_REPORT_SUMMARY}" "${PUBLISH_DIR}\Output" ||
+                Msg "Unable to publish test report summary"
+        fi
+
+        # Publish links
+
+        for (( i = 0; i < ${#PUB_LINK_TARGET[@]}; i++ )); do
+            LT="${PUB_LINK_TARGET[${i}]}"
+            LN="${PUBLISH_ROOT}${PUB_LINK_NAME[${i}]}"
+
+            # Make sure path exists
+            mkdir -p `dirname ${LN}`
+
+            ${SCRIPT_DIR}/eng_share_ln "${LT}" "${LN}"
+        done
+
+        # Publish log (last, so that it has as much as possible in it)
+
+        cp "${LOG_FILE_PATH}" "${PUBLISH_DIR}" ||
+            Msg "Unable to publish log"
+    fi
+}
+
+
+##
+# Function to send a build notification
+#
+# $1    Notification message
+
+Notif()
+{
+    local MSG="$1"
+    local ID
+
+    # Subject starts with project name...
+    local SUBJECT="${PROJ_NAME} ${BUILD_VER}"
+
+    # ...followed by project configuration if specified...
+    if [[ "" != "${PROJ_CONFIG}" ]]; then
+        SUBJECT="${SUBJECT} (${PROJ_CONFIG})"
+    fi
+
+    # ...followed by the input parameter
+    SUBJECT="${SUBJECT} ${MSG}"
+
+    ${SCRIPT_DIR}/build_notification "${NOTIF_OPTIONS}" "${BUILD_ID}" \
+        "${SUBJECT}"
+}
+
+
+##
+# Function to checkout a path
+#
+# $1    Path to checkout.
+
+CheckoutPath()
+{
+    local IN="$1"
+    local OUT=${IN/eng\/trunk/eng}
+
+    # Replace "/trunk" with "/branches/BRANCH" when building from a branch
+    if [[ "" != "${BRANCH}" ]]; then
+        IN=${IN/eng\/trunk/eng\/branches\/${BRANCH}}
+    fi
+
+    Msg "Checking out ${IN} to ${OUT}..."
+
+    svn co -r ${REPOS_REV} "${SVN_ROOT}/${IN}" "${BUILD_INPUT}/${OUT}" ||
+        FailScript "Unable to checkout source: ${IN}"
+}
+
+
+##
+# Function to produce next build num
+
+NextBuildNum()
+{
+    local COPATH
+    local OUT="${BUILD_INPUT}/Wookiee/Build"
+    local ID_FILE="${OUT}/BuildNum"
+    local FW_BUILDNAME
+    local REV
+
+    if [[ "${BRANCH}" == "" ]]; then
+        COPATH="eng/trunk/storage/Wookiee/Build"
+    else
+        COPATH="eng/branches/${BRANCH}/storage/Wookiee/Build"
+    fi
+
+    rm -rf "${OUT}"
+    svn co "${SVN_ROOT}/${COPATH}" "${OUT}" ||
+        FailScript "Unable to checkout build: ${COPATH}"
+
+    . ${ID_FILE}
+
+    if [[ "${BUILD_NUM}" == "" ]]; then
+        FailScript "Failed to get BUILD_NUM"
+    fi
+
+    BUILD_NUM=$((${BUILD_NUM} + 1))
+    BUILD_VER="${FW_BUILDNAME:0:1}`printf %03d ${BUILD_NUM}`"
+
+    sleep 2     # Delay to ensure timestamp changes
+
+    cat - > ${ID_FILE} <<EOF || FailScript "Creating ${ID_FILE} failed"
+# \$Id: build_proj 38833 2007-12-27 22:38:30Z mdr \$
+# \$Revision:\$
+# VER=${BUILD_VER}
+FW_BUILDNAME=${FW_BUILDNAME}
+BUILD_NUM=${BUILD_NUM}
+EOF
+
+    svn commit -m "SAN-0 - Build Wookiee ${BUILD_ID} ${BUILD_VER}" \
+        "${OUT}" ||
+        FailScript "Unable to commit ${OUT}"
+
+    REV="$(grep '\$Revision:' "${ID_FILE}" | tr -cd \[0-9])"
+    if [[ "${REV}" == "" ]]; then
+        FailScript "Failed to find Revision"
+    fi
+
+    Msg "BUILD_ID=${BUILD_ID}, BUILD_NUM=${BUILD_NUM}, " \
+        "REPOS_REV=${REPOS_REV}, REV=${REV}"
+    REPOS_REV="${REV}"
+
+    rm -rf "${OUT}"
+}
+
+
+##
+# Function to build a project
+#
+# $1    Make path.
+# $2-n  Make params.
+
+BuildProject()
+{
+    local MPATH="$1"
+    shift
+    local -a MPARAMS=( "$@" )
+
+    Msg "Starting build of ${MPATH}..."
+
+    pushd "${BUILD_INPUT}/${MPATH}" ||
+        FailScript "Unable to access ${MPATH}"
+
+    # Build project
+
+    echo make ${MPARAMS[@]} "OUTPUT_DIR=${BUILD_OUTPUT}" output
+    if ! make ${MPARAMS[@]} "OUTPUT_DIR=${BUILD_OUTPUT}" output; then
+        popd
+        FailScript "Build of ${MPATH} failed"
+    fi
+    popd
+
+    if [[ "${BUILD_DIR_BASE}" != "" ]]; then
+        mv "${BUILD_DIR}" "${BUILD_DIR_BASE}" &&
+            SetBuildDir "${BUILD_DIR_BASE}"
+    fi
+
+    pushd "${BUILD_INPUT}/${MPATH}" ||
+        FailScript "Unable to access ${MPATH}"
+
+    echo make ${MPARAMS[@]} "OUTPUT_DIR=${BUILD_OUTPUT}" output-links
+    if ! make ${MPARAMS[@]} "OUTPUT_DIR=${BUILD_OUTPUT}" output-links; then
+        popd
+        FailScript "Build of ${MPATH} failed to make output-links"
+    fi
+
+    Msg "Build of ${MPATH} succeeded"
+
+    # Create extra links
+
+    local TARGET_NAME=`make -f Makefile ${MPARAMS[@]} target_name`
+    local TARGET_VERSION=`make -f Makefile ${MPARAMS[@]} version`
+    local TARGET_VERSION_US=`make -f Makefile ${MPARAMS[@]} version_us`
+    local ALT_PROJ_ROOT="${PROJ_ROOT}/../${TARGET_NAME}"
+
+    # ByDate link
+    if [[ "${TARGET_NAME}" != "${PROJ_NAME}" ]]; then
+        local DATE_DIR="${ALT_PROJ_ROOT}/ByDate"
+        mkdir -p "${DATE_DIR}" ||
+            FailScript "Unable to create ByDate directory: ${DATE_DIR}"
+        CreatePubLink "../../${PROJ_NAME}/${REL_BUILD_DIR}" \
+            "${DATE_DIR}/${BUILD_DATE}${_BRANCH}${_PROJ_CONFIG}"
+    fi
+
+    # ByVersion link
+    local VERSION_DIR="${ALT_PROJ_ROOT}/ByVersion"
+    mkdir -p "${VERSION_DIR}" ||
+        FailScript "Unable to create ByVersion directory: ${VERSION_DIR}"
+    CreatePubLink "../../${PROJ_NAME}/${REL_BUILD_DIR}" \
+        "${VERSION_DIR}/${TARGET_VERSION_US}${_PROJ_CONFIG}"
+
+    # Latest link
+    CreatePubLink "../${PROJ_NAME}/${REL_BUILD_DIR}" \
+        "${ALT_PROJ_ROOT}/LATEST${_BRANCH}${_PROJ_CONFIG}"
+
+    # Store the target name/version for the last notification
+
+    FINISHED_TARGETS="${FINISHED_TARGETS}\n${TARGET_NAME} ${TARGET_VERSION}"
+
+    # Record the build
+    # (ignore errors; not all projects keep build records or a version)
+
+    if [[ "" == "${BRANCH}" ]]; then
+        make "${MPARAMS[@]}" record_build ||
+            Msg "Unable to record build"
+    else
+        make "${MPARAMS[@]}" record_patch ||
+            Msg "Unable to record build"
+    fi
+
+    popd
+}
+
+
+##
+# Function to test a project
+#
+# $1    Make path.
+# $2-n  Make params.
+
+TestProject()
+{
+    local MPATH="$1"
+    shift
+    local MPARAMS=( "$@" )
+
+    Msg "Starting test of ${MPATH}..."
+
+    pushd "${BUILD_INPUT}/${MPATH}" || FailScript "Unable to access ${MPATH}"
+
+    # Test project
+
+    echo make "${MPARAMS[@]}" test_report.txt
+    if make "${MPARAMS[@]}" test_report.txt; then
+        Msg "Test of ${MPATH} succeeded"
+
+        local TARGET_NAME=`make "${MPARAMS[@]}" target_name`
+        local TARGET_VERSION=`eval make "${MPARAMS[@]}" version`
+
+        # Add result to test report summary
+
+        echo "${MPATH}:" >> ${TEST_REPORT_SUMMARY}
+        cat test_report.txt | sed 's/^/  /' >> ${TEST_REPORT_SUMMARY}
+        echo -e "\n" >> ${TEST_REPORT_SUMMARY}
+
+        # Store the target name/version for the last notification
+
+        FINISHED_TARGETS="${FINISHED_TARGETS}\n${TARGET_NAME} v${TARGET_VERSION}"
+
+        popd
+    else
+        popd
+
+        FailScript "Test of ${MPATH} failed"
+    fi
+}
+
+
+##
+# Function to remove a path
+#
+# $1    Path to remove.
+
+RemovePath()
+{
+    local RM_PATH="$1"
+
+    Msg "Removing ${RM_PATH}..."
+
+    rm -rf "${RM_PATH}" ||
+        Msg "Unable to remove path: ${RM_PATH}"
+}
+
+
+##
+# Function to remove all paths
+#
+
+RemoveAllPaths()
+{
+    for RP in "${RM_PATHS[@]}"; do
+        RemovePath "${BUILD_INPUT}/${RP}"
+    done
+}
+
+
+##
+# Function to remove all files/directories matching a pattern
+#
+# $1    Path to cleanse.
+# $2    File/directory pattern.
+
+RemoveMatchingPaths()
+{
+    local CLEANSE_PATH="$1"
+    local CLEANSE_PATTERN="$2"
+
+    Msg "Removing files/directories matching ${CLEANSE_PATTERN}..."
+
+    # Ignore expected errors
+    find ${CLEANSE_PATH} -name ${CLEANSE_PATTERN} -exec rm -rf {} \; 2>&1 |
+        grep -v "No such file or directory" || :
+}
+
+
+##
+# Function to remove all patterns
+
+RemoveAllMatchingPaths()
+{
+    for RP in "${RM_PATTERNS[@]}"; do
+        RemoveMatchingPaths "${BUILD_INPUT}" ${RP}
+    done
+}
+
+
+# Load settings
+
+if [ ! -r "${SETTINGS_FILE}" ]; then
+    FailScript "Invalid settings file: ${SETTINGS_FILE}"
+fi
+
+source "${SETTINGS_FILE}" ||
+    FailScript "Unable to load settings from settings file: ${SETTINGS_FILE}"
+
+PROJ_ROOT="${BUILD_ROOT}/${PROJ_NAME}"
+
+# Set build directory
+
+BUILD_DATE="`date '+%Y_%m_%d_%H_%M_%S'`"
+
+if [[ "Build" == "${TASK}" ]]; then
+    BUILD_DIR_BASE="${PROJ_ROOT}/ByDate/${BUILD_DATE}${_BRANCH}${_PROJ_CONFIG}"
+    SetBuildDir "${BUILD_DIR_BASE}_BUILDING"
+    mkdir -p "${BUILD_DIR}" ||
+        FailScript "Unable to create build directory: ${BUILD_DIR}"
+    mkdir -p "${BUILD_INPUT}" ||
+        FailScript "Unable to create build directory: ${BUILD_INPUT}"
+    mkdir -p "${BUILD_OUTPUT}" ||
+        FailScript "Unable to create build directory: ${BUILD_OUTPUT}"
+else
+    SetBuildDir "`ToAbsPath ${PROJ_ROOT}/LATEST${_BRANCH}${_PROJ_CONFIG}`"
+fi
+
+# Everything from this point forward is logged to the log file
+
+{
+    # Intro
+
+    Msg "Started"
+
+    if [[ "Build" == "${TASK}"  && "${REVISION}" == "" ]]; then
+        NextBuildNum
+    fi
+
+    Msg "Command-line inputs..."
+    Msg "...SETTINGS_FILE   = ${SETTINGS_FILE}"
+    Msg "...BUILD_ID        = ${BUILD_ID}"
+    Msg "...TASK            = ${TASK}"
+    Msg "...REMOVE          = ${REMOVE}"
+    Msg "...BRANCH          = ${BRANCH}"
+    Msg "...REVISION        = ${REVISION}"
+    Msg "...PROJ_CONFIG     = ${PROJ_CONFIG}"
+
+    Msg "Loaded settings..."
+    Msg "...PROJ_NAME       = ${PROJ_NAME}"
+    Msg "...NOTIF_OPTIONS   = ${NOTIF_OPTIONS}"
+    Msg "...BUILD_ROOT      = ${BUILD_ROOT}"
+    Msg "...BUILD_NUM       = ${BUILD_NUM}"
+    Msg "...SOURCE_PATHS    = ${SOURCE_PATHS[*]}"
+    Msg "...BRANCH_PATHS    = ${BRANCH_PATHS[*]}"
+    Msg "...MAKE_PATHS      = ${MAKE_PATHS[*]}"
+    Msg "...MAKE_TEST_PATHS = ${MAKE_TEST_PATHS[*]}"
+    Msg "...MAKE_PARAMS     = ${MAKE_PARAMS}"
+    Msg "...RM_PATHS        = ${RM_PATHS[*]}"
+
+    Msg "Project root is ${PROJ_ROOT}"
+    Msg "Build directory is ${BUILD_DIR}"
+    Msg "Log is ${LOG_FILE_PATH}"
+
+    # Send start notification
+
+    echo "See ${MACHINE}:${LOG_FILE_PATH} for progress." |
+        Notif "${TASK} Started"
+
+    # Checkout sources
+
+    if [[ "Build" == "${TASK}" ]]; then
+        # Checkout all source paths
+        for SP in "${SOURCE_PATHS[@]}"; do
+            CheckoutPath "${SP}"
+        done
+    fi
+
+    # Perform builds or tests
+
+    if [[ "Build" == "${TASK}" ]]; then
+        for MP in "${MAKE_PATHS[@]}"; do
+            PROJ_CONFIG_MAKE_PARAMS=`ConcatenateVars MAKE_PARAMS ${_PROJ_CONFIG}`
+            BuildProject "${MP}" "${PROJ_CONFIG_MAKE_PARAMS}"
+        done
+    else
+        for MP in "${MAKE_TEST_PATHS[@]}"; do
+            PROJ_CONFIG_MAKE_PARAMS=`ConcatenateVars MAKE_PARAMS ${_PROJ_CONFIG}`
+            TestProject "${MP}" "${PROJ_CONFIG_MAKE_PARAMS}"
+        done
+    fi
+
+    # Update links
+
+    if [[ "Build" == "${TASK}" ]]; then
+        rm -f "${PROJ_ROOT}/LATEST${_BRANCH}${_PROJ_CONFIG}"
+        CreatePubLink "${REL_BUILD_DIR}" "${PROJ_ROOT}/LATEST${_BRANCH}${_PROJ_CONFIG}"
+    #else
+        # TODO: update stable link if testing passed
+    fi
+
+    # Publish output
+
+    Publish
+
+    # Done
+
+    EndScript 0
+} >> ${LOG_FILE_PATH} 2>&1
+
+# vi:sw=4 ts=4 expandtab

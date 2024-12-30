@@ -1,0 +1,86 @@
+#!/bin/sh
+# $Id: installkernel 15585 2006-11-30 22:59:47Z RustadM $
+# Modified from SLES 9 version by Mark Rustad for Xiotech.
+
+#
+# /sbin/installkernel  - written by tyson@rwii.com
+#
+# May 21, 2003 - agruen@suse.de
+# * Adapted for SuSE and cleaned up.
+#
+
+: ${INSTALL_PATH:=/boot}
+KERNEL_VERSION=$1
+BOOTIMAGE=$2
+MAPFILE=$3
+
+#
+# Move away files from versions up to SuSE Linux 8.2
+#
+
+if [ -f $INSTALL_PATH/vmlinuz -a ! -L $INSTALL_PATH/vmlinuz ]; then
+    mv $INSTALL_PATH/vmlinuz $INSTALL_PATH/vmlinuz.old
+fi
+suffix=-3d	#`expr "$KERNEL_VERSION" \: ".*\\(-3d\\)"`
+ln -sf vmlinuz-$KERNEL_VERSION $INSTALL_PATH/vmlinuz${suffix}
+
+if [ -L $INSTALL_PATH/System.map ]; then
+    rm -f $INSTALL_PATH/System.map
+elif [ -f $INSTALLPATH/System.map ]; then
+    mv $INSTALL_PATH/System.map $INSTALL_PATH/System.map.old
+fi
+
+#
+# Move away files from after SuSE Linux 8.2
+#
+
+if [ -f $INSTALL_PATH/vmlinuz-$KERNEL_VERSION ]; then
+    mv $INSTALL_PATH/vmlinuz-$KERNEL_VERSION \
+	$INSTALL_PATH/vmlinuz-$KERNEL_VERSION.old;
+fi
+
+if [ -f $INSTALL_PATH/System.map-$KERNEL_VERSION ]; then
+    mv $INSTALL_PATH/System.map-$KERNEL_VERSION \
+	$INSTALL_PATH/System.map-$KERNEL_VERSION.old; 
+fi
+
+#
+# Install new files
+#
+
+cp -fp $BOOTIMAGE $INSTALL_PATH/vmlinuz-$KERNEL_VERSION
+cp -fp $MAPFILE $INSTALL_PATH/System.map-$KERNEL_VERSION
+ln -sf vmlinuz-$KERNEL_VERSION $INSTALL_PATH/vmlinuz
+
+KERNTYPES=$(dirname $MAPFILE)/init/kerntypes.o
+if [ -e $KERNTYPES ]; then
+    cp -fp $KERNTYPES $INSTALL_PATH/Kerntypes-$KERNEL_VERSION
+fi
+
+test "x$suffix" != "x" && exit 0	# No initrd for -3d kernels
+
+#
+# Generate initial ramdisk
+#
+[ -x ~/bin/mkinitrd ] && : ${MKINITRD:=~/bin/mkinitrd}
+[ -x /sbin/mk_initrd ] && : ${MKINITRD:=/sbin/mk_initrd}
+[ -x /sbin/mkinitrd ]  && : ${MKINITRD:=/sbin/mkinitrd}
+#if [ -n "$MKINITRD" -a -d /lib/modules/$KERNEL_VERSION ]; then
+if [ -n "$MKINITRD" ]; then
+    $MKINITRD -k vmlinuz-$KERNEL_VERSION -i initrd-$KERNEL_VERSION \
+	      -s off `cd $INSTALL_PATH/..; pwd`
+#	      -b $INSTALL_PATH `cd $INSTALL_PATH/..; pwd`
+else
+    echo "You may need to create an initial ramdisk now."
+fi
+
+exit 0
+
+#
+# Kick boot loader
+#
+if [ -x /sbin/new-kernel-pkg ]; then
+    /sbin/new-kernel-pkg $KERNEL_VERSION
+else
+    echo "Please add kernel $KERNEL_VERSION to the boot manager now."
+fi

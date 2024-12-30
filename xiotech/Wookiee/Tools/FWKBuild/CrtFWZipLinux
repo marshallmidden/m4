@@ -1,0 +1,156 @@
+#!/usr/bin/perl -w
+# $Id: CrtFWZipLinux 67130 2008-10-27 18:01:21Z mdr $
+##############################################################################
+# Xiotech Corporation
+# Copyright (c) 2004-2008  Xiotech Corporation. All rights reserved.
+# ======================================================================
+# Author: Randy Rysavy
+#
+# Purpose:
+#   Create the Firmware zipfile that is loadable by the XSSA.
+##############################################################################
+
+#
+# Include modules
+#
+use File::Copy;
+use File::Path;
+use Cwd;
+
+use strict;
+
+my $start;
+my $script;
+
+($start = $0) =~ s/\\/\//g; # backslashes to forward slashes
+($script = $start) =~ s/^.*\///;
+unless (@ARGV >= 5) 
+{ 
+    die "\n  Usage: $script Model MModel Release Version\n" .
+        "Example: $script 5000 Nitrogen A100 1\n" .
+        "   Note: Must be called from the 'Wookiee' directory\n\n"; 
+}
+
+my ($model, $mmodel, $release, $version, $perf) = @ARGV;
+
+my $myCwd = cwd();
+my $baseDir;
+my $zipName = "XIOTECH-PLATFORM-$mmodel-$release-$version";
+my $zipNameZ = "$zipName" . ".zip";
+my $outDir  = "OUT";
+my $fwDir1  = "$zipName";
+my $fwDir2  = "$zipName/Firmware $release-$version";
+my @allfiles = ();
+
+# the system call subroutine
+sub run 
+{
+    my $rc;
+#   print "> $_[0]\n";
+    $rc = (system "$_[0]") >> 8;
+#   print ">> rc = $rc\n";
+    if ($rc) { die "\nAbort: \"$_[0]\" failed, rc = $rc...\n" };
+}
+
+# Generate the encryption key 
+sub GenKey
+{
+    my ($name) = @_; 
+    my $len = length $name;
+    my $key = "";
+    my $i;
+
+    my @bytes = unpack("C14",   pack("A14",  "Pantera Rulez!"));
+    my @raw   = unpack("C$len", pack("A$len", $name));
+
+    my $min = @bytes < @raw ? @bytes : @raw;
+
+    for ($i=0; $i<$min; $i++)
+    {
+        $raw[$i] += $bytes[$i];
+    }
+
+    # Calculate the key length in $min
+    $min = @raw < 16 ? @raw : 16;
+
+    for ($i=0; $i<$min; $i++)
+    {
+        $key .= sprintf "%02X", $raw[$i];
+    }
+
+    return $key;
+}
+
+print "\nCreating the ICON loadable encrypted zip file...\n";
+
+$baseDir = "built-" . $model . $perf . "/Firmware_Images";
+
+# First cleanup
+run "rm -rf " . $baseDir;
+mkdir "$baseDir" or die "\nAbort: Can't create $baseDir\n";
+
+# Copy all files in Firmware_Images to dir2
+chdir $baseDir or die "\nAbort: Can't chdir $baseDir\n";
+print "cwd: ".cwd()."\n";
+
+# copy in and/or create the needed files
+copy ("../$mmodel-$release-$version.rpm2", ".") or 
+    die "\nAbort: Can't copy $mmodel-$release-$version.rpm2\n";
+
+# Get a list of files in the directory
+opendir DIR, "." or die "\nAbort: Can't read directory \".\"\n";
+@allfiles = readdir DIR;
+close DIR;
+
+# Write the BOM file
+@allfiles = sort @allfiles;
+open BOM, ">XIOupdate.bom" or die "\nAbort: Can't open XIOupdate.bom\n";
+for (my $i=0; $i<@allfiles; $i++)
+{
+    print BOM "$allfiles[$i]\n" if $allfiles[$i] !~ /^\./;
+}
+close BOM;
+
+# Write the FIRMWARE file
+open FW, ">FIRMWARE" or die "\nAbort: Can't open FIRMWARE\n";
+close FW;
+
+# Then create the needed directorys
+mkdir "$fwDir1" or die "\nAbort: Can't create $fwDir1\n";
+mkdir "$fwDir2" or die "\nAbort: Can't create $fwDir2\n";
+mkdir "$outDir" or die "\nAbort: Can't create $outDir\n";
+
+# move the files to the appropriate location in the zip tree
+opendir DIR, "." or die "\nAbort: Can't read directory \".\"\n";
+@allfiles = readdir DIR;
+close DIR;
+
+my $file;
+foreach $file (@allfiles) 
+{
+    if (! -d "$file" && $file !~ /^\./) 
+    {
+#        print "copy: $file\n";
+        copy("$file", "$fwDir2/$file") or 
+            die "\nAbort: Can't copy \"$file\", \"$fwDir2/$file\"\n";
+    }
+}
+
+# Call Linux utils to do the zipping and encrypting
+run "zip -r $zipNameZ $zipName";
+run "md5sum $zipNameZ > CHECKSUM";
+run "zip -0 internal.zip CHECKSUM $zipNameZ";
+run "openssl bf-ecb -e -nosalt -in internal.zip -out $outDir/$zipNameZ -iv 0 -K " .
+    GenKey "$zipNameZ";
+
+# copy the new zip file to the base of the release
+# print "Moving zipfile to base dir...\n";
+copy("$outDir/$zipNameZ", "..") or die "\nAbort: Can't copy zip...\n";
+
+# clean up
+chdir "$myCwd";
+run "rm -rf " . $baseDir;
+print "Done!\n";
+exit 0;
+
+# vi:sw=4 ts=4 expandtab

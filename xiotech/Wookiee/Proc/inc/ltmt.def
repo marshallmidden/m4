@@ -1,0 +1,199 @@
+# $Id: ltmt.def 89177 2009-06-15 14:14:22Z m4 $
+#******************************************************************************
+#
+#  NAME: ltmt.def   (Link-level Target Management Table)
+#
+#  DESCRIPTION:
+#       The LTMT structure contains information for each Target device that is
+#   discovered by the Initiator code (IDriver).  There is one LTMT per Target
+#   device, per FC Channel. These Targets are other 3D Controllers, Magnitudes,
+#   or Foreign Targets which are candidates for possible SAN Links connections.
+#   The LTMT structure is primarily accessed by the LLD component (see also the
+#   TMT structure). All LTMTs for a channel are chained together in a linked
+#   list. A link to the corresponding TMT is used for accessing additional
+#   target data. The LTMT also includes a link back to the CIMT for the channel
+#   this target was discovered on. It may also include a link to an IMT if the
+#   initiator for the IMT is the same device as this LTMT target (this is a
+#   normal case for SAN Links).
+#
+#  Copyright (c) 2003-2009 XIOtech Corporation.  All rights reserved.
+#
+#******************************************************************************
+
+                                @#ifndef _LTMT_H_
+                                @#define _LTMT_H_
+
+                                @#include "XIO_Types.h"
+                                @struct CIMT;
+                                @struct TMT;
+                                @struct DTMT;
+                                @struct LSMT;
+                                @struct IMT;
+                                @struct ILT;
+#
+# --- Constants -------------------------------------------------------
+#
+#
+# --- Target type code definitions (ltmt_type)
+#
+.def ltmt_ty_MAG 0              @#define ltmt_ty_MAG        @ MAGNITUDE target
+.def ltmt_ty_FT 1               @#define ltmt_ty_FT         @ Foreign target
+#
+# --- Link state code definitions (ltmt_lst)
+#
+.def ltmt_lst_id 0              @#define ltmt_lst_id        @ Target identified
+.def ltmt_lst_pest 1            @#define ltmt_lst_pest      @ Pending link established (MAG)
+                                @                           @ as a result of an on-line event
+.def ltmt_lst_est 2             @#define ltmt_lst_est       @ Link established (MAG)
+.def ltmt_lst_term 3            @#define ltmt_lst_term      @ Terminated
+#
+# --- Data-link manager state code definitions (ltmt_dlmst)
+#
+.def ltmt_dst_null 0            @#define ltmt_dst_null      @ Null (nothing done)
+.def ltmt_dst_pid 1             @#define ltmt_dst_pid       @ Pending target identified
+.def ltmt_dst_id 2              @#define ltmt_dst_id        @ Target identified
+#
+# --- LTMT event handler routine table routine definitions (ltmt_ehand)
+#
+.def ltmt_eh_state 0            @#define ltmt_eh_state      @ State code
+.def ltmt_eh_offline 4          @#define ltmt_eh_offline    @ Offline event handler
+.def ltmt_eh_online 8           @#define ltmt_eh_online     @ Online event handler
+.def ltmt_eh_tgone 12           @#define ltmt_eh_tgone      @ Target disappeared event handler
+.def ltmt_eh_mrecv 16           @#define ltmt_eh_mrecv      @ Message received from MAG event handler
+.def ltmt_eh_getdd 20           @#define ltmt_eh_getdd      @ Get device database request event handler
+#
+# --- General definitions
+#
+.def ltmt_dgmax 8               @#define LTMT_DGMAX         @ max. # of outstanding datagram messages.
+                                @                           @ Note: this value MUST be a power of 2.
+#
+# --- Data structure --------------------------------------------------------
+#
+.struct                         @typedef struct LTMT
+                                @{
+# An LTMT will exist for each target that is discovered on each channel.
+# This LTMT Link field links multiple LTMTs together for a given channel.
+.w ltmt_link                    @    struct LTMT *link;     @ Pointer to next LTMT
+
+# Target Type -- The type Magnitude indicates the target is another Magnitude
+# that supports SAN Links.  A Foreign target is any other device or another
+# Magnitude that does not support SAN Links.
+.b ltmt_type                    @    UINT8        type;     @ Target type code
+
+# The Link State shows the state of a link to a Magnitude type target.  The
+# normal progression of the link state is from Target Identifed (after the
+# initial discovery of the target), to Pending Link Established (following an
+# online event), to Link Established (after a session?? has been opened).  The
+# Terminated state is currently not used(??).
+.b ltmt_lst                     @    UINT8       linkState; @ Link state code
+
+# The DLM State shows the state of the DLM link to either a Magnitude of
+# Foreign target type.  The normal progression of the state starts as Null
+# when the target is first discovered.  The state changes to Pending Target
+# Identify following an online event for foreign target or following the
+# completion of a Inquiry request for the peer information page data when
+# estalishing a link with another Magnitude target type. The state then
+# changes to Target Identified after the completion of a Mag Link Established
+# or Foreign Target Identified VRP by the DLM for either a Magnitude or
+# Foreign target type.
+.b ltmt_dlmst                   @    UINT8        dlmState; @ Data-link manager state code
+.b ltmt_rsvd1 1                 @    UINT8        rsvd1;    @ Reserved one byte.
+
+# This field points to the CIMT for the channel that discovered this target.
+.w ltmt_cimt                    @    struct CIMT *pCIMT;    @ Associated CIMT
+
+# This field points back to the associated TMT for the channel that discovered
+# this target.
+.w ltmt_tmt                     @    struct TMT  *pTMT;     @ Associated TMT
+
+# This field contains the DLM session ID or zero if a session does not
+# currently exist. The DLM session ID is a pointer to the DLM's DTMT structure
+# (ie- the DLM's Target Management Table).
+.w ltmt_dlmid                   @    struct DTMT *pDTMT;    @ Data-link manager session ID
+
+# This field is set to point to one of two different jump tables, either:
+#       ltmt_etbl1a - for a Magnitude target type, or
+#       ltmt_etbl2a - for a Foreign target type.
+# The constants defined below are used as an index into these jump tables.
+# Each index is associated with a function in the two tables as as follows:
+#                     ltmt_etbl1a     ltmt_etbl2a
+#                     -----------     -----------
+# ltmt_eh_offline     e1a_offline     e2a_offline
+# ltmt_eh_online      e1a_online      e2a_online
+# ltmt_eh_tgone       e1a_tgone       e2a_tgone
+# ltmt_eh_mrecv       e1a_mrecv       exx_ignore  (currently not used)
+# ltmt_eh_getdd       e1a_getdd       e2a_getdd   (currently not used)
+.w ltmt_ehand                   @    UINT32      *eventHandlerTbl; @ Event handler table
+
+# The LTMT contains head and tail pointers to a link list of LSMTs.  Each LSMT
+# contains information for any session(s) that exist for this LTMT.
+.w ltmt_seshead                 @    struct LSMT *pLSMTHead; @ Session management table link list head
+.w ltmt_sestail                 @    struct LSMT *pLSMTTail; @ Session management table link list tail
+
+# An LTMT will be associated with an IMT if they are for the same device. This
+# is detected by a match in the Node WWNs for the target (LTMT/TMT) and the
+# initiator (IMT). This is a normal occurrence for a SAN Links connection with
+# another device that supports SAN Links. This is detected in both the
+# MAGD$create_image and LLD e1a_online functions.
+.w ltmt_imt                     @    struct IMT  *pIMT;     @ Associated IMT
+
+# When the LLD sends a Mag Link Established or Foreign Target Identified VRP
+# to the DLM, the pointer to the associated ILT is saved in this field.
+.w ltmt_ilt                     @    struct ILT  *pILT;     @ Associated ILT
+
+# --- Peer magnitude information
+#
+# The following data is received from the completion of the peer MAGNITUDE
+# link INQUIRY CDB request for the peer information page data for the MAGNITUDE
+# link session (see lld1$inquiry).
+#
+# CDB 0:  Opcode = 0x12
+# CDB 1:  Bits 7-2 = Reserved(ignored), EVPD Bits 1-0 = 01b
+# CDB 2:  Page Code = 0xc0
+# CDB 3:  Ignored
+# CDB 4:  Allocation Length
+# CDB 5:
+#
+# This data structure is defined in inqmag.inc
+.w ltmt_sn                      @    UINT32   serialNumber; @ MAGNITUDE serial number
+.b ltmt_path                    @    UINT8    path;         @ Path/Channel/Interface number
+.b ltmt_cl                      @    UINT8    cluster;      @ Assigned cluster number
+.b ltmt_vdcnt                   @    UINT8    vdiskCount;   @ Number VDisks
+
+                                                            # Bit 7 =
+                                                            #     6 =
+                                                            #     5 =
+                                                            #     4 =
+                                                            #     3 =
+                                                            #     2 =
+                                                            #     1 =
+                                                            #     0 = 1 if node is operating in target-only mode
+.b ltmt_flag1                   @    UINT8    flag1;        @ special INQUIRY flag byte #1
+.l ltmt_pname                   @    UINT64   pname;        @ peer MAG assigned node name
+.b ltmt_ip 4                    @    UINT8    ipAddr[4];    @ assigned IP address of peer MAGNITUDE
+.w ltmt_alias                   @    UINT32   alias_ip;     @ alias node serial number
+.b ltmt_rsvd2 4                 @    UINT8    rsvd2[4];     @ Reserved four bytes.
+#
+# --- Datagram control area
+#
+.b ltmt_xchgID                  @    UINT8    exchangeID;   @ exchange ID
+.b ltmt_rsvd3 3                 @    UINT8    rsvd3[3];     @ 3 spare bytes
+.w ltmt_dgqdepth                @    UINT32   dgqdepth;     @ Number of DG on Queue
+.w ltmt_dgqdmax                 @    UINT32   dgqdmax;      @ Maximum Queue Depth seen
+.w ltmt_dghead                  @    struct ILT  *dgHead;   @ DG hold queue head
+.w ltmt_dgtail                  @    struct ILT  *dgTail;   @ DG hold queue tail
+.f ltmt_imsg 4*ltmt_dgmax       @    UINT32   initMessage[LTMT_DGMAX];   @ initiator msg tbl
+.f ltmt_tmsg 4*ltmt_dgmax       @    UINT32   targetMessage[LTMT_DGMAX]; @ target msg tbl
+#
+# --- End of data structure -------------------------------------------------
+#
+.f ltmt_size 0 # size of LTMT   @} LTMT;
+                                @#endif /* _LTMT_H_ */
+
+####
+## Modelines:
+## Local Variables:
+## tab-width: 4
+## indent-tabs-mode: nil
+## End:
+## vi:sw=4 ts=4 expandtab

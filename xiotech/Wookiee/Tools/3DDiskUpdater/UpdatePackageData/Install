@@ -1,0 +1,159 @@
+#! /bin/bash
+################################################################################
+#                         CONFIDENTIAL AND PROPRIETARY
+#         Copyright (C) 2007-2010 Xiotech Corporation, All Rights Reserved
+################################################################################
+#
+# Installation script for updating 3D disk firmware.
+#
+################################################################################
+
+
+#
+# process options
+#
+# -d        DSC Identifier.
+#
+
+while getopts "d:" opt; do
+  case $opt in
+    d  )  DSC_ID="${OPTARG}";;
+  esac
+done
+shift $(($OPTIND - 1))
+
+if [[ ${DSC_ID} == "" ]]
+then
+  OPT_ERR=1
+fi
+
+
+#
+# check parameters
+#
+
+if [[ ${OPT_ERR} == "1" ]]
+then
+  echo "Install script."
+  echo "Usage: $(basename $0) -d <DSC ID>"
+  exit 1
+fi
+
+tar jxf TestLibs.tbz2
+
+# Make sure the health-checker is executable
+chmod a+x SystemStatusChecker
+# SystemStatusChecker requires directory CCBE to reside in the current directory
+# Faking out by using a symlink to /opt/xiotech/CCBE
+ln -s /opt/xiotech/CCBE CCBE
+
+opErrorsFile="OpErrors.txt"
+opStatusFile="OpStatus.txt"
+
+
+#
+# Figure out IP addresses of all CNs, then loop through them doing raids cmd
+#
+
+/bin/ls -t /var/xiotech/XioWebService/*Dsc_List*.* |head -1|xargs cat|grep -E 'xwstype:ip_addr|</spaldsclist:id>' >originalIpList
+
+
+#
+# At this point, the iplist looks something like the below:
+#  <spaldsclist:id>10215</spaldsclist:id>
+#     <xwstype:ip_addr>172.17.1.1</xwstype:ip_addr>
+#     <xwstype:ip_addr>172.17.1.0</xwstype:ip_addr>
+#  <spaldsclist:id>10212</spaldsclist:id>
+#     <xwstype:ip_addr>10.64.56.11</xwstype:ip_addr>
+#     <xwstype:ip_addr>10.64.56.10</xwstype:ip_addr>
+#
+# We want to remove all IP addresses that are not in our current DSC
+#
+
+totalLines=`cat originalIpList|wc -l`
+currentLine=1
+
+# Ignore all DSCs that are not ours
+ignoreThisDsc=1
+
+while [ $currentLine -le $totalLines ]
+do
+  # Get text from the current line
+  myline=`sed -n $currentLine"p" originalIpList`
+
+  # See if this is a DSC-line.  If so, ensure it's the correct one
+  if [ `echo $myline | grep "dsclist"` ]; then
+    if [ "<spaldsclist:id>$DSC_ID</spaldsclist:id>" == $myline ]; then
+      ignoreThisDsc=0
+      echo "Found DSC matching id: $DSC_ID."
+    else
+      ignoreThisDsc=1
+      echo "Found another DSC that we will ignore: $myline"
+    fi
+  else
+    if [ $ignoreThisDsc == 0 ]; then
+      echo "Found IP matching DSC: $DSC_ID: $myline"
+      echo $myline >>iplist
+    fi
+  fi
+
+  # Move to the next line in the file
+  let "currentLine++"
+done
+
+
+
+#
+# Go through list (which now only has IPs for the specified DSC)
+# and pass in the IPs to the bay script
+#
+
+# Load the list of IP addresses into myvar
+myvar=`cat iplist|wc -l`
+
+while [[ $myvar != 0 ]]
+do 
+
+  #
+  # Substitute in "/usr/bin/perl DriveCodeLoad.pl" into the opening <xwstype:ip_addr> location
+  #
+  
+  sed -n $myvar"p" iplist|sed -n 's/.xwstype.ip_addr./\/usr\/bin\/perl DriveCodeLoad.pl /p' >ip_head
+  
+  
+  #
+  # At this point, the command looks something like this:
+  # /usr/bin/perl DriveCodeLoad.pl 172.17.1.0</xwstype:ip_addr>
+  #
+  # The next step is to replace the closing </xwstype:ip_addr> with "DriveCodeLoad.cmd".
+  #
+  
+  echo "`sed -n 's/..xwstype.*$/:3000 /p' ip_head` $opErrorsFile $opStatusFile DriveCodeLoad.cmd" >ccb_cmds
+  
+  
+  #
+  # At this point, the "ccb_cmds" file looks something like this:
+  # /usr/bin/perl DriveCodeLoad.pl 172.17.1.0:3000 DriveCodeLoad.cmd ../OpErrors.txt ../OpStatus.txt
+  #
+  # Now, execute that command file
+  #
+
+  # dump commands to log (XioWebService.xiolog)
+  cat ccb_cmds
+  
+  chmod +x ./ccb_cmds
+
+  ./ccb_cmds
+  
+  # Move to the next IP address in the list
+  myvar=`expr $myvar - 1`
+
+done
+
+
+#
+# done
+#
+
+exit 0
+

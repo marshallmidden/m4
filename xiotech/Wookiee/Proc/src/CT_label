@@ -1,0 +1,1349 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+my $fileno;                             # Filename index
+my $filename;                           # My current filename
+my @filename;                           # Stack of enclosing filenames
+
+my $linenumber;                         # Line number within filename
+my @linenumber;                         # Stack of enclosing line numbers
+
+my $linecount;                          # Total input line number
+
+my $input;                              # Input line
+
+my $opcode;                             # Opcode field contents
+my @operand;                            # Array of operands
+
+my %on_table;                           # Opcodeable when compiling
+my %off_table;                          # Opcode table when not compiling
+my $table;                              # Current opcode table
+
+my @regname;                            # Register names
+my %regnum;                             # Register numbers
+
+my $do_include;                         # Include file to process
+
+my %define;                             # Command line defines
+my %label;                              # File Hash of label attributes
+my %glabel;                             # Global Hash of label attributes
+
+my @labelseq;                           # Array of labels in the order defined
+
+my %unknown;                            # Unknown opcode reference counts
+
+my $iflevel;                            # Nested if level
+
+my $section_name;                       # Current section label
+my $section_type;                       # Current section type
+
+my $text_labels_since_ret;              # Number of text labels since last ret
+my $retcount;                           # Number of ret ops seen
+
+my $opt_list;                           # Turn listing on
+my $opt_all;                            # Print all symbols
+my $opt_similar;                        # Print similar symbols
+my $opt_conflict;                       # Print conflicting symbols
+my $opt_data;                           # Symbols appearing in data statements
+my $opt_underline;                      # Underline symbols
+
+
+##############################################################################
+# Initialize register list.
+##############################################################################
+
+@regname = qw( g0 g1 g2 g3 g4 g5 g6 g7 g8 g9 g10 g11 g12 g13 g14 g15
+               r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 );
+
+for (my $i = 0; $i <= $#regname; $i++) {
+    $regnum{$regname[$i]} = $i;
+}
+
+# The following are additional names for certain registers.
+
+$regnum{pfp} = $regnum{r0};
+$regnum{sp}  = $regnum{r1};
+$regnum{rip} = $regnum{r2};
+$regnum{fp}  = $regnum{g15};
+
+
+##############################################################################
+# Generates an error message.
+##############################################################################
+
+sub error($)
+{
+    print STDERR "$filename($linenumber) $_[0]\n";
+    print "====== $filename($linenumber) $_[0]\n" if $opt_list;
+
+    for (my $i = $#filename; $i >= 0; --$i) {
+        print STDERR "\tIncluded by: $filename[$i] $linenumber[$i]\n";
+        print        "\tIncluded by: $filename[$i] $linenumber[$i]\n"
+            if $opt_list;
+    }
+
+    return undef;
+}
+
+
+########################################################################
+# Converts either a symbol or number to a constant value.
+########################################################################
+
+sub get_value($) {
+    my $name = shift;
+
+    # Convert hex and octal number numbers and fractions to decimal.
+
+    return $name if ($name =~ s/^0x([a-z0-9]*)$/hex($1)/ei ||
+                     $name =~ s/^0([0-9]+)$/oct($1)/ei ||
+                     $name =~ s/^([0-9]*)\.[0-9]+$/$1/);
+
+    my $value = $label{$name}{value};
+
+    # If the name is undefined, just return the name.
+
+    return $name if !defined $value;
+
+    # Return the value, if the value is quoted.
+
+    return $value if $value =~ /[\'\"]/;
+
+    # Return the value if it looks like a label or a number.
+
+    return $value if $value =~ /^-?[a-z0-9._\$]+$/;
+
+    # Otherwise assume the value is an expression, and
+    # put it in parens to avoid ambiguity.
+
+    return "($value)";
+}
+
+
+########################################################################
+# Evaluate numeric expressions with operators the same way GAS
+# evaluates them.
+########################################################################
+
+sub const_expression($) {
+    my $e = shift;
+
+    # Evaluate unary operators + - ~ !
+
+    1 while $e =~ (s/(?<![0-9])([\#+!~]|--)(-?[0-9]+)/
+                              $1 eq '+'  ?  $2 :
+                              $1 eq '--' ?  $2 :
+                              $1 eq '~'  ? ~(0+$2) :
+                              $1 eq '!'  ? ($2 == 0 ? 1 : 0) :
+                              error("internal error")/e);
+
+    # Evaluate high precedence operators * / % < << > >>
+
+    1 while $e =~ (s/(?<![0-9])(-?[0-9]+)([\/\*%]|<<|>>)(-?[0-9]+)/
+                              $2 eq '*'  ? $1 * $3 :
+                              $2 eq '\/' ? int($1 \/ $3) :
+                              $2 eq '%'  ? int($1 % $3) :
+                              $2 eq '<<' ? $1 << $3 :
+                              $2 eq '>>' ? $1 >> $3 :
+                              error("internal error")/e);
+
+    # Evaluate intermediate precedence operators | & ^ !
+
+    1 while $e =~ (s/(?<![0-9])(-?[0-9]+)([|&^!])(-?[0-9]+)/
+                              $2 eq '|' ? (0+$1) |  (0+$3) :
+                              $2 eq '&' ? (0+$1) &  (0+$3) :
+                              $2 eq '^' ? (0+$1) ^  (0+$3) :
+                              $2 eq '!' ? (0+$1) | ~(0+$3) :
+                              error("internal error")/e);
+
+    # Evaluate low precedence operators + - == <> < > >= <=
+
+    1 while $e =~ (s/(-?[0-9]+)([\-+<>]|==|<>|>=|<=)(-?[0-9]+)/
+                              $2 eq '+'  ? $1 + $3 :
+                              $2 eq '-'  ? $1 - $3 :
+                              $2 eq '<'  ? ($1 <  $3 ? 1 : 0) :
+                              $2 eq '>'  ? ($1 >  $3 ? 1 : 0) :
+                              $2 eq '==' ? ($1 == $3 ? 1 : 0) :
+                              $2 eq '<>' ? ($1 != $3 ? 1 : 0) :
+                              $2 eq '<=' ? ($1 <= $3 ? 1 : 0) :
+                              $2 eq '>=' ? ($1 >= $3 ? 1 : 0) :
+                              error("internal error")/e);
+
+    # Evaluate lowest precedence operators && and very lowest ||
+
+    1 while $e =~ (s/([0-9]+)\&\&([0-9]+)/$1 && $2 ? 1 : 0/e);
+
+    1 while $e =~ (s/([0-9]+)\|\|([0-9]+)/$1 || $2 ? 1 : 0/e);
+
+    # By now there should be nothing left but a number.
+
+    return $e if $e =~ /^-?[0-9]+$/;
+
+    error("Strange operators present: $e");
+    return 0;
+}
+
+
+########################################################################
+# Evaluate a general expression.
+########################################################################
+
+sub expression($) {
+
+    my $e = shift;
+    my $e1 = $e;
+
+    # Accept a quoted string.
+
+    if ($e =~ /[\"\']/) {
+        return $e if $e =~ /^".*"$/;
+        return $e if $e =~ /^'.*'$/;
+        error("Cannot process quotes in expression: $e");
+        return 0;
+    }
+
+    # Convert symbols to decimal values
+
+    my $ee = $e;
+    my $count = 0;
+
+    while ($e =~ (s/(?<![0-9a-z._\$])
+                  ([a-z._\$][0-9a-z._\$]*|0[0-7]+|0x[0-9a-f]+)
+                  (?![0-9a-z._\$])
+                  /get_value($1)/igex))
+    {
+        last if $e eq $ee;
+
+        $ee = $e;
+
+        if (++$count > 100) {
+            error("Recursive symbol definition? $e");
+            return 0;
+        }
+    }
+
+    # Remove all white space.
+
+    $e =~ s/\s+//g;
+
+    # Exit if some value is undefined.
+
+    return $e if $e =~ /[a-z._\$]/i;
+
+    my $e2 = $e;
+
+    # Evaluate parenthesized sub-expressions.
+
+    1 while $e =~ s/\(([^\(\)]*)\)/const_expression($1)/ge;
+
+    # Exit on unbalanced parenthesis.
+
+    if ($e =~ /[\(\)]/) {
+        error("Unbalanced parenthesis");
+        return 0;
+    }
+
+    # Evaluate the entire expression as a subexpression
+
+    $e = const_expression($e);
+
+    #print "/* $e1  ==>   $e2  ==>  $e */\n" if $e1 !~ /^[-+a-z0-9_.\$]+$/i;
+
+    return $e;
+}
+
+
+########################################################################
+# Evaluates an expression to a numeric value.
+########################################################################
+
+sub value($)
+{
+    my $e = shift;
+
+    my $v = expression($e);
+
+    return $v if $v =~ /^-?[0-9]+$/;
+
+    error("Not constant value: $e => $v");
+
+    return 0;
+}
+
+
+##############################################################################
+# Notes that a reference was made to the specified symbol.
+##############################################################################
+
+sub target($@)
+{
+    my $type = $_[0];                   # Reference type
+    my @expr = $_[1];                   # Label
+    my $rtn;
+
+    for (@expr) {
+        while (s/([a-z0-9_.\$][a-z0-9_.\$]*)//i) {
+
+            my $ref = $1;
+
+            next if $ref =~ /^[0-9]/;
+            next if defined $regnum{$ref};
+
+            my $h = \%{$label{$ref}};
+            my $v = ++$h->{$type};
+
+            $rtn .= "; " if defined $rtn;
+            $rtn .= "$ref\{$type} = $v";
+
+            if (!defined $h->{file}) {
+
+                $h->{file} = $filename;
+                $h->{line} = $linenumber;
+            }
+
+
+        }
+    }
+
+    return $rtn;
+}
+
+
+########################################################################
+# Prints the most interesting information about a label.
+########################################################################
+
+sub print_label(\%$)
+{
+    my $lab = shift;
+    my $name = shift;
+
+    (my $n = $name) =~ s/::.*//;
+
+    my $h = $lab->{$name};
+    my $f = '';
+
+    for (qw(G D B C L A R W S)) {
+        $f .= defined $h->{$_} ? $_ : " ";
+    }
+
+    printf("%-24s %s  ", $n, $f);
+
+    if (defined $h->{stype}) {
+
+        printf("%-8s %-8s %6s  %s\n",
+               $h->{sname}, $h->{stype}, $h->{count},
+               "$h->{file}($h->{line})"
+               );
+    } else {
+
+        my $value = defined $h->{value} ? $h->{value} : "undef";
+
+        if (defined $h->{file}) {
+            printf("%-25s %s\n", $value, "$h->{file}($h->{line})");
+        } else {
+            printf("%s\n", $value);
+
+        }
+    }
+
+    if (defined $h->{dup}) {
+
+        for my $d (@{$h->{dup}}) {
+            print("\t redefined in: $d->{file}($d->{line})" .
+                  " ($d->{sname} $d->{stype})\n");
+        }
+    }
+}
+
+
+########################################################################
+# Handles a "set" definition.
+########################################################################
+
+sub set($$)
+{
+    my $name = shift;
+    my $expr = shift;
+
+    my $value = expression($expr);
+
+    $label{$name}{value} = $@ ? $expr : $value;
+}
+
+
+########################################################################
+# Notes where a label is defined.
+########################################################################
+
+sub def($)
+{
+    my $name = shift;
+
+    my $h = \%{$label{$name}};
+
+    #### Detect duplicate label definitions.
+
+    if (defined $h->{stype}) {
+
+        push(@{$h->{dup}}, { file  => $filename,
+                             line  => $linenumber,
+                             sname => $section_name,
+                             stype => $section_type });
+
+        print_label(%label, $name);
+        return;
+    }
+
+    #### Save the location of the label, and other information
+    #### about its definition.
+
+    push(@labelseq, $name);
+
+    $h->{seq}   = $#labelseq;
+
+    $h->{file}  = $filename;
+    $h->{line}  = $linenumber;
+    $h->{count} = $linecount;
+
+    $h->{sname} = $section_name;
+    $h->{stype} = $section_type;
+
+    $h->{ret}   = $retcount;
+}
+
+
+########################################################################
+# Generates an unconditional branch.
+########################################################################
+
+sub op_bu()
+{
+    target("B", $operand[0]);
+}
+
+
+##############################################################################
+# Generates a branch operation.
+##############################################################################
+
+sub op_b()
+{
+    target("B", $operand[0]);
+}
+
+
+##############################################################################
+# Generates code for a conditional branch.
+##############################################################################
+
+sub op_bcc($$)
+{
+    target("B", $operand[2]);
+}
+
+
+##############################################################################
+# Generates a branch operation.
+##############################################################################
+
+sub op_bal()
+{
+    target("L", $operand[0]);
+}
+
+
+##############################################################################
+# Generates code for a call operation.
+##############################################################################
+
+sub op_call()
+{
+    target("C", $operand[0]);
+}
+
+
+########################################################################
+# Generates code for a return operation.
+########################################################################
+
+sub op_ret()
+{
+    ++$retcount;
+    $text_labels_since_ret = 0;
+}
+
+
+##############################################################################
+# Generates code for a load operation.
+##############################################################################
+
+sub op_load($)
+{
+    target("R", $operand[0]);
+}
+
+
+##############################################################################
+# Generates code for a load operation.
+##############################################################################
+
+sub op_lda($)
+{
+    target("A", $operand[0]);
+}
+
+
+##############################################################################
+# Generates code for a store operation.
+##############################################################################
+
+sub op_store($)
+{
+    target("W", $operand[1]);
+}
+
+
+########################################################################
+# Finishes up after an if, else, or endif.
+########################################################################
+
+sub cond()
+{
+    $table = $iflevel > 0 ? \%off_table : \%on_table;
+
+    "iflevel = $iflevel";
+}
+
+
+##############################################################################
+# Handles an .if pseudo-op.
+##############################################################################
+
+sub ps_if()
+{
+    my $e = $operand[0];
+
+    if ($iflevel > 0) {
+
+        $iflevel++;
+
+        return cond();
+    }
+
+    my $v = ($e =~ /^[a-z0-9_.\$]*$/i && !defined $label{$e}) ? 0 : value($e);
+
+    if ($v == 0) {
+
+        $iflevel = 1;
+    }
+
+    return cond() . "  {$e == $v}";
+}
+
+
+##############################################################################
+# Handles an .ifdef pseudo-op.
+##############################################################################
+
+sub ps_ifdef()
+{
+    my $exp = $label{$operand[0]};
+
+    if ($iflevel > 0) {
+
+        $iflevel++;
+
+    } elsif (!defined($exp)) {
+
+        $iflevel = 1;
+    }
+
+    return cond();
+}
+
+
+##############################################################################
+# Handles an .ifndef pseudo-op.
+##############################################################################
+
+sub ps_ifndef()
+{
+    my $exp = $label{$operand[0]};
+
+    if ($iflevel > 0) {
+
+        $iflevel++;
+
+    } elsif (defined($exp)) {
+
+        $iflevel = 1;
+    }
+
+    return cond();
+}
+
+
+##############################################################################
+# Handles an .else pseudo-op.
+##############################################################################
+
+sub ps_else()
+{
+    if ($iflevel == 0) {
+
+        $iflevel = 1;
+
+    } elsif ($iflevel == 1) {
+
+        $iflevel = 0;
+    }
+
+    return cond();
+}
+
+
+##############################################################################
+# Handles an .endif pseudo-op.
+##############################################################################
+
+sub ps_endif()
+{
+    if ($iflevel == 0) {
+
+        $@ = "Unmatched endif";
+
+    } elsif ($iflevel == 1) {
+
+        $iflevel = 0;
+
+    } else {
+
+        --$iflevel;
+    }
+
+    return cond();
+}
+
+
+##############################################################################
+# Handles an include operation.
+##############################################################################
+
+sub ps_include()
+{
+    my $f = $operand[0];
+
+    $f =~ s/"(.*)"/$1/;
+
+    if ($f !~ /^\// && ! -r $f) {
+
+        if ($filename =~ m|(.*)/| && -r "$1/$f") {
+            $f = "$1/$f";
+        } elsif (-r "../inc/$f") {
+            $f = "../inc/$f";
+        }
+    }
+
+    $do_include = $f;
+}
+
+
+##############################################################################
+# Handles a .set pseudo-op.
+##############################################################################
+
+sub ps_set()
+{
+    my $name = $operand[0];
+    my $e = expression($operand[1]);
+
+    $@ = undef;
+    error("$@") if $@;
+
+    set($name, "$e");
+
+    target("S", $name);
+
+    "$name = $e";
+}
+
+
+########################################################################
+# Handles a .text or .data pseudo-op.
+########################################################################
+
+sub ps_sect($)
+{
+    $section_type  = $_[0];
+    $section_name = $_[0];
+
+    "section $section_type $section_name";
+}
+
+
+########################################################################
+# Handles a .section pseudo-op.
+########################################################################
+
+sub ps_section()
+{
+    $section_name = $operand[0];
+    $section_type  = $operand[1];
+
+    $section_name =~ s/[.\"]//g;
+    $section_type  =~ s/[.\"]//g;
+
+    "section $section_type $section_name";
+}
+
+
+########################################################################
+# Handles a .global pseudo-op.
+########################################################################
+
+sub ps_globl()
+{
+    target("G", @operand);
+}
+
+
+########################################################################
+# Handles an .align pseudo-op.
+########################################################################
+
+sub ps_align()
+{
+    # NOTDONEYET
+    "align";
+}
+
+
+########################################################################
+# Handles a .space pseudo-op.
+########################################################################
+
+sub ps_space()
+{
+    value($operand[0]);
+}
+
+
+########################################################################
+# Handles a .word, .short and .byte pseudo-op.
+########################################################################
+
+sub ps_data()
+{
+    target("D", @operand);
+}
+
+
+########################################################################
+# Generates a label.
+########################################################################
+
+sub label($)
+{
+    my $name = shift;
+    my $r;
+
+    if ($iflevel == 0) {
+        def($name);
+        $r = "$section_name $section_type";
+    } else {
+        $r = "skip";
+    }
+
+    $text_labels_since_ret++ if $section_type eq "text";
+
+    return $r;
+}
+
+
+##############################################################################
+# Generate an instruction.
+##############################################################################
+
+sub opcode()
+{
+    my $s = $$table{$opcode};
+    my $code;
+
+    #### If an opcode entry is defined, and processing is successful
+    #### output the parsed code.  However if an error occurs, then
+    #### output the error.
+
+    if (defined($s)) {
+        $code = eval{ $s->() };
+
+        if (!defined $code) {
+            chomp $@;
+            return $@;
+        }
+
+        return $code;
+    }
+
+    $unknown{$opcode}++;
+
+    return $iflevel == 0 ? "unused" : "skip";
+}
+
+
+########################################################################
+# Includes a file.
+########################################################################
+
+sub include_file($);
+
+sub include_file($)
+{
+    $filename   = shift;
+    $linenumber = 0;
+
+    $filename =~ s|\\|/|g;
+
+    my $FILE;
+
+    if (!open($FILE, "<$filename")) {
+        error("cannot open: $filename");
+        return;
+    }
+
+    print "#line 1 \"$filename\" 1\n" if $opt_list;
+
+    #### Main loop.
+
+    while (<$FILE>) {
+
+        chop;
+
+        $linenumber++;
+        $linecount++;
+
+        $input = $_;
+
+        my $x = $_;
+        my $code;
+
+        #### Remove any /* comments */ or // comments.
+
+        s/\/\*(.*)\*\//\#$1/g;
+        s/\/\/+/\#/g;
+
+        #### Tear off any label.
+
+        if (s/^ *(\.?[a-zA-Z0-9\$_]+)://) {
+            $code .= label($1);
+        }
+
+        #### Get the opcode field, and any opcode operands.
+
+        if (s/^[ \t]*([.a-zA-Z0-9]+)[ \t]*//) {
+            $opcode = $1;
+            $opcode =~ s/^(.*)\.[tf]$/$1/;
+
+            @operand = ();
+
+            while (s/^([^,\#]*[^ \t,\#])[ \t,]*//) {
+                push(@operand, $1);
+            }
+
+            $code .= opcode();
+        }
+
+        #### Print any unprocessed non-comment information.
+
+        s/^[ \t]*//;
+
+        if (!/^(|\#.*|\/\*.*\*\/[ \t]*)$/) {
+            error("Incorrectly parsed: $input\n");
+        }
+
+        #### Extend out to column 80, then enter the code there.
+
+        if ($opt_list) {
+            if (defined $code && $code ne "") {
+
+                for (my $i = 10; --$i >= 0;) {
+
+                    if ($x =~ s/^([^\t]{8})//) {
+                        print $1;
+                    }
+                    elsif ($x =~ s/^([^\t]{0,7})\t?//) {
+                        print substr("$1        ",0,8);
+                    }
+                }
+
+                print " $code\n";
+
+            }
+
+            #### Process unrecognised stuff.
+
+            else {
+                print "$x\n";
+            }
+        }
+
+        #### Process nested include.
+
+        if (defined $do_include) {
+            my $f = $do_include;
+            $do_include = undef;
+
+            push(@filename,   $filename);
+            push(@linenumber, $linenumber);
+
+            include_file($f);
+
+            $filename = pop(@filename);
+            $linenumber = pop(@linenumber);
+
+            print "#resume $linenumber \"$filename\" 2\n" if $opt_list;
+        }
+    }
+
+    #### Clean up and exit.
+
+    close($FILE);
+}
+
+
+####################################################################
+# Merges the local label space of the current file with the
+# global label space.
+########################################################################
+
+sub merge_labels()
+{
+    my $suffix = sprintf("%02d", $fileno);
+
+    for my $name (keys %label) {
+
+        my $h = $label{$name};
+
+        #### The assembly makes all undefined labels global.
+
+        if (!defined $h->{G} && !defined $h->{stype} && !defined $h->{S}) {
+
+            $h->{G} = -1;
+        }
+
+        #### If a local label, suffix the name with ":$fileno",
+        #### and shove it in the global name space.
+
+        if (!defined $h->{G}) {
+
+            $glabel{"$name:$suffix"} = $h;
+        }
+
+        #### If a global label not seen before, just copy it to
+        #### the global name space.
+
+        elsif (!defined $glabel{$name}) {
+
+            $glabel{"$name"} = $h;
+        }
+
+        #### Two global labels must now merge.
+
+        else {
+
+            my $g = $glabel{$name};
+
+            #### Merge the reference counts.
+
+            for (qw(G D B C L A R W S)) {
+
+                if (defined $h->{$_}) {
+
+                    if (defined $g->{$_}) {
+                        $g->{$_} += $h->{$_};
+                    } else {
+                        $g->{$_} = $h->{$_};
+                    }
+                }
+            }
+
+            #### Merge the label definitions.
+
+            if (defined $g->{stype}) {
+
+                if (defined $h->{stype}) {
+
+                    push(@{$g->{dup}}, { file  => $h->{file},
+                                         line  => $h->{line},
+                                         sname => $h->{sname},
+                                         stype => $h->{stype} });
+
+                    if (defined $h->{dup}) {
+                        push(@{$g->{dup}}, @{$h->{dup}});
+                        delete $h->{dup};
+                    }
+                }
+
+            } else {
+
+                if (defined $h->{stype}) {
+
+                    for (qw/file line count sname stype/) {
+                        $g->{$_} = $h->{$_};
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+########################################################################
+# Initialize the table of opcodes processed when compilation is
+# turned off.
+########################################################################
+
+%off_table = ('.if'      => \&ps_if,
+              '.else'    => \&ps_else,
+              '.endif'   => \&ps_endif,
+              '.ifdef'   => \&ps_ifdef,
+              '.ifndef'  => \&ps_ifndef,
+              );
+
+
+########################################################################
+# Initialize the table of opcodes processed when compilation is
+# turned off.
+########################################################################
+
+%on_table = ( b        => \&op_bu,
+              bx       => \&op_bu,
+
+              bal      => \&op_bal,
+              balx     => \&op_bal,
+
+              be       => \&op_b,
+              bne      => \&op_b,
+              bl       => \&op_b,
+              ble      => \&op_b,
+              bg       => \&op_b,
+              bge      => \&op_b,
+
+              bno      => \&op_b,
+              bo       => \&op_b,
+
+              call     => \&op_call,
+              callx    => \&op_call,
+              calls    => \&op_call,
+              callj    => \&op_call,
+              calljx   => \&op_call,
+
+              ret      => \&op_ret,
+
+              cmpibe   => \&op_bcc,
+              cmpibne  => \&op_bcc,
+              cmpibl   => \&op_bcc,
+              cmpible  => \&op_bcc,
+              cmpibg   => \&op_bcc,
+              cmpibge  => \&op_bcc,
+
+              cmpobe   => \&op_bcc,
+              cmpobne  => \&op_bcc,
+              cmpobl   => \&op_bcc,
+              cmpoble  => \&op_bcc,
+              cmpobg   => \&op_bcc,
+              cmpobge  => \&op_bcc,
+
+              cmpibo   => \&op_bcc,
+              cmpibno  => \&op_bcc,
+
+              ld       => \&op_load,
+              ldob     => \&op_load,
+              ldos     => \&op_load,
+              ldib     => \&op_load,
+              ldis     => \&op_load,
+
+              ldl      => \&op_load,
+              ldt      => \&op_load,
+              ldq      => \&op_load,
+
+              ldconst  => \&op_lda,
+              lda      => \&op_lda,
+
+              st       => \&op_store,
+              stob     => \&op_store,
+              stos     => \&op_store,
+
+              stl      => \&op_store,
+              stt      => \&op_store,
+              stq      => \&op_store,
+
+              '.include' => \&ps_include,
+
+              '.text'    => sub() { ps_sect("text") },
+              '.data'    => sub() { ps_sect("data") },
+
+              '.section' => \&ps_section,
+
+              '.set'     => \&ps_set,
+
+              '.globl'   => \&ps_globl,
+              '.align'   => \&ps_align,
+              '.space'   => \&ps_space,
+
+              '.word'    => \&ps_data,
+              '.short'   => \&ps_data,
+              '.byte'    => \&ps_data,
+              );
+
+
+# Identifiers in off_table also go into on_table.
+
+for (keys %off_table) {
+    $on_table{$_} = $off_table{$_};
+}
+
+for (keys %on_table) {
+    print "Please define $_\n" if !defined $_;
+}
+
+
+##############################################################################
+# Main program
+##############################################################################
+
+# Parse the Input parameters, doing -D's to define things.
+
+{
+    my @not_opt;
+
+    #### Parse the input parameters
+
+    while ($#ARGV >= 0) {
+
+        $_ = shift;
+
+        #### Strip off a '-' option.
+
+        if (s/^-//) {
+
+            while ($_ ne '') {
+
+                #### Single character print options.
+
+                if (s/^a//) {
+                    $opt_all = 1;
+                    next;
+                }
+
+                if (s/^c//) {
+                    $opt_conflict = 1;
+                    next;
+                }
+
+                if (s/^d//) {
+                    $opt_data = 1;
+                    next;
+                }
+
+                if (s/^l//) {
+                    $opt_list = 1;
+                    next;
+                }
+
+                if (s/^s//) {
+                    $opt_similar = 1;
+                    next;
+                }
+
+                if (s/^u//) {
+                    $opt_underline = 1;
+                    next;
+                }
+
+                #### Constant definition.
+
+                if (s/^D//) {
+
+                    $_ = shift if $_ eq '';
+
+                    if (/^(.*)=(.*)\$/) {
+                        $define{$1} = { S => 1, value => $2 };
+                    } else {
+                        die "Null symbol definition" if $_ eq '';
+                        $define{$_} = { S => 1, value => 1 };
+                    }
+                    last;
+                }
+
+                #### Turn on source listing.
+
+                if (s/^l//) {
+                    $opt_list = 1;
+                    next;
+                }
+
+                #### Unknown option.
+
+                print STDERR "Unknown option: $_\n";
+                exit 2;
+            }
+        }
+
+        #### File name.
+
+        else {
+            push(@not_opt, $_);
+        }
+    }
+
+    #### Read the list of input files.
+
+    $fileno = 0;
+
+    for my $f (@not_opt) {
+
+        %label = %define;
+
+        $fileno++;
+
+        $iflevel = 0;
+        $table = \%on_table;
+        $text_labels_since_ret = 0;
+
+        $section_name = "text";
+        $section_type = "text";
+
+        include_file($f);
+
+        merge_labels();
+    }
+
+    #### Print the label list.
+
+    if ($opt_all) {
+
+        print "\n========== Complete label list:\n";
+
+        for (sort keys %glabel) {
+            print_label(%glabel, $_);
+        }
+    }
+
+    if ($opt_similar) {
+
+        print "\n========== Similar labels:\n";
+
+        my $thislabel = "";
+        my $lastlabel;
+        my $lastprefix = "";
+        my $lastcount = 0;
+
+        for (sort keys %glabel) {
+
+            my $h = $glabel{$_};
+
+            next if defined $h->{S};
+
+            next if defined $h->{sname} && $h->{sname} eq "critdata";
+
+            $lastlabel = $thislabel;
+            $thislabel = $_;
+
+            s/:.*//;
+
+            if ($_ eq $lastprefix) {
+
+                if ($lastcount == 0) {
+                    print "\n";
+                    print_label(%glabel, $lastlabel);
+                }
+
+                print_label(%glabel, $thislabel);
+
+                $lastcount++;
+
+            } else {
+
+                $lastcount = 0;
+                $lastprefix = $_;
+            }
+        }
+    }
+
+    print "\n========== Duplicate label definitions:\n";
+
+    for (sort keys %glabel) {
+
+        my $h = $glabel{$_};
+
+        if (defined $h->{dup}) {
+
+            print_label(%glabel, $_);
+        }
+    }
+
+    if ($opt_conflict) {
+
+        print "\n========== Labels with conflicting usage:\n";
+
+        for (sort keys %glabel) {
+
+            my $h = $glabel{$_};
+
+            if ((defined $h->{C} & (defined $h->{B} || defined $h->{L})) ||
+                (defined $h->{L} & defined $h->{B}) ||
+                (  (defined $h->{C} || defined $h->{B} || defined $h->{L}) &&
+                   (defined $h->{R} || defined $h->{W})))
+            {
+                print_label(%glabel, $_);
+            }
+        }
+    }
+
+    if ($opt_data) {
+
+        print "\n=========== Labels appearing in data statements:\n";
+
+        for (sort keys %glabel) {
+
+            my $h = $glabel{$_};
+
+            if (defined $h->{D} & defined $h->{stype} && $h->{stype} eq 'text')
+            {
+                print_label(%glabel, $_);
+            }
+        }
+    }
+
+    if ($opt_underline) {
+
+        print "\n=========== C Language compatible labels:\n";
+
+        for (sort keys %glabel) {
+
+            my $h = $glabel{$_};
+
+            if (/^_/ && ((defined $h->{G} && defined $h->{stype} && $h->{stype} eq "text") ||
+                         (defined $h->{C})))
+            {
+                print_label(%glabel, $_);
+            }
+        }
+    }
+
+    print "\n=========== Undefined non-C-compatible labels:\n";
+
+    for (sort keys %glabel) {
+
+        my $h = $glabel{$_};
+
+        if (!/^_/ && !defined $h->{stype} && !defined $h->{S})
+        {
+            print_label(%glabel, $_);
+        }
+    }
+
+    exit(0);
+}

@@ -1,0 +1,35 @@
+--- a/drivers/scsi/scsi_lib.c	2006-03-19 23:53:29.000000000 -0600
++++ obj-3d3000/drivers/scsi/scsi_lib.c	2006-06-12 17:52:17.860791985 -0500
+@@ -309,6 +309,13 @@
+ 	struct bio *bio = NULL;
+ 	int i, err, nr_vecs = 0;
+ 
++	/* The nr_pages calc above assumes that only the first and last page
++	 * may be partial.  With direct I/O of iovecs, the first and last page
++	 * of each iovec may be partial pages, so make sure we alolocate at
++	 * least nsegs pages to handle the worst when nothing coalesces.
++	 */
++	nr_pages = max_t(int, nr_pages, nsegs);
++
+ 	for (i = 0; i < nsegs; i++) {
+ 		page = sgl[i].page;
+ 		off = sgl[i].offset;
+@@ -352,6 +359,18 @@ static int scsi_req_map_sg(struct reques
+ 		}
+ 	}
+ 
++	/* if bio_add_pc_page coalesced page fragments, we may not have hit
++	 * the vec limit, and we may still need to merge the bio into the req.
++	 */
++	if (bio != NULL) {
++		err = scsi_merge_bio(rq, bio);
++		if (err) {
++			bio_endio(bio, bio->bi_size, 0);
++			goto free_bios;
++		}
++		bio = NULL;
++	}
++
+ 	rq->buffer = rq->data = NULL;
+ 	rq->data_len = data_len;
+ 	return 0;

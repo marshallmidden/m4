@@ -1,0 +1,597 @@
+#!/usr/bin/perl -w
+use strict;
+use Getopt::Std;
+
+my $version= "0.1.0.10";
+# Where the ccbCL.pl script is located.
+my $ccbe_at;
+# The Ewok Description List is.
+my $dsc_file;
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+$dsc_file = `/bin/ls -t /var/xiotech/XioWebService/*Dsc_List*.*|head -1`;
+$ccbe_at = "./CCBE";
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# Command to run the ccbCL.pl script.
+my $run_ccbcl = "cd $ccbe_at ;/usr/bin/perl ccbCL.pl";
+#
+# Where the ise_upgrader expect script is located.
+my $ise_show_me_at = ".";
+#
+# Command to run the ise_upgrader script.
+my $run_show_me = "$ise_show_me_at/ise_show_me";
+my $run_sw_show_me = "$ise_show_me_at/sw_show_me";
+#
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# Key is the DSC number, the value is IP's, comma separated.
+my %dsc;
+
+
+my $specific_dsc = -1;
+my $fetch_ccbcl_output = 1;
+my $fetch_ise_logs = 1;
+my $fetch_switch_logs = 1;
+our $opStatusFile = "OpStatus.txt";
+
+
+#
+# Process the input parameters
+# -d DSC ID to process
+# -c Fetch CCBCL output (1=yes, 0=no)
+# -i Fetch ISE logs or not (1=yes, 0=no)
+# -s Fetch Switch logs or not (1=yes, 0=no)
+# -w Working directory to save OpErrors and OpStatus into
+#
+
+our %options=();
+getopt("dcisw",\%options);
+print "Detected: -d $options{d}\n" if defined $options{d};
+print "Detected: -c $options{c}\n" if defined $options{c};
+print "Detected: -i $options{i}\n" if defined $options{i};
+print "Detected: -s $options{s}\n" if defined $options{s};
+print "Detected: -w $options{w}\n" if defined $options{w};
+
+
+if (defined $options{d}) {
+  $specific_dsc = $options{d};
+}
+if (defined $options{c}) {
+  $fetch_ccbcl_output = $options{c};
+}
+if (defined $options{i}) {
+  $fetch_ise_logs = $options{i};
+}
+if (defined $options{s}) {
+  $fetch_switch_logs = $options{s};
+}
+if (defined $options{w}) {
+  $opStatusFile = "$options{w}/OpStatus.txt";
+}
+
+
+
+#-----------------------------------------------------------------------------
+# Define a bunch of subroutines, run them at the end of the file.
+#-----------------------------------------------------------------------------
+# Deletes any carriage returns and/or new-lines from the end of the input line.
+sub chompit($)
+{
+    my $line = $_[0];
+    $line =~ s/\n*\r*\n*$//;
+    return($line);
+}   # End of chompit
+
+#-----------------------------------------------------------------------------
+# Read $dsc_file to get $dsc{} hash array set.
+
+sub read_Dsc_List
+{
+    if (!defined(open(FILE, "<$dsc_file"))) {
+        die("Cannot open Dsc_List file $dsc_file\n");
+    }
+    my $line;
+    my $id;
+    while (<FILE>) {
+        $line = chompit($_);
+        if ($line =~ /^.*<spaldsclist:id>(.*)<\/spaldsclist:id>/) {
+            $id = $1;                   # DSC ID number.
+        } elsif ($line =~ /^.*<xwstype:ip_addr>(.*)<\/xwstype:ip_addr>/) {
+            if (!defined($id)) {
+                die("Found ip_addr ($1) without a spaldsclist:id\n")
+            }
+
+
+            #
+            # Only process the DSC if it's the specific one that we want OR
+            # we don't care which DSC to fetch for
+            #
+
+            if (($specific_dsc == -1) || ($id == $specific_dsc)) {
+                if (defined($dsc{$id})) {
+                    $dsc{$id} .= ' ' . $1;
+                } else {
+                    $dsc{$id} =  $1;
+                }
+            }
+        }
+    }
+    close(FILE);
+}   # End of read_Dsc_List
+
+#-----------------------------------------------------------------------------
+sub send_ccbcl_status($$$)
+{
+    my $severity = $_[0];
+    my $controller = $_[1];
+    my $message = "$_[2]";
+    $message =~ s /%/pct/;
+
+    printf STDERR "CCBCL($controller) $severity - %s\n", "$message";
+    system( "$run_ccbcl '$controller' -e '\"logtextmessage -v $severity $message\"' >/dev/null" );
+}   # End of send_ccbcl_status
+
+sub do_ccbcl_cmd($$)
+{
+    my $controller = $_[0];
+    my $cmd = "$_[1]";
+
+#    printf STDERR "CCBCL($controller) cmd=%s\n", "$cmd";
+    system( "$run_ccbcl '$controller' -e '\"$cmd\"'" );
+}   # End of send_ccbcl_status
+
+
+#-----------------------------------------------------------------------------
+sub set_status($$)
+{
+
+  #
+  # By saving this status in OpStatus.txt file, IWS can better monitor the task
+  #
+
+  my $status = $_[0];
+  my $percent = $_[1];
+  open (STATUS_FILE, ">$opStatusFile") or print STDERR "Can't open file '$opStatusFile' $!";
+  print (STATUS_FILE "PercentComplete=$percent\nStatus=$status");
+  close (STATUS_FILE);
+
+  printf STDERR "Status Update:  Status=$status  Percent=$percent\n";
+
+} #end set_status
+
+
+#-----------------------------------------------------------------------------
+# Use @controller_ips to get $master set.
+
+sub get_master_slave_and_ise_ips($)
+{
+    my @controller_ips = split(/\s+/, $_[0]);
+    my @ise_ips;
+    my $master;
+    my $slave;
+    my $m1;
+    my $s1;
+    my $i1;
+    my $i2;
+
+    # Get master and other stuff, this allows for one to not be configured yet.
+    my $ips = join(':3000 ', @controller_ips) . ':3000';
+print STDERR "ips=$ips\n";
+    my $ccbcl_grep;
+    $ccbcl_grep .= "'" . ' *MASTER';
+    $ccbcl_grep .= "|" . ' *SLAVE';
+    $ccbcl_grep .= '|' . 'IP address  : .*IP address  : ';
+    $ccbcl_grep .= '|' . 'DO *NOT *SCRIPTME';
+    $ccbcl_grep .= '|' . 'DO *NOT *SCRIPT0';
+    $ccbcl_grep .= '|' . 'DO *NOT *SCRIPT1';
+#    $ccbcl_grep .= '|' . 'DO *NOT *APPLY';
+#    $ccbcl_grep .= '|' . '^ Serial #    : .* Model       : .*DP';
+#    $ccbcl_grep .= '|' . '^ Part Number : .*  FW Version  : ';
+#    $ccbcl_grep .= '|' . 'DataPac 0';
+#    $ccbcl_grep .= '|' . 'DataPac 1';
+    $ccbcl_grep .= "'";
+
+print STDERR "$run_ccbcl $ips -e 'a:vcginfo ; a:isestatus ; vdisks' |sort |uniq | egrep -i $ccbcl_grep\n";
+    my $ccbe_output = `$run_ccbcl $ips -e 'a:vcginfo ; a:isestatus; a:isestatus ; vdisks' | sort | uniq | egrep -i $ccbcl_grep`;
+print STDERR "ccbe_output=$ccbe_output";
+
+    my @ccbe_output = split(/\n/, $ccbe_output);
+# printf STDERR "ccbe_output=%s\n", join("\n\t", @ccbe_output);
+    my $last_ise_IPs;
+    my $stop_on_error = 0;
+    my $ise_num = -1;
+    foreach my $i (@ccbe_output) {
+        if ($i =~ /^.* (\d+\.\d+\.\d+\.\d+) *OPERATIONAL *MASTER.*/i) {
+            $m1 = $1;
+            my $new_master = $1 . ':3000';
+            $master = $new_master;
+        } elsif ($i =~ /^.* (\d+\.\d+\.\d+\.\d+) *FAILED *MASTER.*/i) {
+            $m1 = $1;
+            my $new_master = $1 . ':3000';
+            $master = $new_master;
+        } elsif ($i =~ /^.* (\d+\.\d+\.\d+\.\d+) *OPERATIONAL *SLAVE.*/i) {
+            $s1 = $1;
+            my $new_slave = $1 . ':3000';
+            $slave = $new_slave;
+        } elsif ($i =~ /^.* (\d+\.\d+\.\d+\.\d+) *FAILED *SLAVE.*/i) {
+            $s1 = $1;
+            my $new_slave = $1 . ':3000';
+            $slave = $new_slave;
+        } elsif ($i =~ /^ *IP address *: (\d+\.\d+\.\d+\.\d+) *IP address *: (\d+\.\d+\.\d+\.\d+)/i) {
+            $i1 = $1;
+            $i2 = $2;
+            $last_ise_IPs = "$i1 $i2";
+            my @ise1 = split(/\./, $i1);
+            my @ise2 = split(/\./, $i2);
+# printf STDERR "IPs=%s, %s\n", join('.', @ise1), join('.', @ise2);
+            if ($ise1[0] == "0") {
+               push(@ise_ips, join('.', $ise2[0], $ise2[1], $ise2[2], $ise1[3] & 254));
+               $ise_num = ($ise2[3] & 0x7e)/2;
+            } else {
+               push(@ise_ips, join('.', $ise1[0], $ise1[1], $ise1[2], $ise1[3] & 254));
+               $ise_num = ($ise1[3] & 0x7e)/2;
+            }
+        }
+    }
+
+# print STDERR "master=$master\n";
+# printf STDERR "ise_ips=%s\n", join(' ', @ise_ips);;
+    return ($master, $slave, $m1, $s1, $i1, $i2, @ise_ips);
+}   # end of get_master_slave_and_ise_ips
+
+#-----------------------------------------------------------------------------
+# Do the processing now.
+printf STDERR "SHOW_ALL ". $version ." was started ". localtime() ."\n";
+
+set_status("Collecting controller info...", -1);
+
+
+# Get %dsc set to all DSC's and IP addresses of their controllers.
+read_Dsc_List();
+foreach my $k (keys(%dsc)) {
+  printf STDERR "DSC #%s -> %s\n", $k, $dsc{$k};
+}
+# . . . . .
+
+foreach my $j (keys(%dsc)) {
+    # Use $dsc{} to get $master and @ise_ips set.
+    my ($master, $slave, $m1, $s1, $i1, $i2, @ise_ips) = get_master_slave_and_ise_ips($dsc{$j});
+    send_ccbcl_status(0, $master, '!$Running script SHOWME_ALL');
+    printf STDERR "DSC $j  master=$master($m1) slave=$slave($s1)  ise_ips=%s\n", join(' ', @ise_ips);
+    
+    # issue various ccbcl commands to master (and then to slave)
+             
+    if (defined($m1) && $fetch_ccbcl_output ) {
+      send_ccbcl_status(0, $master, '!$..Gathering Master Controller Info');
+      do_ccbcl_cmd($master, 'vcginfo');
+      do_ccbcl_cmd($master, 'vcgmplist');
+      do_ccbcl_cmd($master, 'ipget');
+      do_ccbcl_cmd($master, 'netstat');
+      do_ccbcl_cmd($master, 'gettime');
+ 
+      set_status("Collecting virtual disk information  (master)...", -1);
+      do_ccbcl_cmd($master, 'vdisks');
+      do_ccbcl_cmd($master, 'raids');
+      
+      set_status("Collecting physical disk information  (master)...", -1);
+      do_ccbcl_cmd($master, 'pdisks smart');
+      do_ccbcl_cmd($master, 'bedevicepaths');
+      do_ccbcl_cmd($master, 'statsvdisk');
+      do_ccbcl_cmd($master, 'serverwwntotargetmap');
+      
+
+      set_status("Checking for remote links (master)...", -1);
+      do_ccbcl_cmd($master, 'vlinks');
+      do_ccbcl_cmd($master, 'vlinkctrlcount');
+      do_ccbcl_cmd($master, 'vlinkctrlinfo 0');
+      do_ccbcl_cmd($master, 'vlinkctrlinfo 1');
+      do_ccbcl_cmd($master, 'vlinkctrlinfo 2');
+      do_ccbcl_cmd($master, 'vlinkctrlinfo 3');
+      do_ccbcl_cmd($master, 'vlinkctrlinfo 4');
+      do_ccbcl_cmd($master, 'vlinkctrlinfo 5');
+      do_ccbcl_cmd($master, 'vlinkctrlinfo 6');
+      do_ccbcl_cmd($master, 'vlinkctrlinfo 7');
+      do_ccbcl_cmd($master, 'vlinkctrlvdisks 0');
+      do_ccbcl_cmd($master, 'vlinkctrlvdisks 1');
+      do_ccbcl_cmd($master, 'vlinkctrlvdisks 2');
+      do_ccbcl_cmd($master, 'vlinkctrlvdisks 3');
+      do_ccbcl_cmd($master, 'vlinkctrlvdisks 4');
+      do_ccbcl_cmd($master, 'vlinkctrlvdisks 5');
+      do_ccbcl_cmd($master, 'vlinkctrlvdisks 6');
+      do_ccbcl_cmd($master, 'vlinkctrlvdisks 7');
+      do_ccbcl_cmd($master, 'resyncdata vids');
+      
+
+      set_status("Collecting HBA information (master)...", -1);
+      do_ccbcl_cmd($master, 'targets');
+      do_ccbcl_cmd($master, 'statsloop fe ext');
+      do_ccbcl_cmd($master, 'statshab 0');
+      do_ccbcl_cmd($master, 'statshab 1');
+      do_ccbcl_cmd($master, 'statshab 2');
+      do_ccbcl_cmd($master, 'statshab 3');
+      do_ccbcl_cmd($master, 'devicelist FE 0');
+      do_ccbcl_cmd($master, 'devicelist FE 1');
+      do_ccbcl_cmd($master, 'devicelist FE 2');
+      do_ccbcl_cmd($master, 'devicelist FE 3');
+      do_ccbcl_cmd($master, 'portlist fe 0');
+      do_ccbcl_cmd($master, 'portlist fe 1');
+      do_ccbcl_cmd($master, 'portlist fe 2');
+      do_ccbcl_cmd($master, 'portlist fe 3');
+      do_ccbcl_cmd($master, 'portlist fe 4');
+      do_ccbcl_cmd($master, 'portlist fe 5');
+      do_ccbcl_cmd($master, 'portlist fe 6');
+      do_ccbcl_cmd($master, 'portlist fe 7');
+      do_ccbcl_cmd($master, 'diskbays');
+      do_ccbcl_cmd($master, 'getgeolocation');
+      do_ccbcl_cmd($master, 'getbetype');
+      do_ccbcl_cmd($master, 'scrubinfo');
+
+      set_status("Checking back-end devices (master)...", -1);
+      do_ccbcl_cmd($master, 'statsloop be ext');
+      do_ccbcl_cmd($master, 'devicelist be 0');
+      do_ccbcl_cmd($master, 'devicelist be 1');
+      do_ccbcl_cmd($master, 'devicelist be 2');
+      do_ccbcl_cmd($master, 'devicelist be 3');
+      do_ccbcl_cmd($master, 'portlist be 0');
+      do_ccbcl_cmd($master, 'portlist be 1');
+      do_ccbcl_cmd($master, 'portlist be 2');
+      do_ccbcl_cmd($master, 'portlist be 3');
+      do_ccbcl_cmd($master, 'portlist be 4');
+      do_ccbcl_cmd($master, 'portlist be 5');
+      do_ccbcl_cmd($master, 'portlist be 6');
+      do_ccbcl_cmd($master, 'portlist be 7');
+      do_ccbcl_cmd($master, 'statsenv');
+      do_ccbcl_cmd($master, 'pigetx1env');
+      do_ccbcl_cmd($master, 'statsbufferboard 0');
+      do_ccbcl_cmd($master, 'statsproc');
+      do_ccbcl_cmd($master, 'perfs');
+      do_ccbcl_cmd($master, 'statspci');
+      do_ccbcl_cmd($master, 'statsi2c');
+      do_ccbcl_cmd($master, 'modebits');
+      
+      set_status("Checking structures (master)...", -1);
+      do_ccbcl_cmd($master, 'structureinfo 1');
+      do_ccbcl_cmd($master, 'structureinfo 2');
+      do_ccbcl_cmd($master, 'structureinfo 3');
+      do_ccbcl_cmd($master, 'structureinfo 5');
+      do_ccbcl_cmd($master, 'getreport packet /tmp/ise/goofy');
+      `cat /tmp/ise/goofy`;
+      do_ccbcl_cmd($master, 'getreport heap');
+      do_ccbcl_cmd($master, 'iddinfo');      
+       
+      set_status("Sustaining Engineering (master)...", -1);
+      do_ccbcl_cmd($master, 'vcginfo');
+      do_ccbcl_cmd($master, 'vcgmp');
+      do_ccbcl_cmd($master, 'devstat pd');
+      do_ccbcl_cmd($master, 'devstat vd');
+      do_ccbcl_cmd($master, 'devstat rd');
+      do_ccbcl_cmd($master, 'devstat /b');
+      do_ccbcl_cmd($master, 'counts');
+      do_ccbcl_cmd($master, 'bedevicepath enc');
+      do_ccbcl_cmd($master, 'bedevicepath');
+      do_ccbcl_cmd($master, 'bedevicepath 1');
+      do_ccbcl_cmd($master, 'isestatus');
+    }
+    if (defined($s1) && $fetch_ccbcl_output ) {
+      send_ccbcl_status(0, $slave, '!$..Gathering Slave Controller Info');
+      do_ccbcl_cmd($slave, 'vcginfo');
+      do_ccbcl_cmd($slave, 'vcgmplist');
+      do_ccbcl_cmd($slave, 'ipget');
+      do_ccbcl_cmd($slave, 'netstat');
+      do_ccbcl_cmd($slave, 'gettime');
+
+      set_status("Collecting virtual disk information  (slave)...", -1);
+      do_ccbcl_cmd($slave, 'vdisks');
+      do_ccbcl_cmd($slave, 'raids');
+      
+      set_status("Collecting physical disk information  (slave)...", -1);
+      do_ccbcl_cmd($slave, 'pdisks smart');
+      do_ccbcl_cmd($slave, 'bedevicepaths');
+      do_ccbcl_cmd($slave, 'statsvdisk');
+      do_ccbcl_cmd($slave, 'serverwwntotargetmap');
+
+      set_status("Checking for remote links (slave)...", -1);
+      do_ccbcl_cmd($slave, 'vlinks');
+      do_ccbcl_cmd($slave, 'vlinkctrlcount');
+      do_ccbcl_cmd($slave, 'vlinkctrlinfo 0');
+      do_ccbcl_cmd($slave, 'vlinkctrlinfo 1');
+      do_ccbcl_cmd($slave, 'vlinkctrlinfo 2');
+      do_ccbcl_cmd($slave, 'vlinkctrlinfo 3');
+      do_ccbcl_cmd($slave, 'vlinkctrlinfo 4');
+      do_ccbcl_cmd($slave, 'vlinkctrlinfo 5');
+      do_ccbcl_cmd($slave, 'vlinkctrlinfo 6');
+      do_ccbcl_cmd($slave, 'vlinkctrlinfo 7');
+      do_ccbcl_cmd($slave, 'vlinkctrlvdisks 0');
+      do_ccbcl_cmd($slave, 'vlinkctrlvdisks 1');
+      do_ccbcl_cmd($slave, 'vlinkctrlvdisks 2');
+      do_ccbcl_cmd($slave, 'vlinkctrlvdisks 3');
+      do_ccbcl_cmd($slave, 'vlinkctrlvdisks 4');
+      do_ccbcl_cmd($slave, 'vlinkctrlvdisks 5');
+      do_ccbcl_cmd($slave, 'vlinkctrlvdisks 6');
+      do_ccbcl_cmd($slave, 'vlinkctrlvdisks 7');
+      do_ccbcl_cmd($slave, 'resyncdata vids');
+
+      set_status("Collecting HBA information (slave)...", -1);
+      do_ccbcl_cmd($slave, 'targets');
+      do_ccbcl_cmd($slave, 'statsloop fe ext');
+      do_ccbcl_cmd($slave, 'statshab 0');
+      do_ccbcl_cmd($slave, 'statshab 1');
+      do_ccbcl_cmd($slave, 'statshab 2');
+      do_ccbcl_cmd($slave, 'statshab 3');
+
+      set_status("Checking back-end devices (slave)...", -1);
+      do_ccbcl_cmd($slave, 'devicelist FE 0');
+      do_ccbcl_cmd($slave, 'devicelist FE 1');
+      do_ccbcl_cmd($slave, 'devicelist FE 2');
+      do_ccbcl_cmd($slave, 'devicelist FE 3');
+      do_ccbcl_cmd($slave, 'portlist fe 0');
+      do_ccbcl_cmd($slave, 'portlist fe 1');
+      do_ccbcl_cmd($slave, 'portlist fe 2');
+      do_ccbcl_cmd($slave, 'portlist fe 3');
+      do_ccbcl_cmd($slave, 'portlist fe 4');
+      do_ccbcl_cmd($slave, 'portlist fe 5');
+      do_ccbcl_cmd($slave, 'portlist fe 6');
+      do_ccbcl_cmd($slave, 'portlist fe 7');
+      do_ccbcl_cmd($slave, 'diskbays');
+      do_ccbcl_cmd($slave, 'getgeolocation');
+      do_ccbcl_cmd($slave, 'getbetype');
+      do_ccbcl_cmd($slave, 'scrubinfo');
+      do_ccbcl_cmd($slave, 'statsloop be ext');
+      do_ccbcl_cmd($slave, 'devicelist be 0');
+      do_ccbcl_cmd($slave, 'devicelist be 1');
+      do_ccbcl_cmd($slave, 'devicelist be 2');
+      do_ccbcl_cmd($slave, 'devicelist be 3');
+      do_ccbcl_cmd($slave, 'portlist be 0');
+      do_ccbcl_cmd($slave, 'portlist be 1');
+      do_ccbcl_cmd($slave, 'portlist be 2');
+      do_ccbcl_cmd($slave, 'portlist be 3');
+      do_ccbcl_cmd($slave, 'portlist be 4');
+      do_ccbcl_cmd($slave, 'portlist be 5');
+      do_ccbcl_cmd($slave, 'portlist be 6');
+      do_ccbcl_cmd($slave, 'portlist be 7');
+      do_ccbcl_cmd($slave, 'statsenv');
+      do_ccbcl_cmd($slave, 'pigetx1env');
+      do_ccbcl_cmd($slave, 'statsbufferboard 0');
+      do_ccbcl_cmd($slave, 'statsproc');
+      do_ccbcl_cmd($slave, 'perfs');
+      do_ccbcl_cmd($slave, 'statspci');
+      do_ccbcl_cmd($slave, 'statsi2c');
+      do_ccbcl_cmd($slave, 'modebits');
+
+      set_status("Checking structures (slave)...", -1);
+      do_ccbcl_cmd($slave, 'structureinfo 1');
+      do_ccbcl_cmd($slave, 'structureinfo 2');
+      do_ccbcl_cmd($slave, 'structureinfo 3');
+      do_ccbcl_cmd($slave, 'structureinfo 5');
+      do_ccbcl_cmd($slave, 'getreport packet /tmp/ise/goofy');
+      `cat /tmp/ise/goofy`;
+      do_ccbcl_cmd($slave, 'getreport heap');
+      do_ccbcl_cmd($slave, 'iddinfo');      
+       
+      set_status("Sustaining Engineering (slave)...", -1);
+      do_ccbcl_cmd($slave, 'vcginfo');
+      do_ccbcl_cmd($slave, 'vcgmp');
+      do_ccbcl_cmd($slave, 'devstat pd');
+      do_ccbcl_cmd($slave, 'devstat vd');
+      do_ccbcl_cmd($slave, 'devstat rd');
+      do_ccbcl_cmd($slave, 'devstat /b');
+      do_ccbcl_cmd($slave, 'counts');
+      do_ccbcl_cmd($slave, 'bedevicepath enc');
+      do_ccbcl_cmd($slave, 'bedevicepath');
+      do_ccbcl_cmd($slave, 'bedevicepath 1');
+      do_ccbcl_cmd($slave, 'isestatus');
+    }
+    if (defined($m1) ) {
+     if ( defined($i1) || defined($i2) ) {
+      send_ccbcl_status(0, $master, '!$..Gathering ISE Info');
+      # issue a isestatus command to the master
+      do_ccbcl_cmd($master, 'isestatus');
+
+
+      #
+      # Now get all the info from each ISE (if the caller wanted them)
+      #
+      if ($fetch_ise_logs)
+      {
+        my $parcnt = 0;
+        my $currentBatch = 1;
+        my $num_ise = @ise_ips;
+        my $number_of_batches = $num_ise / 4;
+        
+        #round up
+        if ($number_of_batches > int($number_of_batches)) {
+          $number_of_batches = int($number_of_batches) + 1;
+        }
+        
+        
+        foreach my $k (@ise_ips) {
+        
+            #See if we need to wait for the current batch to complete
+            if((($parcnt) % 4)==0 && $parcnt!=0) {
+              1 while(wait() != -1);
+              $currentBatch = $currentBatch++;
+            }
+            
+            set_status("Gathering ISE information: Batch $currentBatch of $number_of_batches", $currentBatch/$number_of_batches);
+            
+            $parcnt = $parcnt +1;
+            my @ise = split(/\./, $k);
+            my $ses = ($ise[3] & 0x7e)/2;       # mod 128, without last bit.
+            printf STDERR "$k: MRC(even) IP=%s   SES=%d\n", join('.', @ise), $ses;
+            `/bin/date`;
+            my $pid;
+            next if $pid = fork;
+            my $command = "$run_show_me $k $master";
+            printf STDERR "$command\n";
+            my $output = `$command`;
+            my $status = $?;
+            if ($status != 0) {
+                send_ccbcl_status(2, $master, "ISE($k) SHOWME FAILED");
+                print STDERR "command failed ($status): $command\n";
+            } else {
+                send_ccbcl_status(0, $master, "ISE($k) SHOWME DONE");
+                print STDERR $output;
+            }
+            exit
+        }
+        if(($parcnt % 4)!=0) {
+           1 while (wait() != -1);
+        }
+      }
+      
+      #
+      # Now get all the info from each BE SWITCH (if user wanted to)
+      #
+      if ($fetch_switch_logs)
+      {
+        my $parcnt = 0;
+        my @controller_ips = split(/\s+/, $dsc{$j});
+        my @sip =  split(/\./, $controller_ips[0]);
+        my $swip = "$sip[0].$sip[1].$sip[2]";
+        my $iconip = "$sip[0].$sip[1].0.1";
+        my $number_switches = 0;
+        send_ccbcl_status(0, $master, '!$..Gathering BE Switch logs');
+        set_status("Gathering switch logs (this will take a while)...", -1);
+        $parcnt = 0;
+        for (my $lip = 192; $lip <= 199; $lip++) {
+            if((($parcnt) % 2)==0 && $parcnt!=0) {
+              1 while(wait() != -1);
+            }
+            $parcnt = $parcnt +1;
+            my $ip = "$swip" . "." . "$lip";
+            print STDERR "BES IP=$ip\n";
+            my $pid;
+            next if $pid = fork;
+            my $command = "$run_sw_show_me $m1 $ip $iconip";
+            my $output = `$command`;
+            my $status = $?;
+            if ($status != 0) {
+                print STDERR "command failed ($status): $command\n";
+            } else {
+                print STDERR $output;
+            }
+            printf STDERR "$command\n";
+            exit
+        }
+        if(($parcnt % 2)!=0) {
+           1 while (wait() != -1);
+        }
+      }
+     }
+     send_ccbcl_status(0, $master, '$!Finished SHOWME_ALL');
+    } else {
+       print STDERR "FAILED. No master found.";
+    }
+   
+}
+# . . . . .
+
+#-----------------------------------------------------------------------------
+#`cp /tmp/ise/showme_all.out /var/log/xiotech/showme_all.log`;
+exit 0;
+
+###
+# Modelines:
+# Local Variables:
+# tab-width: 4
+# indent-tabs-mode: nil
+# End:
+# vi:sw=4 ts=4 expandtab

@@ -1,0 +1,61 @@
+#! /bin/bash
+# exp_update - Update expander firmware if needed
+
+test -f /etc/sysconfig/expparms ||
+	{ echo "No expander update requested."; exit 0; }
+
+. /etc/sysconfig/expparms
+
+for fn in /etc/xioexp*.lod; do
+	if [[ -f ${fn} && "${fn}" != "/etc/xioexp${EXP_VER}.lod" ]]; then
+		echo "Removing old expander firmware ${fn}"
+		rm ${fn}
+	fi
+done
+
+updated=0
+lastsg=
+enc=`lsscsi -g | grep " enclosu " | tee /tmp/explist | wc -l`
+echo "${enc} expander(s) found"
+exec 5</tmp/explist
+while read -u 5 scs typ ven id rev fill sg rest; do
+	if [[ "${EXP_VER}" = "${rev}" ]]; then
+		echo "Expander ${sg} firmware at version ${rev}"
+		continue;
+	fi
+	echo "Updating expander ${sg} firmware to version ${EXP_VER}"
+	if sg_fwupdate ${sg} /etc/xioexp${EXP_VER}.lod; then
+		lastsg=${sg}
+		: $((++updated))
+		echo "Update of ${sg} successful"
+	else
+		echo "Update of ${sg} failed"
+	fi
+done
+5<&-
+rm -f /tmp/explist
+
+if [[ ${updated} -eq 0 ]]; then
+	echo "No expander updated, continuing startup."
+	exit 0
+fi
+
+echo "Expander updates sent... waiting for expander restart."
+i=0
+while lsscsi -g | grep "${lastsg}" &> /dev/null; do
+	echo -ne "$((++i))   \r"
+	sleep 0.5
+done
+echo
+
+echo "Expander resetting. Waiting for all expander(s) to reappear."
+
+i=0
+until [[ "`lsscsi -g | grep ' enclosu ' | wc -l`" = "${enc}" ]]; do
+	echo -ne "$((++i))   \r"
+	sleep 0.5
+done
+echo
+echo "Expander update complete."
+
+# vi:sw=8 ts=8 noexpandtab

@@ -1,0 +1,251 @@
+diff -rubB obj-750/drivers/scsi/sas/sas_discover.c obj-750new/drivers/scsi/sas/sas_discover.c
+--- obj-750/drivers/scsi/sas/sas_discover.c	2006-06-02 13:53:55.670651145 -0500
++++ obj-750new/drivers/scsi/sas/sas_discover.c	2006-06-02 13:57:06.095434773 -0500
+@@ -27,6 +27,8 @@
+ #include <linux/scatterlist.h>
+ #include <scsi/scsi_host.h>
+ #include <scsi/scsi_eh.h>
++#include <scsi/scsi_cmnd.h>
++#include <scsi/scsi_device.h>
+ #include "sas_internal.h"
+ #include <scsi/sas/sas_task.h>
+ #include <scsi/sas/sas_discover.h>
+@@ -1290,6 +1292,36 @@
+ 	kobject_unregister(&dev->dev_obj);
+ }
+ 
++static int sas_del_io_list(struct domain_device *dev)
++{
++//    struct sas_task *task;
++//    struct list_head *ntask;
++    struct sas_ha_struct *ha = dev->port->ha;
++    unsigned long flags;
++    struct LU *lu, *n;
++    SAS_DPRINTK("%s:  ENTER \n", __FUNCTION__);
++    /*return if no ios*/
++    if (list_empty(&dev->io_list))
++        return 0;
++            
++//     list_for_each_entry_supersafe(task,ntask,&dev->io_list,dev_io_list) {
++//         SAS_DPRINTK("%s: task %p in list \n", __FUNCTION__,task);
++//     }
++    
++    list_for_each_entry_safe(lu, n, &dev->end_dev.LU_list, list) {
++        ha->lldd_abort_task_set(dev,lu->LUN);
++    }
++    
++    spin_lock_irqsave(&dev->io_list_lock,flags);
++    while (!list_empty(&dev->io_list)){
++        spin_unlock_irqrestore(&dev->io_list_lock,flags);
++        schedule();
++        spin_lock_irqsave(&dev->io_list_lock,flags);
++    }
++    spin_unlock_irqrestore(&dev->io_list_lock,flags);
++    SAS_DPRINTK("%s:  DONE \n", __FUNCTION__);
++    return 0;
++ }
+ static int sas_register_end_dev(struct domain_device *dev)
+ {
+ 	struct LU *lu;
+@@ -1298,6 +1330,7 @@
+ 	kset_register(&dev->end_dev.LU_kset);
+ 
+ 	list_for_each_entry(lu, &dev->end_dev.LU_list, list) {
++                kobject_get(&dev->dev_obj);
+ 		kobject_register(&lu->lu_obj);
+ 		sas_register_with_scsi(lu);
+ 	}
+@@ -1308,8 +1341,19 @@
+ static void sas_unregister_end_dev(struct domain_device *dev)
+ {
+ 	struct LU *lu, *n;
++        struct scsi_device *scsi_dev ;
++       
++
++        SAS_DPRINTK("%s:ENTER \n", __FUNCTION__);
++        list_for_each_entry_safe(lu, n, &dev->end_dev.LU_list, list) {
++            scsi_dev = lu->uldd_dev;
++            scsi_device_set_state(scsi_dev,SDEV_CANCEL);
++        }
++        
++        sas_del_io_list(dev);
+ 
+ 	list_for_each_entry_safe(lu, n, &dev->end_dev.LU_list, list) {
++               
+ 		sas_unregister_with_scsi(lu);
+ 		list_del_init(&lu->list);
+ 		kobject_unregister(&lu->lu_obj);
+@@ -1313,6 +1357,7 @@
+ 		sas_unregister_with_scsi(lu);
+ 		list_del_init(&lu->list);
+ 		kobject_unregister(&lu->lu_obj);
++                kobject_put(&dev->dev_obj);
+ 	}
+ 	kset_unregister(&dev->end_dev.LU_kset);
+ 	sas_unregister_common_dev(dev);
+@@ -1336,6 +1381,14 @@
+ 	if (dev->sata_dev->lu)
+ 		sas_unregister_with_scsi(dev->sata_dev->lu);
+ 	*/
++        struct scsi_device *scsi_dev ;
++        if (dev->sata_dev.lu)
++        {
++            scsi_dev = dev->sata_dev.lu->uldd_dev;
++            scsi_device_set_state(scsi_dev,SDEV_CANCEL);
++        }
++        /* do i need to poke the sata layer here*/
++        sas_del_io_list(dev);
+ 	if (dev->sata_dev.lu)
+ 		sas_unregister_with_scsi(dev->sata_dev.lu);
+ 
+Only in obj-750new/drivers/scsi/sas: sas_discover.c~
+diff -rubB obj-750/drivers/scsi/sas/sas_satl_host.c obj-750new/drivers/scsi/sas/sas_satl_host.c
+--- obj-750/drivers/scsi/sas/sas_satl_host.c	2006-06-02 13:53:55.716646746 -0500
++++ obj-750new/drivers/scsi/sas/sas_satl_host.c	2006-06-02 13:53:29.000000000 -0500
+@@ -80,9 +80,16 @@
+ {
+ 	struct task_status_struct *ts = &task->task_status;
+ 	struct scsi_cmnd *sc = task->uldd_task;
++        struct domain_device *dev = task->dev;
++        unsigned long flags;
+ 	unsigned ts_flags = task->task_state_flags;
+ 	int hs = 0, stat = 0;
+ 
++          
++        spin_lock_irqsave(&dev->io_list_lock,flags);
++        list_del_init(&task->dev_io_list);
++        spin_unlock_irqrestore(&dev->io_list_lock,flags);
++        
+ 	if (unlikely(!sc)) {
+ 		SAS_DPRINTK("task_done called with non existing SCSI cmnd!\n");
+ 		list_del_init(&task->list);
+@@ -236,6 +243,8 @@
+ 	int res = 0;
+ 	struct LU *lu = cmd->device->hostdata;
+ 	struct Scsi_Host *host = cmd->device->host;
++        struct domain_device *dev ;
++        unsigned long flags;
+ 
+ 	spin_unlock_irq(host->host_lock);
+ 	if (!lu) {
+@@ -253,6 +262,11 @@
+ 		if (!task)
+ 			goto out;
+ 
++                dev = task->dev;
++                spin_lock_irqsave(&dev->io_list_lock,flags); 
++                list_add(&task->dev_io_list,&dev->io_list);
++                spin_unlock_irqrestore(&dev->io_list_lock,flags);
++                
+ 		cmd->scsi_done = scsi_done;
+ 		/* Queue up, Direct Mode or Task Collector Mode. */
+ 		if (sas_ha->lldd_max_execute_num < 2)
+@@ -264,6 +278,9 @@
+ 		if (res) {
+ 			SAS_DPRINTK("lldd_execute_task returned: %d\n", res);
+ 			ASSIGN_SAS_TASK(cmd, NULL);
++                        spin_lock_irqsave(&dev->io_list_lock,flags);
++                        list_del_init(&task->dev_io_list);
++                        spin_unlock_irqrestore(&dev->io_list_lock,flags);
+ 			sas_free_task(task);
+ 			if (res == -SAS_QUEUE_FULL) {
+ 				cmd->result = DID_SOFT_ERROR << 16; /* retry */
+diff -rubB obj-750/drivers/scsi/sas/sas_scsi_host.c obj-750new/drivers/scsi/sas/sas_scsi_host.c
+--- obj-750/drivers/scsi/sas/sas_scsi_host.c	2006-06-02 13:53:56.357585441 -0500
++++ obj-750new/drivers/scsi/sas/sas_scsi_host.c	2006-06-02 13:53:29.000000000 -0500
+@@ -87,12 +87,20 @@
+ {
+ 	struct task_status_struct *ts = &task->task_status;
+ 	struct scsi_cmnd *sc = task->uldd_task;
++       struct domain_device *dev = task->dev;
++       unsigned long flags;
+ 	unsigned ts_flags = task->task_state_flags;
+ 	int hs = 0, stat = 0;
+ 
++        
++        spin_lock_irqsave(&dev->io_list_lock,flags);
++        list_del_init(&task->dev_io_list);
++        spin_unlock_irqrestore(&dev->io_list_lock,flags);
++        
+ 	if (unlikely(!sc)) {
+-		SAS_DPRINTK("task_done called with non existing SCSI cmnd!\n");
++            SAS_DPRINTK("task_done task (%p) called with non existing SCSI cmnd!\n",task);
+ 		list_del_init(&task->list);
++               
+ 		sas_free_task(task);
+ 		return;
+ 	}
+@@ -256,6 +264,8 @@
+ 	int res = 0;
+ 	struct LU *lu = cmd->device->hostdata;
+ 	struct Scsi_Host *host = cmd->device->host;
++        struct domain_device *dev ;
++        unsigned long flags;
+ 
+ 	spin_unlock_irq(host->host_lock);
+ 	if (!lu) {
+@@ -281,6 +291,11 @@
+ 		if (!task)
+ 			goto out;
+ 
++                dev = task->dev;
++                spin_lock_irqsave(&dev->io_list_lock,flags); 
++                list_add(&task->dev_io_list,&dev->io_list);
++                spin_unlock_irqrestore(&dev->io_list_lock,flags);
++		
+ 		/* Queue up, Direct Mode or Task Collector Mode. */
+ 		if (sas_ha->lldd_max_execute_num < 2)
+ 			res = sas_ha->lldd_execute_task(task, 1, GFP_ATOMIC);
+@@ -291,6 +306,9 @@
+ 		if (res) {
+ 			SAS_DPRINTK("lldd_execute_task returned: %d\n", res);
+ 			ASSIGN_SAS_TASK(cmd, NULL);
++                        spin_lock_irqsave(&dev->io_list_lock,flags);
++                        list_del_init(&task->dev_io_list);
++                        spin_unlock_irqrestore(&dev->io_list_lock,flags);
+ 			sas_free_task(task);
+ 			if (res == -SAS_QUEUE_FULL) {
+ 				cmd->result = DID_SOFT_ERROR << 16; /* retry */
+diff -rubB obj-750/include/scsi/sas/sas_discover.h obj-750new/include/scsi/sas/sas_discover.h
+--- obj-750/include/scsi/sas/sas_discover.h	2006-06-02 13:53:55.791639573 -0500
++++ obj-750new/include/scsi/sas/sas_discover.h	2006-06-02 13:53:29.000000000 -0500
+@@ -149,6 +149,10 @@
+ 
+ 	struct list_head dev_list_node;
+ 
++        struct list_head io_list;
++
++        spinlock_t io_list_lock;
++        
+ 	enum sas_proto    iproto;
+ 	enum sas_proto    tproto;
+ 
+@@ -197,6 +201,8 @@
+ {
+ 	INIT_LIST_HEAD(&dev->siblings);
+ 	INIT_LIST_HEAD(&dev->dev_list_node);
++        INIT_LIST_HEAD(&dev->io_list);
++        spin_lock_init(&dev->io_list_lock);
+ 	switch (dev->dev_type) {
+ 	case SAS_END_DEV:
+ 		INIT_LIST_HEAD(&dev->end_dev.LU_list);
+diff -rubB obj-750/include/scsi/sas/sas_task.h obj-750new/include/scsi/sas/sas_task.h
+--- obj-750/include/scsi/sas/sas_task.h	2006-06-02 13:53:55.840634887 -0500
++++ obj-750new/include/scsi/sas/sas_task.h	2006-06-02 13:53:29.000000000 -0500
+@@ -166,7 +166,7 @@
+ struct sas_task {
+ 	struct domain_device *dev;
+ 	struct list_head      list;
+-
++        struct list_head      dev_io_list;
+ 	spinlock_t   task_state_lock;
+ 	unsigned     task_state_flags;
+ 
+@@ -203,6 +203,7 @@
+ 	if (task) {
+ 		memset(task, 0, sizeof(*task));
+ 		INIT_LIST_HEAD(&task->list);
++                INIT_LIST_HEAD(&task->dev_io_list);
+ 		spin_lock_init(&task->task_state_lock);
+ 		task->task_state_flags = SAS_TASK_STATE_PENDING;
+ 		init_timer(&task->timer);

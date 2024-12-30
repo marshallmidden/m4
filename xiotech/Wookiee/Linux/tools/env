@@ -1,0 +1,158 @@
+#!/bin/sh
+#############################################################################
+#
+# env:		Environment support script
+#
+# Author:	Mark Rustad <Mark_Rustad@XIOtech.com>
+#
+# chkconfig: - 04 96
+# description: Environment support script
+#
+### BEGIN INIT INFO
+# Provides: env
+# Required-Start: $local_fs $remote_fs $syslog
+# Required-Stop: $localf_s $remote_fs $syslog
+# Default-Start: 2 3 5
+# Default-Stop:
+# Short-Description: Environment support script
+# Description: Environment support script
+### END INIT INFO
+#
+# Status return codes
+# 0 = no errors
+# 1 = errors
+
+#
+#############################################################################
+# for log_success_msg and friends
+if [ -r /lib/lsb/init-functions ]; then
+# LSB, SLES, ...
+    . /lib/lsb/init-functions
+elif [ -r /etc/init.d/functions ]; then
+# Red Hat / VMware
+    . /etc/init.d/functions
+    my_log_message()
+    {
+	ACTION=$1
+	shift
+	
+	case "$ACTION" in
+	success)
+		echo -n $*
+		success "$*"
+		echo
+		;;
+	failure)
+		echo -n $*
+		failure "$*"
+		echo
+		;;
+	warning)
+		echo -n $*
+		warning "$*"
+		echo
+		;;
+	*)
+		;;
+	esac
+    }
+    log_success_msg()
+    {
+	my_log_message success "$*"
+    }
+    log_failure_msg()
+    {
+	my_log_message failure "$*"
+    }
+    log_warning_msg()
+    {
+	my_log_message warning "$*"
+    }
+fi
+
+#############################################################################
+# GLOBALS
+#############################################################################
+MODULE_NAME="env"
+
+RETVAL=0
+LOCKFILE=/var/lock/subsys/env
+
+#############################################################################
+start()
+{
+	echo -n "Bind-mounting for environments: "
+	for envn in `ls /env`; do
+		env="/env/${envn}"
+		if [[ ! -d "${env}" || ! -f "${env}/env-mounts" ]]; then
+			continue
+		fi
+		echo -n " ${envn}"
+		for f in `cat ${env}/env-mounts`; do
+			umount "${env}${f}" || :
+			mount --rbind ${f} "${env}${f}" || RETVAL=1
+		done
+	done
+	if [[ ${RETVAL} -eq 0 ]]; then
+		touch ${LOCKFILE} && log_success_msg
+	else
+		if [[ $((RETVAL & 1)) -eq 1 ]]; then
+			log_failure_msg
+		else
+			touch ${LOCKFILE} && log_warning_msg
+		fi
+	fi
+}
+
+#############################################################################
+stop()
+{
+	echo -n "Unbind-mounting for environments: "
+	for envn in `ls /env`; do
+		env="/env/${envn}"
+		if [[ ! -d "${env}" || ! -f "${env}/env-mounts" ]]; then
+			continue
+		fi
+		echo -n "${envn}"
+		for f in `cat ${env}/env-mounts`; do
+			umount "${env}${f}" || :
+		done
+	done
+	rm -f ${LOCKFILE}
+	log_success_msg
+}
+
+#############################################################################
+restart()
+{
+	stop
+	RETVAL=0
+	start
+}
+
+#############################################################################
+
+status()
+{
+	RETVAL=0
+}
+
+#############################################################################
+usage ()
+{
+	echo $"Usage: $0 {start|stop|status|restart" 1>&2
+	RETVAL=1
+}
+
+#############################################################################
+# MAIN
+#############################################################################
+case "$1" in
+	start) start ;;
+	stop)  stop ;;
+	restart) restart ;;
+	status)	status ;;
+	*) usage ;;
+esac
+
+exit ${RETVAL}

@@ -1,0 +1,52 @@
+diff --git a/drivers/scsi/scsi_transport_spi.c b/drivers/scsi/scsi_transport_spi.c
+index 6f56f87..fccc62d 100644
+--- a/drivers/scsi/scsi_transport_spi.c
++++ b/drivers/scsi/scsi_transport_spi.c
+@@ -788,6 +788,7 @@ spi_dv_device_internal(struct scsi_device *sdev, u8 *buffer)
+ 	struct scsi_target *starget = sdev->sdev_target;
+ 	struct Scsi_Host *shost = sdev->host;
+ 	int len = sdev->inquiry_len;
++	int min_period = spi_min_period(starget);
+ 	/* first set us up for narrow async */
+ 	DV_SET(offset, 0);
+ 	DV_SET(width, 0);
+@@ -810,6 +811,11 @@ spi_dv_device_internal(struct scsi_device *sdev, u8 *buffer)
+ 		    != SPI_COMPARE_SUCCESS) {
+ 			starget_printk(KERN_ERR, starget, "Wide Transfers Fail\n");
+ 			i->f->set_width(starget, 0);
++			/* Make sure we don't force wide back on by asking
++			 * for a transfer period that requires it */
++			spi_max_width(starget) = 0;
++			if (min_period < 10)
++				min_period = 10;
+ 		}
+ 	}
+
+@@ -829,7 +835,8 @@ spi_dv_device_internal(struct scsi_device *sdev, u8 *buffer)
+
+ 	/* now set up to the maximum */
+ 	DV_SET(offset, spi_max_offset(starget));
+-	DV_SET(period, spi_min_period(starget));
++	DV_SET(period, min_period);
++
+ 	/* try QAS requests; this should be harmless to set if the
+ 	 * target supports it */
+ 	if (scsi_device_qas(sdev)) {
+@@ -838,14 +845,14 @@ spi_dv_device_internal(struct scsi_device *sdev, u8 *buffer)
+ 		DV_SET(qas, 0);
+ 	}
+
+-	if (scsi_device_ius(sdev) && spi_min_period(starget) < 9) {
++	if (scsi_device_ius(sdev) && min_period < 9) {
+ 		/* This u320 (or u640). Set IU transfers */
+ 		DV_SET(iu, 1);
+ 		/* Then set the optional parameters */
+ 		DV_SET(rd_strm, 1);
+ 		DV_SET(wr_flow, 1);
+ 		DV_SET(rti, 1);
+-		if (spi_min_period(starget) == 8)
++		if (min_period == 8)
+ 			DV_SET(pcomp_en, 1);
+ 	} else {
+ 		DV_SET(iu, 0);
+

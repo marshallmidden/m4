@@ -1,0 +1,304 @@
+diff -rup old/drivers/scsi/iscsi_tcp.c new/drivers/scsi/iscsi_tcp.c
+--- old/drivers/scsi/iscsi_tcp.c	2006-06-05 15:24:31.534154987 -0500
++++ new/drivers/scsi/iscsi_tcp.c	2006-06-05 15:40:27.481450282 -0500
+@@ -79,16 +79,7 @@ MODULE_VERSION("0:4.445");
+ static unsigned int iscsi_max_lun = 512;
+ module_param_named(max_lun, iscsi_max_lun, uint, S_IRUGO);
+ 
+-/* global data */
+-static kmem_cache_t *taskcache;
+-
+-static inline void
+-iscsi_buf_init_virt(struct iscsi_buf *ibuf, char *vbuf, int size)
+-{
+-	sg_init_one(&ibuf->sg, (u8 *)vbuf, size);
+-	ibuf->sent = 0;
+-	ibuf->use_sendmsg = 0;
+-}
++#define iscsi_buf_init_virt iscsi_buf_init_iov
+ 
+ static inline void
+ iscsi_buf_init_iov(struct iscsi_buf *ibuf, char *vbuf, int size)
+@@ -241,14 +232,6 @@ iscsi_ctask_cleanup(struct iscsi_conn *c
+ 		spin_unlock(&session->lock);
+ 		return;
+ 	}
+-	if (sc->sc_data_direction == DMA_TO_DEVICE) {
+-		struct iscsi_data_task *dtask, *n;
+-		/* WRITE: cleanup Data-Out's if any */
+-		list_for_each_entry_safe(dtask, n, &ctask->dataqueue, item) {
+-			list_del(&dtask->item);
+-			mempool_free(dtask, ctask->datapool);
+-		}
+-	}
+ 	ctask->xmstate = XMSTATE_IDLE;
+ 	ctask->r2t = NULL;
+ 	ctask->sc = NULL;
+@@ -390,12 +373,9 @@ iscsi_solicit_data_init(struct iscsi_con
+ 			struct iscsi_r2t_info *r2t)
+ {
+ 	struct iscsi_data *hdr;
+-	struct iscsi_data_task *dtask;
+ 	struct scsi_cmnd *sc = ctask->sc;
+ 
+-	dtask = mempool_alloc(ctask->datapool, GFP_ATOMIC);
+-	BUG_ON(!dtask);
+-	hdr = &dtask->hdr;
++	hdr = &r2t->dtask.hdr;
+ 	memset(hdr, 0, sizeof(struct iscsi_data));
+ 	hdr->ttt = r2t->ttt;
+ 	hdr->datasn = cpu_to_be32(r2t->solicit_datasn);
+@@ -421,8 +401,6 @@ iscsi_solicit_data_init(struct iscsi_con
+ 	iscsi_buf_init_virt(&r2t->headbuf, (char*)hdr,
+ 			   sizeof(struct iscsi_hdr));
+ 
+-	r2t->dtask = dtask;
+-
+ 	if (sc->use_sg) {
+ 		int i, sg_count = 0;
+ 		struct scatterlist *sg = sc->request_buffer;
+@@ -454,8 +432,6 @@ iscsi_solicit_data_init(struct iscsi_con
+ 		iscsi_buf_init_iov(&ctask->sendbuf,
+ 			    (char*)sc->request_buffer + r2t->data_offset,
+ 			    r2t->data_count);
+-
+-	list_add(&dtask->item, &ctask->dataqueue);
+ }
+ 
+ /**
+@@ -1162,8 +1138,6 @@ more:
+ 		rc = iscsi_data_recv(conn);
+ 		if (rc) {
+ 			if (rc == -EAGAIN) {
+-				rd_desc->count = conn->in.datalen -
+-						conn->in.ctask->data_count;
+ 				goto again;
+ 			}
+ 			iscsi_conn_failure(conn, rc);
+@@ -1222,7 +1196,7 @@ iscsi_tcp_data_ready(struct sock *sk, in
+ 
+ 	/* use rd_desc to pass 'conn' to iscsi_tcp_data_recv */
+ 	rd_desc.arg.data = conn;
+-	rd_desc.count = 0;
++	rd_desc.count = 1;
+ 	tcp_read_sock(sk, &rd_desc, iscsi_tcp_data_recv);
+ 
+ 	read_unlock(&sk->sk_callback_lock);
+@@ -1355,11 +1329,10 @@ iscsi_sendhdr(struct iscsi_conn *conn, s
+ 		if (size != res)
+ 			return -EAGAIN;
+ 		return 0;
+-	} else if (res == -EAGAIN) {
++	} else {
+ 		conn->sendpage_failures_cnt++;
+-		set_bit(SUSPEND_BIT, &conn->suspend_tx);
+-	} else if (res == -EPIPE)
+ 		iscsi_conn_failure(conn, ISCSI_ERR_CONN_FAILED);
++	}
+ 
+ 	return res;
+ }
+@@ -1399,11 +1372,10 @@ iscsi_sendpage(struct iscsi_conn *conn, 
+ 		if (size != res)
+ 			return -EAGAIN;
+ 		return 0;
+-	} else if (res == -EAGAIN) {
++	} else {
+ 		conn->sendpage_failures_cnt++;
+-		set_bit(SUSPEND_BIT, &conn->suspend_tx);
+-	} else if (res == -EPIPE)
+ 		iscsi_conn_failure(conn, ISCSI_ERR_CONN_FAILED);
++	}
+ 
+ 	return res;
+ }
+@@ -1454,13 +1426,10 @@ iscsi_solicit_data_cont(struct iscsi_con
+ 			struct iscsi_r2t_info *r2t, int left)
+ {
+ 	struct iscsi_data *hdr;
+-	struct iscsi_data_task *dtask;
+ 	struct scsi_cmnd *sc = ctask->sc;
+ 	int new_offset;
+ 
+-	dtask = mempool_alloc(ctask->datapool, GFP_ATOMIC);
+-	BUG_ON(!dtask);
+-	hdr = &dtask->hdr;
++	hdr = &r2t->dtask.hdr;
+ 	memset(hdr, 0, sizeof(struct iscsi_data));
+ 	hdr->ttt = r2t->ttt;
+ 	hdr->datasn = cpu_to_be32(r2t->solicit_datasn);
+@@ -1484,8 +1453,6 @@ iscsi_solicit_data_cont(struct iscsi_con
+ 	iscsi_buf_init_virt(&r2t->headbuf, (char*)hdr,
+ 			   sizeof(struct iscsi_hdr));
+ 
+-	r2t->dtask = dtask;
+-
+ 	if (sc->use_sg && !iscsi_buf_left(&r2t->sendbuf)) {
+ 		BUG_ON(ctask->bad_sg == r2t->sg);
+ 		iscsi_buf_init_sg(&r2t->sendbuf, r2t->sg);
+@@ -1494,8 +1461,6 @@ iscsi_solicit_data_cont(struct iscsi_con
+ 		iscsi_buf_init_iov(&ctask->sendbuf,
+ 			    (char*)sc->request_buffer + new_offset,
+ 			    r2t->data_count);
+-
+-	list_add(&dtask->item, &ctask->dataqueue);
+ }
+ 
+ static void
+@@ -1504,8 +1469,7 @@ iscsi_unsolicit_data_init(struct iscsi_c
+ 	struct iscsi_data *hdr;
+ 	struct iscsi_data_task *dtask;
+ 
+-	dtask = mempool_alloc(ctask->datapool, GFP_ATOMIC);
+-	BUG_ON(!dtask);
++	dtask = ctask->dtask = &ctask->unsol_dtask;
+ 	hdr = &dtask->hdr;
+ 	memset(hdr, 0, sizeof(struct iscsi_data));
+ 	hdr->ttt = cpu_to_be32(ISCSI_RESERVED_TAG);
+@@ -1530,10 +1494,6 @@ iscsi_unsolicit_data_init(struct iscsi_c
+ 
+ 	iscsi_buf_init_virt(&ctask->headbuf, (char*)hdr,
+ 			   sizeof(struct iscsi_hdr));
+-
+-	list_add(&dtask->item, &ctask->dataqueue);
+-
+-	ctask->dtask = dtask;
+ }
+ 
+ /**
+@@ -1913,7 +1873,7 @@ handle_xmstate_sol_data(struct iscsi_con
+ {
+ 	struct iscsi_session *session = conn->session;
+ 	struct iscsi_r2t_info *r2t = ctask->r2t;
+-	struct iscsi_data_task *dtask = r2t->dtask;
++	struct iscsi_data_task *dtask = &r2t->dtask;
+ 	int left;
+ 
+ 	ctask->xmstate &= ~XMSTATE_SOL_DATA;
+@@ -2120,7 +2080,7 @@ solicit_head_again:
+ 		r2t = ctask->r2t;
+ 		if (conn->hdrdgst_en)
+ 			iscsi_hdr_digest(conn, &r2t->headbuf,
+-					(u8*)r2t->dtask->hdrext);
++					(u8*)r2t->dtask.hdrext);
+ 		if (iscsi_sendhdr(conn, &r2t->headbuf, r2t->data_count)) {
+ 			ctask->xmstate &= ~XMSTATE_SOL_DATA;
+ 			ctask->xmstate |= XMSTATE_SOL_HDR;
+@@ -3194,27 +3154,12 @@ iscsi_r2tpool_alloc(struct iscsi_session
+ 			iscsi_pool_free(&ctask->r2tpool, (void**)ctask->r2ts);
+ 			goto r2t_alloc_fail;
+ 		}
+-
+-		/*
+-		 * number of
+-		 * Data-Out PDU's within R2T-sequence can be quite big;
+-		 * using mempool
+-		 */
+-		ctask->datapool = mempool_create(ISCSI_DTASK_DEFAULT_MAX,
+-			 mempool_alloc_slab, mempool_free_slab, taskcache);
+-		if (ctask->datapool == NULL) {
+-			kfifo_free(ctask->r2tqueue);
+-			iscsi_pool_free(&ctask->r2tpool, (void**)ctask->r2ts);
+-			goto r2t_alloc_fail;
+-		}
+-		INIT_LIST_HEAD(&ctask->dataqueue);
+ 	}
+ 
+ 	return 0;
+ 
+ r2t_alloc_fail:
+ 	for (i = 0; i < cmd_i; i++) {
+-		mempool_destroy(session->cmds[i]->datapool);
+ 		kfifo_free(session->cmds[i]->r2tqueue);
+ 		iscsi_pool_free(&session->cmds[i]->r2tpool,
+ 				(void**)session->cmds[i]->r2ts);
+@@ -3228,7 +3173,6 @@ iscsi_r2tpool_free(struct iscsi_session 
+ 	int i;
+ 
+ 	for (i = 0; i < session->cmds_max; i++) {
+-		mempool_destroy(session->cmds[i]->datapool);
+ 		kfifo_free(session->cmds[i]->r2tqueue);
+ 		iscsi_pool_free(&session->cmds[i]->r2tpool,
+ 				(void**)session->cmds[i]->r2ts);
+@@ -3331,15 +3275,6 @@ iscsi_session_destroy(struct iscsi_cls_s
+ 	struct Scsi_Host *shost = iscsi_session_to_shost(cls_session);
+ 	struct iscsi_session *session = iscsi_hostdata(shost->hostdata);
+ 	int cmd_i;
+-	struct iscsi_data_task *dtask, *n;
+-
+-	for (cmd_i = 0; cmd_i < session->cmds_max; cmd_i++) {
+-		struct iscsi_cmd_task *ctask = session->cmds[cmd_i];
+-		list_for_each_entry_safe(dtask, n, &ctask->dataqueue, item) {
+-			list_del(&dtask->item);
+-			mempool_free(dtask, ctask->datapool);
+-		}
+-	}
+ 
+ 	for (cmd_i = 0; cmd_i < session->mgmtpool_max; cmd_i++)
+ 		kfree(session->mgmt_cmds[cmd_i]->data);
+@@ -3637,14 +3572,8 @@ iscsi_tcp_init(void)
+ 	}
+ 	iscsi_tcp_transport.max_lun = iscsi_max_lun;
+ 
+-	taskcache = kmem_cache_create("iscsi_taskcache",
+-			sizeof(struct iscsi_data_task), 0,
+-			SLAB_HWCACHE_ALIGN | SLAB_NO_REAP, NULL, NULL);
+-	if (!taskcache)
+-		return -ENOMEM;
+-
+ 	if (!iscsi_register_transport(&iscsi_tcp_transport))
+-		kmem_cache_destroy(taskcache);
++		return -ENODEV;
+ 
+ 	return 0;
+ }
+@@ -3653,7 +3582,6 @@ static void __exit
+ iscsi_tcp_exit(void)
+ {
+ 	iscsi_unregister_transport(&iscsi_tcp_transport);
+-	kmem_cache_destroy(taskcache);
+ }
+ 
+ module_init(iscsi_tcp_init);
+diff -rup old/drivers/scsi/iscsi_tcp.h new/drivers/scsi/iscsi_tcp.h
+--- old/drivers/scsi/iscsi_tcp.h	2006-06-05 15:24:31.576150969 -0500
++++ new/drivers/scsi/iscsi_tcp.h	2006-06-05 15:25:43.040313291 -0500
+@@ -251,11 +251,9 @@ struct iscsi_buf {
+ struct iscsi_data_task {
+ 	struct iscsi_data	hdr;			/* PDU */
+ 	char			hdrext[sizeof(__u32)];	/* Header-Digest */
+-	struct list_head	item;			/* data queue item */
+ 	struct iscsi_buf	digestbuf;		/* digest buffer */
+ 	uint32_t		digest;			/* data digest */
+ };
+-#define ISCSI_DTASK_DEFAULT_MAX	ISCSI_SG_TABLESIZE * PAGE_SIZE / 512
+ 
+ struct iscsi_mgmt_task {
+ 	struct iscsi_hdr	hdr;		/* mgmt. PDU */
+@@ -280,7 +278,7 @@ struct iscsi_r2t_info {
+ 	int			data_count;	/* DATA-Out payload progress */
+ 	struct scatterlist	*sg;		/* per-R2T SG list */
+ 	int			solicit_datasn;
+-	struct iscsi_data_task   *dtask;        /* which data task */
++	struct iscsi_data_task  dtask;          /* which data task */
+ };
+ 
+ struct iscsi_cmd_task {
+@@ -314,14 +312,13 @@ struct iscsi_cmd_task {
+ 	struct iscsi_queue	r2tpool;
+ 	struct kfifo		*r2tqueue;
+ 	struct iscsi_r2t_info	**r2ts;
+-	struct list_head	dataqueue;		/* Data-Out dataqueue */
+-	mempool_t		*datapool;
+ 	uint32_t		datadigest;		/* for recover digest */
+ 	int			digest_count;
+ 	uint32_t		immdigest;		/* for imm data */
+ 	struct iscsi_buf	immbuf;			/* for imm data digest */
+-	struct iscsi_data_task   *dtask;		/* data task in progress*/
+-	int			digest_offset;		/* for partial buff digest */
++	struct iscsi_data_task	*dtask;		        /* data task in progress*/
++	struct iscsi_data_task	unsol_dtask;	        /* unsol data task */
++	int			digest_offset;	        /* for partial buff digest */
+ };
+ 
+ #endif /* ISCSI_H */

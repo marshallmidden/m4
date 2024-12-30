@@ -1,0 +1,211 @@
+.\" $Id: xio3d.4 4298 2005-05-04 18:53:47Z RysavyR $
+.\" Copyright 2004 Xiotech Corporation. All rights reserved.
+.\" Mark D. Rustad <Mark_Rustad@Xiotech.com>
+.\"
+.TH XIO3D 4 2004-04-26 "Xiotech" "Magnitude 3D Programming"
+.SH NAME
+xio3d \- kernel support module for Xiotech 3D systems
+.SH SYNOPSIS
+.sp
+.BR "#include <xio3d.h>" 
+.sp
+.BI "int ioctl(int " fd ", int " cmd ", ...);" 
+.br
+.BI "ssize_t read(int " fd ", void *" buf ", size_t " count ");" 
+.sp
+.SH DESCRIPTION
+The \fIioctl()\fR
+call for the xio3d module performs a number of functions.
+All require a third argument, of varying type, here called \fIargp\fP
+or \fIarg\fP.
+.sp
+The \fIread()\fR call for the xio3d module is used to block waiting for
+events and to be notified of which enabled events have occurred. These can
+be either inter-process events or interrupt-generated events.
+.sp
+The \fImmap()\fR call for the xio3d module is used to map access to the
+shared memory segments reserved by the module for the Xiotech application
+processes. See the \fBmmap\fR(2) man page. The configuration of the shared
+memory regions is returned by the \fBXIO3D_GETINF\fR ioctl.
+.LP
+
+.SS "Get Information ioctls"
+.TP
+.BI "XIO3D_GETINF	struct xio3d_drvinfo *" argp
+Fills in the \fBxio3d_drvinfo \fRstructure, providing version information
+and shared memory region information.
+.LP
+The structures used by this ioctl are defined in \fIxio3d.h\fR as
+
+.nf
+struct xio3d_mem_regions {
+    unsigned long   offset; /* Offset in "file" to request */
+    unsigned long   size;   /* Size of region */
+    unsigned long   phys;   /* Physical address for DMA */
+};
+
+struct xio3d_drvinfo {
+    unsigned long   id; /* Holds ID for validation/version check */
+    struct xio3d_mem_regions    mem_regions[XIO3D_NSHM_MAX];
+};
+.fi
+
+.SS "Event Operation ioctls"
+.TP
+.BI "XIO3D_REGINT	int *" argp
+Registers to receive notification of the interrupt number pointed to by
+\fBargp\fR. When successful, the value is replaced by the event number
+used to represent this interrupt. The event number is a small integer,
+starting at zero, assigned by the module for this process.
+.TP
+.BI "XIO3D_MASKEVT	unsigned int *" argp
+This ioctl passes a mask used to control the delivery of events. When
+bit \fI(1 << n)\fR is set, event \fIn\fR is allowed to be delivered. The
+event mask in effect at the time of the call is returned in the same unsigned
+int that passed in the new mask.
+.TP
+.BI "XIO3D_REGEVT	int " arg
+Register to receive event number passed in \fIarg\fR.
+.TP
+.BI "XIO3D_SENDEVT	int " arg
+Sends an event to the process registered to receive it. The event
+number is passed in \fIarg\fR.
+
+.SS "Receiving Events"
+.LP
+The \fIread()\fR call is used to receive events. If one or more unmasked
+events are pending when the read is issued, a mask of the unmasked pending
+events is returned. If no unmasked events are pending, the \fIread()\fR will
+block until an unmasked event is issued.
+.sp
+The \fIread()\fR returns an unsigned int which is a mask of unmasked events
+that have been received. It is the caller's responsibility to process each of
+the indicated events. There is no acknowledgement protocol to indicate the
+processing of events back to the module.
+.sp
+Be aware that within the module, interrupts may be disabled and enabled as
+notification of the corresponding events are delivered to the application. This is necessary to allow the interrupt handler within the kernel to be able to
+exit at all. These operations should be transparent to the application.
+
+.SH "RETURN VALUE"
+The \fIioctl()\fR system call returns 0 on success. On error it returns \-1
+and sets \fIerrno\fR appropriately.
+
+.SH ERRORS
+.TP
+.B EINVAL
+Invalid command parameter.
+.TP
+.B ENOMEM
+Kernel out of memory.
+.TP
+.B EADDRINUSE
+Event previously registered.
+.TP
+.B EHOSTUNREACH
+Event has no recipient registered.
+.TP
+.B ENXIO
+Unsupported operation.
+
+.SH EXAMPLE
+Get shared memory information, map shared memory, register for events and wait
+for an event.
+
+.nf
+#include <unistd.h>
+#include <stdio.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <sys/mman.h>
+#include <sys/ioctl.h>
+#include <linux/pci.h>
+#include <linux/ioport.h>
+
+#include "xio3d.h"
+
+#define DEVFILE "/dev/xio3d0"
+
+struct xio3d_drvinfo    xio3d_drvinfo;
+unsigned long   *mr[XIO3D_NSHM_MAX];
+
+main() {
+    int xiofd, i, err;
+    unsigned int    events;
+
+    fd = open(DEVFILE, O_RDWR);
+    ioctl(xiofd, XIO3D_GETINF, &xio3d_drvinfo); /* Get info */
+
+    /* Print id info. */
+
+    printf(".id=%08lX\\n", xio3d_drvinfo.id);
+
+    /* Print shared memory region info. */
+
+    for (i = 0; i < XIO3D_NSHM_MAX; ++i)
+    {
+        if (xio3d_drvinfo.mem_regions[i].offset == 0)
+        {
+            continue;
+        }
+        printf(".mem_regions[%d].offset=%08lX\\n", i,
+            xio3d_drvinfo.mem_regions[i].offset);
+        printf(".mem_regions[%d].size=%08lX\\n", i,
+            xio3d_drvinfo.mem_regions[i].size);
+        printf(".mem_regions[%d].phys=%08lX\\n", i,
+            xio3d_drvinfo.mem_regions[i].phys);
+    }
+
+    /* Map shared memory regions into 0x<n>0000000 */
+
+    for (i = 0; i < XIO3D_NSHM_MAX; ++i)
+    {
+        if (xio3d_drvinfo.mem_regions[i].offset)
+        {
+            void    *mem;
+
+            mem = mmap((void *)((i + 1) << 28),
+                xio3d_drvinfo.mem_regions[i].size,
+                PROT_READ | PROT_WRITE, MAP_SHARED | MAP_LOCKED, xiofd,
+                xio3d_drvinfo.mem_regions[i].offset);
+
+            if (mem == MAP_FAILED)
+            {
+                fprintf(stderr, "mmap failed with %d\\n", errno);
+                perror("mmap failed");
+                return errno;
+            }
+
+            mr[i] = mem;
+            printf("mr[%d]=%p, .offset=%08lX\\n", i, mem,
+                xio3d_drvinfo.mem_regions[i].offset);
+            dumpsome(mem, 128);
+        }
+    }
+
+    /* Register for events */
+
+    ioctl(xiofd, XIO3D_REGEVT, XIO3D_EVT_BASE + 0);
+    ioctl(xiofd, XIO3D_REGEVT, XIO3D_EVT_BASE + 1);
+
+    /* Send an event (to myself) */
+
+    ioctl(xiofd, XIO3D_SENDEVT, XIO3D_EVT_BASE);
+
+    /* Wait for event */
+
+    read(xiofd, &events, sizeof events);
+    printf("Received events=%08x\\n", events);
+
+    close(xiofd);
+}
+.fi
+
+.SH "SEE ALSO"
+.BR ioctl (2),
+.BR mmap (2),
+.BR read (2),
+.BR xio3d.h
+

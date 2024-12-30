@@ -1,0 +1,286 @@
+#!/usr/bin/perl -w
+#====================================================================
+#
+# FILE NAME:    chgnetcfg
+#
+# AUTHOR:       Randy Rysavy
+#
+# DATE:         5/7/04
+#
+# DESCRIPTION:  Modifies a network configuration script and optionally
+#               restarts the network devices.
+#
+# RETURNS:      0 on success, > 0 on error
+#
+#====================================================================
+
+use strict;
+use	Getopt::Std;
+use Socket;
+
+#
+# Get the command line args
+#
+our ($opt_r, $opt_v);
+getopts('rv');
+
+#
+# Print usage if not sufficient parameters
+#
+my $script;
+
+($script = $0) =~ s/^.*\\//;
+if (@ARGV != 5) 
+{ 
+    print STDERR "\nUsage: $script [-r] [-v] ip-address subnet-mask gateway-address ".
+          "ifcfg-file routes-file\n\n".
+    " -r                 : restart the ifc after modifying the cfg files'\n".
+    " -v                 : verbose mode\n".
+    " ip-address         : new ip address\n".
+    " subnet-mask        : new subnet mask\n".
+    " gateway-address    : new gateway address\n".
+    " ifcfg-file         : the interface config file to modify (IP addr/Subnet mask)\n".
+    " routes-file        : the routes config file to modify (Gateway addr)\n";
+
+    exit 2;
+}
+
+my ($ip, $sn, $gw, $ifcfg, $routes) = @ARGV;
+my $delRtBak = 0;   # Flag to indicate that the routes file did not exist when
+                    # we entered this script so a dummy file was created. It
+                    # then turns into the backup - it should be deleted.
+
+print "Checking input parameters...\n\n" if $opt_v;
+
+if (! -w "$ifcfg")
+{
+    print STDERR "$ifcfg does not exist or is not writable\n";
+    exit 3;
+}
+
+if (! -e "$routes")
+{
+    open(R, ">$routes"); # don't check for errors (catch it below)
+    print R "default\n"; # only need the keyword
+    close R;
+    chmod 0644, $routes;
+
+    $delRtBak = 1;
+}
+
+if (! -w "$routes")
+{
+    print STDERR "$routes does not exist or is not writable\n";
+    exit 4;
+}
+
+my $iface = $ifcfg;
+$iface =~ s/.*-//g;
+print "iface $iface\n";
+
+#
+# IP addresses OK?
+#
+my $ipNum = unpack "N", inet_aton($ip); 
+my $snNum = unpack "N", inet_aton($sn); 
+my $gwNum = unpack "N", inet_aton($gw); 
+my $nwNum = $ipNum & $snNum;
+my $bcNum = $nwNum | ~($snNum);
+my $nw = inet_ntoa(pack "N", $nwNum);
+my $bc = inet_ntoa(pack "N", $bcNum);
+
+if (!ValidAddr($ip) or $ipNum == 0)
+{
+    print STDERR " IP Address $ip invalid\n";
+    exit 5;
+}
+
+if (!ValidAddr($sn) or $snNum == 0)
+{
+    print STDERR " Subnet Mask $sn invalid\n";
+    exit 6;
+}
+
+if (!ValidAddr($gw)) # "0.0.0.0" is allowed
+{
+    print STDERR " Gateway Address $gw invalid\n";
+    exit 7;
+}
+
+if ($gwNum && (($gwNum & $snNum) != ($ipNum & $snNum)))
+{
+    print STDERR "IP Addr / Gateway Addr / Subnet Mask incompatible\n\n";
+    exit 8;
+}
+
+if (ModifyFile($ifcfg, "IFCFG"))
+{
+    print STDERR " Failed to modify $ifcfg\n";
+    exit 9;
+}
+
+if (ModifyFile($routes, "ROUTES"))
+{
+    print STDERR " Failed to modify $routes\n";
+    exit 10;
+}
+
+#
+# This call will return 0 on success, 1 on failure.
+#
+if ($opt_r)
+{
+    print "Clearing iface $iface...\n" if $opt_v;
+    system "ip -f inet addr del dev $iface";
+    print "exec'ing to restart the network...\n" if $opt_v;
+    exec "/etc/init.d/network restart";
+}
+
+exit 0;
+
+#
+# Validate the specified ip address
+#
+sub ValidAddr
+{
+    my ($addr) = @_;
+    my @parts = split /\./, $addr;
+
+    if (@parts == 4 and
+        $parts[0] <= 255 and 
+        $parts[1] <= 255 and 
+        $parts[2] <= 255 and 
+        $parts[3] <= 255)
+    {
+        return 1;
+    }
+    else
+    {
+        return 0;
+    }
+}
+
+#
+# Construct the backup file name
+#
+sub OldFile
+{
+    my ($fIn) = @_; 
+    my $fOut;
+
+    $fIn =~ s/\\/\//g; 
+
+    if ($fIn =~ /\//)
+    {
+        $fIn =~ m/^.*\//;
+        $fOut = "$&"."~"."$'";
+    }
+    else
+    {
+        $fOut = "~"."$fIn";
+    }
+
+    return $fOut;
+}
+
+#
+# Modify the fields in the config file
+#
+sub ModifyFile
+{
+    my ($file, $type) = @_;
+    my $oldf = OldFile($file);
+    my $unique = "";
+    my $nm_name = "";
+
+    print "Modifying: $file\n" if $opt_v;
+
+    print "Creating backup file: $file -> $oldf\n" if $opt_v;
+
+    #
+    # Rename the file we will modify to a backup name.
+    #
+    if (!rename("$file", "$oldf"))
+    {
+        print STDERR "Can't rename $file to $oldf\n";
+        return 1; # error!
+    }
+
+    # Open the original file for read
+    #
+    if (!open(OLD, "$oldf"))
+    {
+        # Fix up the original file
+        rename("$oldf", "$file");
+        
+        print STDERR "Can't open $oldf for read\n";
+        return 2;
+    }
+
+    #
+    # Open a new file by the old name
+    #
+    if (!open(NEW, ">$file"))
+    {
+        # Fix up the original file
+        rename("$oldf", "$file");
+        
+        print STDERR "Can't open $file for write\n";
+        return 3;
+    }
+
+    #
+    # Work through the file
+    
+    if ($type =~ /IFCFG/)
+    {
+        print "  BOOTPROTO='static'\n" if $opt_v;
+        print NEW "BOOTPROTO='static'\n";
+
+        print "  BROADCAST='$bc'\n" if $opt_v;
+        print NEW "BROADCAST='$bc'\n";
+
+        print "  IPADDR='$ip'\n" if $opt_v;
+        print NEW "IPADDR='$ip'\n";
+
+        print "  MTU=''\n" if $opt_v;
+        print NEW "MTU=''\n";
+
+        print "  NETMASK='$sn'\n" if $opt_v;
+        print NEW "NETMASK='$sn'\n";
+
+        print "  NETWORK='$nw'\n" if $opt_v;
+        print NEW "NETWORK='$nw'\n";
+
+        print "  REMOTE_IPADDR=''\n" if $opt_v;
+        print NEW "REMOTE_IPADDR=''\n";
+
+        print "  STARTMODE='onboot'\n" if $opt_v;
+        print NEW "STARTMODE='onboot'\n";
+    }
+    else # type =~ /ROUTES/
+    {
+        while(<OLD>)
+        {
+            if (/^default/)
+            {
+                print "  default $gw - -\n" if $opt_v;
+                print NEW "default $gw - -\n";
+                next;
+            }
+        }
+
+        if ($delRtBak)
+        {
+            print "Unlinking: $oldf\n" if $opt_v;
+            unlink($oldf);
+        }
+    }
+    
+    close OLD;
+    close NEW;
+
+    print "Done: $file\n\n" if $opt_v;
+    return 0;
+}
+

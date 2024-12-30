@@ -1,0 +1,203 @@
+diff -u -r a/drivers/scsi/sas/sas_discover.c b/drivers/scsi/sas/sas_discover.c
+--- a/drivers/scsi/sas/sas_discover.c	2006-10-20 09:26:12.376179354 -0500
++++ b/drivers/scsi/sas/sas_discover.c	2006-10-19 17:40:56.000000000 -0500
+@@ -471,7 +471,7 @@
+  * @pci_dma_dir: PCI_DMA_...
+  */
+ static int sas_execute_task(struct sas_task *task, void *buffer, int size,
+-			    int pci_dma_dir)
++			    int pci_dma_dir, int retry_count)
+ {
+ 	int res = -ENOMEM;
+ 	struct scatterlist *scatter = NULL;
+@@ -497,7 +497,7 @@
+ 	task->task_done = sas_disc_task_done;
+ 
+ 
+-	for (retries = 0; retries < 5; retries++) {
++	for (retries = 0; retries < retry_count; retries++) {
+ 		task->task_state_flags = SAS_TASK_STATE_PENDING;
+ 		init_completion(&task->completion);
+ 
+@@ -541,7 +541,8 @@
+                 else
+                     task->task_status.abort_reason = SAS_TASK_TIMED_OUT;
+ 
+-                ssleep(5);
++                if ((retries+1) < retry_count)
++                    ssleep(5);
+                 continue;
+             }
+ 			if (!(task->task_state_flags & SAS_TASK_STATE_DONE)) {
+@@ -562,7 +563,8 @@
+             if (task->dev->dev_type == SATA_DEV ) {
+                 sas_queue_device_work(task->dev, 
+                         (SAS_DWT_OPTION_RESET_DEV));
+-                ssleep(5);
++                if ((retries+1) < retry_count)
++                    ssleep(5);
+                 continue;
+             }
+             goto ex_err;
+@@ -783,7 +785,7 @@
+     task->ata_task.stp_affil_pol = 1;
+     task->ata_task.set_affil_pol = 1;
+ 
+-	res = sas_execute_task(task, buffer, size, pci_dma_dir);
++	res = sas_execute_task(task, buffer, size, pci_dma_dir, 5);
+ 
+ 	sas_free_task(task);
+ out:
+@@ -827,7 +829,7 @@
+     task->ata_task.stp_affil_pol = 1;
+     task->ata_task.set_affil_pol = 1;
+ 
+-	res = sas_execute_task(task, log10, 512, PCI_DMA_FROMDEVICE);
++	res = sas_execute_task(task, log10, 512, PCI_DMA_FROMDEVICE, 1);
+ 
+     *tag = *tag = log10[0] & 0x1f;
+ 
+@@ -1001,7 +1003,7 @@
+ 		task->ssp_task.cdb[4] = buffer_size;
+ 
+ 		res = sas_execute_task(task, buffer, buffer_size,
+-				       PCI_DMA_FROMDEVICE);
++				       PCI_DMA_FROMDEVICE, 1);
+ 		if (!res)
+ 			break;
+ 		else {
+@@ -1019,7 +1021,7 @@
+ 		task->ssp_task.cdb[8] = buffer_size;
+ 
+ 		res = sas_execute_task(task, buffer, buffer_size,
+-				       PCI_DMA_FROMDEVICE);
++				       PCI_DMA_FROMDEVICE, 1);
+ 		if (res) {
+ 			SAS_DPRINTK("task to device %llx returned stat 0x%x "
+ 				    "for MODE SENSE 10\n",
+@@ -1114,14 +1116,14 @@
+ 	memcpy(task->ssp_task.cdb, report_luns, 16);
+ 	*(__be32 *)(&task->ssp_task.cdb[6]) = cpu_to_be32(buffer_size);
+ 
+-	res = sas_execute_task(task, buf, buffer_size, PCI_DMA_FROMDEVICE);
++	res = sas_execute_task(task, buf, buffer_size, PCI_DMA_FROMDEVICE, 1);
+ 	if (res) {
+ 		SAS_DPRINTK("REPORT LUNS to LUN0 failed for device %llx "
+ 			    "with status:0x%x\n",
+ 			    SAS_ADDR(dev->sas_addr), task->task_status.stat);
+ 		memcpy(task->ssp_task.LUN, RL_WLUN, 8);
+ 		res = sas_execute_task(task, buf, buffer_size,
+-				       PCI_DMA_FROMDEVICE);
++				       PCI_DMA_FROMDEVICE, 1);
+ 		if (res) {
+ 			SAS_DPRINTK("REPORT LUNS to REPORT LUNS W-LUN failed "
+ 				    "for device %llx with status:0x%x\n",
+@@ -1147,7 +1149,7 @@
+ 		else
+ 			memset(task->ssp_task.LUN, 0, 8);
+ 		res = sas_execute_task(task, buf, buffer_size,
+-				       PCI_DMA_FROMDEVICE);
++				       PCI_DMA_FROMDEVICE, 1);
+ 		if (res) {
+ 			SAS_DPRINTK("2nd REPORT LUNS to %s failed "
+ 				    "for device %llx with status:0x%x\n",
+@@ -1189,7 +1191,7 @@
+ 	*(__be16 *)(task->ssp_task.cdb+3) = cpu_to_be16(SAS_INQUIRY_DATA_LEN);
+ 
+ 	res = sas_execute_task(task, lu->inquiry_data, SAS_INQUIRY_DATA_LEN,
+-			       PCI_DMA_FROMDEVICE);
++			       PCI_DMA_FROMDEVICE, 1);
+ 	if (!res)
+ 		lu->inquiry_valid_data_len = min(SAS_INQUIRY_DATA_LEN,
+ 						 lu->inquiry_data[4]+5);
+@@ -2177,11 +2179,20 @@
+                         SAS_ADDR(dev->sas_addr), dev);
+ 
+                 notify_ha_event(dev->port->ha, HAE_RESET);
+-                goto out_unblock;
+             }
+ 
+-            if ( options & SAS_DWT_OPTION_NCQ_SIGNAL ) 
+-                sas_device_ncq_analyze(dev);
++            if ( options & SAS_DWT_OPTION_NCQ_SIGNAL ) {
++                /* If this fails, reset the device and abort IO */
++                if ( sas_device_ncq_analyze(dev) ) {
++                    spin_lock_irqsave(&dev->dwt.options_lock,flags);
++                    dev->dwt.options |= SAS_DWT_OPTION_RESET_DEV | 
++                                        SAS_DWT_OPTION_ABORT_ALL_IO;
++                    spin_unlock_irqrestore(&dev->dwt.options_lock,flags);
++                    options |= SAS_DWT_OPTION_RESET_DEV |
++                               SAS_DWT_OPTION_ABORT_ALL_IO;
++                }
++            }
++
+         } else {
+             SAS_DPRINTK("%016llx: dev %p, abort suspend "
+                     "skipping in HA Reset/Recovery\n",
+@@ -2233,7 +2244,6 @@
+                         SAS_ADDR(dev->sas_addr), dev);
+ 
+                 notify_ha_event(dev->port->ha, HAE_RESET);
+-                goto out_unblock;
+             }
+         } else {
+             SAS_DPRINTK("%016llx: dev %p, abort resume "
+@@ -2326,7 +2336,6 @@
+         sas_device_reset_ddb_entry(dev);
+     }
+ 
+-out_unblock:    
+     if ( !(options & SAS_DWT_OPTION_PRE_REMOVE_DEV) ) {
+         if ( sas_set_device_scsi_state(dev, SDEV_RUNNING))
+             SAS_DPRINTK("%016llx: dev %p, failed to set scsi "
+@@ -2407,8 +2416,29 @@
+         sas_device_work(dev);
+         return 0;
+     }
++
++Again:
++    if ( (dev->dwt.options ^ options) & ~SAS_INTERNAL_FLAG_MASK )
++        dev->dwt.options |= options;
++    else {
++        options |= SAS_DWT_QUEUED;
++        goto out_unlock;
++    }
++
++    /* Convert NCQ Error/Clears... For Now */
++    if ( options & SAS_DWT_OPTION_NCQ_CLEAR ) {
++        dev->dwt.options &= ~SAS_DWT_OPTION_NCQ_CLEAR;
++        options |= SAS_DWT_QUEUED;
++        goto out_unlock;
++    }
+     
+-    dev->dwt.options |= options;
++    if ( options & SAS_DWT_OPTION_NCQ_SIGNAL ) {
++        dev->dwt.options &= ~SAS_DWT_OPTION_NCQ_SIGNAL;
++        options &= ~SAS_DWT_OPTION_NCQ_SIGNAL;
++        options |= SAS_DWT_OPTION_ABORT_ALL_IO;
++        options |= SAS_DWT_OPTION_RESET_DEV;
++        goto Again;
++    }
+ 
+     if ( !(dev->dwt.options & SAS_DWT_INITIALIZED) ) {
+         dev->dwt.options |= SAS_DWT_INITIALIZED;
+@@ -2424,6 +2454,7 @@
+     else
+         dev->dwt.options |= SAS_DWT_QUEUED;
+ 
++out_unlock:
+     spin_unlock_irqrestore(&dev->dwt.options_lock, flags);
+     
+         
+diff -u -r a/include/scsi/sas/sas_discover.h b/include/scsi/sas/sas_discover.h
+--- a/include/scsi/sas/sas_discover.h	2006-10-20 09:26:12.296186991 -0500
++++ b/include/scsi/sas/sas_discover.h	2006-10-19 14:36:07.000000000 -0500
+@@ -146,6 +146,7 @@
+ #define SAS_DWT_OPTION_REINIT_DDB       0x00000100
+ 
+ /* Internal flags */
++#define SAS_INTERNAL_FLAG_MASK          0xFF000000
+ #define SAS_DWT_QUEUED                  0x80000000
+ #define SAS_DWT_BLOCKED                 0x40000000
+ #define SAS_DWT_INITIALIZED             0x10000000
+

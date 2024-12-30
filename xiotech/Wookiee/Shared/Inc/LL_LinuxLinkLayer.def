@@ -1,0 +1,308 @@
+# $Id: LL_LinuxLinkLayer.def 148621 2010-10-05 17:49:17Z m4 $
+#*****************************************************************************
+#
+#  NAME: LL_LinuxLinkLayer.def (Linux Link Layer)
+#
+#   This file defines the interface to the Link Layer implementation for the
+#   Wookiee platform running Linux, made to work like Bigfoot 1000 controller.
+#
+#  Copyright (c) 2004-2008 Xiotech Corporation. All rights reserved.
+#
+#*****************************************************************************
+
+                                @#ifndef _LL_LINUXLINKLAYER_H_
+                                @#define _LL_LINUXLINKLAYER_H_
+                                @#include "XIO_Types.h"
+
+                                @#ifdef __cplusplus
+                                @#pragma pack(push,1)
+                                @#endif
+
+#----------------------------------------------------------------------------
+#   Public defines - constants
+
+#
+#   Execution priorities for tasks (lower number => higher priority).
+#
+.def LL_BOOT_PRIORITY 126       @#define LL_BOOT_PRIORITY       @ LL_BootInit task priority
+
+                                @#ifdef FRONTEND
+                                @#define LL_INITIATOR_PRI 124   @ Initiator priority (FE)
+                                @#define LL_COMPLETION_PRI 120  @ Completion priority (FE)
+                                @#define LL_TARGET_PRI 122      @ Target priority (FE)
+                                @#elif defined (BACKEND)
+                                @#define LL_INITIATOR_PRI 90    @ Initiator priority (BE)
+                                @#define LL_COMPLETION_PRI 88   @ Completion priority (BE)
+                                @#define LL_TARGET_PRI 89       @ Target priority (BE)
+                                @#elif defined (CCB_RUNTIME_CODE)
+                                @#define LL_INITIATOR_PRI 124   @ Initiator priority (CCB)
+                                @#define LL_COMPLETION_PRI 120  @ Completion priority (CCB)
+                                @#define LL_TARGET_PRI 122      @ Target priority (CCB)
+                                @#endif
+
+                                @#define LL_NUM_DIR_ENTRIES 6   @ One directory entry per
+                                @                               @ possible communication link
+                                @#define LL_NUM_LLI_ENTRIES 2   @ One LLI structure per
+                                @                               @ Initiator link
+.def VRMAX 2048                 @#define VRMAX                  @ Max VRP/MRP's in queue
+
+#----------------------------------------------------------------------------
+#   Submission queue defines. These define the parameters pertaining to the
+#   number of messages waiting to be sent by the InitiatorTask.
+#
+
+#   The submission queue is the mechanism that is used to pass messages to the
+#   Initiator task to send. This is the maximum number of entries that can be
+#   in the queue for the FE and BE. Therefore, this limits how much the
+#   Initiator task can fall behind.
+                                @#define LL_INIT_Q_DEPTH 0x7ffe
+
+#   If the queue fills, then the task attempting to submit a message may
+#   suspend. When the queue falls below the low water mark, any suspended
+#   tasks waiting to use the queue are awakened. This value is for FE and BE.
+                                @#define LL_INIT_Q_LOWATER (LL_INIT_Q_DEPTH+1)
+
+#   This is the maximum number of entries that can be in the queue for the CCB.
+#   Therefore, this limits how much the Initiator task can fall behind.
+                                @#define LL_INIT_Q_DEPTH_CCB 0x1ff
+
+#   If the queue fills, then the task attempting to submit a message may
+#   suspend. When the queue falls below the low water mark, any suspended
+#   tasks waiting to use the queue are awakened. This value is for the CCB.
+                                @#define LL_INIT_Q_LOWATER_CCB LL_INIT_Q_DEPTH_CCB
+
+#----------------------------------------------------------------------------
+                                @#define SM_STRUCT_VERSION 13   @ Current version of shared
+                                @                               @   memory layout.
+
+#----------------------------------------------------------------------------
+#   Public defines - macros
+
+                @#ifndef DOXYGEN
+#   Macro to force cache line alignment of variables
+                @#define CACHE_LINE_ALIGN __attribute__ ((aligned(64)))
+#   Macro to stop instruction pipelining for SMP
+                @#define FORCE_WRITE_BARRIER __asm__ __volatile__ ("mfence": : : "memory")
+                @#else /* DOXYGEN */
+#   Macro to force cache line alignment of variables
+                @#define CACHE_LINE_ALIGN
+#   Macro to stop instruction pipelining for SMP
+                @#define FORCE_WRITE_BARRIER
+                @#endif /* DOXYGEN */
+
+#-----------------------------------------------------------------------------
+#   Public defines - data structures and enumerations.
+
+#   Enumeration of possible communication links.
+                                @typedef enum LL_POSSIBLE_LINKS
+                                @{
+                                @    FE2BE = 0,                 @ FrontEnd to BackEnd
+                                @    CCB2FE,                    @ CCB to FrontEnd
+                                @    CCB2BE,                    @ CCB to BackEnd
+                                @    BE2FE,                     @ BackEnd to FrontEnd
+                                @    FE2CCB,                    @ FrontEnd to CCB
+                                @    BE2CCB,                    @ BackEnd to CCB
+                                @} LL_POSSIBLE_LINKS;
+
+#   Enumeration of synchronization states.
+                                @typedef enum SYNC_STATE
+                                @{
+                                @    POWERUP = 0,               @ Platform is starting up
+                                @    READY,                     @ Platform ready to handshake
+                                @    SYNCHRONIZE,               @ Partially synchronized
+                                @    RUNNING,                   @ Platform is running (normal)
+                                @    MUST_RESYNC,               @ Error -> resynchronization
+                                @    ERR_TRAP                   @ An error trap happened.
+                                @} SYNC_STATE;
+
+#----------------------------------------------------------------------------
+#   LLI Link Layer Information (Linux Version)
+#
+#   This structure contains information about one connection (FE to BE, CCB to
+#   FE, etc.). There is one of these for each of the four active communication
+#   links on a platform.
+#
+#   In an effort to improve efficiency, the elements of this structure have
+#   been grouped so that variables accessed by one side of the link reside in
+#   the same cache line, and variables accessed by the other side reside in a
+#   different cache line.
+                                @typedef CACHE_LINE_ALIGN struct lli_t
+                                @{
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#   The following variables are accessed by the Initiator/Completion platform.
+
+#   Index into LinkLayer QCS and SHMLLI. This value indicates which of the two
+#   Initiator links this structure corresponds to.
+                                @   UINT32 LLInitiatorQCSIndex CACHE_LINE_ALIGN;
+#   Head of outstanding ILT list. This list keeps track of all active ILTs
+#   (that is, all messages that have been sent to the Target platform, but
+#   which have not yet been replied to). This list is needed for error handling
+#   if a connection is lost.
+                                @   struct ILT *volatile pLLActiveILTHead;
+#   Tail of outstanding ILT list. See pLLActiveILTHead.
+                                @   struct ILT *volatile  pLLActiveILTTail;
+#   Pointer to Target task's PCB. When a message is queued for the Target, the
+#   Target task is put into PCB_READY state (if it is not already READY).
+                                @   struct PCB *pLLTargetPCB;
+#   Pointer to indicator that the Target platform's scheduler is ** suspended.
+#   When the Target platform (FE, BE, or CCB) has nothing to do, it sets this
+#   indicator and suspends. Sending the LLTargetEvent will awaken the platform.
+                                @   UINT32 *volatile pLLTargetSleep;
+#   Event to wake the Target platform. When the Target platform (FE, BE, or
+#   CCB) has nothing to do, it issues a Linux call to suspend. Sending this
+#   event will awaken the platform.
+                                @   UINT32 LLTargetEvent;
+#   Pointer to Target platform up counter. This value is incremented every
+#   time another platform makes a task ready to run on this platform. The
+#   value is not important, just the fact that it changed. This value is used
+#   by the Target platform scheduler to realize that a task's run status has
+#   just asynchronously changed, and all tasks should be re-examined before
+#   suspending.
+                                @   UINT32 *volatile pLLTargetUpCounter;
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#   The following variable are almost never accessed (e.g. only at startup).
+#   They are put here to help fill up the cache line.
+
+#   Connection identification. This indicates what connection (FE to BE, CCB
+#   to FE, etc) this structure corresponds to.
+                                @   LL_POSSIBLE_LINKS LLmyLink;
+#   Pointer to Initiator task's PCB. This is only used when a communication
+#   error is detected.
+                                @   struct PCB *pLLInitiatorPCB;
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#   The following variables are accessed by the Target platform
+
+#   Pointer to Completion task's PCB. When a message reply is queued, the
+#   Completion task is put into PCB_READY state (if it is not already READY).
+                                @   struct PCB *pLLCompletionPCB CACHE_LINE_ALIGN;
+#   Pointer to indicator that the Completion platform's scheduler is suspended.
+#   When the Completion platform (FE, BE, or CCB) has nothing to do, it sets
+#   this indicator and suspends. Sending the LLCompletionEvent will awaken the
+#   platform.
+                                @   UINT32 *volatile pLLCompletionSleep;
+#   Event to wake the Completion platform. When the Completion platform (FE,
+#   BE, or CCB) has nothing to do, it issues a Linux call to suspend. Sending
+#   this event will awaken the platform.
+                                @   UINT32 LLCompletionEvent;
+#   Pointer to Completion platform up counter. This value is incremented every
+#   time another platform makes a task ready to run on this platform. The
+#   value is not important, just the fact that it changed.  This value is used
+#   by the Completion platform scheduler to realize that a task's run status
+#   has just asynchronously changed, and all tasks should be re-examined before
+#   suspending.
+                                @   UINT32 *volatile pLLCompletionUpCounter;
+#   Target re-synchronization count. This count is used by the Target task to
+#   detect a communication re-synchronization that has occurred during its
+#   processing of a message.
+                                @   volatile UINT32 LLTargetSyncCount;
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#   The following variable are almost never accessed (e.g. only at startup).
+#   They are put here to help fill up the cache line.
+
+#   The Completion task synchronization state. This is used during startup,
+#   or during re-synchronization.
+                                @   volatile SYNC_STATE LLCompletionSync;
+#   The Target task synchronization state. This is used during startup, or
+#   during re-synchronization.
+                                @   volatile SYNC_STATE LLTargetSync;
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#   The following queue pointers are heavily accessed by both the Initiator/
+#   Completion and Target platforms. However, the access is localized. In other
+#   words, when one is accessed, the others will likely be accessed soon. So
+#   put them in their own cache line.
+
+#   Start of the Target Input queue. The Target Input queue is used to pass a
+#   message from the Initiator to the Target. These four values (Start, End,
+#   InPtr, and OutPtr) define the queue.
+                                @   struct ILT **pLLTargetQueueStart CACHE_LINE_ALIGN;
+#   End of the Target Input queue. The Target Input queue is used to pass a
+#   message from the Initiator to the Target. These four values (Start, End,
+#   InPtr, and OutPtr) define the queue.
+                                @   struct ILT **pLLTargetQueueEnd;
+#   Input pointer of the Target Input queue. The Target Input queue is used to
+#   pass a message from the Initiator to the Target. These four values (Start,
+#   End, InPtr, and OutPtr) define the queue.
+                                @   struct ILT ** volatile pLLTargetQueueInPtr;
+#   Output pointer of the Target Input queue. The Target Input queue is used
+#   to pass a message from the Initiator to the Target. These four values
+#   (Start, End, InPtr, and OutPtr) define the queue.
+                                @   struct ILT ** volatile pLLTargetQueueOutPtr;
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#   The following queue pointers are heavily accessed by both the Initiator/
+#   Completion and Target platforms. However, the access is localized. In
+#   other words, when one is accessed, the others will likely be accessed soon.
+#   So put them in their own cache line.
+
+#   Start of the Completion Response queue. The Completion Response queue is
+#   used to pass a message reply from the Target to the Completion task. These
+#   four values (Start, End, InPtr, and OutPtr) define the queue.
+                                @   struct ILT **pLLCompletionQueueStart CACHE_LINE_ALIGN;
+#   End of the Completion Response queue. The Completion Response queue is used
+#   to pass a message reply from the Target to the Completion task. These four
+#   values (Start, End, InPtr, and OutPtr) define the queue.
+                                @   struct ILT **pLLCompletionQueueEnd;
+#   Input pointer of the Completion Response queue. The Completion Response
+#   queue is used to pass a message reply from the Target to the Completion
+#   task. These four values (Start, End, InPtr, and OutPtr) define the queue.
+                                @   struct ILT ** volatile pLLCompletionQueueInPtr;
+#   Output pointer of the Completion Response queue. The Completion Response
+#   queue is used to pass a message reply from the Target to the Completion
+#   task. These four values (Start, End, InPtr, and OutPtr) define the queue.
+                                @   struct ILT ** volatile pLLCompletionQueueOutPtr;
+
+#   The worst-case exception. This variable is pounded on by both platforms in
+#   an unpredictable manner, so give it a cache line to itself.
+
+#   The Initiator task synchronization state. This is used during startup, or
+#   during re-synchronization. It is also the global flag that is used to
+#   initiate a re-synchronization.
+                                @   volatile SYNC_STATE LLInitiatorSync CACHE_LINE_ALIGN;
+                                @} LLI;
+
+#-----------------------------------------------------------------------------
+#   Shared Memory Structure.
+#
+#   This describes the layout of the shared memory areas between the Front End,
+#   Back End, and CCB. All of the shared memory areas have the same structure.
+#   There is one shared memory section for each (i.e. the FE shared memory
+#   section, the BE shared memory section, and the CCB shared memory section).
+
+                                @typedef struct shm_t
+                                @{
+#   Structure version number. If the definition of the shared memory layout
+#   changes, increment this.
+                                @   UINT32 SHMStructVersionID;
+#   LLI Directory - one entry per possible link. Using this directory, the LLI
+#   structure corresponding to any active link can be located. Note that the
+#   LLI structures corresponding to incoming connections (i.e. for Target
+#   connections) will reside in a different shared memory section.
+                                @   LLI *pSHMLLIDir[LL_NUM_DIR_ENTRIES];
+                                @   volatile SYNC_STATE SHMSync; @ Synchronization Variable
+#   LLI - one entry per Initiator link. These are the LLI structures
+#   corresponding to the two outgoing (Initiator) links.
+                                @   LLI  SHMLLI[LL_NUM_LLI_ENTRIES] CACHE_LINE_ALIGN;
+                                @} SHM;
+
+#-----------------------------------------------------------------------------
+#   Extern's used in various places.
+                @extern UINT8 *pStartOfHeap;        @ Pointer to memory heap in shared memory
+                @extern UINT32 startOfMySharedMem;  @ Starting address of my shared memory
+                @extern UINT32 endOfMySharedMem;    @ Ending address of my shared memory
+
+                @extern UINT32 startOfBESharedMem;  @ Starting address of BE shared memory
+                @extern UINT32 endOfBESharedMem;    @ Ending address of BE shared memory
+#-----------------------------------------------------------------------------
+                                @#ifdef __cplusplus
+                                @#pragma pack(pop)
+                                @#endif
+
+                                @#endif /* _LL_LINUXLINKLAYER_H_ */
+#******************************************************************************
+#
+####
+## Modelines:
+## Local Variables:
+## tab-width: 4
+## indent-tabs-mode: nil
+## End:
+## vi:sw=4 ts=4 expandtab

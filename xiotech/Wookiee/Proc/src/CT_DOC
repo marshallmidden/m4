@@ -1,0 +1,1260 @@
+=pod
+
+=begin _no_way
+
+This is the start of documentation for CT_analyze.
+Date of last edit - 2005-01-20@15:01:35
+Date of previous edit - 2004-03-08@13:51:26
+
+=end _no_way
+
+=cut
+
+
+=head1 Contents
+
+=cut
+
+=over
+
+=item 1.
+
+Getting started.
+
+=item 2.
+
+CT_analyze description.
+
+=item 3.
+
+Needed inputs.
+
+=item 4.
+
+gdb use.
+
+=item 5.
+
+prototype file format.
+
+=item 6.
+
+CT_analyze options.
+
+=item 7.
+
+Creating i960 assembly source from .c program.
+
+=item 8.
+
+Compiler options for i386 gcc.
+
+=item 9.
+
+Makefile for using CT_analyze.
+
+=item 10.
+
+Things that can't work without a lot of work.
+
+=item 11.
+
+START_SH_DATA_SECTION, END_SH_DATA_SECTION
+
+=item 12.
+
+Using CT_analyze for front-end and back-end code.
+
+=back
+
+=cut
+
+
+
+
+
+
+=head1 1. Getting started.
+
+=over
+
+=item *
+
+setup CVSROOT environment variable (F<.bashrc>):
+
+ export CVSROOT=":pserver:${USER}@cvs.xiotech.com:/usr/local/cvsroot"
+
+Replace ${USER} with the Rochester cvs server login name assigned, if different.
+(Note: call Keith House in Rochester for an account on the cvs server.)
+Please make sure that the CVSROOT is set (e.g. C<source .bashrc>, or re-login).
+
+=item *
+
+Next, do:
+
+    cvs login
+
+and enter the password provided to you.  To change your password, run
+C<ssh cvs.xiotech.com> and follow directions.
+
+=item *
+
+Create a F<.cvsrc> file that contains lines (no leading spaces or tabs):
+
+    rdiff -kk -u
+    update -Pd
+    release -d
+    # diff -N -U 5
+
+The F<.cvsrc> file provides default flags to specific C<cvs> sub-commands.  For
+instances: the C<cvs release> command will always have the -d argument; and the
+C<cvs update> command will always have -P (prune empty directories) and -d (new
+directories are created) arguments.  Please modify per your preferences.
+The line starting with a '#' sign is a comment line.
+
+=item *
+
+Create a F<.rpmmacros> file that looks:
+
+    # Path to top of build area.
+    %_topdir /opt/xiotech/rpmroot/packages
+
+This is needed when building yeti and rpm is building a .rpm
+file for downloading to controller.  This moves the default to
+/opt/xiotech/rpmroot/packages from /usr/src.   This directory needs to exist
+on the machine that is doing the building; if you happen to build on a
+controller (which you shouldn't be), or a new build machine is created.
+
+=item *
+
+How to checkout 3d-3000 (Wookiee/Yeti) source:
+
+    cvs checkout -r CT1_BR Bigfoot
+
+=item *
+
+Check that you are in group root and can execute the C<root> command (in
+/usr/local/bin):
+
+    root uptime
+
+If needed, add yourself to F</etc/group>.
+
+=item *
+
+Gnu C<make> (gmake),  C<perl> version 5, and C<gcc> are required.  Preference would be a
+gcc release 3.3.3 or newer.  A build machine will have all this installed.
+A controller may have to have this NFS mounted, and various environment
+variables changed to make it work (as per your Unix experience -- see
+C<make cd>).
+
+=item *
+
+To compile the Code Translated stuff for engineering/development work:
+
+    cd Bigfoot
+    make yeti
+
+(Weekly and Nightly releases set various environment/make variables.)
+
+=item *
+
+To run, you need to get the compiled images onto your controller.
+Possible ways:
+
+=over
+
+=item a)
+
+use the ccbcl and load file:
+
+    Bigfoot/YetiApps/XIOTECH-PLATFORM-3000-ENGR-0.zip
+
+=item b)
+
+Login to controller, scp to /tmp the file:
+
+    Bigfoot/YetiApps/platformApps-ENGR-0.rpm
+
+Then do "rpm -i --force /tmp/platformApps-ENGR-0.rpm".
+
+=item c)
+
+Use icon to load the file.
+
+=back
+
+Note: \\dot\ is available.  Use C<root smbpasswd -a ${USER}> to create.
+
+=item *
+
+To clean up all the compiling created files, do "make clean".
+
+=item *
+
+For more "make" targets, type "make help".  "make morehelp" will be for
+more experienced users.
+
+=item Note:
+
+you can type "make" from inside the "CCB/Src" and "Proc/src" to see
+if things compile, but the .rpm and then the .zip files are NOT created.
+
+=item *
+
+To save (commit) your changes, do:
+
+    cd Bigfoot
+    cvs commit -m "TBolt0012456 - Fixed typo.  Reviewed by GWBush" .
+
+If the -m argument is not used, the "vi" editor is invoked. Simple way to do
+what is needed:
+
+    Type "O" (shift-o, means put a new line before where the
+        cursor/blinking line is).
+    Type in your message, and press the "escape" key when finished.
+    Press "ZZ" to write and exit vi.
+
+In addition the "." on the cvs commit means the current directory (and every
+subdirectory under it) -- or everything checked out will be checked for
+changes and committed.  For one specific file, enter it's name.  You probably
+will cd into that directory first.
+
+=cut
+
+
+
+
+
+
+=head1 2. CT_analyze description.
+
+F<CT_analyze> is a two pass perl script to convert i960 assembler code into "c"
+code that may be executed on generic machines.  It generates two output files,
+one for executable code, and a different one for the data section.
+
+The name F<CT_analyze> is an interesting leftover relic.  "CT" stands for Code
+Translation, and the analyze part of the name is from the original name of the
+perl script, which analyzed the format of the commands in the front-end and
+back-end.
+
+The intention was to create "c" code and have it execute on a MIPS cpu with
+little changes to the i960 assembler source.  The vision was that the Mag 3D
+source would work on the i960 and MIPS with minimal changes.
+
+This meant that the registers and stack of the i960 would be emulated in "c",
+and the i960 instructions would generate "c" code to do the same thing.
+(Exception is that the compare instructions do not set 3 different bits of
+condition code, and unordered is implemented as "not equal" and ordered is
+"equal".)
+
+gcc takes the "c" code, optimizes it, and hopefully it runs fairly fast.
+Tests have shown that the stack emulation for i960 call structure is somewhat
+expensive if the "c" code is compiled and run on an i386/Pentium processor.
+Additionally, the i960 has lots of registers, and the i386 family has
+relatively few.
+
+In addition, gdb (with a windowing front-end) was to be used to debug the
+program, and source level debugging of the i960 assembler was intended.  As
+such, when you are looking at the code, you see the i960 assembler, not the
+"c" code.  Option -no_line_numbers will allow you to debug the "c" code.
+
+The various types of i960 assembler operations that will not work on a new
+hardware architecture (with the generated "c"):
+
+=over 4
+
+=item a)
+
+anything related to hardware (memory addresses).
+
+=item b)
+
+interrupts, faults, instruction/data cache, system register control.
+Some of these instructions generate a call to a "c" routine that may
+decode the instruction further and print out a message.
+
+=item c)
+
+unimplemented instructions: addono, addoo, addio, addino, calls, cmpibo,
+cmpibno, eshro, fmark, halt, mark, modac, modtc, scanbyte, shli, shrdi,
+subono, suboo, subio, subino, syncf.
+
+=item d)
+
+code that relies on the endian-ness of the i960 architecture.
+
+=back
+
+NOTE: The unimplemented instructions do not appear to be  generated by
+C<i960-gcc>, nor are they in the front-end or back-end i960 assembler source.
+Those instructions the i960 source does not implemented, call "c" routines
+that print out a message and return.  The "c" code does in-line asm for some
+instructions has been modified to call these "c" routines also.
+
+The "." symbol (for current address) was used only six times in the source.
+It was used to calculate the size of data structures.  The code was changed to
+subtract a label at the end of the data structure from a label at the start of
+the data structure.
+
+In addition, as some of the source code is in "c", forcing the ability to call
+real "c" code from the translated assembler, and visa versa is needed.  This
+is allowed by the specifications in a prototype file (e.g. -P fe_proto) to the
+perl script.  This allows the input and output arguments of the routines to be
+passed in and out correctly.  The types and lengths of parameters and return
+value must be known.  See section "prototype file format."
+
+=cut
+
+
+
+
+
+
+=head1 3. Needed inputs.
+
+F<CT_analyze> needs to know the name(s) of input i960 assembler files.  These
+are listed on the command line.
+
+    CT_analyze file1.as file2.as ...
+
+F<CT_analyze> needs the prototype file for any existing "c" to i960 assembler
+(and visa versa) calls.  This is specified via the "-P" option.
+
+    CT_analyze -P file_proto file1.as file2.as ...
+
+F<CT_analyze> needs to know the machine type that the translated code is to be
+compiled on -- the asm pseudo-ops are different for different processors.
+i.e. command line option -i386 or -mips.
+
+    CT_analyze -i386 -P file_proto file1.as file2.as ...
+
+There are several command line options for issuing warnings to
+potentially help spot i960 coding methods that may cause the
+code to not run as expected on a different processor.
+See section "6) F<CT_analyze> options."
+
+To run the program, it needs an entry point.  This needs to setup the
+frame and stack pointers used by the translated code.
+
+    #include "CT_defines.h"
+    long ct_stack[2000] __attribute__((aligned(64)));
+    extern void K$start(void);
+    int main(int argc, char** argv)
+    {
+        fp = (ulong) &ct_stack[0];
+        sp = (ulong)fp + 64;
+        K$start();
+        return 0;
+    }
+
+The line:
+
+    #include "CT_defines.h"
+
+defines the various registers that the translated code uses.  It is used
+to set the frame pointer (fp or g15), and the stack pointer (sp or r1).
+Strictly speaking, the stack does need not be aligned at a 64 byte boundary,
+but it makes sense if one wishes the i960 "r" registers (that are really on
+the stack) to be aligned at a 64 byte boundary.
+
+The prototype file must contain an entry for K$start (or the name of the
+i960 assembler entry point), something like:
+
+    CA void K$start(void)
+
+This means that it is called from "C" to "A"ssembler.  The first "void"
+means that there is no value returned.  The second "void" means that
+there are no parameters passed to the i960 assembler code.  For a normal
+program there would be a return value and parameters passed in.  But,
+because the front-end and back-end are stand-alone boot-able programs, they
+do not have any inputs or outputs -- they are self contained.
+
+=cut
+
+
+
+
+
+
+=head1 4. gdb use.
+
+First you make sure the program was compiled and linked with the -g option to
+gcc.  Then you can start the debugger on it.  You might wish a front-end to
+gdb, like for instance "ddd".
+
+Start gdb.
+
+    gdb Front.t
+    (gdb) break main
+    (gdb) run
+    Starting program: /home/m4/projects/Bigfoot/Proc/src/Front.t
+
+    Breakpoint 1, main (argc=1, argv=0xcfbf4cc0) at fe_main.c:12
+    12       fp = (ulong) &ct_stack[0];     /* Probably not needed */
+    (gdb) s
+    13       sp = (ulong)fp + 64;           /* Probably not needed */
+    (gdb) s
+    15       K$start();
+    (gdb) s
+    K$start () at f_front.CT.c:11
+    11      {
+    (gdb) s
+    f_front_CT_c (CT_which_entry=0) at f_front.CT.c:2067
+    2067        ulong ofp;
+    (gdb) s
+    2064      ulong cmp_tmp0, cmp_tmp1;
+    (gdb) s
+    2068        ofp = fp;
+    (gdb) s
+    2069        rip = (ulong)&&ct_alldone;
+    (gdb) s
+    2070        fp = (sp + 0xf) & ~0xf;
+    (gdb) s
+    2071        pfp = ofp;
+    (gdb) s
+    2072        sp = fp + 64;
+    (gdb) s
+    2074      }
+    (gdb) s
+    1009            intdis                  # Turn off interrupts
+    (gdb) s
+    i960_intdis () at CT_variables.c:67
+    67        write(2, "intdis ", 7);
+    (gdb) s
+    intdis 68         write(2, "disable interrupts", 18);
+    (gdb) s
+    disable interrupts69      write(2, "\n", 1);
+    (gdb) s
+
+    70      }
+    (gdb) s
+    f_front_CT_c (CT_which_entry=0) at kernel.as:1014
+    1014            lda     .iramend,r3
+    (gdb) s
+    1015            ldconst 0x400,r4
+    (gdb) s
+    1017            faultg
+    (gdb) s
+    1016            cmpo    r3,r4
+    (gdb) s
+    1017            faultg
+    (gdb) s
+    i960_fault (cmp0=470230872, cmp1=1024, type=4) at CT_variables.c:13
+    13        write(2, "fault ", 6);
+    (gdb) s
+    fault 14          switch (type) {
+    (gdb) s
+    23          case 4: write(2, ">", 1);
+    (gdb) s
+    >30       write(2, "\n", 1);
+    (gdb) s
+
+
+    Program received signal SIGSEGV, Segmentation fault.
+    f_front_CT_c (CT_which_entry=0) at kernel.as:1030
+    1030            ld      DMA_CSR0,r3   # get DMA unit 0 channel status
+    (gdb)
+
+The "g" registers are directly defined in "c", whereas the "r" registers are
+in memory, on the stack.  The registers can be printed in hex as follows:
+
+    (gdb) print /x g@16
+    (gdb) print /x g5
+    (gdb) x/16 r
+
+Sorry, I could not figure out how to have r0 through r15, sp, rip, nor pfp
+to be specified -- without slowing the execution down tremendously.  fp
+and g15 both may be printed by name, and provide the same memory location.
+
+=cut
+
+
+
+
+
+
+=head1 5. prototype file format.
+
+The reason that a prototype file is necessary is to tell the "c" generator
+how many input parameters (and types) there are for a given external
+function, and what the return type is.  As an example, a 64 bit value takes
+two registers on the i960, and on some architectures any 64 bit value must
+be even register aligned.
+
+There are two glue types that are needed CA (for C to Assembler) and AC
+(Assembler to C).  The type files must not have a dummy parameter name
+associated.  If an '*' (asterisk) is associated for specification of a
+pointer, put it with the type, not the routine name.  A space is not needed
+in "C" between the type and the asterisk.
+
+There is another glue type used for verification of "c" routine usage,
+verses that of an external variable.  It is "Variable" followed by white
+space, then the type of the variable, more white space and the name of the
+variable defined in "c".  Example:
+
+    Variable int CT_fork_tmp
+
+No type checking on use is preformed, but an "extern" is created with the
+type specified.  If no "extern" is desired, use it as follows:
+
+    Variable_noext int CT_fork_tmp;
+
+The semicolon at the end is optional.
+
+One of the first routines you will need is the "start" (possibly original
+main) for the code.
+
+    CA void K$start(void)
+
+The CA means "C" calling "A"ssembler.  K$start is the entry point, and it
+takes no input parameters and returns none (void and void).
+
+Or for a main program:
+
+    CA int main_program(int, char**);
+
+If you need the environment variables, add them.
+
+For every routine that has "c" calling an entry point in the i960 assembler,
+a similar line must exist.  A more complicated example:
+
+    CA int _MSC_MemCmp(void*, void*, UINT32)
+
+There is a function _MSC_MemCmp that returns an "int".  The function has
+three parameters, two pointers to void [i.e. any type of pointer], and an
+unsigned 32 bit int.  The UINT32 is a typedef, and should be defined via
+a file specified on the "-I" option of F<CT_analyze>.
+
+NOTE: the processing for 64 bit numbers looks for "64" in the type field.
+
+A semi-colon at the end of the line is allowed and ignored.  This is for cut
+and paste from "man" pages or similar locations.
+
+
+The next type of definitions are for "A"ssembly calling a "C" routine.
+Example:
+
+    AC UINT32 DEF_WWNLookup(UINT64, UINT16, UINT32)
+
+The function DEF_WWNLookup returns a value of type UINT32, and has three
+input parameters of UINT64, UINT16, UINT32.
+
+Extensions to AC form:
+
+    ACno_           Normally the "C" routine has an underline prefix to
+                    the routine name.  "no_" causes it not to do so.
+                    If for example your i960-gcc does not use a prefix.
+    ACdelete_       If the function given has an underline prefix, delete
+                    it and do not output the glue function with it.
+    ACnoext         An "extern"al to the "c" routine is normally done.
+                    If an include file file defines the prototype in a
+                    slightly different manner than you can do so here,
+                    you an add "noext" and have it not put out.  stdio.h
+                    and fprintf is an example you may run into.
+
+ -----------------------------------------------------------------------
+
+Combinations are allowed, no spaces please.  Such as "ACno_noext".
+
+You may wish to use the gcc option S<-fleading-underscore> (or the
+inverse S<-fno-leading-underscore>) if there are a large number of problems.
+
+Some things of special note follow.
+
+Some systems have getc(), putc(), putchar(), and similar functions defined
+as macros (#define ...) that reference variables instead of being real "c"
+library routines.  You may find it advantageous to get rid of these with a
+C<#undef getc> in those files.
+
+If you have emulated floating point routines, long long's or other libgcc.a
+routines, you may wish to add this to the F<CT_analyze> line:
+
+    CT_analyze -I CT_defines.h -I CT_math.h ...
+
+The file CT_math.h is an attempt at glue routines for floating point math.
+It needs the register definitions in CT_defines.h and is why S<"-I CT_defines.h">
+is specified before S<"-I CT_math.h">.
+
+ -----------------------------------------------------------------------
+
+There is a LC_no entry for a routine in "c" referenced in assembler by either
+a computed goto or more importantly C<fork>/C<tfork>/C<taskcreate>.
+
+There is a LA entry for an assembler routine referenced in C, but the assembler
+branches to it by register (computed goto).
+
+NOTE: You probably will just cut and paste in a similar line.
+
+There are two more things you can specify in the file (excepting comments
+which are lines starting with the '#' character.  If one wants an entry
+done conditionally (like on define PERF), one starts the line with C<?PERF>.
+If one wants the opposite, one does C<!?PERF>.  Example:
+
+  LA p$init_drv
+  LCno_ void RB_ClearRebuildWaitStateTask (UINT32, UINT32);
+  ?DEBUG CA g3=UINT32 QueueILT(void*, ILT*, UINT32, UINT32);
+  !?PERF CA void DPrintf(UINT32, void*, UINT32, UINT32, UINT32, UINT32);
+
+=cut
+
+
+
+
+
+
+=head1 6. CT_analyze options.
+
+There are many options to the F<CT_analyze> perl script.  If an argument does
+not start with a minus sign ('-') it is assumed to be an i960 assembler source
+file.  Multiple files are concatenated together into one "c" program.
+Otherwise glue code from one assembler file to the other is necessary,
+if it is even possible to do it.
+
+=item a) -Dsomething
+
+To define a variable on the command line, possibly to a value (zero assumed).
+
+   -Dsomething      or -D something
+   -Dsomething=else or -D something=else
+
+=item b) -Usomething
+
+To undefine a previously defined variable (with -Dsomething).
+
+=item c) -Include F<directory>
+
+Look in this F<directory> for files on i960 C<.include> directives.
+
+=item d) -IF</usr/include> or -I F</usr/include>
+
+Add to the "c" output code lines that look like this:
+
+    #include "/usr/include"
+
+This is useful for F<stdio.h> and other prototypes.
+
+=item e) -oF<file.c> or -o F<file.c>
+
+Set output file to receive the "c" code generated from the i960
+assembler input.
+
+=item f) -L_local
+
+If any labels start with a capital el ('L'), then treat it as a local label
+for that specific file only.  It will not be available to any other files
+that may be sequentially input to F<CT_analyze>.
+
+=item g) -PF<prototype> or -P F<prototype>
+
+The name of a file containing prototype definitions for routines called
+from i960 assembler to "c", or from "c" to i960 assembler.  The type of the
+value returned, and of all arguments must be known to be able to generate
+the correct "glue" code.  See section 5 for a description of the prototype file.
+
+=item h) -no_line_numbers
+
+If you desire to debug the generated "c" code instead of the i960 assembler
+source file, this option will disable putting in lines like :
+
+    # NNN "filename.s"
+
+which lets the debugger (gcc -g) know where the source for this line is.
+
+=item i) -full_path_name
+
+To put in complete path names for the gdb debugger.
+
+=item j) -all_asm_labels
+
+To put asm labels on all goto's.  This allows gdb to find the address of the goto's.
+
+=item k) -no_leading_underscore
+
+This will delete leading underscores from assembler names encountered.
+This is in case the assembler has a bunch of these defined,
+but you do not wish to delete them in the source.
+
+=item l) -no_comments
+
+This option does not print out the original i960 assembler lines with
+the generated "c" code.  It does not print out blank lines.  F<CT_analyze>
+runs about twice as fast.  Source debugging still shows the assembler lines.
+
+=item m) -i386 or -mips
+
+Generate assembler pseudo-ops suitable for either a i386 or mips type
+processor.  There are differences between i960 and others.
+
+=item n) -debug_labels
+
+If you wish to have a message printed to stderr each time a label (or glue
+code) is reached, this option will do it.  You may follow execution
+of the program by looking at the generated "c" code and seeing where it is
+going via the print statements.
+
+=item o) -debug_registers
+
+After every line of assembler code, print the value of all registers.  (g0-15, r0-15).
+
+=item p) -assumes_works
+
+This option stops the rip register from being set to an error condition
+when a "call" is happening.  If F<CT_analyze> is working correctly, and your
+program is working correctly, the error condition never happens.  The
+extra code generated slows things down by about eight (8) percent.
+
+=item q) -g_reg_proto_special
+
+If this flag is given, then it is possible to specify which g registers go with
+each argument specified in the prototype file.  Example:
+
+  CA g2=void* DeQueueMessage(void*, void*);
+  CA void Something(g4=void*, g7=int);
+
+=item r) -CA_register_save_restore
+
+For each CA call, save and restore all registers before/after it.
+
+=item s) -AC_register_save_restore
+
+For each AC call, save and restore all registers before/after it.
+
+=item t) -W option_type or -Woption_type
+
+Turn on warning C<option_type> listed below:
+
+=over
+
+=item * all
+
+This turns on all warning flags and conditions.
+
+=item * set_before_use
+
+If a variable is not "set" before it is "used", print out a warning.
+Code that would cause this appears like this:
+    .word   ABC
+    .set    ABC,5
+
+=item * code_label_in_data
+
+If a "goto" label (normally only available to "code") is in a .word or
+similar pseudo-op, give a warning about this.  Jump tables cause this.
+
+=item * data_label_in_goto
+
+If a data label is jumped to by the "c" code, issue a warning.  Why would
+one wish to execute data?
+
+=item * data_label_in_call
+
+If someone calls a routine that is in the .data section, issue a warning.
+Why would one wish to execute data?
+
+=item * external_label_in_load_or_store
+
+If the program is not self-contained, external labels in
+a load or store instruction cause a warning to be issued.
+
+=item * call_to_register
+
+If a call to a register occurs, issue a warning.  Jump tables, etc. use
+this form.  This warning shows the potential of programming mistakes.
+
+=item * call_expression
+
+If a call is to an expression (e.g. ABC+5), issue a warning.
+
+=item * goto_register
+
+If a branch is to a register, issue a warning.
+
+=item * goto_expression
+
+If a branch is to an expression (e.g. ABC+5), issue a warning.
+
+=item * multiple_global
+
+If there are multiple ".globl" pseudo-ops to the same symbol, print out
+a message for additional ones.  (i.e. they may be able to be deleted).
+
+=item * org_pseudo_op
+
+If a ".org" pseudo-op occurs, print a message. (Probably can not do
+anything with it in "c").
+
+=item * data_in_text_section
+
+If there are pseudo-ops to create "data" in the text section (program
+space), print out warning messages.  This occurs for some ascii strings,
+and for jump tables.
+
+=item * external_and_constant
+
+If a label is external and a constant, this is probably a mistake in
+the coding of the program.
+
+=item * globl_nothing
+
+If a ".globl" pseudo-op occurs, but the label is never defined, issue
+a warning.
+
+=item * fp_r0_r2_changed
+
+If register fp (or g15), r0 (or pfp), r2 (or rip) is set directly or
+indirectly via an instruction, issue a warning.
+
+=item * external_routine_used_as_variable
+
+If the prototype file specifies that a routine is "C", but it is used
+in the i960 assembler source as a variable (load/store/load_address),
+issue a warning.
+
+=item * moving_to_data
+
+Issue a warning if a label in .text will be moved to .data section.
+
+=back
+
+=cut
+
+
+
+
+
+
+=head1 7. Creating i960 assembly source from .c program.
+
+There are two parts to this section. First are options to the compiler that
+may allow problems to be gotten around a bit easier.  The second part is
+showing how to use C<i960-gcc> to create the assembler and using F<CT_analyze>
+to create another "c" program that can be compiled.
+
+If one gets an C<i960-gcc>, the following options may be necessary to create
+assembler source that can be fed into F<CT_analyze>.
+
+=item a) -fno-leading-underscore
+
+Sometimes C<i960-gcc> has been built to output an underscore ("_") in front of all
+"c" subroutines and variables that are external (or global).  For recent
+i386 versions of gcc, this is no longer the case.  If an underscore is
+added, it complicates the task of creating the prototype (glue) file.
+
+=item b) -fno-builtin
+
+Gcc by default knows how to optimize a bunch of simple small routines, and
+will use libgcc.a for special routines.  This stops that from happening.
+
+=item c) -nostdinc -I/usr/include
+
+Perhaps your C<i960-gcc> was built to use a non-standard include directory.
+This will make the assumed standard include files to be ignored, and
+/usr/include (for the machine you are executing on) to be used.
+
+=item d) -S
+
+This causes assembler output to be saved in a file ending in .s.  It is
+named the same as the input file name, with the .c suffix replaced with .s.
+
+=item e) -Dlint
+
+If one has gotten BSD code, one can eliminate unnecessary and complicated
+strings that may mess up the F<CT_analyze> string and command parsing.
+
+=item f) -fpack_struct
+
+Do not do this unless you have isolated it down to a structure that is
+being aligned in the i960 assembler code generated by C<i960-gcc>, but it
+is not aligned in the normal i386 gcc compiler.  Example: struct FILE.
+Perhaps making the structure look as follows might be better:
+
+    typedef struct __sFILE {
+            unsigned char *_p;
+            struct  __sbuf _bf;
+            unsigned char _nbuf[1];
+            struct  __sbuf _lb;
+            int     _blksize;
+    } __attribute__((packed)) FILE;
+
+The C<__attribute__((packed))> tells gcc to pack this structure and generate
+"c" code that allows variables to not be aligned as they normally would.
+
+=back
+
+How to use C<i960-gcc> to create F<.s> source for feeding into F<CT_analyze>.  Start
+with a program like F<cat.c> and change the main program entry from "main"
+to something like "main_program".  The frame pointer and stack pointer
+need to be setup before the program can start executing.  Then compile F<cat.c>
+to assembler.
+
+    i960-gcc -O4 -fno-leading-underscore -fno-builtin \
+            -nostdinc -I/usr/include -S cat.s
+
+Then run F<CT_analyze> on it.
+
+    CT_analyze -i386 -L_local -I stdio.h -I unistd.h cat.s -o cat.CT.c
+
+This says that code should be for an i386, with two include files added to
+the source, and any labels starting with "L" are local to the file.  The
+output "c" is put into F<cat.CT.c>.
+
+Next try to compile and link the F<cat.CT.c> program.
+
+    gcc -fno-builtin -Wno-unused -o cat.CT.o cat.CT.c
+
+There will be warnings about subroutines referenced by the "converted" i960
+assembler that do not have prototypes.  If you don't have prototypes, you
+can't guess how many variables (and their types) get sent to the function,
+nor what type of return (if any) happens.  They look like:
+
+    cat.s:29: warning: implicit declaration of function `CT_GLUE_call_setlocale'
+    cat.s:34: warning: implicit declaration of function `CT_GLUE_call_getopt'
+    cat.s:106: warning: implicit declaration of function `CT_GLUE_call_setbuf'
+    cat.s:116: warning: implicit declaration of function `CT_GLUE_call_fprintf'
+    cat.s:118: warning: implicit declaration of function `CT_GLUE_call_exit'
+    cat.s:153: warning: implicit declaration of function `CT_GLUE_call_fclose'
+    cat.s:159: warning: implicit declaration of function `CT_GLUE_call_err'
+    cat.s:201: warning: implicit declaration of function `CT_GLUE_call_strcmp'
+    cat.s:212: warning: implicit declaration of function `CT_GLUE_call_fopen'
+    ...
+
+Create the prototype file for these.
+
+    CA int main_program(int, char**)
+    ACno_ char* setlocale(int, char*)
+    ACno_noext int getopt(int, char**, char*)
+    ACno_noext void setbuf(FILE*, char*)
+    ACno_noext int fprintf(FILE*, char*, int, int, int, int, int, int, int)
+    ACno_ void exit(int)
+    ACno_noext int fclose(FILE*)
+    ACno_ void err(int, char*, int, int, int, int, int, int, int)
+    ACno_ int strcmp(char*, char*)
+    ACno_noext FILE* fopen(char*, char*)
+    ...
+
+The first line is for the new main program written in "c" that will call
+the converted i960 assembler "c" code.  See prototype file format for
+information.
+
+Fix and recompile until errors disappear.
+
+Next create the main program which will look something like:
+
+    #include <stdio.h>
+    #include <unistd.h>
+    #include "CT_defines.h"
+    long ct_stack[2000] __attribute__((aligned(64)));
+    extern void main_program(int, char **);
+    int main(int argc, char** argv)
+    {
+        fp = (ulong) &ct_stack[0];
+        sp = (ulong)fp + 64;
+        main_program(argc, argv);
+        return 0;
+    }
+
+This creates a stack of 8000 bytes and sets the frame pointer to the start
+of it, and the stack pointer to 64 beyond it.  It then calls main_program
+with argc and argv as passed in.
+
+Compile the new F<main.c> program, then link with the new F<cat.CT.o> object.
+
+    gcc -fno-builtin -g -O4 -Wno-unused -o cat_main.o -c cat_main.c
+    gcc -static -o cat cat.CT.o cat_main.o
+
+Run the new F<cat> program.
+
+    ./cat /etc/motd
+
+Not mentioned is the handling of "variables".  Neither is how to identify
+the error messages and warnings, and what should be done for them.  Look at
+the documention of the prototype file, the "Variable" line.
+
+=cut
+
+
+
+
+
+
+=head1 8. Compiler options for i386 gcc version 3.3.3.
+
+This section lists the suggested gcc options for finding potential problems.
+No warnings should appear for any program that is being compiled.  It is
+necessary to have -O4 present to find the most problems, like unused code.
+
+=item a) C_GCC_FLAGS += -Wall
+
+This gets all the standard little mistakes.
+
+=item b) C_GCC_FLAGS += -Werror
+
+If a warning occurs, treat it as an error and halt compilation.
+
+=item c) C_GCC_FLAGS += -Wshadow
+
+If a variable shadows a previous level (or global) name, print out a
+warning about it.  A common one is a variable "int index;" which happens
+to shadow the index(3) string library routine.
+
+=item d) C_GCC_FLAGS += -Wpointer-arith
+
+Warn about function pointer arithmetic.  Any such uses are probably "wrong",
+and is probably not portable across platforms.
+
+=item e) C_GCC_FLAGS += -Wcast-qual
+
+Warn about casts which discard qualifiers.  Usually someone casts a
+"const" to something else and throws the const away.  It is not a good
+thing to say that something doesn't change, then allow changing it.
+
+=item f) C_GCC_FLAGS += -Winline
+
+Warn when an inlined function cannot be inlined.
+
+=item g) C_GCC_FLAGS += -Waggregate-return
+
+Warn about returning structures, unions or arrays.  Different platforms
+handle the alignment and registers differently and generally it is not
+a good thing to be doing.
+
+=item h) C_GCC_FLAGS += -Wcast-align
+
+Warn about pointer casts which increase alignment.  The
+structure may have to be packed, or the size of the new structure is
+larger, or the size of a pointer may be unknown.
+
+=item i) C_GCC_FLAGS += -W
+
+Enables extra "standard" warnings.  (Such as checking printf formats for legal
+syntax, and correct number of arguments.)
+
+=item j) C_GCC_FLAGS += -Wno-unused-parameter
+
+Warn when a function parameter is unused.
+
+=item k) C_GCC_FLAGS += -Wundef
+
+Warn if an undefined macro is used by #if.
+
+=item l) C_GCC_FLAGS += -Wendif-labels
+
+Warn about endif-labels being present.
+
+=item m) C_GCC_FLAGS += -Wwrite-strings
+
+Mark strings as C<const char *>, and thus unchangeable.
+
+=item n) C_GCC_FLAGS += -Wsign-compare
+
+Warn about signed/unsigned comparisons.
+
+=item o) C_GCC_FLAGS += -Wstrict-prototypes
+
+Warn about non-prototyped function declarations.
+
+=item p) C_GCC_FLAGS += -Wmissing-prototypes
+
+Warn about global functions without prototypes.
+
+=item q) C_GCC_FLAGS += -Wmissing-declarations
+
+Warn about global functionss without previous declarations.
+
+=item r) C_GCC_FLAGS += -Wmissing-noreturn
+
+Warn about functions which might be candidates for attribute noreturn.
+
+=item s) C_GCC_FLAGS += -Wmissing-format-attribute
+
+Warn about functions which might be candidates for format attributes.
+
+=item t) C_GCC_FLAGS += -Wnested-externs
+
+Warn about externs not at file scope level.
+
+=item u) C_GCC_FLAGS += -Wlong-long
+
+=item v) C_GCC_FLAGS += -Wno-unused-label
+
+Do not warn when a label is unused.
+
+=item w) C_GCC_FLAGS += -Wno-unknown-pragmas
+
+Do not warn about unrecognized pragmas.
+
+=cut
+
+
+
+
+
+
+=head1 9. Makefile for using CT_analyze.
+
+Suppose you have a F<cat.as> program that you wish to compile via GNU make.
+There is a prototype file called F<cat_proto> and main program F<cat_main.c>.
+The F<Makefile> might look something like this:
+
+    PROG=cat
+    SRCS=${PROG}.as
+    CFLAGS += -fno-builtin -g -O4 -Wno-unused
+    AFLAGS += -i386 -L_local -assumes_works
+    A_DEFINES += -I stdio.h -I unistd.h -P ${PROG}_proto
+    AS_PRE = CT_analyze ${AFLAGS} ${A_DEFINES} $+ -o $@
+    %.o: %.c
+            ${CC} ${CFLAGS} -o $@ -c $<
+    all: ${PROG}
+    ${PROG}: ${PROG}.CT.o ${PROG}_main.o
+            ${CC} -static ${CFLAGS} -o $@ $^
+    ${PROG}.CT.c: SRCS
+            ${AS_PRE}
+    clean:
+            rm -f *.o ${PROG}.CT.c ${PROG} core.* ${PROG}.core
+
+=cut
+
+
+
+
+
+
+=head1 10. Things that can't work without a lot of work.
+
+=item a)
+
+The format of floating point numbers appears to be the same between an i960
+and an i386.  The problem comes with calling routines with floating point
+numbers.  In i960, they are aligned on even numbered registers (and stack),
+and on the i386 they are just the next thing in order.  It is not possible
+to call printf and reliably print a floating point number.
+
+    printf("%f\n", (double)17.1);
+
+=item Z<>
+
+On the i960 this puts g0 with the address of the format string, skips g1
+and puts the 17.1 into g2 and g3.  No skipping is done on the i386.
+
+=item Z<>
+
+One simple thing to is to change it to C<fprintf(stdout, ...>.
+The stdout argument goes into g0, and the format string into g1.
+
+=item b)
+
+The prototypes for printf (and similar) allow only passing 9 arguments. If
+there are several long long's or floating point numbers, each of these count as two
+arguments and you will run out of arguments on the stack.  Add more
+arguments to the prototypes, or break the print's into multiple commands.
+
+=cut
+
+
+
+
+
+
+=head1 11. START_SH_DATA_SECTION, END_SH_DATA_SECTION
+
+If there is a data section that must be in shared memory, F<CT_analyze> will
+change it as follows:
+
+        START_SH_DATA_SECTION
+  c$inquiry1:
+        .byte   0x7f      # peripheral qualifier/device type
+        .byte   00        # RMB/reserved
+        .byte   02        # ISO/ECMA/ANSI version
+        .byte   02        # AERC,TrmTsk,NormACA,HiSupport,response data
+                          #  format
+        .byte   36-4      # additional length (n-4)
+        .byte   00        # SCCS,reserved
+        .byte   02        # BQue,EncServ,VS,MultiP,MChngr,AckReqQ,Addr32,
+                          #  Addr16
+        .byte   00        # RelAdr,WBus32,WBus16,Sync,Linked,TranDis,
+                          #  Cmdque,VS
+        .ascii  "XIOtech " # vendor identification
+        .ascii  "Magnitude 3D    " # product identification field1
+  c$inquiry1_rev:
+        .ascii  "1.00"    # product revision level
+  c$inquiry1end:
+  #
+        .set    c$inquiry_size,c$inquiry1end-c$inquiry1 # size of table
+  #
+        .align  4
+        END_SH_DATA_SECTION
+
+Two sections will be created.  Both will take up the same amount of space.
+The one with "real labels" will be a bss section in shared memory.  The other
+will be used only during kernel.as initialization to copy the data into the
+bss section.
+
+Generated is another table that looks like:
+
+       .word   FROM
+       .word   TO
+       .word   LTH
+
+That table is terminated by knowing start and length of that table.
+The labels are swapped from the .word's to the .bss's.
+Sections are named .shdata, .shinit, and .shinittable.
+
+=cut
+
+
+
+
+
+
+=head1 12. Using CT_analyze for front-end and back-end code.
+
+The "Makefile" should be all you need to use to compile, and link both
+the front-end and the back-end.
+
+If you have a fresh cvs checkout do:
+
+    make obj
+    make
+
+(May be combined into one step of "make obj all".)
+
+If you wish to delete all the .o's, do a:
+
+    make clean
+
+If you also wish to delete the depend file(s) (created automatically):
+
+    make cleandir
+
+If you don't trust anything and wish to start over:
+
+    make cleandir
+    rmdir obj
+    make obj
+    make
+
+(The rmdir obj is not done via: "make cleandir obj all".)
+
+If you have added a "c" routine, you must update either the fe_proto or
+the be_proto files as appropriate.  If a "c" routine calls an assembler
+routines and previously the assembler routine was not called, you must
+also update the fe_proto or be_proto file(s) as appropriate.
+
+If you add/delete a "c" file, it needs to be added/deleted in the
+appropriate make variable:
+
+    F_C_OBJS (for front-end) and/or B_C_OBJS (for back-end).
+
+An Assembler file addition or deletion gets changed in one of the
+variables F_ASM_* or B_ASM_*. ("*" represents many choices,
+there are names for each of the "modules" that are built in Mag 3D via
+the Windows methodology.)
+
+The .o's are created with a f_NAME.o or b_NAME.o naming convention.  The
+f_ and b_ are because there are different -DBACKEND or -DFRONTEND (etc)
+passed to the compiler and/or assembler, and the .o's are probably different.
+
+=cut
+
+# End of file CT_DOC

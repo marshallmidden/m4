@@ -1,0 +1,284 @@
+From:	Mike Christie <michaelc@cs.wisc.edu>
+User-Agent: Thunderbird 1.5 (X11/20060313)
+MIME-Version: 1.0
+To:	linux-scsi <linux-scsi@vger.kernel.org>
+Subject: [PATCH 0/5] iscsi bug fixes
+X-Enigmail-Version: 0.94.0.0
+Content-Type: text/plain; charset=ISO-8859-1
+Content-Transfer-Encoding: 7bit
+Sender:	linux-scsi-owner@vger.kernel.org
+Precedence: bulk
+X-Mailing-List:	linux-scsi@vger.kernel.org
+
+These are bug fixes for LSI support, big endian fix for sense len
+calculation, digest porting errors, and printing output. There have been
+several iscsi patches floating around from Andrew and other users and
+this incorporates those patches.
+
+The patches were made over scsi-misc, but apply to Linus's current git
+tree. One patch applies at a offset because of some of the queue work
+changes in linus's tree but it is ok.
+-
+To unsubscribe from this list: send the line "unsubscribe linux-scsi" in
+the body of a message to majordomo@vger.kernel.org
+More majordomo info at  http://vger.kernel.org/majordomo-info.html
+
+From:	michaelc@cs.wisc.edu
+To:	linux-scsi@vger.kernel.org
+Subject: [PATCH 1/5] fix 2.6.19 data digest calculation bug
+Reply-To: michaelc@cs.wisc.edu
+Date:	Sun, 17 Dec 2006 12:10:24 -0600
+Message-Id: <1166379028772-git-send-email-michaelc@cs.wisc.edu>
+X-Mailer: git-send-email 1.4.1.1
+Sender:	linux-scsi-owner@vger.kernel.org
+Precedence: bulk
+X-Mailing-List:	linux-scsi@vger.kernel.org
+
+From: Arne Redlich <agr@powerkom-dd.de>
+
+The transition from crypto_digest_*() to  the crypto_hash_*() family
+introduced a bug into the data digest calculation: crypto_hash_update() is
+called with the number of S/G elements instead of the S/G lists data size.
+
+Signed-off-by: Arne Redlich <arne.redlich@xiranet.com>
+-
+Signed-off-by: Mike Christie <michaelc@cs.wisc.edu>
+---
+ drivers/scsi/iscsi_tcp.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/scsi/iscsi_tcp.c b/drivers/scsi/iscsi_tcp.c
+index d0b139c..61e3a61 100644
+--- a/drivers/scsi/iscsi_tcp.c
++++ b/drivers/scsi/iscsi_tcp.c
+@@ -750,7 +750,7 @@ static int iscsi_scsi_data_in(struct isc
+ 				if (!offset)
+ 					crypto_hash_update(
+ 							&tcp_conn->rx_hash,
+-							&sg[i], 1);
++							&sg[i], sg[i].length);
+ 				else
+ 					partial_sg_digest_update(
+ 							&tcp_conn->rx_hash,
+-- 
+1.4.1.1
+
+-
+To unsubscribe from this list: send the line "unsubscribe linux-scsi" in
+the body of a message to majordomo@vger.kernel.org
+More majordomo info at  http://vger.kernel.org/majordomo-info.html
+
+From:	michaelc@cs.wisc.edu
+To:	linux-scsi@vger.kernel.org
+Subject: [PATCH 2/5] iscsi: fix crypto_alloc_hash() error check
+Reply-To: michaelc@cs.wisc.edu
+Date:	Sun, 17 Dec 2006 12:10:25 -0600
+Message-Id: <11663790303684-git-send-email-michaelc@cs.wisc.edu>
+X-Mailer: git-send-email 1.4.1.1
+In-Reply-To: <1166379028772-git-send-email-michaelc@cs.wisc.edu>
+References: <1166379028772-git-send-email-michaelc@cs.wisc.edu>
+Sender:	linux-scsi-owner@vger.kernel.org
+Precedence: bulk
+X-Mailing-List:	linux-scsi@vger.kernel.org
+
+From: Akinobu Mita <akinobu.mita@gmail.com>
+
+The return value of crypto_alloc_hash() should be checked by
+IS_ERR().
+
+Cc: Dmitry Yusupov <dmitry_yus@yahoo.com>
+Cc: Alex Aizman <itn780@yahoo.com>
+Signed-off-by: Akinobu Mita <akinobu.mita@gmail.com>
+Cc: James Bottomley <James.Bottomley@steeleye.com>
+Signed-off-by: Andrew Morton <akpm@osdl.org>
+Signed-off-by: Mike Christie <michaelc@cs.wisc.edu>
+---
+ drivers/scsi/iscsi_tcp.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/scsi/iscsi_tcp.c b/drivers/scsi/iscsi_tcp.c
+index 61e3a61..8889686 100644
+--- a/drivers/scsi/iscsi_tcp.c
++++ b/drivers/scsi/iscsi_tcp.c
+@@ -1783,13 +1783,13 @@ iscsi_tcp_conn_create(struct iscsi_cls_s
+ 	tcp_conn->tx_hash.tfm = crypto_alloc_hash("crc32c", 0,
+ 						  CRYPTO_ALG_ASYNC);
+ 	tcp_conn->tx_hash.flags = 0;
+-	if (!tcp_conn->tx_hash.tfm)
++	if (IS_ERR(tcp_conn->tx_hash.tfm))
+ 		goto free_tcp_conn;
+ 
+ 	tcp_conn->rx_hash.tfm = crypto_alloc_hash("crc32c", 0,
+ 						  CRYPTO_ALG_ASYNC);
+ 	tcp_conn->rx_hash.flags = 0;
+-	if (!tcp_conn->rx_hash.tfm)
++	if (IS_ERR(tcp_conn->rx_hash.tfm))
+ 		goto free_tx_tfm;
+ 
+ 	return cls_conn;
+-- 
+1.4.1.1
+
+-
+To unsubscribe from this list: send the line "unsubscribe linux-scsi" in
+the body of a message to majordomo@vger.kernel.org
+More majordomo info at  http://vger.kernel.org/majordomo-info.html
+
+From:	michaelc@cs.wisc.edu
+To:	linux-scsi@vger.kernel.org
+Subject: [PATCH 3/5] newline in iscsi printk
+Reply-To: michaelc@cs.wisc.edu
+Date:	Sun, 17 Dec 2006 12:10:26 -0600
+Message-Id: <11663790313961-git-send-email-michaelc@cs.wisc.edu>
+X-Mailer: git-send-email 1.4.1.1
+In-Reply-To: <11663790303684-git-send-email-michaelc@cs.wisc.edu>
+References: <1166379028772-git-send-email-michaelc@cs.wisc.edu> <11663790303684-git-send-email-michaelc@cs.wisc.edu>
+Sender:	linux-scsi-owner@vger.kernel.org
+Precedence: bulk
+X-Mailing-List:	linux-scsi@vger.kernel.org
+
+From: Meelis Roos <mroos@linux.ee>
+
+This patch against 2.6.19 cures two runtogether printk messages in iSCSI
+driver.
+Signed-off-by: Mike Christie <michaelc@cs.wisc.edu>
+---
+ drivers/scsi/scsi_transport_iscsi.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/scsi/scsi_transport_iscsi.c b/drivers/scsi/scsi_transport_iscsi.c
+index 9b25124..2648dbd 100644
+--- a/drivers/scsi/scsi_transport_iscsi.c
++++ b/drivers/scsi/scsi_transport_iscsi.c
+@@ -1414,7 +1414,7 @@ static __init int iscsi_transport_init(v
+ {
+ 	int err;
+ 
+-	printk(KERN_INFO "Loading iSCSI transport class v%s.",
++	printk(KERN_INFO "Loading iSCSI transport class v%s.\n",
+ 		ISCSI_TRANSPORT_VERSION);
+ 
+ 	err = class_register(&iscsi_transport_class);
+-- 
+1.4.1.1
+
+-
+To unsubscribe from this list: send the line "unsubscribe linux-scsi" in
+the body of a message to majordomo@vger.kernel.org
+More majordomo info at  http://vger.kernel.org/majordomo-info.html
+
+From:	michaelc@cs.wisc.edu
+To:	linux-scsi@vger.kernel.org
+Subject: [PATCH 4/5] IPv6 and Linux iSCSI initiator
+Reply-To: michaelc@cs.wisc.edu
+Date:	Sun, 17 Dec 2006 12:10:27 -0600
+Message-Id: <1166379031350-git-send-email-michaelc@cs.wisc.edu>
+X-Mailer: git-send-email 1.4.1.1
+In-Reply-To: <11663790313961-git-send-email-michaelc@cs.wisc.edu>
+References: <1166379028772-git-send-email-michaelc@cs.wisc.edu> <11663790303684-git-send-email-michaelc@cs.wisc.edu> <11663790313961-git-send-email-michaelc@cs.wisc.edu>
+Sender:	linux-scsi-owner@vger.kernel.org
+Precedence: bulk
+X-Mailing-List:	linux-scsi@vger.kernel.org
+
+From: FUJITA Tomonori <fujita.tomonori@lab.ntt.co.jp>
+
+By the way, here's a minor patch to simplify IP address print.
+
+Signed-off-by: FUJITA Tomonori <fujita.tomonori@lab.ntt.co.jp>
+Signed-off-by: Mike Christie <michaelc@cs.wisc.edu>
+---
+ drivers/scsi/iscsi_tcp.c |    6 ++----
+ 1 files changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/scsi/iscsi_tcp.c b/drivers/scsi/iscsi_tcp.c
+index 8889686..4376840 100644
+--- a/drivers/scsi/iscsi_tcp.c
++++ b/drivers/scsi/iscsi_tcp.c
+@@ -2053,13 +2053,11 @@ iscsi_tcp_conn_get_param(struct iscsi_cl
+ 		sk = tcp_conn->sock->sk;
+ 		if (sk->sk_family == PF_INET) {
+ 			inet = inet_sk(sk);
+-			len = sprintf(buf, "%u.%u.%u.%u\n",
++			len = sprintf(buf, NIPQUAD_FMT "\n",
+ 				      NIPQUAD(inet->daddr));
+ 		} else {
+ 			np = inet6_sk(sk);
+-			len = sprintf(buf,
+-				"%04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
+-				NIP6(np->daddr));
++			len = sprintf(buf, NIP6_FMT "\n", NIP6(np->daddr));
+ 		}
+ 		mutex_unlock(&conn->xmitmutex);
+ 		break;
+-- 
+1.4.1.1
+
+-
+To unsubscribe from this list: send the line "unsubscribe linux-scsi" in
+the body of a message to majordomo@vger.kernel.org
+More majordomo info at  http://vger.kernel.org/majordomo-info.html
+
+From:	michaelc@cs.wisc.edu
+To:	linux-scsi@vger.kernel.org
+Subject: [PATCH 5/5] libiscsi: fix senselen calculation
+Reply-To: michaelc@cs.wisc.edu
+Date:	Sun, 17 Dec 2006 12:10:28 -0600
+Message-Id: <11663790332500-git-send-email-michaelc@cs.wisc.edu>
+X-Mailer: git-send-email 1.4.1.1
+In-Reply-To: <1166379031350-git-send-email-michaelc@cs.wisc.edu>
+References: <1166379028772-git-send-email-michaelc@cs.wisc.edu> <11663790303684-git-send-email-michaelc@cs.wisc.edu> <11663790313961-git-send-email-michaelc@cs.wisc.edu> <1166379031350-git-send-email-michaelc@cs.wisc.edu>
+Sender:	linux-scsi-owner@vger.kernel.org
+Precedence: bulk
+X-Mailing-List:	linux-scsi@vger.kernel.org
+
+From: Mike Christie <michaelc@cs.wisc.edu>
+
+Yanling Qi, noted that when the sense data length of
+a check-condition is greater than 0x7f (127), senselen = (data[0] << 8)
+| data[1] will become negative. It causes different kinds of panics from
+GPF, spin_lock deadlock to spin_lock recursion.
+
+We were also swapping this value on big endien machines.
+
+This patch fixes both issues by using be16_to_cpu().
+Signed-off-by: Mike Christie <michaelc@cs.wisc.edu>
+---
+ drivers/scsi/libiscsi.c |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/scsi/libiscsi.c b/drivers/scsi/libiscsi.c
+index 5d88621..c58ae3b 100644
+--- a/drivers/scsi/libiscsi.c
++++ b/drivers/scsi/libiscsi.c
+@@ -264,7 +264,7 @@ static int iscsi_scsi_cmd_rsp(struct isc
+ 	}
+ 
+ 	if (rhdr->cmd_status == SAM_STAT_CHECK_CONDITION) {
+-		int senselen;
++		uint16_t senselen;
+ 
+ 		if (datalen < 2) {
+ invalid_datalen:
+@@ -274,12 +274,12 @@ invalid_datalen:
+ 			goto out;
+ 		}
+ 
+-		senselen = (data[0] << 8) | data[1];
++		senselen = be16_to_cpu(*(uint16_t *)data);
+ 		if (datalen < senselen)
+ 			goto invalid_datalen;
+ 
+ 		memcpy(sc->sense_buffer, data + 2,
+-		       min(senselen, SCSI_SENSE_BUFFERSIZE));
++		       min_t(uint16_t, senselen, SCSI_SENSE_BUFFERSIZE));
+ 		debug_scsi("copied %d bytes of sense\n",
+ 			   min(senselen, SCSI_SENSE_BUFFERSIZE));
+ 	}
+-- 
+1.4.1.1
+
+-
+To unsubscribe from this list: send the line "unsubscribe linux-scsi" in
+the body of a message to majordomo@vger.kernel.org
+More majordomo info at  http://vger.kernel.org/majordomo-info.html
+

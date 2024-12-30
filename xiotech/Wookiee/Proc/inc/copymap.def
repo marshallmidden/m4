@@ -1,0 +1,154 @@
+# $Id: copymap.def 159812 2012-09-07 21:29:27Z marshall_midden $
+#**********************************************************************
+#
+#  NAME: copymap.def (Secondary copy mapping table definitions)
+#
+#  DESCRIPTION:
+#       This file contains the data structures and definitions
+#       used to manage the mapping tables by the secondary copy
+#       logic.
+#
+#  Copyright (c) 2000-2009 XIOtech Corporation.  All rights reserved.
+#
+#**********************************************************************
+#
+# --- Secondary copy mapping is managed on two levels, the segment level
+#       and the region level. The segment level is the lowest level
+#       managed and represents a segment of the device that consists of
+#       some number of sectors. The region level consists of a number of
+#       consecutive segments that form a region.
+#
+#       A segment mapping table is used to manage segments of a region.
+#       Each bit in a segment mapping table represents a segment of the
+#       virtual device it is associated with. A segment mapping table
+#       manages a region of the virtual device. Multiple segment mapping
+#       tables are used to manage virtual devices that are larger then
+#       what a segment mapping table can manage. As many segment mapping
+#       tables as needed are used to manage the secondary copy virtual
+#       device.
+#
+#       Segment/region mapping tables can be used in a number of ways.
+#       They can keep track of the segments of a virtual device that
+#       have been copied, they can keep track of the segments of a
+#       virtual device that have been updated by a server that have not
+#       been applied to it's associated mirror, they can keep track of
+#       server writes to a mirrored virtual device that need to be
+#       remirrored once the mirror is resumed, they can keep track of
+#       the data that has been copied to a snapshot virtual device, etc.
+#
+#       SEGSIZE_bytes = # bytes in a segment
+#       SEGSIZE_sec   = # sectors in a segment
+#       SMTBLsize     = # bytes in a segment mapping table
+#       REGSIZE_bytes = # bytes in a region
+#       REGSIZE_sec   = # sectors in a region
+#       RMTBLsize     = # bytes in a region mapping table
+#       maxRMcnt      = maximum # regions supported for a virtual device
+#
+#       The following value are the only values that should be modified:
+#               SECpower - Defines the # of sectors per segment as a power of 2.
+#               SMpower  - Defines the segment table size as a power of 2.
+#               RMpower  - Defines the region table size as a power of 2.
+#
+#       The current setting are as follows:
+#               SECpower = 11 (2048 sectors per segment)
+#               SMpower  = 10 (1024 bytes or 8192 segments per region)
+#               RMpower  = 8  (256 regions)
+#
+#       Each segment is 2048 sectors * 512 bytes or 1048576 bytes.
+#       Each region is 8192 segment * 1048576 bytes or ~8GB.
+#       Total size is 256 regions * ~8GB or ~2TB
+#
+
+                                @#ifndef _COPYMAP_H_
+                                @#define _COPYMAP_H_
+                                @#include "XIO_Types.h"
+
+# --- Modifiable Equates ----------------------------------------------------
+#
+# --- The following definitions allow support for up to 2 TB virtual
+#       devices.
+#
+# --- sectors per segment expressed as a power of 2.
+#
+.def SECpower 11                @#define SECPOWER               @ 2048 sectors per segment
+#
+# --- segment table size expressed as a power of 2
+#
+.def SMpower 10                 @#define SMPOWER                @ 1024 bytes or
+                                @                               @ (8192 segments per region)
+#
+# --- region table size as expressed as a power of 2
+#
+.def RMpower 8                  @#define RMPOWER                @ 256 regions
+#
+# --- Non Modifiable Equates ------------------------------------------------
+#
+#     The following should not be modified unless there is a logic error.
+#
+.set SEGSIZE_sec,1<<SECpower    @#define SEGSIZE_SEC (1<<SECPOWER) @ segment size in sectors (2048)
+.set SEGSIZE_bytes,512*SEGSIZE_sec @#define SEGSIZE_BYTES (512 * SEGSIZE_SEC) @ segment size in bytes
+.set SEGb2REG_fs,SMpower        @#define SEGb2REG_FS SMPOWER    @ segment byte # to region shift factor
+.set SEC2SEG_sf,SECpower        @#define SEC2SEG_SF SECPOWER    @ sector-to-segment # shift factor
+
+.def SEC2SEG_msk 0x00ffffff     @#define SEC2SEG_MSK            @ sector-to-segment logical and factor
+                                @                               @   within a region
+
+.set SEC2REG_sf,SECpower+SMpower+3 @#define SEC2REG_SF (SECPOWER+SMPOWER+3) @ sector-to-region # shift factor
+
+.def SMbits2wrd_sf 5            @#define SMBITS2WRD_SF          @ bits to word shift factor
+
+.set SMwrd2reg_sf,SMpower-2     @#define SMWRD2REG_SF (SMPOWER-2) @ word to region shift factor
+.set SMTBLsize,1<<SMpower       @#define SMTBLSIZE (1<<SMPOWER) @ size of segment map tbl (1024 bytes)
+.set SMTBLSZ_msk,SMTBLsize-1    @#define SMTBLSZ_MSK (SMTBLSIZE-1) @ segment map tbl mask (bytes)
+.set SMwrdidx_mask,(SMTBLsize/4)-1 @#define SMWRDIDX_MASK ((SMTBLSIZE/4)-1)
+
+.set REGSIZE_bytes,SMTBLsize*8*SEGSIZE_bytes @#define REGSIZE_BYTES (SMTBLSIZE*8*SEGSIZE_BYTES) @ region size in bytes (8589934592)
+.set REGSIZE_sec,SMTBLsize*8*SEGSIZE_sec @#define REGSIZE_SEC (SMTBLSIZE*8*SEGSIZE_SEC) @ region size in sectors (16777216)
+.set REGSIZE_seg,SMTBLsize*8    @#define REGSIZE_SEG (SMTBLSIZE*8) @ region size in segment (8192)
+.set maxRMcnt,1<<RMpower        @#define MAXRMCNT (1<<RMPOWER)  @ maximum # region maps supported (256)
+.set RMTBLsize,maxRMcnt*4       @#define RMTBLSIZE (MAXRMCNT*4) @ size of region mapping table (1024)
+
+#
+# --- Begin structure segment table definitions -----------------------
+#
+.struct                         @typedef struct SM              @ Segment Map
+                                @{
+.w SM_cnt                       @   UINT32 cnt;                 @ number of segments
+.w SM_lastwrd                   @   UINT32 lastwrd;             @ last word scanned
+.b SM_rsvd1 8                   @   UINT8  rsvd1[8];            @ Unused 8 bytes
+.w SM_ccsm_len                  @   UINT32 ccsm_len;            @ event length
+.b SM_ccsm_type                 @   UINT8  ccsm_type;           @ event type code
+.b SM_ccsm_fc                   @   UINT8  ccsm_fc;             @ function code
+.s SM_ccsm_seq                  @   UINT16 ccsm_seq;            @ sequence number
+.w SM_ccsm_sendsn               @   UINT32 ccsm_sendsn;         @ sender serial number
+.w SM_ccsm_ext_id               @   UINT32 ccsmx_id;            @ external registration ID
+.w SM_ccsm_ext_cmsn             @   UINT32 ccsmx_cmsn;          @ external CM serial number
+.w SM_ccsm_ext_regnum           @   UINT32 ccsmx_regnum;        @ external region number
+.b SM_rsvd2 8                   @   UINT8  rsvd2[8];            @ Unused 8 bytes
+.f SM_tbl SMTBLsize             @   UINT32 segments[SMTBLSIZE/4]; @ start of seg. table  (1024/4 =1024 bytes)
+# --- End structure ---------------------------------------------------
+.f SMallocsize 0                @} SM;                          @ Size of SM.
+
+#
+# --- Begin structure region table definitions ------------------------
+#
+.struct                         @typedef struct RM              @ Region Map
+                                @{
+.b RM_type                      @   UINT8  type;                @ Region table type
+.b RM_rsvd1 3                   @   UINT8  rsvd1[3];            @ Reserved 3 bytes
+.w RM_lastmerge                 @   UINT32 lastmerge;           @ Last merge timestamp
+.b RM_rsvd2 8                   @   UINT8  rsvd2[8];            @ Reserved 8 bytes
+.f RM_tbl RMTBLsize             @   struct SM *regions[MAXRMCNT]; @ Start of segment maps (256)
+# --- End structure ---------------------------------------------------
+.f RMallocsize 0                @} RM;                          @ Size of RM.
+
+                                @#endif /* _COPYMAP_H_ */
+#******************************************************************************
+#
+####
+## Modelines:
+## Local Variables:
+## tab-width: 4
+## indent-tabs-mode: nil
+## End:
+## vi:sw=4 ts=4 expandtab

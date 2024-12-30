@@ -1,0 +1,91 @@
+#
+# initscript   Executed by init(8) for every program it
+#              wants to spawn like this:
+#
+#              /bin/sh /etc/initscript <id> <level> <action> <process>
+#
+# Set ulimits from sysconfig
+# (c) garloff@suse.de, 1996, 2003
+# License: Artistic
+
+# Set umask to safe level, and enable core dumps.
+umask 022
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export PATH
+
+if test -r /etc/sysconfig/ulimit; then
+  . /etc/sysconfig/ulimit
+  unset HARGS SARGS
+  # Max CPU time (not recommended)
+  test -z "$HARDCPULIMIT" -o "$HARDCPULIMIT" = "0" ||
+  HARGS="-Ht $HARDCPULIMIT"
+  test -z "$SOFTCPULIMIT" -o "$SOFTCPULIMIT" = "0" ||
+  SARGS="-St $SOFTCPULIMIT"
+  # File descriptors
+  test -z "$HARDFDLIMIT" -o "$HARDFDLIMIT" = "0" ||
+  HARGS="$HARGS -Hn $HARDFDLIMIT"
+  test -z "$SOFTFDLIMIT" -o "$SOFTFDLIMIT" = "0" ||
+  SARGS="$SARGS -Sn $SOFTFDLIMIT"
+  # Core files (0 makes sense here!)
+  test -z "$HARDCORELIMIT" ||
+  HARGS="$HARGS -Hc $HARDCORELIMIT"
+  test -z "$SOFTCORELIMIT" ||
+  SARGS="$SARGS -Sc $SOFTCORELIMIT"
+  # File sizes
+  test -z "$HARDFILESZLIMIT" -o "$HARDFILESZLIMIT" = "0" ||
+  HARGS="$HARGS -Hf $HARDFILESZLIMIT"
+  test -z "$SOFTFILESZLIMIT" -o "$SOFTFILESZLIMIT" = "0" ||
+  SARGS="$SARGS -Sf $SOFTFILESZLIMIT"
+  # User processes
+  test -z "$HARDPROCESSLIMIT" -o "$HARDPROCESSLIMIT" = "0" ||
+  HARGS="$HARGS -Hu $HARDPROCESSLIMIT"
+  test -z "$SOFTPROCESSLIMIT" -o "$SOFTPROCESSLIMIT" = "0" ||
+  SARGS="$SARGS -Su $SOFTPROCESSLIMIT"
+  # Apply
+  test -z "$SARGS" || ulimit $SARGS
+  test -z "$HARGS" || ulimit $HARGS
+fi
+
+if test -r /proc/meminfo -a -r /etc/sysconfig/ulimit; then
+  # Get memory & swap sizes to evaluate the percentages
+  MEMTOT=$(sed -e '/^MemTotal:/!d;s/^MemTotal*:[ 	]*\([0-9]*\) .*/\1/'  /proc/meminfo)
+  SWPTOT=$(sed -e '/^SwapTotal:/!d;s/^SwapTotal*:[ 	]*\([0-9]*\) .*/\1/'  /proc/meminfo)
+  TOT=$(($MEMTOT+$SWPTOT))
+  
+  unset HARGS SARGS
+  # SINGLE process limits to prevent a process from killing the machine
+  # by making it go OOM
+
+  # Maximum No more than VIRTUALLIMIT % of all virtual memory
+  test -z "$HARDVIRTUALLIMIT" -o "$HARDVIRTUALLIMIT" = "0" ||
+  HARGS="-Hv $((($TOT+99)/100*$HARDVIRTUALLIMIT))"
+  test -z "$SOFTVIRTUALLIMIT" -o "$SOFTVIRTUALLIMIT" = "0" ||
+  SARGS="-Sv $((($TOT+99)/100*$SOFTVIRTUALLIMIT))"
+  # Maximum resident size is $RESIDENTLIMIT % of physical RAM
+  test -z "$HARDRESIDENTLIMIT" -o "$HARDRESIDENTLIMIT" = "0" ||
+  HARGS="$HARGS -Hm $((($MEMTOT+99)/100*$HARDRESIDENTLIMIT))"
+  test -z "$SOFTRESIDENTLIMIT" -o "$SOFTRESIDENTLIMIT" = "0" ||
+  SARGS="$SARGS -Sm $((($MEMTOT+99)/100*$SOFTRESIDENTLIMIT))"
+  # Limit locked mem to $LOCKLIMIT % of phys RAM
+  test -z "$HARDLOCKLIMIT" -o "$HARDLOCKLIMIT" = "0" ||
+  HARGS="$HARGS -Hl $((($MEMTOT+99)/100*$HARDLOCKLIMIT))"
+  test -z "$SOFTLOCKLIMIT" -o "$SOFTLOCKLIMIT" = "0" ||
+  SARGS="$SARGS -Sl $((($MEMTOT+99)/100*$SOFTLOCKLIMIT))"
+  # Optional: Limit stack and data segment sizes ($STACKLIMIT, $DATALIMIT) 
+  test -z "$HARDSTACKLIMIT" -o "$HARDSTACKLIMIT" = "0" || 
+  HARGS="$HARGS -Hs $((($MEMTOT+99)/100*$HARDSTACKLIMIT))"
+  test -z "$SOFTSTACKLIMIT" -o "$SOFTSTACKLIMIT" = "0" || 
+  SARGS="$SARGS -Ss $((($MEMTOT+99)/100*$SOFTSTACKLIMIT))"
+  test -z "$HARDDATALIMIT" -o "$HARDDATALIMIT" = "0" || 
+  HARGS="$HARGS -Hd $((($MEMTOT+99)/100*$HARDDATALIMIT))"
+  test -z "$SOFTDATALIMIT" -o "$SOFTDATALIMIT" = "0" || 
+  SARGS="$SARGS -Sd $((($MEMTOT+99)/100*$SOFTDATALIMIT))"
+  # Apply
+  test -z "$HARGS" || ulimit $HARGS
+  test -z "$SARGS" || ulimit $SARGS
+fi
+
+# Execute the program.
+exec $4
+
+# vi:sw=8 ts=8 noexpandtab

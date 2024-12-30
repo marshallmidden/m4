@@ -1,0 +1,129 @@
+#!/bin/bash -e
+# $Id$
+# Script to build releases from subversion
+# Copyright 2006 Xiotech Corporation. All Rights reserved.
+# Mark D. Rustad, 2006/12/22
+#
+# svnWookieeBuild [-h] [-b branch] [-T] [-t tag] [-v version] [-w where]
+#                 [-m model]
+
+usage() {
+    echo "$0 [-h] [-b branch] [-v version] [-w where]"
+    echo ""
+    echo "-h display help"
+    echo "-b branch to build code from, ie. trunk"
+    echo "-v version of code to build, ie. F100"
+    echo "-w where to put results of build"
+    echo "-T create tag for build"
+    echo "-t use tag for build"
+    echo "-m model to build (or ALL)"
+}
+
+fail() {
+    echo "$1"
+    exit 1
+}
+
+test "$#" -eq 0 && { echo "Parameters required"; usage; exit 1; }
+repo="svn://svn.xiotech.com/eng"
+models="750 3000"
+branch=
+tag=
+ver=
+where=
+settag=
+model=ALL
+
+while getopts "b:hm:Tt:v:w:" option; do
+    case "${option}" in
+        b) branch="${OPTARG}";;
+        h) usage;;
+        t) tag="${OPTARG}";;
+        T) settag=1;;
+        v) ver="${OPTARG}";;
+        w) where="${OPTARG}";;
+        m) model="${OPTARG}";;
+        :) echo "Required parameter for option ${OPTARG} missing.";
+            usage; exit 1;;
+        \?) usage; exit 1;;
+        *) echo "Unknown option '${option}'"; usage; exit 1;;
+    esac
+done
+
+shift $((OPTIND - 1))
+
+ubranch="`echo ${branch}|tr [:lower:] [:upper:]`"
+test "${ubranch}" = "MAIN" && branch="trunk"
+test "${ubranch}" = "HEAD" && branch="trunk"
+if [ -z "${branch}" ]; then
+    branch=trunk
+    bpath=trunk
+else
+    bpath="branches/${branch}"
+fi
+
+test "${ver}" = "" && ver=ENGR
+uver="`echo ${ver}|tr [:lower:] [:upper:]`"
+
+where="`echo "${where}"|tr [:lower:] [:upper:]`"
+test "${where}" = "" && where=Engr
+
+test "${tag}" = "" && tag="BUILD_WOOKIEE_${branch}-${uver}"
+
+test "${model}" = "ALL" && model="${models}"
+
+echo "----------"
+echo "About to build:"
+echo "  branch=${branch}, ver=${ver}, where=${where}"
+echo "  tag=${tag}, settag=${settag}, model=${model}"
+echo ""
+
+while { echo -n "Ready [Y/N]? "; read input; } do
+    test "${input}" = "Y" && break
+    test "${input}" = "n" -o "${input}" = "N" &&
+        { echo "build cancelled."; exit 1; }
+done
+echo "*** Beginning build ***"
+
+blddir="${branch}-${uver}"
+test -d "${blddir}" &&
+    {   echo "Work directory, ${blddir}, already exists"
+        while { echo -n "Continue, blowing it away [Y/N]? "; read input; } do
+            test "${input}" = "Y" && { echo "Continuing..."; break; }
+        done
+    }
+
+rm -rf "${blddir}"
+mkdir -p "${blddir}"
+cd "${blddir}"
+echo "** Entering ${blddir} **"
+if [ "${settag}" = "1" ]; then
+    echo "** Creating tag ${tag} **"
+    svn copy ${repo}/${bpath}/storage/Wookiee \
+        ${repo}/tags/storage/Wookiee/${tag} \
+        -m "TBolt00000000 -svnStBuild Wookiee tag ${tag}" &>tag.out ||
+        fail 'svn tag failed!'
+    svn copy ${repo}/${bpath}/apps/AppEng/UpdateSigner \
+        ${repo}/tags/storage/Wookiee/${tag} \
+        -m "TBolt00000000 -svnStBuild UpdateSigner tag ${tag}" &>tag.out ||
+        fail 'svn tag failed!'
+fi
+echo "** Checking out Wookiee from ${tag} **"
+mkdir -p Wookiee
+cd Wookiee || fail 'Failed to enter Wookiee!'
+svn co ${repo}/tags/storage/Wookiee/${tag} . &> co.out ||
+    fail 'svn checkout failed!'
+cd ..
+
+cd Wookiee || fail 'Failed to enter Wookiee!'
+test -x ./BuildRelease || fail 'No BuildRelease script!'
+
+for mod in ${model}; do
+    echo "** Beginning build for model ${mod} **"
+    ./BuildRelease -v ${ver} -w ${where} -m ${mod} ||
+        fail "svnWookieeBuild -v ${ver} -w ${where} -m ${mod} failed"
+done
+
+echo '** svnWookieeBuild completed successfully! **'
+
+# vi:sw=4 ts=4 expandtab

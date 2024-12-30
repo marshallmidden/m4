@@ -1,0 +1,68 @@
+diff -rubB obj-750/drivers/scsi/aic94xx/aic94xx_sds.c obj-750.new/drivers/scsi/aic94xx/aic94xx_sds.c
+--- obj-750/drivers/scsi/aic94xx/aic94xx_sds.c	2006-08-09 16:45:44.765414267 -0500
++++ obj-750.new/drivers/scsi/aic94xx/aic94xx_sds.c	2006-08-09 15:42:49.000000000 -0500
+@@ -32,6 +32,10 @@
+ #include "aic94xx.h"
+ #include "aic94xx_reg.h"
+ 
++int speed_go_3 = 0;
++module_param(speed_go_3, int, 0444);
++MODULE_PARM_DESC(speed_go_3, "Enable 3Gbps SAS (0=off, 1=on)");
++
+ /* ---------- OCM stuff ---------- */
+ 
+ struct asd_ocm_dir_ent {
+@@ -849,6 +853,9 @@
+ 		/* This is the SAS address which should be sent in IDENTIFY. */
+ 		memcpy(asd_ha->hw_prof.phy_desc[i].sas_addr, pe->sas_addr,
+ 		       SAS_ADDR_SIZE);
++                if (speed_go_3)
++                    asd_ha->hw_prof.phy_desc[i].max_sas_lrate = PHY_LINKRATE_3;
++                else
+ 		asd_ha->hw_prof.phy_desc[i].max_sas_lrate = PHY_LINKRATE_1_5;
+ 			//(pe->sas_link_rates & 0xF0) >> 4;
+ 		asd_ha->hw_prof.phy_desc[i].min_sas_lrate = PHY_LINKRATE_1_5;
+diff -rubB obj-750/drivers/scsi/sas/sas_expander.c obj-750.new/drivers/scsi/sas/sas_expander.c
+--- obj-750/drivers/scsi/sas/sas_expander.c	2006-08-09 16:45:45.083383871 -0500
++++ obj-750.new/drivers/scsi/sas/sas_expander.c	2006-08-09 16:50:40.009188155 -0500
+@@ -757,6 +757,13 @@
+ 	sas_ex_get_linkrate(parent, child, phy);
+ 
+ 	if ((phy->attached_tproto & SAS_PROTO_STP) || phy->attached_sata_dev) {
++            
++                res = smp_phy_control(parent, phy_id, PHY_FUNC_LINK_RESET);
++                if (res)  {
++                    kfree(child);
++                    return NULL;
++                }
++                mdelay(100) ;
+ 		child->dev_type = SATA_DEV;
+ 		if (phy->attached_tproto & SAS_PROTO_STP)
+ 			child->tproto = phy->attached_tproto;
+@@ -900,8 +907,7 @@
+ 
+ 	switch (ex_phy->attached_dev_type) {
+ 	case SAS_END_DEV:
+-		res = smp_phy_control(dev, phy_id, PHY_FUNC_LINK_RESET);
+-		mdelay(100) ;
++		
+ 		child = sas_ex_discover_end_dev(dev, phy_id);
+ 		break;
+ 	case FANOUT_DEV:
+@@ -1829,7 +1835,14 @@
+ 		   SAS_ADDR(phy->attached_sas_addr)) {
+ 		SAS_DPRINTK("ex %016llx phy 0x%x broadcast flutter\n",
+ 			    SAS_ADDR(dev->sas_addr), phy_id);
+-                sas_del_io_list(dev);
++                struct domain_device *child, *n;
++                struct expander_device *ex_dev = &dev->ex_dev;
++                list_for_each_entry_safe(child, n, &ex_dev->children, siblings) {
++                    if (SAS_ADDR(child->sas_addr) ==
++                        SAS_ADDR(phy->attached_sas_addr)) {
++                            sas_del_io_list(child);
++                        }
++                   }
+ 	} else
+ 		res = sas_discover_new(dev, phy_id);
+ out:
+Only in obj-750.new/drivers/scsi/sas: sas_expander.c~

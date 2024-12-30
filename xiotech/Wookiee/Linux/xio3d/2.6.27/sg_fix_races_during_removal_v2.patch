@@ -1,0 +1,659 @@
+Message-ID: <496373B4.2050700@cybernetics.com>
+Date: Tue, 06 Jan 2009 10:07:32 -0500
+From: Tony Battersby <tonyb@cybernetics.com>
+MIME-Version: 1.0
+To: Mark Rustad <mrustad@gmail.com>
+Subject: Re: [PATCH 0/2] sg: fix races during device removal (v2)
+Content-Type: text/plain; charset=ISO-8859-1
+Content-Transfer-Encoding: 7bit
+Received-SPF: none
+
+Since you expressed an interest in 2.6.27, here is the first patch
+against 2.6.27.10, since the patch I posted for 2.6.28 doesn't apply
+cleanly to 2.6.27.
+
+--- a/drivers/scsi/sg.c	2008-10-09 18:13:53.000000000 -0400
++++ b/drivers/scsi/sg.c	2009-01-06 10:02:39.000000000 -0500
+@@ -109,6 +109,8 @@ static DEFINE_IDR(sg_index_idr);
+ static DEFINE_RWLOCK(sg_index_lock);	/* Also used to lock
+ 							   file descriptor list for device */
+ 
++static DECLARE_WAIT_QUEUE_HEAD(sg_remove_wait);
++
+ static struct class_interface sg_interface = {
+ 	.add_dev	= sg_add,
+ 	.remove_dev	= sg_remove,
+@@ -160,12 +162,22 @@ typedef struct sg_fd {		/* holds the sta
+ 	char mmap_called;	/* 0 -> mmap() never called on this fd */
+ } Sg_fd;
+ 
++#define to_sg_device(obj) container_of(obj, Sg_device, kref)
++
+ typedef struct sg_device { /* holds the state of each scsi generic device */
+ 	struct scsi_device *device;
+ 	wait_queue_head_t o_excl_wait;	/* queue open() when O_EXCL in use */
+ 	int sg_tablesize;	/* adapter's max scatter-gather table size */
+ 	u32 index;		/* device index number */
+ 	Sg_fd *headfp;		/* first open fd belonging to this device */
++	/* The refcount is initialized to 1 upon device creation and
++	   decremented by sg_remove() after setting detached = 1.  The
++	   refcount is incremented for each Sg_fd linked into headfp.
++	   Functions that access sg_device without an associated Sg_fd must
++	   use kref_get() (done by sg_get_dev()) and then call sg_put_dev()
++	   when finished.
++	   */
++	struct kref kref;
+ 	volatile char detached;	/* 0->attached, 1->detached pending removal */
+ 	volatile char exclude;	/* opened for exclusive access */
+ 	char sgdebug;		/* 0->off, 1->sense, 9->dump dev, 10-> all devs */
+@@ -200,14 +212,14 @@ static void sg_unlink_reserve(Sg_fd * sf
+ static struct page *sg_page_malloc(int rqSz, int lowDma, int *retSzp);
+ static void sg_page_free(struct page *page, int size);
+ static Sg_fd *sg_add_sfp(Sg_device * sdp, int dev);
+-static int sg_remove_sfp(Sg_device * sdp, Sg_fd * sfp);
+-static void __sg_remove_sfp(Sg_device * sdp, Sg_fd * sfp);
++static void sg_remove_sfp(Sg_device * sdp, Sg_fd * sfp);
+ static Sg_request *sg_get_rq_mark(Sg_fd * sfp, int pack_id);
+ static Sg_request *sg_add_request(Sg_fd * sfp);
+ static int sg_remove_request(Sg_fd * sfp, Sg_request * srp);
+ static int sg_res_in_use(Sg_fd * sfp);
+ static int sg_build_direct(Sg_request * srp, Sg_fd * sfp, int dxfer_len);
+ static Sg_device *sg_get_dev(int dev);
++static void sg_put_dev(Sg_device *sdp);
+ #ifdef CONFIG_SCSI_PROC_FS
+ static int sg_last_dev(void);
+ #endif
+@@ -245,21 +257,19 @@ sg_open(struct inode *inode, struct file
+ 	SCSI_LOG_TIMEOUT(3, printk("sg_open: dev=%d, flags=0x%x\n", dev, flags));
+ 	sdp = sg_get_dev(dev);
+ 	if ((!sdp) || (!sdp->device)) {
+-		unlock_kernel();
+-		return -ENXIO;
++		retval = -ENXIO;
++		goto out_sg_put;
+ 	}
+ 	if (sdp->detached) {
+-		unlock_kernel();
+-		return -ENODEV;
++		retval = -ENODEV;
++		goto out_sg_put;
+ 	}
+ 
+ 	/* This driver's module count bumped by fops_get in <linux/fs.h> */
+ 	/* Prevent the device driver from vanishing while we sleep */
+ 	retval = scsi_device_get(sdp->device);
+-	if (retval) {
+-		unlock_kernel();
+-		return retval;
+-	}
++	if (retval)
++		goto out_sg_put;
+ 
+ 	if (!((flags & O_NONBLOCK) ||
+ 	      scsi_block_when_processing_errors(sdp->device))) {
+@@ -297,29 +307,31 @@ sg_open(struct inode *inode, struct file
+ 			goto error_out;
+ 		}
+ 	}
+-	if (sdp->detached) {
+-		retval = -ENODEV;
+-		goto error_out;
+-	}
+ 	if (!sdp->headfp) {	/* no existing opens on this device */
+ 		sdp->sgdebug = 0;
+ 		q = sdp->device->request_queue;
+ 		sdp->sg_tablesize = min(q->max_hw_segments,
+ 					q->max_phys_segments);
+ 	}
+-	if ((sfp = sg_add_sfp(sdp, dev)))
++	sfp = sg_add_sfp(sdp, dev);
++	if (!IS_ERR(sfp))
+ 		filp->private_data = sfp;
+ 	else {
+-		if (flags & O_EXCL)
++		if (flags & O_EXCL) {
+ 			sdp->exclude = 0;	/* undo if error */
+-		retval = -ENOMEM;
++			wake_up_interruptible(&sdp->o_excl_wait);
++		}
++		retval = PTR_ERR(sfp);
+ 		goto error_out;
+ 	}
++	sg_put_dev(sdp);
+ 	unlock_kernel();
+ 	return 0;
+ 
+-      error_out:
++ error_out:
+ 	scsi_device_put(sdp->device);
++ out_sg_put:
++	sg_put_dev(sdp);
+ 	unlock_kernel();
+ 	return retval;
+ }
+@@ -330,18 +342,57 @@ sg_release(struct inode *inode, struct f
+ {
+ 	Sg_device *sdp;
+ 	Sg_fd *sfp;
++	int dirty;
+ 
+ 	if ((!(sfp = (Sg_fd *) filp->private_data)) || (!(sdp = sfp->parentdp)))
+ 		return -ENXIO;
++
+ 	SCSI_LOG_TIMEOUT(3, printk("sg_release: %s\n", sdp->disk->disk_name));
++
+ 	sg_fasync(-1, filp, 0);	/* remove filp from async notification list */
+-	if (0 == sg_remove_sfp(sdp, sfp)) {	/* Returns 1 when sdp gone */
+-		if (!sdp->detached) {
+-			scsi_device_put(sdp->device);
++
++	sdp->exclude = 0;
++	wake_up_interruptible(&sdp->o_excl_wait);
++
++	/* Need a write lock to set sfp->closed. */
++	write_lock_irq(&sfp->rq_list_lock);
++	for (;;) {
++		Sg_request *srp;
++
++		dirty = 0;
++		for (srp = sfp->headrp; srp; srp = srp->nextrp) {
++			if (srp->done)
++				break;
++			dirty++;
+ 		}
+-		sdp->exclude = 0;
+-		wake_up_interruptible(&sdp->o_excl_wait);
++		if (NULL == srp)
++			break;
++
++		/* Found a command that is done but not cleaned up; remove
++		   it and then check again. */
++		write_unlock_irq(&sfp->rq_list_lock);
++		sg_finish_rem_req(srp);
++		write_lock_irq(&sfp->rq_list_lock);
+ 	}
++	if (dirty) {
++		sfp->closed = 1;	/* flag dirty state on this fd */
++		try_module_get(THIS_MODULE); /* prevent module unload */
++		SCSI_LOG_TIMEOUT(1,
++			printk("sg_release: %s, sfp=0x%p, %d commands "
++				"still pending\n",
++				sdp->disk->disk_name,
++				sfp,
++				dirty));
++	}
++	write_unlock_irq(&sfp->rq_list_lock);
++
++	/* If dirty != 0, then sg_remove_sfp() will be called from
++	   sg_cmd_done().  Note that since sg_cmd_done() can happen any time
++	   after rq_list_lock is dropped, it is no longer safe to access sfp
++	   or sdp in this case. */
++	if (0 == dirty)
++		sg_remove_sfp(sdp, sfp);
++
+ 	return 0;
+ }
+ 
+@@ -1269,23 +1320,22 @@ static void
+ sg_cmd_done(void *data, char *sense, int result, int resid)
+ {
+ 	Sg_request *srp = data;
+-	Sg_device *sdp = NULL;
++	Sg_device *sdp;
+ 	Sg_fd *sfp;
+ 	unsigned long iflags;
+ 	unsigned int ms;
++	int discard_response = 0;
+ 
+-	if (NULL == srp) {
++	if (unlikely(NULL == srp)) {
+ 		printk(KERN_ERR "sg_cmd_done: NULL request\n");
+ 		return;
+ 	}
+ 	sfp = srp->parentfp;
+-	if (sfp)
+-		sdp = sfp->parentdp;
+-	if ((NULL == sdp) || sdp->detached) {
+-		printk(KERN_INFO "sg_cmd_done: device detached\n");
++	if (unlikely(NULL == sfp)) {
++		printk(KERN_ERR "sg_cmd_done: NULL sg_fd\n");
+ 		return;
+ 	}
+-
++	sdp = sfp->parentdp;
+ 
+ 	SCSI_LOG_TIMEOUT(4, printk("sg_cmd_done: %s, pack_id=%d, res=0x%x\n",
+ 		sdp->disk->disk_name, srp->header.pack_id, result));
+@@ -1321,33 +1371,46 @@ sg_cmd_done(void *data, char *sense, int
+ 	}
+ 	/* Rely on write phase to clean out srp status values, so no "else" */
+ 
+-	if (sfp->closed) {	/* whoops this fd already released, cleanup */
+-		SCSI_LOG_TIMEOUT(1, printk("sg_cmd_done: already closed, freeing ...\n"));
+-		sg_finish_rem_req(srp);
+-		srp = NULL;
+-		if (NULL == sfp->headrp) {
+-			SCSI_LOG_TIMEOUT(1, printk("sg_cmd_done: already closed, final cleanup\n"));
+-			if (0 == sg_remove_sfp(sdp, sfp)) {	/* device still present */
+-				scsi_device_put(sdp->device);
+-			}
+-			sfp = NULL;
+-		}
+-	} else if (srp && srp->orphan) {
+-		if (sfp->keep_orphan)
+-			srp->sg_io_owned = 0;
+-		else {
+-			sg_finish_rem_req(srp);
+-			srp = NULL;
++	/* NOTE: if the file descriptor is being closed, sg_release() may run
++	   concurrently with this function.  In that case, it is possible for
++	   sg_release() to free sfp (and possibly sdp) even before this
++	   function returns.  This can happen any time after this function
++	   drops rq_list_lock with srp->done = 1, or any time after this
++	   function calls sg_finish_rem_req().  Therefore, the last action
++	   taken must be one of the following:
++	   1) unlock rq_list_lock after setting srp->done = 1, and then return
++	      without accessing srp, sfp, or sdp again, or
++	   2) leave srp->done = 0, call sg_finish_rem_req(), and then return
++	      without accessing srp, sfp, or sdp again.  Also note that
++	      sg_finish_rem_req() itself may free sfp if sfp->closed. */
++
++	write_lock_irqsave(&sfp->rq_list_lock, iflags);
++	if (unlikely(sfp->closed)) {
++		/* whoops this fd already released, cleanup */
++		SCSI_LOG_TIMEOUT(1,
++			printk("sg_cmd_done: already closed, freeing ...\n"));
++		discard_response = 1;
++	} else {
++		if (unlikely(srp->orphan)) {
++			if (sfp->keep_orphan)
++				srp->sg_io_owned = 0;
++			else
++				discard_response = 1;
+ 		}
+ 	}
+-	if (sfp && srp) {
+-		/* Now wake up any sg_read() that is waiting for this packet. */
+-		kill_fasync(&sfp->async_qp, SIGPOLL, POLL_IN);
+-		write_lock_irqsave(&sfp->rq_list_lock, iflags);
++	if (likely(!discard_response)) {
++		/* Now wake up any sg_read() that is waiting for this
++		   packet. */
+ 		srp->done = 1;
+ 		wake_up_interruptible(&sfp->read_wait);
+-		write_unlock_irqrestore(&sfp->rq_list_lock, iflags);
++		kill_fasync(&sfp->async_qp, SIGPOLL, POLL_IN);
++		if (unlikely(sdp->detached))
++			wake_up(&sg_remove_wait);
+ 	}
++	write_unlock_irqrestore(&sfp->rq_list_lock, iflags);
++
++	if (unlikely(discard_response))
++		sg_finish_rem_req(srp);
+ }
+ 
+ static struct file_operations sg_fops = {
+@@ -1409,6 +1472,7 @@ static Sg_device *sg_alloc(struct gendis
+ 	init_waitqueue_head(&sdp->o_excl_wait);
+ 	sdp->sg_tablesize = min(q->max_hw_segments, q->max_phys_segments);
+ 	sdp->index = k;
++	kref_init(&sdp->kref);
+ 
+ 	error = 0;
+  out:
+@@ -1508,63 +1572,96 @@ out:
+ 	return error;
+ }
+ 
++/* Return 0 if all commands to the device have gone through sg_cmd_done(),
++   or 1 if there is a command that hasn't gone through sg_cmd_done(). */
++static int
++sg_device_has_active_cmds(Sg_device *sdp)
++{
++	Sg_fd *sfp;
++	int has_active_cmds = 0;
++
++	read_lock_irq(&sg_index_lock);
++	for (sfp = sdp->headfp; sfp; sfp = sfp->nextfp) {
++		Sg_request *srp;
++
++		read_lock(&sfp->rq_list_lock);
++		for (srp = sfp->headrp; srp; srp = srp->nextrp) {
++			if (0 == srp->done) {
++				has_active_cmds = 1;
++				break;
++			}
++		}
++		read_unlock(&sfp->rq_list_lock);
++
++		if (has_active_cmds)
++			break;
++	}
++	read_unlock_irq(&sg_index_lock);
++
++	return has_active_cmds;
++}
++
+ static void
+ sg_remove(struct device *cl_dev, struct class_interface *cl_intf)
+ {
+ 	struct scsi_device *scsidp = to_scsi_device(cl_dev->parent);
+ 	Sg_device *sdp = dev_get_drvdata(cl_dev);
+-	unsigned long iflags;
+ 	Sg_fd *sfp;
+-	Sg_fd *tsfp;
+-	Sg_request *srp;
+-	Sg_request *tsrp;
+-	int delay;
++	int n_closed_fds = 0;
++	int n_open_fds = 0;
++	int n_active_cmds = 0;
+ 
+-	if (!sdp)
++	if (!sdp || sdp->detached)
+ 		return;
+ 
+-	delay = 0;
+-	write_lock_irqsave(&sg_index_lock, iflags);
+-	if (sdp->headfp) {
+-		sdp->detached = 1;
+-		for (sfp = sdp->headfp; sfp; sfp = tsfp) {
+-			tsfp = sfp->nextfp;
+-			for (srp = sfp->headrp; srp; srp = tsrp) {
+-				tsrp = srp->nextrp;
+-				if (sfp->closed || (0 == sg_srp_done(srp, sfp)))
+-					sg_finish_rem_req(srp);
+-			}
+-			if (sfp->closed) {
+-				scsi_device_put(sdp->device);
+-				__sg_remove_sfp(sdp, sfp);
+-			} else {
+-				delay = 1;
+-				wake_up_interruptible(&sfp->read_wait);
+-				kill_fasync(&sfp->async_qp, SIGPOLL,
+-					    POLL_HUP);
+-			}
++	/* Need a write lock to set sdp->detached. */
++	write_lock_irq(&sg_index_lock);
++	sdp->detached = 1;
++	for (sfp = sdp->headfp; sfp; sfp = sfp->nextfp) {
++		Sg_request *srp;
++
++		read_lock(&sfp->rq_list_lock);
++		for (srp = sfp->headrp; srp; srp = srp->nextrp) {
++			if (0 == srp->done)
++				n_active_cmds++;
+ 		}
+-		SCSI_LOG_TIMEOUT(3, printk("sg_remove: dev=%d, dirty\n", sdp->index));
+-		if (NULL == sdp->headfp) {
+-			idr_remove(&sg_index_idr, sdp->index);
+-		}
+-	} else {	/* nothing active, simple case */
+-		SCSI_LOG_TIMEOUT(3, printk("sg_remove: dev=%d\n", sdp->index));
+-		idr_remove(&sg_index_idr, sdp->index);
+-	}
+-	write_unlock_irqrestore(&sg_index_lock, iflags);
++		if (sfp->closed) {
++			n_closed_fds++;
++		} else {
++			n_open_fds++;
++			wake_up_interruptible(&sfp->read_wait);
++			kill_fasync(&sfp->async_qp, SIGPOLL, POLL_HUP);
++		}
++		read_unlock(&sfp->rq_list_lock);
++	}
++	write_unlock_irq(&sg_index_lock);
++
++	SCSI_LOG_TIMEOUT(3,
++		printk("sg_remove: %s n_open_fds=%d n_closed_fds=%d "
++			"n_active_cmds=%d\n",
++			sdp->disk->disk_name,
++			n_open_fds,
++			n_closed_fds,
++			n_active_cmds));
+ 
+ 	sysfs_remove_link(&scsidp->sdev_gendev.kobj, "generic");
+ 	device_destroy(sg_sysfs_class, MKDEV(SCSI_GENERIC_MAJOR, sdp->index));
+ 	cdev_del(sdp->cdev);
+ 	sdp->cdev = NULL;
+-	put_disk(sdp->disk);
+-	sdp->disk = NULL;
+-	if (NULL == sdp->headfp)
+-		kfree(sdp);
+ 
+-	if (delay)
+-		msleep(10);	/* dirty detach so delay device destruction */
++	/* Wait for outstanding commands to go through sg_cmd_done(), but do
++	   not wait for open fds to be closed. */
++	if (n_active_cmds != 0) {
++		SCSI_LOG_TIMEOUT(3,
++			printk("sg_remove: %s: waiting for outstanding cmds\n",
++				sdp->disk->disk_name));
++		wait_event(sg_remove_wait, !sg_device_has_active_cmds(sdp));
++		SCSI_LOG_TIMEOUT(3,
++			printk("sg_remove: %s: all commands complete\n",
++				sdp->disk->disk_name));
++	}
++
++	sg_put_dev(sdp); /* put initial reference from kref_init. */
+ }
+ 
+ module_param_named(scatter_elem_sz, scatter_elem_sz, int, S_IRUGO | S_IWUSR);
+@@ -1678,6 +1775,8 @@ sg_finish_rem_req(Sg_request * srp)
+ 		sg_unlink_reserve(sfp, srp);
+ 	else
+ 		sg_remove_scat(req_schp);
++
++	/* This should be called last since it may free sfp if sfp->closed. */
+ 	sg_remove_request(sfp, srp);
+ }
+ 
+@@ -2315,6 +2414,7 @@ sg_remove_request(Sg_fd * sfp, Sg_reques
+ 	Sg_request *rp;
+ 	unsigned long iflags;
+ 	int res = 0;
++	int remove_sfp = 0;
+ 
+ 	if ((!sfp) || (!srp) || (!sfp->headrp))
+ 		return res;
+@@ -2322,6 +2422,8 @@ sg_remove_request(Sg_fd * sfp, Sg_reques
+ 	prev_rp = sfp->headrp;
+ 	if (srp == prev_rp) {
+ 		sfp->headrp = prev_rp->nextrp;
++		if (unlikely(sfp->closed) && NULL == sfp->headrp)
++			remove_sfp = 1;
+ 		prev_rp->parentfp = NULL;
+ 		res = 1;
+ 	} else {
+@@ -2335,7 +2437,16 @@ sg_remove_request(Sg_fd * sfp, Sg_reques
+ 			prev_rp = rp;
+ 		}
+ 	}
++	if (unlikely(sfp->parentdp->detached))
++		wake_up(&sg_remove_wait);
+ 	write_unlock_irqrestore(&sfp->rq_list_lock, iflags);
++	if (unlikely(remove_sfp)) {
++		SCSI_LOG_TIMEOUT(1,
++			printk("sg_remove_request: already closed, final "
++				"cleanup\n"));
++		sg_remove_sfp(sfp->parentdp, sfp);
++		module_put(THIS_MODULE);
++	}
+ 	return res;
+ }
+ 
+@@ -2364,7 +2475,7 @@ sg_add_sfp(Sg_device * sdp, int dev)
+ 
+ 	sfp = kzalloc(sizeof(*sfp), GFP_ATOMIC | __GFP_NOWARN);
+ 	if (!sfp)
+-		return NULL;
++		return ERR_PTR(-ENOMEM);
+ 
+ 	init_waitqueue_head(&sfp->read_wait);
+ 	rwlock_init(&sfp->rq_list_lock);
+@@ -2378,6 +2489,12 @@ sg_add_sfp(Sg_device * sdp, int dev)
+ 	sfp->keep_orphan = SG_DEF_KEEP_ORPHAN;
+ 	sfp->parentdp = sdp;
+ 	write_lock_irqsave(&sg_index_lock, iflags);
++	if (sdp->detached) {
++		write_unlock_irqrestore(&sg_index_lock, iflags);
++		kfree(sfp);
++		return ERR_PTR(-ENODEV);
++	}
++	kref_get(&sdp->kref);
+ 	if (!sdp->headfp)
+ 		sdp->headfp = sfp;
+ 	else {			/* add to tail of existing list */
+@@ -2399,12 +2516,15 @@ sg_add_sfp(Sg_device * sdp, int dev)
+ 	return sfp;
+ }
+ 
++/* Note: this function may free sdp in addition to sfp. */
+ static void
+-__sg_remove_sfp(Sg_device * sdp, Sg_fd * sfp)
++sg_remove_sfp(Sg_device * sdp, Sg_fd * sfp)
+ {
+ 	Sg_fd *fp;
+ 	Sg_fd *prev_fp;
++	unsigned long iflags;
+ 
++	write_lock_irqsave(&sg_index_lock, iflags);
+ 	prev_fp = sdp->headfp;
+ 	if (sfp == prev_fp)
+ 		sdp->headfp = prev_fp->nextfp;
+@@ -2417,54 +2537,20 @@ __sg_remove_sfp(Sg_device * sdp, Sg_fd *
+ 			prev_fp = fp;
+ 		}
+ 	}
++	write_unlock_irqrestore(&sg_index_lock, iflags);
++
+ 	if (sfp->reserve.bufflen > 0) {
+ 		SCSI_LOG_TIMEOUT(6, 
+-			printk("__sg_remove_sfp:    bufflen=%d, k_use_sg=%d\n",
++			printk("sg_remove_sfp:    bufflen=%d, k_use_sg=%d\n",
+ 			(int) sfp->reserve.bufflen, (int) sfp->reserve.k_use_sg));
+ 		sg_remove_scat(&sfp->reserve);
+ 	}
+-	sfp->parentdp = NULL;
+-	SCSI_LOG_TIMEOUT(6, printk("__sg_remove_sfp:    sfp=0x%p\n", sfp));
++	SCSI_LOG_TIMEOUT(6, printk("sg_remove_sfp: sfp=0x%p\n", sfp));
+ 	kfree(sfp);
+-}
+-
+-/* Returns 0 in normal case, 1 when detached and sdp object removed */
+-static int
+-sg_remove_sfp(Sg_device * sdp, Sg_fd * sfp)
+-{
+-	Sg_request *srp;
+-	Sg_request *tsrp;
+-	int dirty = 0;
+-	int res = 0;
+ 
+-	for (srp = sfp->headrp; srp; srp = tsrp) {
+-		tsrp = srp->nextrp;
+-		if (sg_srp_done(srp, sfp))
+-			sg_finish_rem_req(srp);
+-		else
+-			++dirty;
+-	}
+-	if (0 == dirty) {
+-		unsigned long iflags;
+-
+-		write_lock_irqsave(&sg_index_lock, iflags);
+-		__sg_remove_sfp(sdp, sfp);
+-		if (sdp->detached && (NULL == sdp->headfp)) {
+-			idr_remove(&sg_index_idr, sdp->index);
+-			kfree(sdp);
+-			res = 1;
+-		}
+-		write_unlock_irqrestore(&sg_index_lock, iflags);
+-	} else {
+-		/* MOD_INC's to inhibit unloading sg and associated adapter driver */
+-		/* only bump the access_count if we actually succeeded in
+-		 * throwing another counter on the host module */
+-		scsi_device_get(sdp->device);	/* XXX: retval ignored? */	
+-		sfp->closed = 1;	/* flag dirty state on this fd */
+-		SCSI_LOG_TIMEOUT(1, printk("sg_remove_sfp: worrisome, %d writes pending\n",
+-				  dirty));
+-	}
+-	return res;
++	wake_up_interruptible(&sdp->o_excl_wait);
++	scsi_device_put(sdp->device);
++	sg_put_dev(sdp);
+ }
+ 
+ static int
+@@ -2561,11 +2647,37 @@ sg_get_dev(int dev)
+ 
+ 	read_lock_irqsave(&sg_index_lock, iflags);
+ 	sdp = idr_find(&sg_index_idr, dev);
++	if (sdp != NULL)
++		kref_get(&sdp->kref);
+ 	read_unlock_irqrestore(&sg_index_lock, iflags);
+ 
+ 	return sdp;
+ }
+ 
++static void
++sg_device_release(struct kref *kref)
++{
++	Sg_device *sdp = to_sg_device(kref);
++
++	/* Already holding a write lock on sg_index_lock. */
++	idr_remove(&sg_index_idr, sdp->index);
++	put_disk(sdp->disk);
++	kfree(sdp);
++}
++
++static void
++sg_put_dev(Sg_device *sdp)
++{
++	unsigned long iflags;
++
++	if (sdp == NULL)
++		return;
++
++	write_lock_irqsave(&sg_index_lock, iflags);
++	kref_put(&sdp->kref, sg_device_release);
++	write_unlock_irqrestore(&sg_index_lock, iflags);
++}
++
+ #ifdef CONFIG_SCSI_PROC_FS
+ 
+ static struct proc_dir_entry *sg_proc_sgp = NULL;
+@@ -2834,6 +2946,7 @@ static int sg_proc_seq_show_dev(struct s
+ 			      (int) scsi_device_online(scsidp));
+ 	else
+ 		seq_printf(s, "-1\t-1\t-1\t-1\t-1\t-1\t-1\t-1\t-1\n");
++	sg_put_dev(sdp);
+ 	return 0;
+ }
+ 
+@@ -2854,6 +2967,7 @@ static int sg_proc_seq_show_devstrs(stru
+ 			   scsidp->vendor, scsidp->model, scsidp->rev);
+ 	else
+ 		seq_printf(s, "<no active device>\n");
++	sg_put_dev(sdp);
+ 	return 0;
+ }
+ 
+@@ -2938,7 +3052,7 @@ static int sg_proc_seq_show_debug(struct
+ 		if (NULL == scsidp) {
+ 			seq_printf(s, "device %d detached ??\n", 
+ 				   (int)it->index);
+-			return 0;
++			goto err_out;
+ 		}
+ 
+ 		if (sg_get_nth_sfp(sdp, 0)) {
+@@ -2958,6 +3072,8 @@ static int sg_proc_seq_show_debug(struct
+ 		}
+ 		sg_proc_debug_helper(s, sdp);
+ 	}
++err_out:
++	sg_put_dev(sdp);
+ 	return 0;
+ }
+ 
+
+

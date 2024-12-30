@@ -1,0 +1,394 @@
+--- a/drivers/scsi/iscsi_tcp.c	2006-08-25 01:37:57.000000000 -0500
++++ b/drivers/scsi/iscsi_tcp.c	2008-05-05 17:49:44.000000000 -0500
+@@ -38,6 +38,7 @@
+ #include <net/tcp.h>
+ #include <scsi/scsi_cmnd.h>
+ #include <scsi/scsi_host.h>
++#include <scsi/scsi_device.h>
+ #include <scsi/scsi.h>
+ #include <scsi/scsi_transport_iscsi.h>
+ 
+@@ -860,6 +861,10 @@ iscsi_tcp_data_recv(read_descriptor_t *r
+ 	BUG_ON(tcp_conn->in.copy <= 0);
+ 	debug_tcp("in %d bytes\n", tcp_conn->in.copy);
+ 
++	if (unlikely(conn->c_stage == ISCSI_CONN_INITIAL_STAGE))
++		printk(KERN_DEBUG "iscsi host %d initial data_recv offset %u length %d bytes\n",
++		       conn->session->host->host_no, offset, tcp_conn->in.copy);
++	
+ more:
+ 	tcp_conn->in.copied = 0;
+ 	rc = 0;
+@@ -1019,7 +1024,8 @@ iscsi_tcp_state_change(struct sock *sk)
+ 	if ((sk->sk_state == TCP_CLOSE_WAIT ||
+ 	     sk->sk_state == TCP_CLOSE) &&
+ 	    !atomic_read(&sk->sk_rmem_alloc)) {
+-		debug_tcp("iscsi_tcp_state_change: TCP_CLOSE|TCP_CLOSE_WAIT\n");
++		printk(KERN_INFO "iscsi_tcp_state_change: host %d TCP_CLOSE|TCP_CLOSE_WAIT\n",
++		       session->host->host_no);
+ 		iscsi_conn_failure(conn, ISCSI_ERR_CONN_FAILED);
+ 	}
+ 
+@@ -1981,6 +1987,9 @@ iscsi_conn_set_param(struct iscsi_cls_co
+ 	struct iscsi_tcp_conn *tcp_conn = conn->dd_data;
+ 	int value;
+ 
++	printk(KERN_DEBUG "iscsi_conn_set_param host %u conn %u param %u value %u\n",
++	       session->host->host_no, conn->id, param, value);
++
+ 	switch(param) {
+ 	case ISCSI_PARAM_HDRDGST_EN:
+ 		iscsi_set_param(cls_conn, param, buf, buflen);
+@@ -2119,6 +2128,7 @@ iscsi_tcp_session_create(struct iscsi_tr
+ 	if (iscsi_r2tpool_alloc(class_to_transport_session(cls_session)))
+ 		goto r2tpool_alloc_fail;
+ 
++	printk(KERN_INFO "iscsi_session_create host %u succeeded\n", hn);
+ 	return cls_session;
+ 
+ r2tpool_alloc_fail:
+@@ -2128,20 +2138,38 @@ r2tpool_alloc_fail:
+ 
+ static void iscsi_tcp_session_destroy(struct iscsi_cls_session *cls_session)
+ {
+-	iscsi_r2tpool_free(class_to_transport_session(cls_session));
++	struct iscsi_session *session = class_to_transport_session(cls_session);
++	unsigned host_no = session->host->host_no;
++	printk(KERN_INFO "iscsi_session_destroy host %u starting\n", host_no);
++	iscsi_r2tpool_free(session);
+ 	iscsi_session_teardown(cls_session);
++	printk(KERN_INFO "iscsi_session_destroy host %u complete\n", host_no);
++}
++
++static int iscsi_slave_configure(struct scsi_device *sdev)
++{
++	/* we only want SG to attach, not the other ULDs */
++	sdev->no_uld_attach = 1;
++
++	/* NIC doesn't require alignment */
++	blk_queue_dma_alignment(sdev->request_queue, 1);
++	printk("iscsi queue %p alignment mask 0x1\n", sdev->request_queue);
++	return 0;
+ }
+ 
+ static struct scsi_host_template iscsi_sht = {
+ 	.name			= "iSCSI Initiator over TCP/IP",
+ 	.queuecommand           = iscsi_queuecommand,
+ 	.change_queue_depth	= iscsi_change_queue_depth,
++	.slave_configure        = iscsi_slave_configure,
+ 	.can_queue		= ISCSI_XMIT_CMDS_MAX - 1,
+ 	.sg_tablesize		= ISCSI_SG_TABLESIZE,
+ 	.cmd_per_lun		= ISCSI_DEF_CMD_PER_LUN,
+ 	.eh_abort_handler       = iscsi_eh_abort,
+ 	.eh_host_reset_handler	= iscsi_eh_host_reset,
++	.skip_settle_delay      = 1,
+ 	.use_clustering         = DISABLE_CLUSTERING,
++	.max_sectors            = 0xFFFF,
+ 	.proc_name		= "iscsi_tcp",
+ 	.this_id		= -1,
+ };
+--- a/drivers/scsi/iscsi_tcp.h	2006-08-22 14:06:35.000000000 -0500
++++ b/drivers/scsi/iscsi_tcp.h	2008-05-05 17:49:44.000000000 -0500
+@@ -46,7 +46,7 @@
+ #define XMSTATE_W_RESEND_DATA_DIGEST	0x800
+ 
+ #define ISCSI_PAD_LEN			4
+-#define ISCSI_SG_TABLESIZE		SG_ALL
++#define ISCSI_SG_TABLESIZE		SCSI_MAX_PHYS_SEGMENTS
+ #define ISCSI_TCP_MAX_CMD_LEN		16
+ 
+ struct crypto_hash;
+--- a/drivers/scsi/libiscsi.c	2006-08-26 04:28:38.000000000 -0500
++++ b/drivers/scsi/libiscsi.c	2008-05-05 17:49:44.000000000 -0500
+#@@ -192,8 +192,6 @@ static void iscsi_complete_command(struc
+# 
+# 	ctask->state = ISCSI_TASK_COMPLETED;
+# 	ctask->sc = NULL;
+#-	/* SCSI eh reuses commands to verify us */
+#-	sc->SCp.ptr = NULL;
+# 	list_del_init(&ctask->running);
+# 	__kfifo_put(session->cmdpool.queue, (void*)&ctask, sizeof(void*));
+# 	sc->scsi_done(sc);
+@@ -213,8 +213,12 @@ static void iscsi_get_ctask(struct iscsi
+ 
+ static void __iscsi_put_ctask(struct iscsi_cmd_task *ctask)
+ {
+-	if (atomic_dec_and_test(&ctask->refcount))
++	struct iscsi_conn *conn = ctask->conn;
++
++	if (atomic_dec_and_test(&ctask->refcount)) {
++		conn->session->tt->cleanup_cmd_task(conn, ctask);
+ 		iscsi_complete_command(ctask);
++	}
+ }
+ 
+ static void iscsi_put_ctask(struct iscsi_cmd_task *ctask)
+@@ -824,10 +828,9 @@ int iscsi_queuecommand(struct scsi_cmnd 
+ 
+ 	list_add_tail(&ctask->running, &conn->xmitqueue);
+ 	debug_scsi(
+-	       "ctask enq [%s cid %d sc %p cdb 0x%x itt 0x%x len %d cmdsn %d "
+-		"win %d]\n",
++	       "ctask enq [%s cid %d sc %lx itt 0x%x len %d cmdsn %d win %d]\n",
+ 		sc->sc_data_direction == DMA_TO_DEVICE ? "write" : "read",
+-		conn->id, sc, sc->cmnd[0], ctask->itt, sc->request_bufflen,
++		conn->id, (long)sc, ctask->itt, sc->request_bufflen,
+ 		session->cmdsn, session->max_cmdsn - session->exp_cmdsn + 1);
+ 	spin_unlock(&session->lock);
+ 
+@@ -841,8 +844,8 @@ reject:
+ 
+ fault:
+ 	spin_unlock(&session->lock);
+-	printk(KERN_ERR "iscsi: cmd 0x%x is not queued (%d)\n",
+-	       sc->cmnd[0], reason);
++	printk(KERN_ERR "iscsi: sc %p cmd 0x%x is not queued (%d)\n",
++		sc, sc->cmnd[0], reason);
+ 	sc->result = (DID_NO_CONNECT << 16);
+ 	sc->resid = sc->request_bufflen;
+ 	sc->scsi_done(sc);
+@@ -967,23 +970,44 @@ EXPORT_SYMBOL_GPL(iscsi_session_recovery
+ 
+ int iscsi_eh_host_reset(struct scsi_cmnd *sc)
+ {
+-	struct Scsi_Host *host = sc->device->host;
+-	struct iscsi_session *session = iscsi_hostdata(host->hostdata);
+-	struct iscsi_conn *conn = session->leadconn;
++	//struct Scsi_Host *host = sc->device->host;
++	struct iscsi_cmd_task *ctask = (struct iscsi_cmd_task *)sc->SCp.ptr;
++	struct iscsi_session *session;
++	struct iscsi_conn *conn;
+ 	int fail_session = 0;
++	int skip_wait = 0;
++
++	if (ctask) {
++		conn = ctask->conn;
++		session = conn->session;
++		printk(KERN_INFO "iscsi host %d reset for cmd %p\n", 
++		       sc->device->host->host_no, sc);
++	}
++	else {
++		/* SG_SCSI_RESET ioctls pass commands with no associated
++		 * ctask, since the command never went through queuecommand.
++		 * FIXME: locking on hostdata/session/conn?
++		 */
++		session = iscsi_hostdata(sc->device->host->hostdata);
++		conn = session->leadconn;
++		printk(KERN_INFO "iscsi host %d reset requested by ioctl\n",
++		       sc->device->host->host_no);
++		fail_session = 1;
++		skip_wait = 1;
++	}
+ 
+ 	spin_lock_bh(&session->lock);
+ 	if (session->state == ISCSI_STATE_TERMINATE) {
+ failed:
+-		debug_scsi("failing host reset: session terminated "
+-			   "[CID %d age %d]\n", conn->id, session->age);
++		printk(KERN_INFO "iscsi: host %d failing host reset because session terminated [ID %d age %d]\n",
++		       sc->device->host->host_no, conn->id, session->age);
+ 		spin_unlock_bh(&session->lock);
+ 		return FAILED;
+ 	}
+ 
+-	if (sc->SCp.phase == session->age) {
+-		debug_scsi("failing connection CID %d due to SCSI host reset\n",
+-			   conn->id);
++	if (ctask && sc->SCp.phase == session->age) {
++		printk(KERN_INFO "iscsi: host %d failing connection CID %d due to host reset\n",
++			sc->device->host->host_no, conn->id);
+ 		fail_session = 1;
+ 	}
+ 	spin_unlock_bh(&session->lock);
+@@ -995,7 +1019,15 @@ failed:
+ 	if (fail_session)
+ 		iscsi_conn_failure(conn, ISCSI_ERR_CONN_FAILED);
+ 
+-	debug_scsi("iscsi_eh_host_reset wait for relogin\n");
++	if (skip_wait) {
++		printk(KERN_INFO 
++		       "iscsi host %d reset ioctl returning SUCCESS without waiting for reset result\n",
++		       sc->device->host->host_no);
++		return SUCCESS;
++	}
++
++	printk(KERN_INFO "iscsi: host %d reset waiting for relogin or termination\n",
++		sc->device->host->host_no);
+ 	wait_event_interruptible(conn->ehwait,
+ 				 session->state == ISCSI_STATE_TERMINATE ||
+ 				 session->state == ISCSI_STATE_LOGGED_IN ||
+@@ -1005,7 +1037,7 @@ failed:
+ 
+ 	spin_lock_bh(&session->lock);
+ 	if (session->state == ISCSI_STATE_LOGGED_IN)
+-		printk(KERN_INFO "iscsi: host reset succeeded\n");
++		printk(KERN_INFO "iscsi: host %d reset success\n", sc->device->host->host_no);
+ 	else
+ 		goto failed;
+ 	spin_unlock_bh(&session->lock);
+@@ -1023,8 +1055,9 @@ static void iscsi_tmabort_timedout(unsig
+ 	spin_lock(&session->lock);
+ 	if (conn->tmabort_state == TMABORT_INITIAL) {
+ 		conn->tmabort_state = TMABORT_TIMEDOUT;
+-		debug_scsi("tmabort timedout [sc %p itt 0x%x]\n",
+-			ctask->sc, ctask->itt);
++		printk(KERN_INFO "iscsi: host %d tmabort timedout [sc %p itt 0x%x]\n",
++		       session->host->host_no,
++		       ctask->sc, ctask->itt);
+ 		/* unblock eh_abort() */
+ 		wake_up(&conn->ehwait);
+ 	}
+#@@ -1149,38 +1181,23 @@ static void fail_command(struct iscsi_co
+# 	sc = ctask->sc;
+# 	if (!sc)
+# 		return;
+#-
+#-	conn->session->tt->cleanup_cmd_task(conn, ctask);
+# 	iscsi_ctask_mtask_cleanup(ctask);
+# 
+# 	sc->result = err;
+# 	sc->resid = sc->request_bufflen;
+#-	/* release ref from queuecommand */
+# 	__iscsi_put_ctask(ctask);
+# }
+# 
+# int iscsi_eh_abort(struct scsi_cmnd *sc)
+# {
+#-	struct iscsi_cmd_task *ctask;
+#-	struct iscsi_conn *conn;
+#-	struct iscsi_session *session;
+#+	struct iscsi_cmd_task *ctask = (struct iscsi_cmd_task *)sc->SCp.ptr;
+#+	struct iscsi_conn *conn = ctask->conn;
+#+	struct iscsi_session *session = conn->session;
+# 	int rc;
+# 
+#-	/*
+#-	 * if session was ISCSI_STATE_IN_RECOVERY then we may not have
+#-	 * got the command.
+#-	 */
+#-	if (!sc->SCp.ptr) {
+#-		debug_scsi("sc never reached iscsi layer or it completed.\n");
+#-		return SUCCESS;
+#-	}
+#-
+#-	ctask = (struct iscsi_cmd_task *)sc->SCp.ptr;
+#-	conn = ctask->conn;
+#-	session = conn->session;
+#-
+# 	conn->eh_abort_cnt++;
+#-	debug_scsi("aborting [sc %p itt 0x%x]\n", sc, ctask->itt);
+#+	printk(KERN_INFO "iscsi host %d aborting [sc %p itt 0x%x]\n", 
+#+		sc->device->host->host_no, sc, ctask->itt);
+# 
+# 	mutex_lock(&conn->xmitmutex);
+# 	spin_lock_bh(&session->lock);
+@@ -1191,8 +1224,14 @@ int iscsi_eh_abort(struct scsi_cmnd *sc)
+ 	 * then let the host reset code handle this
+ 	 */
+ 	if (session->state != ISCSI_STATE_LOGGED_IN ||
+-	    sc->SCp.phase != session->age)
++	    sc->SCp.phase != session->age) {
++		printk(KERN_INFO "iscsi: host %d giving up on abort of [sc %p itt 0x%x age %u],"
++			"session state %u age %u\n", 
++			sc->device->host->host_no,
++			sc, ctask->itt, sc->SCp.phase,
++			session->state, session->age);
+ 		goto failed;
++	}
+ 
+ 	/* ctask completed before time out */
+ 	if (!ctask->sc) {
+@@ -1460,6 +1499,7 @@ void iscsi_session_teardown(struct iscsi
+ 	struct iscsi_session *session = iscsi_hostdata(shost->hostdata);
+ 	struct module *owner = cls_session->transport->owner;
+ 
++	scsi_flush_work(shost); 
+ 	scsi_remove_host(shost);
+ 
+ 	iscsi_pool_free(&session->mgmtpool, (void**)session->mgmt_cmds);
+@@ -1534,6 +1574,7 @@ iscsi_conn_setup(struct iscsi_cls_sessio
+ 	mutex_init(&conn->xmitmutex);
+ 	init_waitqueue_head(&conn->ehwait);
+ 
++	printk(KERN_INFO "iscsi_conn_setup host %u success\n", session->host->host_no);
+ 	return cls_conn;
+ 
+ login_mtask_data_alloc_fail:
+@@ -1562,6 +1603,7 @@ void iscsi_conn_teardown(struct iscsi_cl
+ 	struct iscsi_session *session = conn->session;
+ 	unsigned long flags;
+ 
++	printk(KERN_INFO "iscsi_conn_teardown host %u\n", session->host->host_no);
+ 	set_bit(ISCSI_SUSPEND_BIT, &conn->suspend_tx);
+ 	mutex_lock(&conn->xmitmutex);
+ 
+@@ -1589,16 +1631,18 @@ void iscsi_conn_teardown(struct iscsi_cl
+ 			break;
+ 		}
+ 		spin_unlock_irqrestore(session->host->host_lock, flags);
++		printk(KERN_INFO "iscsi: conn_destroy host %u busy %d failed %d\n",
++			session->host->host_no, session->host->host_busy, session->host->host_failed);
+ 		msleep_interruptible(500);
+-		printk(KERN_INFO "iscsi: scsi conn_destroy(): host_busy %d "
+-		       "host_failed %d\n", session->host->host_busy,
+-		       session->host->host_failed);
++
+ 		/*
+ 		 * force eh_abort() to unblock
+ 		 */
+ 		wake_up(&conn->ehwait);
+ 	}
+ 
++	printk(KERN_INFO "iscsi: conn_destroy host %u finished blocking\n", session->host->host_no);
++
+ 	spin_lock_bh(&session->lock);
+ 	kfree(conn->data);
+ 	kfree(conn->persistent_address);
+@@ -1615,6 +1659,7 @@ void iscsi_conn_teardown(struct iscsi_cl
+ 	kfifo_free(conn->mgmtqueue);
+ 
+ 	iscsi_destroy_conn(cls_conn);
++	printk(KERN_INFO "iscsi: conn_destroy host %u complete\n", session->host->host_no);
+ }
+ EXPORT_SYMBOL_GPL(iscsi_conn_teardown);
+ 
+#@@ -1627,14 +1672,15 @@ int iscsi_conn_start(struct iscsi_cls_co
+# 		return -EPERM;
+# 	}
+# 
+#-	if ((session->imm_data_en || !session->initial_r2t_en) && 
+#-	     session->first_burst > session->max_burst) {
+#+	if (session->first_burst > session->max_burst) {
+# 		printk("iscsi: invalid burst lengths: "
+# 		       "first_burst %d max_burst %d\n",
+# 		       session->first_burst, session->max_burst);
+# 		return -EINVAL;
+# 	}
+# 
+#+	printk(KERN_INFO "iscsi_conn_start host %d\n", session->host->host_no);
+#+
+# 	spin_lock_bh(&session->lock);
+# 	conn->c_stage = ISCSI_CONN_STARTED;
+# 	session->state = ISCSI_STATE_LOGGED_IN;
+@@ -1781,6 +1826,9 @@ void iscsi_conn_stop(struct iscsi_cls_co
+ 	struct iscsi_conn *conn = cls_conn->dd_data;
+ 	struct iscsi_session *session = conn->session;
+ 
++	printk(KERN_INFO "iscsi_conn_stop host %d flag %d\n",
++	       session->host->host_no, flag);
++
+ 	switch (flag) {
+ 	case STOP_CONN_RECOVER:
+ 	case STOP_CONN_TERM:
+#@@ -1798,6 +1829,11 @@ int iscsi_conn_bind(struct iscsi_cls_ses
+# 		/* bind new iSCSI connection to session */
+# 		conn->session = session;
+# 		list_add(&conn->item, &session->connections);
+#+		printk(KERN_INFO "iscsi: conn_bind host %u new conn %u lead %d\n", 
+#+		       session->host->host_no, conn->id, is_leading);
+#+	} else {
+#+		printk(KERN_INFO "iscsi: conn_bind host %u existing conn %u lead %d\n",
+#+		       session->host->host_no, conn->id, is_leading);
+# 	}
+# 	spin_unlock_bh(&session->lock);
+# 

@@ -1,0 +1,180 @@
+2010-07-09  Last updated - Signals and how pam reacts, and how CCB goes down.
+==============================================================================
+There are four sections:
+a) Description of column one meanings for following two tables.
+b) Realtime Linux signal 37 (XIO_PLATFORM_SIGNAL) and data values for pam.
+c) Signal 37 (XIO_PLATFORM_SIGNAL) and data values passed to it.
+d) Describes how CCB goes down in three ways.
+==============================================================================
+Description of column one meanings for following two tables.
+------------------------------------------------------------------------------
+  A x in column 1 means tested 2007-05-01/02 and works as expected.
+  A * in column 1 means tested signal on 2007-05-01/02 and is ok.
+  A ? in column 1 means DO NOT TEST THIS AND EXPECT THINGS TO WORK.
+  A space in column 1 means not tested, or don't need to. (like real-time signals!)
+. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+  A ???? in first four columns means broken.
+    SIGABRT may never have worked. It does not take the other applications down.
+
+==============================================================================
+ Number Name             Comments about it.
+------------------------------------------------------------------------------
+*   9   SIGKILL             Kill, unblockable.
+    19  SIGSTOP             Stop, unblockable.
+    32  __SIGRTMIN          real-time signal # 1
+    33  __SIGRTMIN + 1      real-time signal # 2
+    34  __SIGRTMIN + 2      real-time signal # 3
+*   17  SIGCHLD             /* Child status has changed */
+*   18  SIGCONT             /* Continue */
+*   20  SIGTSTP             /* Keyboard stop */
+*   21  SIGTTIN             /* Background read from tty */
+*   22  SIGTTOU             /* Background write to tty */
+*   23  SIGURG              /* Urgent condition on socket */
+*   28  SIGWINCH            /* Window size change */
+        All of the above --
+x           Leave default processing (not caught by pam).
+------------------------------------------------------------------------------
+*   2   SIGINT              /* Interrupt */
+x           Takes controller down, pam exits with status 0xf2
+x           Deadloop same. 
+????   6   SIGABRT             /* Abort */
+            Do an abort() in pam.
+            Deadloop same. 
+*   15  SIGTERM             /* Termination */
+x           Kill all applications, exit with 1.
+x           Deadloop same. 
+------------------------------------------------------------------------------
+*   4   SIGILL              /* Illegal instruction */
+*   8   SIGFPE              /* Floating point exception */
+*   11  SIGSEGV             /* Segmentation violation */
+*   13  SIGPIPE             /* Broken pipe */
+*   7   SIGBUS              /* Bus error */
+        All of the above --
+x         First time, kill all applications, PAM taking down, reboot controller.
+x         Second time, reboot controller.
+x         Deadloop, reboot controller.
+------------------------------------------------------------------------------
+*   1   SIGHUP              /* Hangup */
+*   3   SIGQUIT             /* Quit */
+*   5   SIGTRAP             /* Trace/breakpoint trap */
+*   10  SIGUSR1             /* User defined signal #1 */
+*   12  SIGUSR2             /* User defined signal #2 */
+?   14  SIGALRM             /* Alarm clock */
+?         There are sleep's which use this signal and things get confused.
+*   16  SIGSTKFLT           /* Stack fault */
+*   24  SIGXCPU             /* CPU time limit exceeded */
+*   25  SIGXFSZ             /* File size limit exceeded */
+*   26  SIGVTALRM           /* Virtual alarm clock */
+*   27  SIGPROF             /* Profiling alarm clock */
+*   29  SIGIO               /* I/O now possible */
+*   30  SIGPWR              /* Power failure restart */
+*   31  SIGSYS              /* Bad system call */
+        All of the above (and most others) --
+x           print, ignore.
+
+==============================================================================
+Realtime Linux signal 37 (XIO_PLATFORM_SIGNAL) and data values for pam.
+------------------------------------------------------------------------------
+  37 (0x25) XIO_PLATFORM_SIGNAL   Real-time signal that xiotech applications use.
+       Data value --
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+*   0x01     CCB_2_PAM_HB   /* Heartbeat from ccb to pam. Always happening. */
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+    0x10     ERR_EXIT_SHUTDOWN
+*                               MFGCLEAN -O (to power down controller)
+
+*                               VCGSHUTDOWN
+
+*                               serial console changing IP addresses.
+
+*                               reset all without modebit MD_DISABLE_INACTIVATE_POWER.
+                                    and controller in FD_STATE_INACTIVATED state.
+		ccbcl> FAILURESTATESET 163744 10 ; reset all 2
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+// *   0x11     ERR_EXIT_BE_MISS_HB Can't happen anymore.  UNUSED
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+// *   0x12     ERR_EXIT_FE_MISS_HB Can't happen anymore.	UNUSED
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+*   0x13     ERR_EXIT_RESET_CCB
+*                               ccbcl> reset ccb
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+*   0x14     ERR_EXIT_RESET_ALL
+*                               ccbcl> reset all
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+*   0x15     ERR_EXIT_DEADLOOP
+ ?                              Link Layer error trap (during initialization) not possible.
+
+*                               CCB, deadloop, SUICIDE_DISABLE==true.
+
+                                Controller suicide - powerup complete &&
+*                                      missed heartbeat
+*                                      or quorum failed
+				Power off master and quickly a diskbay.
+
+*                               reset all with modebit MD_DISABLE_INACTIVATE_POWER
+                                    and controller in FD_STATE_INACTIVATED state.
+		ccbcl> modebit INACTIVATE_POWER enable; FAILURESTATESET 163744 10 ;reset all 2
+
+*                               mfgclean license
+
+*                               mfgclean -F FULL
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+*   0x16     ERR_EXIT_REBOOT    Only pam sends this. bvm reboot file exists.
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+?   0x17     ERR_EXIT_FIRMWARE  Not possible to get this easily.
+                                1) exec of ccb fails.
+                                2) the other method is #ifdef-ed out.
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+    0x18     ERR_EXIT_BVM_RESTART
+    				New way, instead of ERR_EXIT_DEADLOOP as default.
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+    0x19     ERR_EXIT_BIOS_REBOOT
+    				Must do a reboot through the BIOS.
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+*   0x20     ERR_PAM_DIRECTED_DOWN Only pam sends this.
+*                               1) Pam detects loss of ccb heartbeats.
+                                        Bring gdb up on ccb to stop them.
+*                               2) iscsi task dies.
+                                        Kill it.
+?                               3) Illegal XIO_PLATFORM_SIGNAL data. (Not possible)
+*                               4) SIGBUS error.
+					kill -7 pam
+
+==============================================================================
+Describes how CCB goes down in three ways.
+------------------------------------------------------------------------------
+/sbin/reboot -i -f
+CN_DOWN_REBOOT
+    misc.c:            errExit(ERR_EXIT_RESET_CCB);    /* Exit with the Reset CCB value */
+    misc.c:                    errorState = ERR_EXIT_RESET_ALL;
+    error_handler.c:        errExit(ERR_EXIT_RESET_ALL);
+------------------------------------------------------------------------------
+/sbin/halt -i -f -p
+CN_DOWN_SHUTDOWN
+    PI_Misc.c:            errExit(ERR_EXIT_SHUTDOWN);
+    PI_VCG.c:    errExit(ERR_EXIT_SHUTDOWN);
+    SerConNetwork.c:        errExit(ERR_EXIT_SHUTDOWN);
+    misc.c:                            errorState = ERR_EXIT_SHUTDOWN;
+------------------------------------------------------------------------------
+CN_DOWN_SHUTDOWN_NOW
+    error_handler.c:        errExit(ERR_EXIT_DEADLOOP);
+    error_handler.c:        errExit(ERR_EXIT_DEADLOOP);
+    misc.c:                            errorState = ERR_EXIT_DEADLOOP;
+  default:
+    xk_kernel.c:    DeadLoop(deadErrCode(ERR_EXIT_KERNEL), TRUE);
+    xk_init.c:        DeadLoop(deadErrCode(ERR_EXIT_INVALID_USER), TRUE);
+
+pam.c: PAM_DeadLoop()   if qlogic reset, else halt.
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+*   errorCodes.h:#define ERR_EXIT_KERNEL         0x00
+*   errorCodes.h:#define ERR_EXIT_INVALID_USER   0x01
+//  errorCodes.h:#define ERR_EXIT_MEM_MAP        0x02
+*   errorCodes.h:#define ERR_EXIT_SHARED_MEM     0x03
+    XIO_Const.h:#define ERR_EXIT_SHUTDOWN       0x00000010
+    XIO_Const.h:#define ERR_EXIT_RESET_CCB      0x00000013
+    XIO_Const.h:#define ERR_EXIT_RESET_ALL      0x00000014
+    XIO_Const.h:#define ERR_EXIT_DEADLOOP       0x00000015
+*   XIO_Const.h:#define ERR_EXIT_REBOOT         0x00000016
+*   XIO_Const.h:#define ERR_EXIT_FIRMWARE       0x00000017
+==============================================================================
+# End of file PAM.chart.signals

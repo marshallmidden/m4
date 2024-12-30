@@ -1,0 +1,214 @@
+#!/bin/bash
+# $Id: mdevt 15414 2006-11-16 20:27:45Z RustadM $
+#    mdevt - Handle md raid events from sgraidmon or "mdadm --follow"
+#
+#       $1 = event  ("Fail", "Insert", "Save", or "ActiveSpare")
+#       $2 = md dev (/dev/md0)
+#       $3 = disk   (/dev/sdb6, for Fail/Insert)
+#       $4 = iteration (for sgraidmon Insert only)
+# sgraidmon is the only tool that detects insertion
+log=/var/log/mdevents
+pdir=/var/scsirastools
+pfile=$pdir/sdf.save
+[[ -f $pdir/partitions.sda ]] && pfile=$pdir/partitions.sda
+rarr="0 1 2 3"	# list of raid device numbers
+parr="2 3 5 6"	# corresponding list of partitions
+rarrstr=${rarr// /}
+parrstr=${parr// /}
+
+r2p () {
+	echo ${1} | tr ${rarrstr} ${parrstr}
+}
+
+echo "-------------------"	>>$log
+echo "mdevt: $* `date`"		>>$log
+# write the event also to the syslog
+logger -i "mdevt: $* `date`"
+if [[ "$3" != "" ]]; then
+	cdev=$3
+        dev=${cdev//[0-9]/}		# Get drive device
+	host=`readlink /sys/block/${dev##*/}/device`
+	[[ "${host/*\/host0\/*/host0}" != "host0" ]] && {
+		echo "Not host0, ignored, host=${host}, dev=${dev}" >>$log
+                exit 0
+        }
+fi
+cnt="`grep \\\[_\*U.\*U.\*] /proc/mdstat | wc -l`"
+[[ -f /tmp/mdevt.lastcnt ]] || touch /tmp/mdevt.lastcnt
+[[ "${cnt}" = "4" && "`cat /tmp/mdevt.lastcnt`" != "4" ]] &&
+	sgsafte -d 6 -r &> /dev/null
+echo "${cnt}" > /tmp/mdevt.lastcnt
+case "$1" in
+#####
+##### Fail/Remove a disk partition, called from sgraidmon
+#####
+"Fail"|"FailSpare")
+   cat /proc/mdstat           >>$log
+   cdev=$3
+   if [[ "$cdev" = "" ]]; then
+      echo "No component device given - figuring it out" >>$log
+      cdev=`mdadm --detail $2 | while read a b c d state dev rest; do
+         if [[ "${state}" = "faulty" ]]; then
+            echo ${dev}
+            break;
+         fi
+      done`
+      if [[ "$cdev" = "" ]]; then
+         echo "Unable to figure out component device"	>>$log
+         exit -1;
+      fi
+   fi
+   dev=${cdev//[0-9]/}		# Get drive device
+   # change to switch boot
+   gdrive=hd`echo ${dev//\/dev\/[sh]d/} | tr \[a-f] \[0-5]`
+   echo "Drive failure, activating switch boot on drive ${dev} (${gdrive})" \
+      >>$log
+   grub --no-floppy --batch --device-map=/boot/grub/device.map <<EOF >>$log
+root (${gdrive},0)
+setup (${gdrive})
+quit
+EOF
+   gruberr=$?
+   if [[ ${gruberr} -ne 0 ]]; then
+      echo "Error running GRUB, err=${gruberr}" >>$log
+   else
+      echo "GRUB successful"  >>$log
+   fi
+   # make sure the drive is marked offline/faulty
+   for r in ${rarr} ; do
+      devp=${dev}`r2p ${r}`
+      echo "mdadm /dev/md${r} --fail ${devp}"	>>$log
+      mdadm /dev/md${r} --fail ${devp}		>>$log 2>&1
+   done
+   map=(`sgsafte -e | grep ${dev}`)
+   sdev=(${map[3]//:/ })
+   if [[ "${map[5]}" != "dead" ]]; then
+      sgsafte -d ${sdev[2]} -f &> /dev/null	# Set status to faulty
+      echo "Drive ${sdev[2]} set faulty" >>$log
+   fi
+   echo "Resulting status:"         >>$log
+   cat /proc/mdstat                 >>$log
+   ;;
+#####
+##### Insert a new disk partition, called from sgraidmon
+#####
+"Insert")
+   # Need to set up partitions with sfdisk first
+   if [[ "$4" = "1" ]]; then
+      # Only set up partitions the first time
+      # Assume that the "Save" has been done earlier, e.g.:
+      #   "mdevt Save /dev/sda" or "sfdisk -d /dev/sda >$pfile"
+      idisk=${3//[0-9]/}
+      for md in ${rarr} ; do
+         part=${idisk}`r2p ${md}`
+         echo mdadm /dev/md${md} --fail ${part}		>>$log
+         mdadm /dev/md${md} --fail ${part}		>>$log 2>&1
+         echo mdadm /dev/md${md} --remove ${part}	>>$log
+         mdadm /dev/md${md} --remove ${part}		>>$log 2>&1
+         # flush each partition, in case old superblock was there
+         echo "dd if=/dev/zero of=${part} bs=1024 count=1"	>>$log
+         dd if=/dev/zero of=${part} bs=1024 count=1	>>$log 2>&1
+      done
+      if [[ -f $pfile ]]; then
+	 # repartition the disk
+         echo "dd if=/dev/zero of=$idisk bs=512 count=1"	>>$log
+         dd if=/dev/zero of=$idisk bs=512 count=1
+	 echo "sfdisk --force $idisk <$pfile"	>>$log
+         sfdisk --force  $idisk  <$pfile  2>&1 |tee -a $log
+      else
+	 echo "*** ERROR *** $pfile does not exist, run mdevt Save" >>$log
+      fi
+      umount /mnt/disk || echo Nothing to umount	>>$log
+      newfs -t ext2 ${idisk}1 || echo newfs ${idisk}1 failed	>>$log
+      mount -t ext2 -o noatime ${idisk}1 /mnt/disk ||
+            echo mount ${idisk}1 failed		>>$log
+      (cd /mnt/disk; tar xjf /etc/3dboot.tar.bz2) ||
+            echo tar to ${idisk}1 failed	>>$log
+      (cd /mnt/disk; tar djf /etc/3dboot.tar.bz2) ||
+            echo tar compare of ${idisk}1 failed	>>$log
+      umount /mnt/disk || echo umount /mnt/disk failed	>>$log
+      # set up to switch boot
+      gdrive=hd`echo ${idisk//\/dev\/[sh]d/} | tr \[a-f] \[0-5]`
+      echo "Partitioned, activating switch boot on drive ${idisk} (${gdrive})" \
+            >>$log
+      grub --no-floppy --batch --device-map=/boot/grub/device.map <<EOF >>$log
+root (${gdrive},0)
+setup (${gdrive})
+quit
+EOF
+      gruberr=$?
+      if [[ ${gruberr} -ne 0 ]]; then
+         echo "Error running GRUB, err=${gruberr}" >>$log
+      else
+         echo "GRUB successful"  >>$log
+      fi
+      for md in 0 1 2 3; do
+         part=${idisk}`r2p ${md}`
+         echo mdadm /dev/md${md} --add ${part}	>>$log
+         mdadm /dev/md${md} --add ${part}	>>$log 2>&1
+      done
+   fi
+   cat /proc/mdstat           >>$log
+   ;;
+#####
+##### Save partition layout - called at init time from sgraid
+#####
+"Save")
+   if [[ -f $pfile ]]; then
+      echo "mdevt: Partition layout is there ($pfile)." | tee -a >>$log
+      exit 0
+   fi
+   mkdir -p $pdir
+   echo "sfdisk -d $2 >$pfile" >>$log
+   sfdisk -d $2 >$pfile
+   ;;
+#####
+##### Check if saved partition layout file is present
+#####
+"Check")
+   if [[ -f $pfile ]]; then
+      echo "mdevt: OK, saved partition layout is there ($pfile)." |
+           tee -a >>$log
+      exit 0
+   fi
+   echo "mdevt: Saved partition layout is missing ($pfile)." | tee -a $log
+   echo "mdevt: Run '/etc/rc.d/init.d/sgraid start' to invoke mdevt Save" |
+      tee -a $log
+   exit -1
+   ;;
+"SpareActive")
+   [[ "$2" != "/dev/md1" ]] && exit 0
+   drive=${3//[0-9]/}
+   gdrive=hd`echo ${drive//\/dev\/[sh]d/} | tr \[a-f] \[0-5]`
+   echo "Sync complete, placing MBR on drive ${drive} (${gdrive})" \
+      >>$log
+   grub --no-floppy --batch --device-map=/boot/grub/device.map <<EOF >>$log
+root (${gdrive},2)
+setup (${gdrive})
+quit
+EOF
+   gruberr=$?
+   if [[ ${gruberr} -ne 0 ]]; then
+      echo "Error running GRUB, err=${gruberr}" >>$log
+   else
+      echo "GRUB successful"  >>$log
+   fi
+   ;;
+"DeviceDisappeared"|"Rebuild"*|"NewArray"| \
+"DegradedArray"|"MoveSpare"|"TestMessage")
+   echo "Doing nothing with $* for now" >>$log
+   ;;
+#####
+##### Display Usage if invalid parameters
+#####
+*)
+   echo "mdevt: Invalid function: $0 $1 $2 $3 $4" | tee -a $log
+   echo "mdevt: Usage: mdevt <event> [md dev] [disk] [iteration]"
+   echo "       where parameters are:"
+   echo "         1 = event  (Fail, Insert, Check, or Save)"
+   echo "         2 = md dev (e.g. /dev/md0  - for Fail/Insert only)"
+   echo "         3 = disk   (e.g. /dev/sdb6 - for Fail,Insert,Save)"
+   echo "         4 = iteration (e.g. 1,2,3  - for Insert only)"
+   ;;
+esac
+# vi:sw=8 ts=8 noexpandtab

@@ -1,0 +1,166 @@
+#!/bin/bash
+
+MNT=/mnt/local
+STAT=/tmp/status
+LOG=/tmp/log
+
+fail() {
+	echo "ERROR $1" >>${STAT}
+	exit 1
+}
+
+get_mb() {
+	dmidecode | grep -A 5 "DMI type 2," | grep "Product Name:" |
+		{ read a b c; echo $c; }
+#	cat /sys/class/dmi/id/board_id ||
+#		echo UNKNOWN
+}
+
+echo "3 4 1 7" > /proc/sys/kernel/printk
+echo -n V > /dev/watchdog
+mount -o remount,rw / >>${LOG} 2>&1	# to be really sure / is rw
+mount -t sysfs none /sys
+mdadm --stop /dev/md* >>${LOG} 2>&1	# to be sure raids are stopped
+# Some echo lines
+MB=`get_mb`
+sleep 1
+echo -e '\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n'
+clear
+echo "3D Controller New Install"
+echo -e "\nThis process will completely initialize a 3D controller."
+pcibus="`ls /proc/bus/pci`"
+pcibus="`echo $pcibus | sed -e 's/ /-/g'`"
+mem=( `grep 'MemTotal:' /proc/meminfo` )
+if [[ ${mem[1]} < 2000000 ]]; then
+	echo "ERROR ${mem[1]} kB DRAM insufficient" | tee -a ${STAT}
+fi
+case "${MB}" in
+X6DH8-XG2) XIO_HW_TYPE="SMX6DH8-XG2"
+	stodevs=2
+	raid=1
+	;;
+X7DWE) XIO_HW_TYPE="SMX7DWE"
+	stodevs=1
+	raid=0
+	;;
+*) XIO_HW_TYPE="UNKNOWN"
+	stodevs=1
+	raid=0
+	;;
+esac
+if [[ `ls /sys/block | grep '^sd' | wc -l` -ne ${stodevs} ]]; then
+	echo ERROR Wrong storage present: `ls /sys/block | grep '^sd'` |
+		tee -a ${STAT}
+fi
+cat <<EOF >/tmp/sysconf
+## Path:        System/xio3d
+## Description: Xio3D configuration
+#
+# This file contains the configuration variables for the Xiotech 3D
+# storage applications.
+
+## Type:        list(SMX6DH8-XG2,SMX7DWE)
+## Default:     SMX7DWE
+# XIO_HW_TYPE indicates the hardware type we are running on.
+#
+XIO_HW_TYPE="${XIO_HW_TYPE}"
+EOF
+echo
+echo "Platform = ${XIO_HW_TYPE}, Version=${VER}" | tee -a ${STAT}
+echo "To start the installation, type yes and press return"
+while : ; do
+      echo -n 'Are you really sure you want to install? (yes/no) > '
+      read answer
+      test "${answer}" = "yes" && break
+      if test "${answer}" = "no"; then
+         echo "No, ejecting CD and rebooting now..."
+         sync; sync
+         umount /mnt/cdrom 2> /dev/null
+         sleep 2
+         /bin/eject
+         sleep 2
+         reboot
+         sleep 9000
+         reboot
+         sleep 9000
+      fi
+      test "${answer}" = "root" && { echo "Going to root shell..."; exit 1; }
+      echo "\"${answer}\" is not recognized. Asking again."
+done
+echo "Beginning installation....."
+(cd /etc; ./do-install.sh)
+echo -e "\nSetting up configuration for platform: ${XIO_HW_TYPE}"
+if [ ${raid} -ne 0 ]; then
+	cp /etc/partitions.sda /mnt/local/var/scsirastools
+fi
+: > ${MNT}/var/log/lastlog
+: > ${MNT}/var/log/wtmp
+cp /cdrom/3000-* ${MNT}/root ||
+	echo "ERROR setting CD info in /root" >>${STAT}
+if [ ${raid} -ne 0 ]; then
+	echo -n "Installing alternate boot partitions"
+	for i in /dev/sd{a,b}1; do
+		dn=${i/#\/dev\//}
+		echo -n " ${dn}"
+		mkfs.ext2 -L xio-alt-boot ${i} >>${LOG} 2>&1 ||
+		    { echo "ERROR mkfs.ext2 ${dn} failed" >>${STAT}; break; }
+		mount -t ext2 ${i} /boot >>${LOG} 2>&1 ||
+		    { echo "ERROR mount ${dn} failed" >>${STAT}; break; }
+		(cd /boot; bunzip2 -c /etc/3dboot.tar.bz2 | tar xf -) ||
+		    { echo "ERROR tar ${dn} failed" >>${STAT}; break; }
+		(cd /boot; bunzip2 -c /etc/3dboot.tar.bz2 | tar df - .) ||
+		    { echo "ERROR tar compare ${dn} failed" >>${STAT}; break; }
+		umount ${i} ||
+		    { echo "ERROR umount ${dn} failed" >>${STAT}; break; }
+		echo "Alternate boot installed on ${dn}" >>${STAT}
+	done
+	echo "."
+	echo "Installation complete. Waiting for RAID sync..."
+	pollcnt=0
+	echo 1000000 > /proc/sys/dev/raid/speed_limit_max
+	while grep % /proc/mdstat &>/dev/null; do
+		sleep 5
+		echo -ne "`grep % /proc/mdstat | cut -b -77 -`\r"
+		test $((pollcnt += 5)) -gt 1800 && break
+	done
+else
+	echo "Installation complete."
+fi
+sync; sync
+clear
+echo -n "Restore results are: "
+if [ ${raid} -ne 0 ]; then
+	grep % /proc/mdstat &>/dev/null &&
+		echo "Sync TIMEOUT! Something is wrong!"
+	echo "Raid status is:"
+	cat /proc/mdstat | { read line; cat; }
+fi
+test `grep ^stepping /proc/cpuinfo | uniq | wc -l` -ne 1 &&
+	echo "ERROR CPU stepping mismatch!" >>${STAT}
+cat ${STAT}
+err=0
+egrep -i "ERROR|SCSI Error|I/O error|Disk failure" ${LOG} ${STAT} && err=1
+grep -v 'failed with error 1' /var/log/messages |
+	egrep -i "ERROR|SCSI Error|I/O error|Disk failure" && err=1
+if [ "${err}" -eq 0 ]; then
+	echo "No ERROR messages found!"
+	echo -n "Installation and syncing complete. Press return to reboot > "
+	read answer
+	test "${answer}" = "root" && exit 0
+	sync; sync
+	umount /mnt/cdrom
+	sleep 2
+	/bin/eject
+	sleep 2
+	reboot
+	sleep 900
+	exit 0
+else
+	echo "ERROR messages found!"
+	while :; do
+		echo -n "Installation had some sort of error. "
+		read answer
+		test "${answer}" = "root" && exit 0
+		sync; sync;
+	done
+fi

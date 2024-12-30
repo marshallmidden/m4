@@ -1,0 +1,140 @@
+#!/bin/bash -e
+pkg=scsirastools-1.4.16
+tar xzf ${1}/${pkg}.tar.gz
+cd ${pkg}
+patch -p0 <<"EOF"
+--- src/sgdiag.c	30 Nov 2006 22:59:47 -0000	1.1
++++ src/sgdiag.c	30 Nov 2006 23:10:31 -0000	1.2
+@@ -16,7 +16,7 @@ Sequence of events for this utility:
+   c = Compose Command to send         r = Reset SCSI bus
+   i = Special Ser# Inquiries          f = Format SCSI disk
+   1 = Do bug 1 (sense_len = 18)       2 = Do bug 2 (INQ hang)
+-  3 = Do bug 3 (fmt w short timeout)  
++  3 = Do bug 3 (fmt w short timeout)  l = Long write sector
+   Enter Selection ('q' to quit) : 
+ sgdiag    [-a -e -x]   
+ Options:
+@@ -292,7 +292,7 @@ int main(int argc, char **argv)
+ 	printf("i = Special Ser# Inquiries   3 = Do bug 3 (fmt w short timeout)\n");
+ 	printf("f = Format SCSI disk         w = Wipe SCSI disk (fmt wo glist)\n");
+ 	printf("s = Start Unit               d = Send Diagnostic self-test\n");
+-	printf("t = sTop Unit                \n");
++	printf("t = sTop Unit                l = Long write sector\n");
+ 	printf("Enter Selection ('q' to quit) : ");
+ 	if (fauto) {
+ 	    response = 'c';
+@@ -322,6 +322,10 @@ int main(int argc, char **argv)
+ 	case 'i':
+ 	    func = 'i';
+ 	    break;
++	case 'L':
++	case 'l':
++	    func = 'l';
++	    break;
+ 	case 'F':
+ 	case 'f':
+ 	    func = 'f';
+@@ -431,6 +435,35 @@ int main(int argc, char **argv)
+ 		    closefd();
+ 		    quit(0);  /* exit now, so we don't try to start it again */
+ 		}
++	    } else if (func == 'l') {	/* Long write to make bad sector */
++		uchar wlCDB[10] = { 0x3f, 0, 0, 0, 0, 0, 0, 0x02, 0x25, 00 };
++		uchar cmdbuf[700];
++		int sect;
++		int rsplen;
++		struct sg_hdr1 *hp1;
++		rsplen = HDR;
++		sect = get_ival("Enter the sector to long write",0);
++		wlCDB[2] = (sect >> 24) & 0xFF;
++		wlCDB[3] = (sect >> 16) & 0xFF;
++		wlCDB[4] = (sect >> 8) & 0xFF;
++		wlCDB[5] = sect & 0xFF;
++		memset(cmdbuf, 0, sizeof(cmdbuf));
++		memcpy(cmdbuf + HDR, wlCDB, 10);
++		hp1 = (struct sg_hdr1 *) cmdbuf;
++		hp1->reply_len = rsplen;
++		rc = beforegd(idx, &numrdy);
++		if (rc)
++			fprintf(stderr, "beforegd returned %d\n", rc);
++		rc = send_scsicdb(devlist[idx].sgfd, cmdbuf, HDR + 10 + 549,
++			cmdbuf, rsplen);
++		if (rc)
++			fprintf(stderr, "send_scsicdb returned %d\n", rc);
++		sprintf(output, "[%d] Command complete\n", idx);
++		showit(output);
++		dumpbufr(fdmsg, cmdbuf, HDR, "Receive data");
++		if (fdmsg != fdlog)
++		   dumpbufr(fdlog, cmdbuf, HDR, "Receive data");
++		closefd();
+ 	    } else if (fdobug > 0) {  /* func = 1, 2, 3 */
+ 		printf("Do Bug %d ...\n", fdobug);
+ 		if (fdobug == 1) {	/*try with sense len = 18 */
+--- src/sgraidmon.c	30 Nov 2006 22:59:47 -0000	1.1
++++ src/sgraidmon.c	4 Dec 2006 19:51:40 -0000	1.4
+@@ -1380,7 +1380,7 @@ safte_inserted(int sgfd, int i, int hdev
+ 	sprintf(output,"*** NEW SAF-TE INSERTION [%d] in slot %d, id %d\n",
+ 	                        idev,i,slot[i].id);
+ 	showit(output);
+-	if (idev == hdev) return(ret);
++	//if (idev == hdev) return(ret);
+ 
+ 	/* If old scsi/aic driver, get data overrun here, see scsiras patch.*/
+ 	ret = sg_cmd(sgfd,turcdb,sizeof(turcdb),sdbuf,sizeof(sdbuf));
+@@ -1645,6 +1645,9 @@ scandev(int bmode)
+    int num_err;
+    int ret = 0;
+    int iret;
++   char devname[64];
++   char symlink[128];
++   char *foundstr;
+    DEVFS_LIST devfs_components = {0,0,0,0,0};
+ 
+    /*
+@@ -1668,6 +1671,19 @@ scandev(int bmode)
+ 			 &devfs_components);
+ 	}
+ 	devlist[idev].dstatus = DSTAT_DEAD;  /*initial value*/
++
++	/* Check for iSCSI devices (IDDs) and ignore them */
++	snprintf(devname, sizeof(devname), "/sys/class/scsi_generic/sg%d/device", idev);
++	ret = readlink(devname, symlink, (sizeof(symlink) - 1));
++	if (ret > 0) {
++		symlink[ret] = '\0';
++		foundstr = strstr(symlink, "/session");
++		if (foundstr) {
++			fprintf(stderr, "Skipping iSCSI device : %s\n", fname);
++			continue;
++		}
++	}
++
+ 	sgfd = open(fname, O_RDWR | O_NONBLOCK);
+ 	if (sgfd < 0) {
+ 	   if (fdebug) {
+@@ -2068,11 +2084,13 @@ int do_remove(int iremove)
+ 		      devlist[i].dstatus = DSTAT_ONL;
+ 		      ret = -3;  /* signal to increment nrdy */
+ 		    } else {   		//  do mdevt
++#if 0
+ 		      sprintf(output, "%s %s %s %s",mdevtcmd,"Fail", mddev,mdpart);
+ 		      showit(output);
+ 		      ret = system(output);  /* execute mdevt command */
+ 		      sprintf(output,"\nremove: system ret = %d\n", ret);    
+ 		      showit(output);
++#endif	/* 0 */
+ 		    }
+ 		 }  /*end-else ret==0*/
+ 	       }  /*end for*/
+@@ -2209,8 +2227,10 @@ void check_devstatus(void)
+ 		else if (c == 0 && k != 0 && 
+ 			 devlist[i].dstatus == DSTAT_READY) {
+ 		     /* ready, configured (c), but not active (k) in raid */
++#if 0
+ 		     iinsert = i;  /* mark it to be inserted */
+ 		     if (devlist[i].dstatus == devmatch[i].dstatus) nchgs++;
++#endif /* 0 */
+ 		} else if (k == 1) { 			/* failed in raid */
+ 			/* decided above if it is failed, or newly inserted */
+ 			if (fdebug) {
+EOF
+echo "Patch of ${pkg} complete"

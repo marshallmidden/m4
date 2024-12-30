@@ -1,0 +1,103 @@
+#! /bin/bash
+################################################################################
+#                         CONFIDENTIAL AND PROPRIETARY
+#         Copyright (C) 2007-2009 Xiotech Corporation, All Rights Reserved
+################################################################################
+#
+# Installation script for kicking off a gather ccb, ise, and switch info on 7000s
+#
+################################################################################
+
+
+#
+# By Default, get everything
+#
+
+DSC_ID=-1
+FETCH_CCB_OUTPUT=1
+FETCH_ISE_LOGS=1
+FETCH_SWITCH_LOGS=1
+BACKGROUND_THREAD=1
+
+#
+# process some optional parameters
+#
+# -d        DSC Identifier.
+# -c        Whether or not to fetch CCBCL output
+# -i        Whether or not to fetch ISE logs
+# -s        Whether or not to fetch switch logs        
+# -b        Whether or not to run in a background thread
+
+# The call will look like this:
+# Install -d 10215 -c 1 -i 1 -s 0 -b 0
+#
+# The above would get logs for every ISE on DSC 10215, and ccbcl output, 
+# but will not get switch logs. Also, will not run in the backgroun
+#
+
+while getopts "d:c:i:s:b:" opt; do
+  case $opt in
+    d  )  DSC_ID="${OPTARG}";;
+    c  )  FETCH_CCB_OUTPUT="${OPTARG}";;
+    i  )  FETCH_ISE_LOGS="${OPTARG}";;
+    s  )  FETCH_SWITCH_LOGS="${OPTARG}";;
+    b  )  BACKGROUND_THREAD="${OPTARG}";;
+  esac
+done
+shift $(($OPTIND - 1))
+
+
+AMPERSAND="&"
+if [ $BACKGROUND_THREAD -eq 1 ]
+then
+  AMPERAND="&"
+else
+  AMPERSAND=""
+fi
+
+
+#
+# Get the current directory (temp directory created by IWS) This directory
+# must hold the OpErrors.txt and OpStatus.txt files, so we must pass this
+# directory into the other scripts
+#
+
+base_dir=`pwd`
+
+echo -e "PercentComplete=-1\nStatus=Decompressing diagnostics..." > OpStatus.txt
+
+#
+# Copy the necessary files into place
+#
+
+chmod +x ./tbkill
+./tbkill show_do_many_7000
+./tbkill ise_show_me
+./tbkill sw_show_me
+./tbkill show_do_many_7000
+sleep 10
+cp /var/log/xiotech/showme_all_$DSC_ID.log /var/log/xiotech/prior_showme_all_$DSC.txt
+rm -f /var/log/xiotech/showme_all.log
+rm -f /var/log/xiotech/prior_showme_all.txt
+mkdir /tmp/ise
+tar jxf E.tbz2 -C / ; ldconfig
+cp CCBE.tbz2 /tmp/ise
+cp ccbCL.ini /tmp/ise
+cp ise_show_me /tmp/ise
+cp sw_show_me /tmp/ise
+cp show_do_many_7000 /tmp/ise
+mv /root/.ssh/known_hosts /root/.ssh/known_hosts.save || true
+pushd /tmp/ise
+chmod a+x show_do_many_7000 ise_show_me sw_show_me
+tar jxvf CCBE.tbz2
+mv ccbCL.ini CCBE/
+
+
+#
+# Run the show-all scripts and pass in the params above
+#
+
+echo "running command: /usr/bin/perl ./show_do_many_7000 -d $DSC_ID -c $FETCH_CCB_OUTPUT -i $FETCH_ISE_LOGS -s $FETCH_SWITCH_LOGS -w $base_dir >&/var/log/xiotech/showme_all_$DSC_ID.log $AMPERSAND"
+/usr/bin/perl ./show_do_many_7000 -d $DSC_ID -c $FETCH_CCB_OUTPUT -i $FETCH_ISE_LOGS -s $FETCH_SWITCH_LOGS -w $base_dir >&/var/log/xiotech/showme_all_$DSC_ID.log $AMPERSAND
+popd
+

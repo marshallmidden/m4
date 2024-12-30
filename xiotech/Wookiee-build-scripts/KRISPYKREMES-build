@@ -1,0 +1,177 @@
+#!/bin/bash -e
+# $Id$
+# Script to build KRISPYKREMES releases
+# Copyright 2007 Xiotech Corporation. All Rights reserved.
+# Mark D. Rustad, 2007/10/10
+#
+# KRISPYKREMES-build [-h] [-b branch] [-T] [-n] [-t tag] [-v version]
+#               [-w where] [-m model]
+
+def_branch=WOOKIEE_KRISPYKREMES_GA_BR
+def_where=KRISPYKREMES
+def_model=3000
+this_script="$0"
+dest_location="/home/Builds/storage/Wookiee"
+
+svn_root="svn://svn.xiotech.com"
+svn_tags="${svn_root}/eng/tags/storage/Wookiee"
+
+usage() {
+    echo "${this_script} [-h] [-b branch] [-T] [-n] [-t tag] [-v version]"
+    echo "            [-w where] [-m model]"
+    echo ""
+    echo "-h display help"
+    echo "-b branch to build code from, default ${def_branch}"
+    echo "-v version of code to build, i.e. F100, default next number"
+    echo "-w where to put results of build, default ${def_where}"
+    echo "-T create tag for build"
+    echo "-t use tag for build"
+    echo "-m model to build (or ALL), default ${def_model}"
+    echo "-n do not create tag"
+}
+
+fail() {
+    echo "$1"
+    exit 1
+}
+
+source ${SDIR}/get_next_build
+
+repo="${svn_root}/eng"
+models="750 3000"
+branch="${def_branch}"
+tag=
+ver=
+where="${def_where}"
+settag=1
+model="${def_model}"
+
+while getopts "b:hm:nTt:v:w:" option; do
+    case "${option}" in
+        b) branch="${OPTARG}";;
+        h) usage;;
+        t) tag="${OPTARG}";;
+        T) settag=1;;
+        v) ver="${OPTARG}";;
+        w) where="${OPTARG}";;
+        m) model="${OPTARG}";;
+        n) settag=;;
+        :) echo "Required parameter for option ${OPTARG} missing.";
+            usage; exit 1;;
+        \?) usage; exit 1;;
+        *) echo "Unknown option '${option}'"; usage; exit 1;;
+    esac
+done
+
+shift $((OPTIND - 1))
+
+ubranch="`echo ${branch}|tr [:lower:] [:upper:]`"
+test "${ubranch}" = "MAIN" && branch="trunk"
+test "${ubranch}" = "HEAD" && branch="trunk"
+if [[ -z "${branch}"  || "${branch}" == "trunk" ]]; then
+    branch=trunk
+    bpath=trunk
+    bextra=
+else
+    bpath="branches"
+    bextra="/${branch}"
+fi
+
+where="`echo "${where}"|tr [:lower:] [:upper:]`"
+test "${where}" = "" && where=Engr
+
+if [[ "${ver}" == "" ]]; then
+    num=`get_next_build "${where}"`
+    test "${num}" = "" || ver="${num}"
+fi
+
+test "${ver}" != "" || fail "Build version is not set."
+
+uver="`echo ${ver}|tr [:lower:] [:upper:]`"
+
+test "${tag}" = "" && tag="BUILD_WOOKIEE_${branch}-${uver}"
+
+test "${model}" = "ALL" && model="${models}"
+
+test -d "${dest_location}" || fail "Destination ${dest_location} not found."
+
+echo "----------"
+echo "Please check the following build information."
+echo "About to build:"
+echo "  branch=${branch}, ver=${ver}, where=${where}"
+echo "  tag=${tag}, settag=${settag}, model=${model}"
+echo ""
+
+while { echo -n "Ready [Y/N]? "; read input; } do
+    test "${input}" = "Y" -o "${input}" = "y" && break
+    test "${input}" = "n" -o "${input}" = "N" && fail "build cancelled."
+done
+echo "*** Beginning build ***"
+
+blddir="${branch}-${uver}"
+test -d "${blddir}" &&
+    {   echo "Work directory, ${blddir}, already exists"
+        while { echo -n "Continue, blowing it away [Y/N]? "; read input; } do
+            test "${input}" = "Y" -o "${input}" = "y" &&
+                { echo "Continuing..."; break; }
+        done
+    }
+
+rm -rf "${blddir}"
+mkdir -p "${blddir}"
+cd "${blddir}"
+echo "** Entering ${blddir} **"
+if [ "${settag}" = "1" ]; then
+    echo "** Creating tag ${tag} **"
+    svn copy ${repo}/${bpath}/storage/Wookiee${bextra} ${svn_tags}/${tag} \
+        -m "TBolt00000000 -Build Wookiee tag ${tag}" &>tag.out ||
+        fail 'svn tag failed!'
+    svn copy ${repo}/trunk/apps/AppEng/UpdateSigner ${svn_tags}/${tag} \
+        -m "TBolt00000000 -Build UpdateSigner tag ${tag}" &>tag.out ||
+        fail 'svn tag failed!'
+fi
+
+echo "** Checking out Wookiee from ${tag} **"
+mkdir -p Wookiee
+cd Wookiee || fail 'Failed to enter Wookiee!'
+svn co ${svn_tags}/${tag} . &> co.out || fail 'svn checkout failed!'
+cd ..
+
+cd Wookiee || fail 'Failed to enter Wookiee!'
+test -x ./BuildRelease || fail 'No BuildRelease script!'
+
+echo "** Beginning build **"
+if [[ "${model}" == "" ]]; then
+    ./BuildRelease -v ${ver} -w ${where} ||
+        fail "${this_script} -v ${ver} -w ${where} failed"
+else
+    ./BuildRelease -v ${ver} -w ${where} -m "${model}" ||
+        fail "${this_script} -v ${ver} -w ${where} -m \"${model}\" failed"
+fi
+
+echo "** Copying release to destination **"
+destdir="${dest_location}/${where}/${ver}"
+rm -rf Test
+mv built-*Perf/*.{zip,rpm2} .
+for f in built-*Perf/*.xzp; do
+    test ! -f "${f}" || mv "${f}" .
+done
+if [[ -d "${destdir}" ]]; then
+    echo "** Previous ${destdir} found - renaming to ${destdir}.old **"
+    rm -rf "${destdir}.old"
+    mv "${destdir}" "${destdir}.old"
+fi
+mkdir -p "${destdir}" ||
+    fail "Unable to create ${destdir}"
+tar cf - --exclude .svn . | tar xf - --no-same-permissions -C "${destdir}" ||
+        fail "Move of files to destination failed"
+
+chmod ugo-w -R "${destdir}" || fail 'Clearing write permission failed!'
+
+cd ../..
+
+echo "** ${this_script} completed successfully\! **"
+
+send-build-mail "${this_script} version ${ver}"
+
+# vi:sw=4 ts=4 expandtab

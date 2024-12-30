@@ -1,0 +1,67 @@
+#!/bin/sh -x
+
+DATE=date
+
+${DATE}
+
+# Where is subversion executable.
+SVN=/usr/local/bin/svn
+
+# Location to svn checkout and build the release for the Morning build.
+DIR=/home/eng_build/Nite
+
+# Location of the DFS directory.
+DFS=/dfs/Eng/Builds/storage/Wookiee/Morning
+
+cd ${DIR}
+
+# Update the build.
+#-- ${SVN} update Morning || (echo "svn update Wookiee failed" ; exit 1) || exit 1
+${SVN} update Wookiee || (echo "svn update Wookiee failed" ; exit 1) || exit 1
+${DATE}
+
+#-- # Go into the Morning directory.
+#-- cd Morning
+cd Wookiee
+
+# Make sure rpmroot directory is owned by us.
+root chown -R eng_build.xiotech /home/eng_build/rpmroot/
+
+${DATE}
+# Do make cleans.
+make VER=NITE MODEL=7000 clean || (echo "make 7000 clean failed"; exit 1) || exit 1
+make VER=NITE MODEL=3000 clean || (echo "make 3000 clean failed"; exit 1) || exit 1
+${DATE}
+
+# Build the 7000 Perf build.
+make VER=NITE MODEL=7000 Perf || (echo "make 7000 failed"; exit 1) || exit 1
+${DATE}
+
+# Build the 3000 Perf build.
+make VER=NITE MODEL=3000 Perf || (echo "make 3000 failed"; exit 1) || exit 1
+${DATE}
+
+# Check if Engineering File Service (DFS) is up.
+./Linux/Nightly/check-dfs || (echo "check-dfs failed" ; exit 1) || exit 1
+${DATE}
+
+# Remove previous "DAY" data.
+DAY=`date +%A`
+rm -rf ${DFS}/${DAY}/*
+${DATE}
+
+# Copy the built directories to the Engineering File Service (DFS).
+tar cf - built-* | tar xf - -C ${DFS}/${DAY}/ || (echo "copy files to DFS failed"; exit 1) || exit 1
+${DATE}
+
+# Run on Neals test ICON.
+# a) Get it there.
+scp built-7000Perf/*.rpm2 root@10.64.102.56:/bldtest/TEST/engbuild.rpm2
+${DATE}
+
+# Run it there.
+ssh -a -f -x root@10.64.102.56 "(cd /bldtest/TEST ; perl XTC.pl BVT1 BUILDTEST) 2>&1 >Test.run.output1" &
+ssh -a -f -x root@10.64.102.56 "(cd /bldtest/TEST ; perl XTC.pl BVT2 BUILDTEST) 2>&1 >Test.run.output2" &
+${DATE}
+
+exit 0

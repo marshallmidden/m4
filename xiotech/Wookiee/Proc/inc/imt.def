@@ -1,0 +1,120 @@
+# $Id: imt.def 144191 2010-07-15 20:23:53Z steve_wirtz $
+#*****************************************************************************
+#
+#  NAME: imt.def  (Initiator management table)
+#
+#  DESCRIPTION:
+#       To provide a data structure to manage FC events received
+#       from a specific FC initiator node.
+#
+# The IMT structure contains information for each Initiator device that has
+# communicated with us (discovered us). There is one IMT per Initiator device,
+# per FC Channel. These Initiators are often host servers, but may also be
+# other Controllers which may request a possible SAN Links connection. All
+# IMTs for a channel are chained together in a linked list. The IMT also
+# includes a link back to the CIMT for the channel this initiator was
+# discovered on. It may also include a link to an LTMT if the target for the
+# LTMT is the same device as this IMT initiator (this is a normal case for
+# SAN Links).
+#
+#  Copyright (c) 1998-2009 XIOtech Corporation.   All rights reserved.
+#
+#*****************************************************************************
+
+                                @#ifndef _IMT_H_
+                                @#define _IMT_H_
+                                @#if defined(FRONTEND)
+                                @#include "XIO_Types.h"
+                                @#include "isp.h"
+                                @#include "system.h"
+                                @struct CIMT;
+                                @struct ILMT;
+                                @struct LTMT;
+                                @struct ILT;
+#
+# --- IMT flags field definitions --------------------------------------------
+#
+.def im_flags_iscsi 7           @#define IM_FLAGS_ISCSI         @ Bit 7 = Interface Specific
+                                @                               @  0 - FC Interface
+                                @                               @  1 - iSCSI Interface
+.def im_flags_vnode 6           @#define IM_FLAGS_VNODE         @ Bit 6 = Valid Node Name
+.def im_flags_mtml 5            @#define IM_FLAGS_MTML          @ Bit 5 = Mag to Mag Link
+.def im_flags_inactive 4        @#define IM_FLAGS_INACTIVE      @ Bit 4 = 1 inactive - 0 active
+                                @                               @ Bit 3 to Bit 0 - reserved
+#
+# --- Configuration record data structure (relative to im_cfgrec area) -------
+#
+                                @                               @ Record data structure for im_cfgrec
+.struct                         @typedef struct IMT_VIRT_DEV    @ Virtual device configuration record
+                                @{
+.s im_cfgvid                    @    UINT16  vid;               @ virtual drive number
+.s im_cfglun                    @    UINT16  lun;               @ assigned LUN
+.s im_cfgattr                   @    UINT16  attr;              @ virtual device attributes<s>
+.f im_cfgrecsiz 0               @} IMT_VIRT_DEV;                @ size of a configuration record
+#
+# --- Common statistics structure ---------------------------------------------
+#
+.struct                         @typedef struct IM_STATS
+                                @{
+.l imst_cmds                    @    UINT64 cmds;               @ total number commands
+.l imst_bytes                   @    UINT64 bytes;              @ total number bytes
+.l imst_writes                  @    UINT64 writes;             @ total number write commands
+.l imst_wbytes                  @    UINT64 wBytes;             @ total number write bytes
+.l imst_reads                   @    UINT64 reads;              @ total number read commands
+.l imst_rbytes                  @    UINT64 rBytes;             @ total number read bytes
+.f imst_size 0                  @} IM_STATS;                    @ size of a statistics structure
+                                @                               @ MUST be a multiple of 8 bytes
+#
+# --- Begin IMT structure -----------------------------------------------------
+#
+.struct                         @typedef struct IMT
+                                @{
+.w im_link                      @   struct IMT  *link;          @ IMT link list field
+.s im_fcaddr                    @   UINT16 fcAddr;              @ Assoc. FC address (Loop ID)
+.s im_vpid                      @   UINT16 vpID;                @ Assoc. Virtual port ID
+.w im_cimt                      @   struct CIMT *cimt;          @ Assoc. CIMT address
+.w im_ehand                     @   void  *ehand;               @ Default event handler table
+.b im_rsrvd1 8                  @   UINT8  rsrvd1[8];           @ Reserved 8 bytes
+.l im_mac                       @   UINT64 mac;                 @ FC MAC address (WWN)
+.b im_rsrvd2 1                  @   UINT8  rsrvd2[1];           @ Reserved 1 byte
+.b im_flags                     @   UINT8  flags;               @ Flags byte
+.b im_rsrvd3 1                  @   UINT8  rsrvd3[1];           @ Reserved 1 byte
+.b im_pri                       @   UINT8  pri;                 @ Priority
+.s im_cfgsiz                    @   UINT16 cfgSize;             @ Configuration record size
+.s im_sid                       @   UINT16 sid;                 @ Server ID - index into SDX
+.s im_tid                       @   UINT16 tid;                 @ Target ID
+.b im_rsrvd4 2                  @   UINT8  rsrvd4[2];           @ Reserved 2 bytes
+.w im_pendtask                  @   struct ILT  *pendTask;      @ Pending image task ILT list
+.w im_inacttmr                  @   UINT32 inactTmr;            @ Inactive IMT timer
+.w im_link2                     @   struct IMT  *link2;         @ Allocated link list field
+.w im_ltmt                      @   struct LTMT *ltmt;          @ Assoc. LTMT address
+.f im_ilmtdir 4*LUNMAX          @   struct ILMT *ilmtDir[MAX_LUNS]; @ ILMT directory
+                                @                               @ This is accessed via LUN index.
+.f im_cfgrec LUNMAX*im_cfgrecsiz @  struct IMT_VIRT_DEV cfg[MAX_LUNS]; @ Configuration Record
+# --- Statistics
+.f im_stinprog imst_size        @   IM_STATS inProg;            @ Periodic in-progress
+.f im_stagg imst_size           @   IM_STATS agg;               @ Aggregate stats
+.f im_stper imst_size           @   IM_STATS per;               @ Periodic stats
+# Note: flsize defined in fls.inc
+.f im_lstatus flsize            @   FLS    lStatus;             @ FCAL link status
+.s im_qdepth                    @   UINT16 qDepth;              @ Queue depth
+.b im_rsrv5 2                   @   UINT8  rsrvd5[2];           @ Reserved 2 bytes
+.b im_iname 256                 @   UINT8  i_name[256];         @ iSCSI Initiator name
+# --- End structure
+.f imtsize 0 # Size of IMTs     @} IMT;
+#*****************************************************************************
+# Following (imtstatsize) is used in def.inc
+.set imtstatstart,im_stagg      @                               @ stats starting location
+.set imtstatsize,im_qdepth+4-imtstatstart   @                   @ stats size
+#*****************************************************************************
+                                @#endif /* defined(FRONTEND)) */
+                                @#endif /* _IMT_H_ */
+#******************************************************************************
+#
+####
+## Modelines:
+## Local Variables:
+## tab-width: 4
+## indent-tabs-mode: nil
+## End:
+## vi:sw=4 ts=4 expandtab

@@ -1,0 +1,72 @@
+diff -uw old/Makefile new/Makefile
+--- old/Makefile	2006-11-27 12:10:05.981757924 -0600
++++ new/Makefile	2006-11-27 14:30:02.524306779 -0600
+@@ -1428,6 +1428,8 @@
+ 
+ ALLSOURCE_ARCHS := $(SRCARCH)
+ 
++ifeq ($(src),$(obj))
++
+ define find-sources
+         ( for arch in $(ALLSOURCE_ARCHS) ; do \
+ 	       find $(__srctree)arch/$${arch} $(RCS_FIND_IGNORE) \
+@@ -1454,6 +1454,59 @@
+ 	  )
+ endef
+ 
++else
++
++# O= may have files not in the main srctree.
++# need to find all src files in O=, and then when searching srctree
++# exclude any src files also in O=
++EXCLUDE_O_SRCS:= ( while read f; do if [ ! -r $(obj)/$${f\#\#$(__srctree)} ]; then echo $${f}; fi; done )
++
++define find-sources
++	( ( find $(obj)/ $(RCS_FIND_IGNORE) \
++	       \( -name include -o -name arch \) -prune -o \
++	       -name $1 -print 2>/dev/null ; \
++	  for ARCH in $(ALLSOURCE_ARCHS) ; do \
++	       find $(obj)/arch/$${ARCH} $(RCS_FIND_IGNORE) \
++	            -name $1 -print 2>/dev/null ;\
++	  done ; \
++	  find $(obj)/security/selinux/include $(RCS_FIND_IGNORE) \
++	       -name $1 -print 2>/dev/null ; \
++	  find $(obj)/include $(RCS_FIND_IGNORE) \
++	       \( -name config -o -name 'asm-*' \) -prune \
++	       -o -name '*.[chS]' -print 2>/dev/null ; \
++	  for ARCH in $(ALLINCLUDE_ARCHS) ; do \
++	       find $(obj)/include/asm-$${ARCH} $(RCS_FIND_IGNORE) \
++	            -name $1 -print 2>/dev/null ; \
++	  done ; \
++	  find $(obj)/include/asm-generic $(RCS_FIND_IGNORE) \
++	       -name $1 -print 2>/dev/null ; ) ; \
++	( find $(__srctree) $(RCS_FIND_IGNORE) \
++	       \( -name include -o -name arch \) -prune -o \
++	       -name $1 -print; \
++	  for ARCH in $(ALLSOURCE_ARCHS) ; do \
++	       find $(__srctree)arch/$${ARCH} $(RCS_FIND_IGNORE) \
++	            -name $1 -print; \
++	  done ; \
++	  find $(__srctree)security/selinux/include $(RCS_FIND_IGNORE) \
++	       -name $1 -print; \
++	  find $(__srctree)include $(RCS_FIND_IGNORE) \
++	       \( -name config -o -name 'asm-*' \) -prune \
++	       -o -name $1 -print; \
++	  for arch in $(ALLINCLUDE_ARCHS) ; do \
++	       test -e $(__srctree)include/asm-$${arch} && \
++	         find $(__srctree)include/asm-$${ARCH} $(RCS_FIND_IGNORE) \
++	            -name $1 -print; \
++	       test -e $(__srctree)arch/$${arch}/include/asm && \
++		 find $(__srctree)arch/$${arch}/include/asm $(RCS_FIND_IGNORE) \
++		    -name $1 -print; \
++	  done ; \
++	  find $(__srctree)include/asm-generic $(RCS_FIND_IGNORE) \
++	       -name $1 -print ) | $(EXCLUDE_O_SRCS) )
++endef
++
++endif
++
++
+ define all-sources
+ 	$(call find-sources,'*.[chS]')
+ endef

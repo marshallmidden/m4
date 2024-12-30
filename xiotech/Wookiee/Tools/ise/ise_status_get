@@ -1,0 +1,168 @@
+#!/usr/bin/expect --
+#
+# Script to set the time on one or more MRCs.
+#
+# The time is gotten from the linux box that is running the script.
+# This presumes that 
+#
+# Usage: mrc_time_set [test] [<ip address> ...]
+#
+# Where:
+#   test
+#       Test the "date" command on the linux system to be producing reasonable output.
+#
+#   <ip address>
+#       Specify one or more IP addresses of ISE MRCs. Note - does not
+#       check for duplicates. IPs are accessed sequentially.
+
+# Create debugging file A.exp_internal, no debugging to stdout (0).
+# exp_internal -f A.exp_internal 0
+# Stop recording to stdout.
+# log_user 0
+
+# regular expression representing the ISE prompt.  Either "seaSH> " or "root:> "
+set mrc_prompt "(seaSH|root:|root|oem:|oem)> "
+
+set error_mess(2) "Timeout while waiting for password prompt."
+set error_mess(3) "Connection terminated while waiting for password prompt."
+set error_mess(4) "Timeout while waiting for prompt after password sent."
+set error_mess(5) "Connection terminated while waiting for prompt after password sent."
+set error_mess(6) "Timeout while waiting for prompt after nseash started."
+set error_mess(7) "Connection terminated while waiting for prompt after nseash started."
+
+set error_mess(8) "Timeout while waiting for prompt after 'show ise' sent."
+set error_mess(9) "Connection terminated while waiting for prompt after 'show ise' sent."
+set error_mess(10) "Timeout while waiting for prompt after 'show mrc' sent."
+set error_mess(11) "Connection terminated while waiting for prompt after 'show mrc' sent."
+set error_mess(12) "Timeout while waiting for prompt after 'show pac' sent."
+set error_mess(13) "Connection terminated while waiting for prompt after 'show pac' sent."
+set error_mess(14) "Timeout while waiting for prompt after 'show ps' sent."
+set error_mess(15) "Connection terminated while waiting for prompt after 'show ps' sent."
+set error_mess(16) "Timeout while waiting for prompt after 'show bat' sent."
+set error_mess(17) "Connection terminated while waiting for prompt after 'show bat' sent."
+set error_mess(18) "Timeout while waiting for prompt after 'show pool' sent."
+set error_mess(19) "Connection terminated while waiting for prompt after 'show pool' sent."
+set error_mess(20) "Timeout while waiting for prompt after 'show volumes' sent."
+set error_mess(21) "Connection terminated while waiting for prompt after 'show volumes' sent."
+
+#-----------------------------------------------------------------------------
+# Print out a usage example if wrong or no arguments.
+proc usage {} {
+    puts "Usage: ise_status_get \[<ip address> ...]"
+    puts "    Typical command line to set status from IPs 123.45.67.89 and 123.45.67.90"
+    puts "        mrc_time_set 123.45.67.89 123.45.67.90"
+    exit 1
+}
+
+#-----------------------------------------------------------------------------
+# Log into an ISE and start seash.
+proc login { mrc_ip } {
+    global mrc_prompt
+    
+    # log into ISE.
+    spawn ssh "root@$mrc_ip"
+#    spawn ssh "oem@$mrc_ip"
+    expect {
+        "password: "    { send "federal\r" }
+#        "password: "    { send "oem\r" }
+        "(yes/no)? "    { send "yes\r" ; exp_continue }
+        timeout         { return 2 }
+        eof             { return 3 }
+        # Ignore all other lines of output.
+        -re "(\[^\r\n]*)\[\r\n]" { exp_continue }
+    }
+    
+    # Start nseash.
+    expect {
+        "\# "   { send "nseash\r" }
+        timeout { return 4 }
+        eof     { return 5 }
+        # Ignore all other lines of output.
+        -re "(\[^\r\n]*)\[\r\n]" { exp_continue }
+    }
+
+    # Check it started.
+    expect {
+        -re $mrc_prompt { return $spawn_id }
+        timeout         { return 6 }
+        eof             { return 7 }
+        # Ignore all other lines of output.
+        -re "(\[^\r\n]*)\[\r\n]" { exp_continue }
+    }
+    abort
+}
+
+#-----------------------------------------------------------------------------
+proc sendit { spawn_id string timeoutreturn eofreturn } {
+    global mrc_prompt
+
+    send $string
+    expect {
+        -re $mrc_prompt {}
+        timeout { return $timeoutreturn }
+        eof     { return $eofreturn }
+        # Ignore all other lines of output.
+        -re "(\[^\r\n]*)\[\r\n]" { exp_continue }
+    }
+    return 0
+}
+
+#-----------------------------------------------------------------------------
+# config_network -  Configure time settings.
+proc config_network { spawn_id } {
+    if { [set retval [sendit $spawn_id "show ise\n" 8 9 ]] != 0 } { return $retval }
+    if { [set retval [sendit $spawn_id "show mrc\n" 10 11 ]] != 0 } { return $retval }
+    if { [set retval [sendit $spawn_id "show pac\n" 12 13 ]] != 0 } { return $retval }
+    if { [set retval [sendit $spawn_id "show ps\n" 14 15 ]] != 0 } { return $retval }
+    if { [set retval [sendit $spawn_id "show bat\n" 16 17 ]] != 0 } { return $retval }
+    if { [set retval [sendit $spawn_id "show pool\n" 18 19 ]] != 0 } { return $retval }
+    set retval [sendit $spawn_id "show volumes\n" 20 21 ]
+    return $retval
+}
+
+#-----------------------------------------------------------------------------
+# session - Open connection to specified ISE, and do our business.
+proc session { mrc_ip } {
+    global error_mess
+    set spawn_id [login $mrc_ip]
+
+    if { $spawn_id > 1 && $spawn_id < 50} {
+        puts "Could not start ssh to $mrc_ip -- $error_mess($spawn_id)"
+    } else {
+        set check_error [config_network $spawn_id]
+        if { $check_error > 1 && $check_error < 50 } {
+           puts "Error while talking to MRC IP $mrc_ip -- $error_mess($check_error)"
+        }
+        close
+        wait
+    }
+}
+
+#-----------------------------------------------------------------------------
+# Main program follows, globals exist.
+
+# Two minute timeout, typical TCP retransmission timeout -- for bad networks.
+# set timeout 120
+set timeout 10
+
+if {[string match "" $argv]} {
+    usage
+}
+# ./ise_status_get 10.64.100.{132,44,18,16} 10.64.172.{235,273} 10.64.173.{15,17}
+
+foreach mrc_ip $argv {
+    session $mrc_ip
+}
+puts "Done"
+exit 0
+
+#=============================================================================
+
+# Modelines:
+# Local Variables:
+# tab-width: 4
+# indent-tabs-mode: nil
+# End:
+# vi:sw=4 ts=4 expandtab
+
+# ==============================================================================

@@ -1,0 +1,1056 @@
+#!/usr/bin/perl -w
+#
+# NOTE: SEE ###DEBUGGING### below! Should not be present for production!
+#
+#-----------------------------------------------------------------------------
+# Run this after migration completes, but before clicking on Ready in MM Tool.
+#-----------------------------------------------------------------------------
+use strict;
+
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# Definitions that are adjustable -- but likely do not need to be.
+
+# Command to run ccbCL.pl
+# my $CCBCL = 'cd ../../../CCBE; perl ccbCL.pl';      ###DEBUGGING###
+my $CCBCL = 'perl ccbCL.pl';            # Production location in current directory.
+
+my $MAXTIMETOWAIT = 210; # Number of seconds to do emulated PAB (real is last 90 => 300).
+
+my $need_firmware_newer = 922;          # Firmware on controllers must be newer.
+
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# Arguments passed to this script.
+
+my $IP;                 # argument of one controller's IP address.
+my $PORT;               # Used for debugging only
+my $PORT1;              # Used for debugging only
+my @migrate_ISE;        # argument of ISE number that is migrating.
+my @migrate_LUNs;       # argument(s) of luns on ISE that are migrating.
+my @dp;                 # If 1 or 2, they specified a datapac instead of LUNs
+
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# Determined from contacting the 7000 controllers.
+my $master;             # Determined IP of master 7000 controller
+my $slave = '';         # Determined IP of slave 7000 controller (if present)
+
+# PIDs, ses, slots - before MM Tool unpresent/mirror-break/present.
+my @original_pids;
+my @original_ses;
+my @original_slot;
+my @original_port;
+
+my @migrate_pids;       # PIDs that are being migrated.
+
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# Working variables used between subroutines (globals).
+my @unique_ISE;         # Unique ISEs (only do PAB once) migrating.
+
+my $error_happened = 0; # Set to one if a FIX MANUALLY is required.
+my $warning_happened = 0; # Set to one if a CHECK MANUALLY is required.
+
+my $str_ccbcl_count;    # String to count outstanding I/O in 7000.
+my $starttime;          # Time when PAB started.
+my $time;               # Used to get current time in seconds.
+my $endtime;            # The time we have left to act.
+
+my %fixup_pids;         # We found new PID and swapped them. Do rest.
+my %relabel_pids;       # We have new PID in place, it needs to be relabeled.
+
+my $port;               # Ports 0&1 or 2&3 (will be 0 or 2).
+
+#-----------------------------------------------------------------------------
+my $FILE;               # Log file
+#-----------------------------------------------------------------------------
+# Print out usage and exit.
+#-----------------------------------------------------------------------------
+sub usage()
+{
+    print "\n";
+    print "This script intends to fix a 7000 controller when MM Tool has migrated data,\n";
+    print "but has NOT yet unpresented LUNs, broken mirrors, nor presented new LUNs.\n";
+    print "This script is run when the pop-up says to stop all I/O and presents a button\n";
+    print "labeled 'READY' in MM Tool, but before actually pressing the 'READY' button.\n";
+    print "This script will tell you when to press 'READY' in MM Tool, and that will be\n";
+    print "SOON after this script starts execution.\n";
+    print "\n";
+    print "./migrate usage:  IP ISE# LUN,[LUN,...]\n";
+    print "            or :  IP ISE# dp2\n";
+    print "    IP   - IP address of one 7000 controller. Used to find both, if present.\n";
+    print "    ISE# - Which ISE is having data migrated (number like '8'). One allowed.\n";
+    print "    LUN  - This is LUN number(s) being migrated. (Called LUN/slot/volume/etc.)\n";
+    print "Note: You do not need to specify where it is being migrated to, just FROM.\n";
+    print "\n";
+    print "Example usages:\n";
+    print "    ./migrate 172.16.1.0 8 1,3,5,7\n";
+    print "    ./migrate 172.16.1.0 8 dp1\n";
+    print "    ./migrate 172.16.1.0 ISE29 dp2\n";
+    print "    ./migrate 172.16.1.0 --ise29 --dp2\n";
+    print "    ./migrate 172.16.1.0 ISE-30 dp-1\n";
+    print "    ./migrate 172.16.1.0 ISE-30 dp-1\n";
+    print "    ./migrate 172.16.1.0 ise8 dp1 ise8 dp2\n";
+    print "    ./migrate 172.16.1.0 ise8 dp1 ise8 dp2 ise7 dp1 ise6 dp2\n";
+    print "    ./migrate 127.0.0.1:8608 ISE-30 dp-1     # MASTER using ssh passthru.\n";
+    print "                                             # SLAVE is on port+1 (8609).\n";
+    exit 1;
+}   # end of usage
+
+#-----------------------------------------------------------------------------
+# Takes an array and outputs a unique list of items.
+#-----------------------------------------------------------------------------
+sub uniq(@)
+{
+    my %seen = ();
+    my @r = ();
+    my $a;
+    foreach $a (@_)
+    {
+        if (!defined($seen{$a}))
+        {
+            push @r, $a;
+            $seen{$a} = 1;
+        }
+    }
+    return @r;
+}   # end of uniq
+
+#-----------------------------------------------------------------------------
+# Process arguments supplied to script.
+#-----------------------------------------------------------------------------
+sub process_arguments()
+{
+    # First argument is the IP address of one controller of the 7000.
+    if (!defined($ARGV[0]))
+    {
+        print "\nNeed IP address of one of the 7000 controllers.\n";
+        usage();
+    }
+
+    ($IP, $PORT) = split(':', $ARGV[0]);
+    $PORT1 = '';
+    if (defined($PORT))
+    {
+        if ($PORT == 3000)
+        {
+            $PORT1 = $PORT = ':3000';
+        }
+        else                        # Allows ssh passthru -- requires master one less than slave
+        {
+            $PORT1 = ':' . ($PORT + 1);
+            $PORT = ':' . $PORT;
+        }
+    }
+    else
+    {
+        $PORT = '';
+    }
+    shift @ARGV;
+
+    # Second argument is the ISE number (bay)
+    do
+    {
+        if (!defined($ARGV[0]) || !defined($ARGV[1]))
+        {
+            print "\nNeed ISE(bay) and LUNs on it that we are migrating.\n";
+            usage();
+        }
+
+        if ($ARGV[0] =~ /^-*[Ii][Ss][Ee][-]*([0-9]+)$/)
+        {
+            push(@migrate_ISE, $1);
+        }
+        elsif ($ARGV[0] =~ /^[0-9]+$/)
+        {
+            push(@migrate_ISE, $ARGV[0]);
+        }
+        else
+        {
+            usage();
+        }
+        shift @ARGV;
+
+        # Third argument is the datapac or luns.
+        if ($ARGV[0] =~ /^-*[dD][pP][-]*([12])$/)
+        {
+            push(@dp, $1);              # Get all DataPac visable LUNs later.
+            push(@migrate_LUNs, '');    # No specific LUNs given.
+        }
+        else
+        {
+            my @i = split(',', $ARGV[0]);
+            my $i;
+            foreach $i (@i)
+            {
+                if ($i !~ /^[0-9]+$/)
+                {
+                    print "\nLUNs must be numbers -- not like '$i'.\n";
+                    usage();
+                }
+            }
+            push(@dp, 0);                   # No datapac given.
+            push(@migrate_LUNs, $ARGV[0]);  # No datapac, specific LUNs given.
+        }
+        shift @ARGV;
+        # Go get more ISE & datapac pairs.
+    } while (scalar(@ARGV) != 0);
+    @unique_ISE = uniq(@migrate_ISE);
+}   # end of process_arguments
+
+#-----------------------------------------------------------------------------
+# Do vcginfo to determine master controller IP address and slave IP, if any.
+#-----------------------------------------------------------------------------
+sub determine_master_slave_IP()
+{
+    my $output = `$CCBCL $IP$PORT -e 'vcginfo' | egrep 'SLAVE|MASTER'`;
+print $FILE "vcginfo output='$output'\n";
+    my @lines = grep(/MASTER|SLAVE/, split("\n", $output));
+    my $i;
+
+    foreach $i (@lines)
+    {
+        chomp($i);
+        if ($i =~ /^ +[0-9]+ +\(0x[0-9a-f]+[01]\) +([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+) +OPERATIONAL +MASTER/)
+        {
+            $master = $1;
+        }
+        elsif ($i =~ /^ +[0-9]+ +\(0x[0-9a-f]+[01]\) +([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+) +OPERATIONAL +SLAVE/)
+        {
+            $slave = $1;
+        }
+    }
+
+    if (!defined($master))
+    {
+        print "output='$output'\n";
+        print "\nDid not find master's IP address\n";
+        usage();
+    }
+
+    print "  MASTER=$master\n";
+    if (defined($slave))
+    {
+        print "  SLAVE =$slave\n";
+    }
+    else
+    {
+        $slave = '';
+    }
+}   # end of determine_master_slave_IP
+
+#-----------------------------------------------------------------------------
+# Verify the firmware version is $need_firmware_newer or higher.
+#-----------------------------------------------------------------------------
+sub verify_firmware_version()
+{
+    my $output;
+    my @lines;
+    my $i;
+    my $str = "a: fwversion";
+
+    $output = `$CCBCL $master$PORT $slave$PORT1 -e '$str'`;
+print $FILE "fwversion output='$output'\n";
+    @lines =  grep(/_RUN /, split("\n", $output));
+    my $cnt = (($slave eq '') ? 3 : 6);
+    if (scalar(@lines) != $cnt)
+    {
+        print "Did not get $cnt lines of '_RUN ' output.\n";
+        print "output='$output'\n";
+        usage;
+    }
+    foreach $i (@lines)
+    {
+        if ($i =~ /^([^ ]+) +([^ ]+) +([^ ]+) +([^ ]+) +([^ ]+) /)
+        {
+            # $1 = program;
+            # $2 = how compiled;
+            # $3 = count of number of compiles;
+            # $4 = who compiled;
+            # $5 = firmware version number (SysRls);
+            my $sysrls = $5;
+            $sysrls =~ s/^0+//;
+            if ($sysrls < $need_firmware_newer)
+            {
+                print "Firmware not at the correct revision level. Need >= $need_firmware_newer, found $sysrls\n";
+                print "line='$i'\n";
+                usage;
+            }
+        }
+    }
+}   # end of verify_firmware_version
+
+#-----------------------------------------------------------------------------
+# Do pdisks to get original PIDs and their SES, SLOT, PORT, and DNAME.
+#-----------------------------------------------------------------------------
+sub get_original_PIDs_ses_slot()
+{
+    my $output = `$CCBCL $master$PORT -e 'pdisks'`;
+print $FILE "get_original_PIDs_ses_slot pdisks output='$output'\n";
+    my @lines = grep(/PD:|0x00000000/, split("\n", $output));
+    my $i;
+
+    print "\n";                     # A blank line
+    foreach $i (@lines)
+    {
+        chomp($i);
+        $i =~ s/ +$//;              # Delete trailing spaces
+        if ("$i" eq "")
+        {
+            next;
+        }
+        if ($i =~ /^[ *!]+([0-9]+) +([0-9]) +PD:([0-9]+)-([0-9]+) +([0-9]+) +([0-9]+) / ||
+            $i =~ /^[ *!]+([0-9]+) +([0-9]) +PD-([A-Z])([0-9]+) +([0-9]+) +([0-9]+) /)
+        {
+            my $pid = $1;
+            my $port = $2;
+            my $dname_ses = $3;
+            my $dname_slot = $4;
+            my $ses = $5;
+            my $slot = $6;
+print $FILE "pid=$pid port=$port dname_ses/slot=$dname_ses/$dname_slot ses=$ses slot=$slot\n";
+            if ($dname_ses =~ /[A-Z]/)  # Allow 4000 to be emulated PAB too.
+            {
+                $dname_ses = ord($dname_ses) - ord('A');
+            }
+            if ($ses == 65535 || $slot == 255)
+            {
+                print "\nPID $i has SES as NOT FOUND -- FIX SYSTEM.\n";
+                usage();
+            }
+            if ($ses != $dname_ses || $slot != $dname_slot)
+            {
+                print "PID SES and SLOT does not match DNAME. ($i)\n";
+                print "FIX MANUALLY FIRST!\n";
+                usage();
+            }
+            my $j;
+            for ($j = 0; $j < scalar(@dp); $j++)
+            {
+                if (defined($dp[$j] && $dp[$j] ne ''))  # if should create migrate_LUNs array.
+                {
+                    if ($ses == $migrate_ISE[$j])
+                    {
+                        if (($slot % 2) == ($dp[$j] == 1) ? 1 : 0)
+                        {
+                            $migrate_LUNs[$j] .= ',' . $slot;   # Tack on this slot.
+                            $migrate_LUNs[$j] =~ s/^,//;
+                        }
+                    }
+                }
+            }
+
+            push(@original_pids, $pid);
+            $original_ses[$pid] = $ses;
+            $original_slot[$pid] = $slot;
+            $original_port[$pid] = $port;
+        }
+        elsif ($i =~ /^[ *!]+([0-9]+) +([0-9]+) +0x00000000 +([0-9]+) +([0-9]+) /)
+        {
+            my $pid = $1;
+            my $port = $2;
+            my $ses = $3;
+            my $slot = $4;
+print $FILE "pid=$pid port=$port unlabeled ses=$ses slot=$slot\n";
+            push(@original_pids, $pid);
+            $original_ses[$pid] = $ses;
+            $original_slot[$pid] = $slot;
+            $original_port[$pid] = $port;
+        }
+    }
+}   # end of get_original_PIDs_ses_slot
+
+#-----------------------------------------------------------------------------
+# Verify ISE and LUNs exist.
+#-----------------------------------------------------------------------------
+sub verify_argument_ISE_LUNs_exist()
+{
+    my $i;
+    my $j;
+    my $k;
+    my @m;
+
+    # Sort LUNs so messages are pretty.
+    for ($j = 0; $j < scalar(@dp); $j++)
+    {
+        @m = sort {$a <=> $b} split(',', $migrate_LUNs[$j]);
+        $migrate_LUNs[$j] = join(',', @m);
+    }
+
+    # Check if original_pids contains ses/slot.
+    # Create array migrate_pids of those to move..
+    foreach $i (@original_pids)
+    {
+        for ($j = 0; $j < scalar(@dp); $j++)
+        {
+            if ($original_ses[$i] == $migrate_ISE[$j])
+            {
+                my @m = split(',', $migrate_LUNs[$j]);
+                foreach $k (@m)
+                {
+                    if ($k == $original_slot[$i])
+                    {
+                        push(@migrate_pids, $i);
+                        last;
+                    }
+                }
+            }
+        }
+    }
+    $i = scalar(@migrate_pids);
+    if ($i == 0)
+    {
+        print "\nDid not find any PIDs to match given arguments.\n";
+        usage();
+    }
+
+    $j = 0;
+    for ($k = 0; $k < scalar(@dp); $k++)
+    {
+        my @m = split(',', $migrate_LUNs[$k]);
+        if (scalar(@m) == 0)
+        {
+            print "\nDid not find any LUNs for ISE $migrate_ISE[$k] DataPac $dp[$k] given in arguments.\n";
+            usage();
+        }
+        $j += scalar(@m);
+    }
+    if ($j == 0)
+    {
+        print "\nDid not find any PIDs to match LUNs given in arguments.\n";
+        usage();
+    }
+
+    # Create string to print of PIDs working on.
+    my $str1 = '';
+    foreach $k (@migrate_pids)
+    {
+        $str1 .= sprintf(" $k(ISE%d-%d)", $original_ses[$k], $original_slot[$k]);
+    }
+    # Create string of ISE/LUN working on.
+    my $str2 = '';
+    for ($k = 0; $k < scalar(@dp); $k++)
+    {
+        $str2 .= " ISE $migrate_ISE[$k]:$migrate_LUNs[$k]";
+    }
+    if ($i != $j)
+    {
+        print "\nDid not find all LUNs for $str2.\nFound $str1\n";
+        usage();
+    }
+
+    my $tpid;
+    my $tport;
+    foreach $i (@migrate_pids)
+    {
+        if (!defined($port))
+        {
+            $port = $original_port[$i] & 0xe;   # Toss lower bit (0&1 or 2&3);
+            $tpid = $i;
+            $tport = $original_port[$i];
+        } elsif ($port != ($original_port[$i] & 0xe)) {
+            print "Ports for LUNs are not on same BE qlogic card. PID $tpid on $tport verses PID $i on %d\n", $original_port[$i];
+            usage();
+        }
+    }
+
+    print "Migrating $str2\nPIDs $str1\n";
+print $FILE "Migrating $str2\nPIDs $str1\n";
+}   # end of verify_argument_ISE_LUNs_exist
+
+#-----------------------------------------------------------------------------
+# Do the Emulated PAB and count outstanding I/O on 7000..
+# Returns output from ccbCL.pl -- want the outstanding I/O count on 7000.
+#-----------------------------------------------------------------------------
+sub do_emulated_PAB()
+{
+    my $output;
+    my $k;
+    my $str1 = '';
+    my $str2 = '';
+    $str_ccbcl_count = '';
+    for ($k = 0; $k < scalar(@unique_ISE); $k++)
+    {
+        $str1 .= "a: emulatepab $unique_ISE[$k] on ;";
+        $str2 .= " $unique_ISE[$k]";
+        $str_ccbcl_count .= "a: emulatepab $unique_ISE[$k] count ;";
+    }
+
+    $starttime = `date '+%s'`;
+    chomp($starttime);
+    $endtime = $starttime + $MAXTIMETOWAIT;
+    $output = `$CCBCL $master$PORT $slave$PORT1 -e '$str1'`;
+print $FILE "emulatedpab start output='$output'\n";
+
+    print "Emulated PAB started for ISE:$str2.\n";
+print $FILE "Emulated PAB started for ISE:$str2.\n";
+
+    return($output);
+}   # end of do_emulated_PAB
+
+#-----------------------------------------------------------------------------
+# Turn off emulated PAB on all PIDs left to do -- we ran out of time.
+#-----------------------------------------------------------------------------
+sub turn_off_emulated_pab()
+{
+    my $str1 = '';
+    my $str2 = '';
+    my $k;
+    for ($k = 0; $k < scalar(@unique_ISE); $k++)
+    {
+        $str1 .= "a: emulatepab $unique_ISE[$k] off ;";
+        $str2 .= " $unique_ISE[$k]";
+    }
+    my $output = `$CCBCL $master$PORT $slave$PORT1 -e '$str1'`;
+print $FILE "emulatedpab stop output='$output'\n";
+    print "Emulated PAB STOPPED for ISE:$str2\n";
+print $FILE "Emulated PAB STOPPED for ISE:$str2\n";
+
+    $time = `date '+%s'`;
+    chomp($time);
+    printf "Time from PAB start to completion was: %d seconds\n", $MAXTIMETOWAIT - ($endtime - $time);
+printf $FILE "Time from PAB start to completion was: %d seconds\n", $MAXTIMETOWAIT - ($endtime - $time);
+}   # end of turn_off_emulated_pab
+
+#-----------------------------------------------------------------------------
+# Check for outstanding I/O for LUNs with Emulated PAB.
+#-----------------------------------------------------------------------------
+sub check_output_for_IO($)
+{
+    my ($arg) = @_;
+    my $ret = 0;
+    my $number = 0;
+    my @lines = grep(/Count of outstanding/, split("\n", $arg));
+    my $i;
+
+    foreach $i (@lines)
+    {
+        chomp($i);
+        if ($i =~ /Count of outstanding I\/Os for ISE=([0-9]+) count=([0-9]+)$/)
+        {
+            my $count = $2;
+            $number++;
+            $ret += $count;
+        }
+    }
+    if ($number != (($slave ne '') ? 2 : 1 ) * scalar(@unique_ISE))
+    {
+        turn_off_emulated_pab();
+        print "output='$arg'\n";
+        printf "Wanted %d line of output from checking I/O count, got $number -- script or 7000 problems\n",
+                (($slave ne '') ? 2 : 1 ) * scalar(@unique_ISE);
+print $FILE "output='$arg'\n";
+printf $FILE "Wanted %d line of output from checking I/O count, got $number -- script or 7000 problems\n",
+        (($slave ne '') ? 2 : 1 ) * scalar(@unique_ISE);
+        $error_happened = 1;
+    }
+    return($ret);
+}   # end of check_output_for_IO
+
+#-----------------------------------------------------------------------------
+# Loop, checking for any outstanding I/O for LUNs with Emulated PAB. None is good.
+#-----------------------------------------------------------------------------
+sub check_outstanding_7k_IO($)
+{
+    my ($output) = @_;
+    my $flag = 0;
+
+    $time = `date '+%s'`;
+    chomp($time);
+    while ($time < $endtime)
+    {
+        my $cnt;
+        if (($cnt = check_output_for_IO($output)) == 0)
+        {
+            $flag = 1;
+            last;
+        }
+
+        print "Waiting for 7000 I/O to clear ($cnt)...\n";
+print $FILE "Waiting for 7000 I/O to clear ($cnt)...\n";
+
+        $output = `$CCBCL $master$PORT $slave$PORT1 -e '$str_ccbcl_count'`;
+print $FILE "emulatedpab count output='$output'\n";
+        $time = `date '+%s'`;
+        chomp($time);
+    }
+
+    if ($flag == 0)
+    {
+        turn_off_emulated_pab();
+print $FILE "Timeout and 7000 still has outstanding I/O -- emulated PAB turned off.\nFIX THINGS MANUALLY!\n";
+        die "Timeout and 7000 still has outstanding I/O -- emulated PAB turned off.\nFIX THINGS MANUALLY!\n";
+    }
+}   # end of check_outstanding_7k_IO
+
+#-----------------------------------------------------------------------------
+# Process a new PID that has shown up with another SES/SLOT's data.
+#-----------------------------------------------------------------------------
+sub process_new_pid($$)
+{
+    my ($newpid, $origpid) = @_;
+
+    my $mig_pid;
+    my $usepid;
+    my $flag;
+    foreach $mig_pid (@migrate_pids)
+    {
+        if ($origpid == $mig_pid)
+        {
+            if (defined($relabel_pids{$mig_pid}) || defined($fixup_pids{$newpid}))
+            {
+                return;                     # Already processed once.
+            }
+            $flag = 1;
+            print "\n  Original PID=$origpid(ISE$original_ses[$origpid]-$original_slot[$origpid]), NEW PID is $newpid\n";
+print $FILE "\n  Original PID=$origpid(ISE$original_ses[$origpid]-$original_slot[$origpid]), NEW PID is $newpid\n";
+            last;
+        }
+    }
+    if ($flag == 0)                 # Not expected to be migrated -- oops.
+    {
+        $flag = 2;
+        print "UNEXPECTED MIGRATE of Original PID=$origpid(ISE$original_ses[$origpid]-$original_slot[$origpid]) with NEW PID of $newpid\n";
+        print "   HOST MAY HAVE LOST SOME I/O! You did not provide correct information to this script!\n";
+print $FILE "UNEXPECTED MIGRATE of Original PID=$origpid(ISE$original_ses[$origpid]-$original_slot[$origpid]) with NEW PID of $newpid\n";
+print $FILE "   HOST MAY HAVE LOST SOME I/O! You did not provide correct information to this script!\n";
+    }
+
+    # origpid = old pid, newpid = new pid.  flag==1 if need to turn off old PAB.
+    my $str = "swappids $origpid $newpid ";
+    if ($flag == 1)
+    {
+        $str .= "; a: emulatepab $newpid off";
+    }
+    my $output = `$CCBCL $master$PORT $slave$PORT1 -e '$str'`;
+print $FILE "swappids output='$output'\n";
+
+    my @lines = grep(/SWAPPIDS/, split("\n", $output));
+    my $i;
+    $flag = 0;
+
+    foreach $i (@lines)             # Verify output is correct.
+    {
+        chomp($i);
+        $i =~ s/ +$//;              # Delete trailing spaces
+        if ($i =~ /SWAPPIDS for ([0-9]+) and ([0-9]+)$/)
+        {
+            my $pid1 = $1;
+            my $pid2 = $2;
+            if ($origpid != $pid1 || $newpid != $pid2)
+            {
+                print "UNEXPECTED ERROR WITH SWAPPING PIDS $origpid and $newpid ($pid1,$pid2) -- FIX MANUALLY!\n";
+print $FILE "UNEXPECTED ERROR WITH SWAPPING PIDS $origpid and $newpid ($pid1,$pid2) -- FIX MANUALLY!\n";
+                $error_happened = 1;
+                return;
+            }
+            $flag = 1;
+            last;
+        }
+    }
+    if ($flag != 1)
+    {
+        print "UNEXPECTED ERROR WITH SWAPPING PIDS $origpid and $newpid, output not found? -- FIX MANUALLY!\n";
+print $FILE "UNEXPECTED ERROR WITH SWAPPING PIDS $origpid and $newpid, output not found? -- FIX MANUALLY!\n";
+        $error_happened = 1;
+        return;
+    }
+
+    # Save for fixup, the PIDs that new relabeling. This takes seconds.
+    $relabel_pids{$origpid} = 1;
+    # Cleanup (delete newly created pids -- which now contain old pid information) later.
+    $fixup_pids{$newpid} = 1;
+}   # end of process_new_pid
+
+#-----------------------------------------------------------------------------
+# Get pdisks ses from ccbCL.pl and break into temp arrays.
+#-----------------------------------------------------------------------------
+sub get_pdisks_ses()
+{
+    my $output = `$CCBCL $master$PORT -e 'pdisks ses'`;
+print $FILE "get_pdisks_ses pdisks ses output='$output'\n";
+    my @lines = grep(/PD:/, split("\n", $output));
+    my $i;
+    my @pid;
+    my @ses;
+    my @slot;
+    my @dname_ses;
+    my @dname_slot;
+
+    foreach $i (@lines)
+    {
+        chomp($i);
+        $i =~ s/ +$//;              # Delete trailing spaces
+        if ($i =~ /^[ *]+([0-9]+) +([0-9]+) +([0-9]+) +PD:([0-9]+)-([0-9]+)$/)
+        {
+            push(@pid, $1);
+            $ses[$1] = $2;
+            $slot[$1] = $3;
+            $dname_ses[$1] = $4;
+            $dname_slot[$1] = $5;
+        }
+    }
+
+    # Go through original pids, see if any are no longer active.
+    my $origpid;
+    foreach $origpid (@original_pids)   # Verify ses/slot of original not same.
+    {
+        # If a PID disappears for some reason, ignore the slot checking...
+        if (!defined($ses[$origpid]) || !defined($slot[$origpid]))
+        {
+            next;
+        }
+        # They could have been swapped already, ignore those -- and those the same.
+        if ($ses[$origpid] != 65535 || $slot[$origpid] != 255)
+        {
+            if ($ses[$origpid] != $original_ses[$origpid] || $slot[$origpid] != $original_slot[$origpid]) { next; }
+        }
+
+        # $origpid is one that has not moved yet - or disappeared. See if new one is available.
+        my $newpid;
+        foreach $newpid (@pid)
+        {
+            # Ignore any original PIDs.
+            if (defined($original_ses[$newpid])) { next; }
+
+            # See if new pid already swapped.
+            if ($ses[$newpid] == 65535 || $slot[$newpid] == 255) { next; }
+            # Following allows one to be turned on that was off before.
+            if ($dname_ses[$newpid] == $ses[$newpid] && $dname_slot[$newpid] == $slot[$newpid]) { next; }
+
+            # We have a new PID here -- see if it matches original ses/slot.
+            if ($original_ses[$origpid] == $dname_ses[$newpid] && $original_slot[$origpid] == $dname_slot[$newpid])
+            {   # Yes, swap it.
+                process_new_pid($newpid, $origpid);
+                last;
+            }
+        }
+    }
+}   # end of get_pdisks_ses
+
+#-----------------------------------------------------------------------------
+# Wait for new pdisks to show up ...
+#-----------------------------------------------------------------------------
+sub wait_for_new_pids()
+{
+    my @new_pids;
+    my @new_ses;
+    my @new_slot;
+
+    while ($time < $endtime && scalar(@migrate_pids) != scalar(keys %relabel_pids))
+    {
+        get_pdisks_ses();
+        $time = `date '+%s'`;
+        chomp($time);
+
+        printf "Time left is %d seconds  \r", $endtime - $time;
+printf $FILE "Time left is %d seconds  \n", $endtime - $time;
+    }
+
+    if ($time >= $endtime && scalar(@migrate_pids) != scalar(keys %relabel_pids))
+    {
+        turn_off_emulated_pab();
+        print "Timeout and 7000 did not find all new PIDs -- emulated PAB turned off.\n";
+print $FILE "Timeout and 7000 did not find all new PIDs -- emulated PAB turned off.\n";
+        my $j;
+
+        print "  PIDs not found: ";
+print $FILE "  PIDs not found: ";
+        foreach $j (@migrate_pids)
+        {
+            my $flag = 0;
+            my $k;
+            foreach $k (keys %relabel_pids)
+            {
+                if ($k == $j)
+                {
+                    $flag = 1;
+                    last;
+                }
+            }
+            if ($flag == 0)
+            {
+                printf "$j(ISE%d-%d) ", $original_ses[$j], $original_slot[$j];
+printf $FILE "$j(ISE%d-%d) ", $original_ses[$j], $original_slot[$j];
+            }
+        }
+        print "\n";
+        print "Please FIX MANUALLY!\n";
+print $FILE "\n";
+print $FILE "Please FIX MANUALLY!\n";
+        $error_happened = 1;
+    }
+    printf "\nTime from emulated PAB to ISE available again is %d seconds.\n", $time - $starttime;
+    print "Done with finding new PIDS, fixing them...\n";
+printf $FILE "\nTime from emulated PAB to ISE available again is %d seconds.\n", $time - $starttime;
+print $FILE "Done with finding new PIDS, fixing them...\n";
+}   # end of wait_for_new_pids
+
+#-----------------------------------------------------------------------------
+# Relabel the PIDs that we moved -- takes time.
+#-----------------------------------------------------------------------------
+sub relabel_moved_pids()
+{
+    my $output;
+    my @lines;
+    my $i;
+    my $pid1;
+    my $str1;
+    my $str2;
+    my @sp;
+
+    my @array_relabel_pids = sort {$a <=> $b} keys %relabel_pids;
+    if (scalar(@array_relabel_pids) == 0)
+    {
+        return;                     # Nothing to do.
+    }
+
+    $str1 = join(',', @array_relabel_pids);
+    # Fix the DNAME.
+    $output = `$CCBCL $master$PORT -e 'pdisklabel $str1 0xfe'`;
+print $FILE "pdisklabel output='$output'\n";
+
+    @lines = grep(/Physical disks labeled/, split("\n", $output));
+    my @done_relabel_pids;
+
+    foreach $i (@lines)             # Verify output is correct.
+    {
+        chomp($i);
+        $i =~ s/ +$//;              # Delete trailing spaces
+        if ($i =~ /Physical disks labeled .*- ([0-9,]+)/)
+        {
+            $pid1 = $1;
+            print "relabeled $pid1\n";
+print $FILE "relabeled $pid1\n";
+            @sp = split(',', $pid1);
+            push(@done_relabel_pids, @sp);
+        }
+    }
+
+    @done_relabel_pids = sort {$a <=> $b} @done_relabel_pids;
+    if (scalar(@done_relabel_pids) != scalar(@array_relabel_pids))
+    {
+        $str1 = join(',', @array_relabel_pids);
+        $str2 = join(',', @done_relabel_pids);
+        print "UNEXPECTED ERROR WITH pdisk relabel of $str1 -- did $str2 instead. -- FIX MANUALLY!\n";
+print $FILE "UNEXPECTED ERROR WITH pdisk relabel of $str1 -- did $str2 instead. -- FIX MANUALLY!\n";
+        $error_happened = 1;
+        return;
+    }
+
+    for ($i = 0; $i < scalar(@array_relabel_pids); $i++)
+    {
+        if ($array_relabel_pids[$i] != $done_relabel_pids[$i])
+        {
+            $str1 = join(',', @array_relabel_pids);
+            $str2 = join(',', @done_relabel_pids);
+            print "UNEXPECTED ERROR WITH pdisk relabel of $str1 -- did $str2 instead. -- FIX MANUALLY!\n";
+print $FILE "UNEXPECTED ERROR WITH pdisk relabel of $str1 -- did $str2 instead. -- FIX MANUALLY!\n";
+            $error_happened = 1;
+            return;
+        }
+    }
+}   # end of relabel_moved_pids
+
+#-----------------------------------------------------------------------------
+# "resetqlogic be" to get SES/SLOT of ones to delete "unknown" by discovery.
+#-----------------------------------------------------------------------------
+sub qlogicreset()
+{
+    my $output;
+    my $str1;
+    my $str2;
+    my @array_fixup_pids;
+
+    @array_fixup_pids = sort {$a <=> $b} keys %fixup_pids;
+
+    $str1 = (scalar(@array_fixup_pids) == 1) ? '' : 's';
+    $str2 = join(',', @array_fixup_pids);
+    print "The pid$str1 needing deleting are: $str2\n";
+print $FILE "The pid$str1 needing deleting are: $str2\n";
+
+    # Do a "resetqlogic be " on MASTER.
+    $str1 = sprintf "0: resetqlogic be $port ; 0: resetqlogic be %d", $port + 1;
+    $str2 = "$master$PORT";
+    if ($slave ne '')
+    {
+        $str1 .= sprintf "; 1: resetqlogic be $port ; 1: resetqlogic be %d", $port + 1;
+        $str2 .= " $slave$PORT1";
+    }
+    $output = `$CCBCL $str2 -e '$str1'`;
+print $FILE "resetql output='$output'\n";
+}   # end of qlogicreset
+
+#-----------------------------------------------------------------------------
+# Delete old pids if they still exist.
+# a) resetqlogic be all
+# b) pdiskdelete
+#-----------------------------------------------------------------------------
+sub fixup_old_pid_information()
+{
+    my @array_fixup_pids;
+    my $i;
+    my $output;
+    my $str = '';
+
+    @array_fixup_pids = sort {$a <=> $b} keys %fixup_pids;
+
+    qlogicreset();                      # NOTE: cannot always guarenteed what ses/slot will be.
+
+    # Now delete the old ones.
+    foreach $i (@array_fixup_pids)
+    {
+        $str .= "pdiskdelete $i ;";
+    }
+    $output = `$CCBCL $master$PORT -e '$str'`;
+print $FILE "pdiskdelete output='$output'\n";
+}   # end of fixup_old_pid_information
+
+#-----------------------------------------------------------------------------
+# Do pdisks to get currents PIDs and their SES, SLOT, PORT, and DNAME.
+#-----------------------------------------------------------------------------
+sub check_same_as_original_pids()
+{
+    print "\n";                     # Put a blank line out before any errors.
+    my @current_pids;
+
+    my $output = `$CCBCL $master$PORT -e 'pdisks'`;
+print $FILE "check_same_as_original_pids pdisks output='$output'\n";
+    my @lines = grep(/PD:|0x00000000/, split("\n", $output));
+    my $i;
+    my $pid_count = 0;
+
+    foreach $i (@lines)
+    {
+        chomp($i);
+        $i =~ s/ +$//;              # Delete trailing spaces
+        if ("$i" eq "")
+        {
+            next;
+        }
+        if ($i =~ /^[ *!]+([0-9]+) +([0-9]) +PD:([0-9]+)-([0-9]+) +([0-9]+) +([0-9]+) / ||
+            $i =~ /^[ *!]+([0-9]+) +([0-9]) +PD-([A-Z])([0-9]+) +([0-9]+) +([0-9]+) /)
+        {
+            my $pid = $1;
+#            my $port = $2;
+            my $dname_ses = $3;
+            my $dname_slot = $4;
+            my $ses = $5;
+            my $slot = $6;
+            $pid_count++;
+            if ($ses == 65535 || $slot == 255)
+            {
+                print "NOT FOUND-PID $i\n          has SES/SLOT as (65535/255) -- FIX SYSTEM MANUALLY!\n";
+print $FILE "NOT FOUND-PID $i\n          has SES/SLOT as (65535/255) -- FIX SYSTEM MANUALLY!\n";
+                $error_happened = 1;
+                next;
+            }
+            if ($ses != $dname_ses || $slot != $dname_slot)
+            {
+                print "PID $pid SES/SLOT ($ses/$slot) does not match DNAME($dname_ses/$dname_slot) -- FIX SYSTEM MANUALLY!\n";
+print $FILE "PID $pid SES/SLOT ($ses/$slot) does not match DNAME($dname_ses/$dname_slot) -- FIX SYSTEM MANUALLY!\n";
+                $error_happened = 1;
+                next;
+            }
+            push(@current_pids, $pid);
+        }
+        elsif ($i =~ /^[ *!]+([0-9]+) +([0-9]+) +0x00000000 +([0-9]+) +([0-9]+) /)
+        {
+            $pid_count++;
+            my $pid = $1;
+            push(@current_pids, $pid);
+        }
+    }
+
+    # See if number of good matches original when script was started.
+    if (scalar(@current_pids) != scalar(@original_pids))
+    {
+        printf "Good PIDS %d of %d, which does not match number when started of %d -- FIX SYSTEM MANUALLY!\n",
+                scalar(@current_pids), $pid_count, scalar(@original_pids);
+printf $FILE "Good PIDS %d of %d, which does not match number when started of %d -- FIX SYSTEM MANUALLY!\n",
+                scalar(@current_pids), $pid_count, scalar(@original_pids);
+        $error_happened = 1;
+        return;
+    }
+
+    # Now check if original matches current.
+    for ($i = 0; $i < scalar(@current_pids); $i++)
+    {
+        if ($current_pids[$i] != $original_pids[$i])
+        {
+            print "The PID $current_pids[$i] does not match $original_pids[$i] -- FIX SYSTEM MANUALLY!\n";
+print $FILE "The PID $current_pids[$i] does not match $original_pids[$i] -- FIX SYSTEM MANUALLY!\n";
+            $error_happened = 1;
+            # Print all mismatches, do not stop at the first.
+        }
+    }
+}   # end of check_same_as_original_pids
+
+##############################################################################
+# Main program follows. Block is created for finding debug prints in column 1.
+{
+    open($FILE, ">Log.migrate") || die "Cannot open log file\n";
+
+    process_arguments();
+
+    determine_master_slave_IP();
+
+    if ($PORT ne '' && $PORT1 ne $PORT)     # Following is for ssh passthru - ignore MASTER/SLAVE
+    {
+        $master = $IP;
+        $slave = $IP;
+    }
+
+    verify_firmware_version();
+
+    get_original_PIDs_ses_slot();
+
+    verify_argument_ISE_LUNs_exist();
+
+    my $output = do_emulated_PAB();
+
+    check_outstanding_7k_IO($output);
+
+    #
+    # TELL USER TO CLICK READY BUTTON IMMEDIATELY!
+    #
+    print "\nCLICK READY BUTTON IN MM TOOL NOW!! QUICKLY!!\n\n";
+print $FILE "\nCLICK READY BUTTON IN MM TOOL NOW!! QUICKLY!!\n\n";
+
+    wait_for_new_pids();
+
+    relabel_moved_pids();
+
+    if (scalar(keys %fixup_pids) == 0)
+    {
+        print "No pids needing fixing.\n";
+print $FILE "No pids needing fixing.\n";
+        $error_happened = 1;
+    }
+    else
+    {
+        fixup_old_pid_information();
+        check_same_as_original_pids();
+    }
+
+    if ($error_happened != 0) {
+        print "Script Finished with ERROR(S) -- SEE ABOVE! You MUST fix things manually!\n";
+print $FILE "Script Finished with ERROR(S) -- SEE ABOVE! You MUST fix things manually!\n";
+    }
+    elsif ($warning_happened != 0)
+    {
+        print "Script Finished with WARNING(S) -- SEE ABOVE! Manual check of system suggested.\n";
+print $FILE "Script Finished with WARNING(S) -- SEE ABOVE! Manual check of system suggested.\n";
+    } else {
+        print "Script Finished SUCCESSFULLY.\n";
+print $FILE "Script Finished SUCCESSFULLY.\n";
+    }
+    $time = `date '+%s'`;
+    chomp($time);
+    printf "Time from emulated PAB to completion is %d seconds.\n", $time - $starttime;
+printf $FILE "Time from emulated PAB to completion is %d seconds.\n", $time - $starttime;
+
+    exit 0;
+}
+#-----------------------------------------------------------------------------
+# End of file migrate
+
+# Modelines:
+# vi:sw=4 ts=4 expandtab

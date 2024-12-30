@@ -1,0 +1,131 @@
+#! /bin/sh
+#
+# Copyright (c) 1996-2001 SuSE GmbH Nuernberg, Germany.
+# Copyright (c) 2002-2003 SuSE Linux AG, Nuernberg, Germany.
+#
+# Author: Florian La Roche <florian@suse.de>, 1996
+#	  Werner Fink <werner@suse.de>, 1998-2001
+#
+# /etc/init.d/syslog
+#
+### BEGIN INIT INFO
+# Provides:       syslog
+# Required-Start: network
+# Required-Stop:  network
+# Default-Start:  2 3 5
+# Default-Stop:
+# Description:    Start the system logging daemons
+### END INIT INFO
+
+. /etc/sysconfig/syslog
+
+BINDIR=/sbin
+
+case "$SYSLOG_DAEMON" in
+    syslog-ng)
+	syslog=syslog-ng
+	config=/etc/syslog-ng/syslog-ng.conf
+	params="$SYSLOG_NG_PARAMS"
+	;;
+    *)
+	syslog=syslogd
+	config=/etc/syslog.conf
+	params="$SYSLOGD_PARAMS"
+	# add additional sockets to SYSLOGD_PARAMS
+	for variable in ${!SYSLOGD_ADDITIONAL_SOCKET*}; do
+	    eval value=\$$variable
+	    test -n "${value}" && test -d ${value%/*} && \
+	    params="$params -a $value"
+	done
+	;;
+esac
+syslog_pid="/var/run/${syslog}.pid"
+
+# check config and programs
+test -s ${config}	  || exit 6
+test -x ${BINDIR}/$syslog || exit 5
+test -x ${BINDIR}/klogd   || exit 5
+
+#
+# Do not translate symbol addresses for 2.6 kernel
+#
+case `uname -r` in
+0.*|1.*|2.[0-4].*)
+    ;;
+*)
+    KLOGD_PARAMS="${KLOGD_PARAMS:+$KLOGD_PARAMS }-x"
+    ;;
+esac
+
+. /etc/rc.status
+rc_reset
+case "$1" in
+    start)
+	if ! test -e /dev/xconsole ; then
+	    for n in 0 1 2 3 4 5; do
+		ln -sf tty0 /dev/:$n
+	    done
+	    mkfifo -m 0600 /dev/xconsole
+	    chown root:tty /dev/xconsole
+	fi
+	test -s /var/run/klogd.pid && killproc ${BINDIR}/klogd
+	test -s ${syslog_pid} && {
+	    killproc -p ${syslog_pid} ${BINDIR}/${syslog}
+	    echo -n "Re-"
+	}
+	echo -n "Starting syslog services"
+	test -z "$KERNEL_LOGLEVEL" && KERNEL_LOGLEVEL=1
+
+        FIFOW=/tmp/warn.fifo
+        FIFOM=/tmp/messages.fifo
+        FIFOL=/tmp/localmessages.fifo
+        OUTD=/var/log
+        OUTW=warn
+        OUTM=messages
+        OUTL=localmessages
+        /bin/rm -f ${FIFOW} ${FIFOM} ${FIFOL}
+        /usr/bin/mkfifo -m 600 ${FIFOW} ${FIFOM} ${FIFOL}
+
+	startproc -p ${syslog_pid} ${BINDIR}/${syslog} $params
+	rc_status
+        ${BINDIR}/logtrim -p ${OUTD} -f ${OUTW} <${FIFOW} 1>/dev/null 2>/dev/null &
+        ${BINDIR}/logtrim -p ${OUTD} -f ${OUTM} <${FIFOM} 1>/dev/null 2>/dev/null &
+        ${BINDIR}/logtrim -p ${OUTD} -f ${OUTL} <${FIFOL} 1>/dev/null 2>/dev/null &
+	startproc ${BINDIR}/klogd -c $KERNEL_LOGLEVEL $KLOGD_PARAMS
+	rc_status -v
+	;;
+    stop)
+	echo -n "Shutting down syslog services"
+	killproc		  -TERM ${BINDIR}/klogd     ; rc_status
+	killproc -p ${syslog_pid} -TERM ${BINDIR}/${syslog} ; rc_status -v
+	;;
+    try-restart)
+	$0 stop && $0 start
+	rc_status
+	;;
+    restart)
+	$0 stop
+	$0 start
+	rc_status
+	;;
+    reload|force-reload)
+	echo -n "Reload syslog service"
+	killproc		  -TSTP ${BINDIR}/klogd     ; rc_status
+	killproc -p ${syslog_pid} -HUP  ${BINDIR}/${syslog} ; rc_status
+	killproc		  -CONT ${BINDIR}/klogd     ; rc_status
+	killproc		  -USR2 ${BINDIR}/klogd     ; rc_status -v
+	;;
+    status)
+	echo -n "Checking for service syslog:"
+	checkproc		  	${BINDIR}/klogd     ; rc_status
+	checkproc -p ${syslog_pid}	${BINDIR}/${syslog} ; rc_status -v
+	;;
+    probe)
+	test ${config} -nt ${syslog_pid} && echo reload
+	;;
+    *)
+	echo "Usage: $0 {start|stop|status|try-restart|restart|force-reload|reload|probe}"
+	exit 1
+	;;
+esac
+rc_exit
