@@ -9,28 +9,10 @@
 # ----------------------------------------------------------------------------
 # BUG: keywords in the middle of a line -- don't seem to work. First ones do.
 # Bugs not fixed yet:
-#   a) p10  - pan 10, p(10) works, but not p#.
-#   b) v10 - vol(10) works, but not v#.
-#   c) keywords in the middle of a staff line. WHAT? I THOUGHT THIS USED TO WORK!
-#   d) Lyrics ... Just didn't do them, saw no reason ... *sigh*
-#   e) tempo rit and tempo acc.  I thought it was too difficult to implement. YUCK.
+#   a) keywords in the middle of a staff line. WHAT? I THOUGHT THIS USED TO WORK!
+#   b) Lyrics ... Just didn't do them, saw no reason ... *sigh*
+#   c) tempo rit and tempo acc.  I thought it was too difficult to implement. YUCK.
 #   
-# --platochars Translate:
-# Need to change '=' to '==' and '^=' to '='.
-# ...   Means   Note: ^ is for funny things ... .
-# ^u    superscript - change to '**' for calculations
-# ^d    subscript - delete ... .
-# ^=    assignment arrow (arrow to left ... <=)
-# ^*    The x (multiply) sign.  Replace with '*'.
-# Micro Means  Note: @ is usually micro.
-# @C    (Copyright)
-# @p    pi  (for calculations)
-# @D    right-arrow ??
-# @W    up-arrow    (delete, means stems up)
-# @X    down-arrow  (delete, means stems down)
-# @=    !=
-# @>    >=
-# @<    <=
 # ----------------------------------------------------------------------------
 # TO DO:
 # 1) b-6 ... some 1/2 notes that are vol(sf) -- should they be shortened?
@@ -1427,6 +1409,11 @@ def parse_args():
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='this is the epilog')
+
+    # For inputting 'plato' source directly.
+    parser.add_argument('--platochars', 
+                        action='store_true',
+                        help='Allow inputting plato format source directly - change characters.')
 
     # For outputting in possibly different format.
     parser.add_argument('--abc', '-abc',
@@ -6025,6 +6012,92 @@ def get_next_loop_line(l):
 # End of get_next_loop_line
 
 # ----------------------------------------------------------------------------
+# --platochars Translate:
+# Need to change '=' to '==' and '^=' to '='.
+# ...   Means   Note: ^ is for funny things ... .
+# ^u    superscript - change to '**' for calculations
+# ^d    subscript - delete ... .
+# ^=    assignment arrow (arrow to left ... <=)
+# ^*    The x (multiply) sign.  Replace with '*'.
+# Micro Means  Note: @ is usually micro.
+# @C    (Copyright)
+# @p    pi  (for calculations)
+# @D    right-arrow ??
+# @W    up-arrow    (delete, means stems up)
+# @X    down-arrow  (delete, means stems down)
+# @=    !=
+# @>    >=
+# @<    <=
+# line = platochars(line)
+
+def platochars(line):
+    newline = ''
+    l = 0
+    e = len(line)
+    while l < e:
+        c1 = line[l]
+        if l+1 < e:                                         # If two chars available for checking.
+            c2 = line[l+1]
+            if c1 == '^':                                    # special plato characters
+                if c2 == 'u':
+                    newline += '**'
+                    l += 2
+                elif c2 == 'd':
+                    l += 2
+                elif c2 == '=':                             # plato assignment <=
+                    newline += '='
+                    l += 2
+                elif c2 == '*':
+                    newline += '='
+                    l +=2
+                else:
+                    print_debug(f'Unexpected ^ (special) string, character ^{c2}')
+                    newline += c1
+                    l += 1
+                # fi
+                continue
+            elif c1 == '@':                                 # Micros start with @.
+                if c2 == 'C':                               # Copyright symbol
+                    newline += '(Copyright)'
+                    l += 2
+                elif c2 == 'p':                             # pi
+                    newline += 'pi'
+                    l += 2
+                elif c2 == 'D':                             # Right Arrow
+                    l += 2                  # Ignore
+                elif c2 == 'W':                             # Up Arrow
+                    l += 2                  # Ignore
+                elif c2 == 'X':                             # Down Arrow
+                    l += 2                  # Ignore
+                elif c2 == 'A':                             # Left Arrow
+                    l += 2                  # Ignore
+                elif c2 == '=':                             # !=
+                    newline += '!='
+                    l += 2
+                elif c2 == '>':                             # >=
+                    newline += '>='
+                    l += 2
+                elif c2 == '<':                             # <=
+                    newline += '<='
+                    l += 2
+                else:
+                    print_debug(f'Unexpected @ (micro) string, character @{c2}')
+                    newline += c1
+                    l += 1
+                # fi
+                continue
+            # fi
+        # fi
+        if c1 == '=':                                       # = changes to ==
+            newline += '=='
+        else:
+            newline += c1
+        # fi
+        l += 1
+    # elihw
+    return newline
+
+# ----------------------------------------------------------------------------
 # Get the next line, file, or macro.
 # Return:
 #   full_line           - the line without $$ comments.
@@ -6094,6 +6167,9 @@ def read_next_line():
             # fi
             linecount = linecount + 1
             i_line.append('input: {:4d}:'.format(linecount) + line)         # Line as given from input file.
+            if args.platochars:
+                line = platochars(line)
+            # fi
             if line:
                 line = line.rstrip()                # trailing spaces gone.
                 if line and line[-1] == '\\':       # if continued on next line
@@ -15849,18 +15925,28 @@ def keyword_volumename(token, delimiter, next_tokens, original_line):
     if len(token) > 0 and token[0] == 'v':  # See if 'v' can be deleted.
         token = token[1:]
     # fi
-    # See if name follows.
+    # See if name/number follows.
     if next_tokens is not None and next_tokens != '':
-        if delimiter in [ '<', '>' ]:           # crescendo/decrescendo.
-            next_tokens = 'vol(' + token + ')' + next_tokens
-        else:
-            next_tokens = 'vol(' + token + ') ' + next_tokens
-        # fi
+        next_tokens = 'vol(' + token + ') ' + next_tokens
     else:
         next_tokens = 'vol(' + token + ')'
     # fi
     return next_tokens
 # End of keyword_volumename
+
+# ----------------------------------------------------------------------------
+def keyword_panname(token, delimiter, next_tokens, original_line):
+    if len(token) > 0 and token[0] == 'p':  # See if 'p' can be deleted.
+        token = token[1:]
+    # fi
+    # See if name/number follows.
+    if next_tokens is not None and next_tokens != '':
+        next_tokens = 'pan(' + token + ') ' + next_tokens
+    else:
+        next_tokens = 'pan(' + token + ')'
+    # fi
+    return next_tokens
+# End of keyword_panname
 
 # ----------------------------------------------------------------------------
 def keyword_crescendo(token, delimiter, next_tokens, original_line):    # NOTDONEYET
@@ -15979,6 +16065,7 @@ staff_keywords = {
     'vppp': keyword_volumename,
     'vpppp': keyword_volumename,
     'vppppp': keyword_volumename,
+    # v# (0 through 127) added after this definition.
     'crescendo': keyword_crescendo,
     'position': keyword_position,
     'type': keyword_type,
@@ -16017,7 +16104,10 @@ staff_keywords = {
     'glide': keyword_glide,
     'tie': keyword_tie,
 }
-
+for i in range(128):
+    staff_keywords['v' + str(i)] = keyword_volumename   # Allow v10 to work.
+    staff_keywords['p' + str(i)] = keyword_panname      # Allow p10 to work.
+# rof
 # ----------------------------------------------------------------------------
 # next_tokens = process_keyword(token, delimiter, next_tokens, original_line)
 # Might take multiple tokens.
