@@ -21,6 +21,7 @@ import sys
 import readline
 import re
 import math
+from datetime import datetime
 #-----------------------------------------------------------------------------
 #++ import inspect
 #++ print(inspect.currentframe().f_code.co_name, '#0', file=sys.stderr, flush=True)
@@ -118,6 +119,12 @@ class SymbolDesc:
     # End of __repr__
 
 #-----------------------------------------------------------------------------
+def is_octal(string):
+    pattern = r'^o[0-7]+$'
+    return bool(re.match(pattern, string))
+# is_octal
+
+#-----------------------------------------------------------------------------
 # Returns:
 #   therest - everything after this token
 #   token   - the token
@@ -209,6 +216,14 @@ def next_token(string):
             return string[1:], c, 'OPER'
         # fi
         return None, c, 'OPER'
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    elif is_octal(string):                  # First is a leading 'o' for octal number following.
+        pattern = r'^o[0-7]+$'
+        m = re.match(pattern, string)
+        strg = m.group(0)[1:]
+        ret = int(strg,8)
+        b = float(ret)
+        return string[len(strg)+1:], b, 'NUMBER'
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     elif c.isalpha():                       # First character is [a-zA-Z].
         m = re.match(r'[_a-zA-Z0-9]+', string)
@@ -1593,6 +1608,17 @@ def f_mod(arg):
 # End of f_mod
 
 #-----------------------------------------------------------------------------
+def f_clock(arg):
+    now = datetime.now()
+    it = arg[1]
+    a = [now.year, now.month, now.day, now.hour, now.minute, now.second, now.microsecond]
+    if it <= 0.0 or it > 7.0:
+        return [ 'COMMA', a]
+    # fi
+    return [ 'NUMBER', a[int(it)-1] ]
+# End of f_clock
+
+#-----------------------------------------------------------------------------
 global functions
 functions = {
 #    NAME       Function        array of argument-types
@@ -1620,6 +1646,7 @@ functions = {
     'sin':      [ f_sin,        ['NUMBER']],
     'sqrt':     [ f_sqrt,       ['NUMBER']],
     'defined':  [ f_defined,    ['NUMBER', 'CHAR', 'COMMA', 'ERROR - .*']],
+    'clock':    [ f_clock,      ['NUMBER']],     # NOTDONEYET
 #...............................................................................
 # Old musicomp functions.
     'freq':     [ f_freq,       ['NUMBER']],
