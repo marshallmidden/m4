@@ -119,6 +119,12 @@ class SymbolDesc:
     # End of __repr__
 
 #-----------------------------------------------------------------------------
+def is_octal(string):
+    pattern = r'^o[0-7]+$'
+    return bool(re.match(pattern, string))
+# is_octal
+
+#-----------------------------------------------------------------------------
 # Returns:
 #   therest - everything after this token
 #   token   - the token
@@ -210,6 +216,14 @@ def next_token(string):
             return string[1:], c, 'OPER'
         # fi
         return None, c, 'OPER'
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    elif is_octal(string):                  # First is a leading 'o' for octal number following.
+        pattern = r'^o[0-7]+$'
+        m = re.match(pattern, string)
+        strg = m.group(0)[1:]
+        ret = int(strg,8)
+        b = float(ret)
+        return string[len(strg)+1:], b, 'NUMBER'
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     elif c.isalpha():                       # First character is [a-zA-Z].
         m = re.match(r'[_a-zA-Z0-9]+', string)
