@@ -21,6 +21,7 @@ import sys
 import readline
 import re
 import math
+from datetime import datetime
 #-----------------------------------------------------------------------------
 #++ import inspect
 #++ print(inspect.currentframe().f_code.co_name, '#0', file=sys.stderr, flush=True)
@@ -1593,6 +1594,17 @@ def f_mod(arg):
 # End of f_mod
 
 #-----------------------------------------------------------------------------
+def f_clock(arg):
+    now = datetime.now()
+    it = arg[1]
+    a = [now.year, now.month, now.day, now.hour, now.minute, now.second, now.microsecond]
+    if it <= 0.0 or it > 7.0:
+        return [ 'COMMA', a]
+    # fi
+    return [ 'NUMBER', a[int(it)-1] ]
+# End of f_clock
+
+#-----------------------------------------------------------------------------
 global functions
 functions = {
 #    NAME       Function        array of argument-types
@@ -1620,6 +1632,7 @@ functions = {
     'sin':      [ f_sin,        ['NUMBER']],
     'sqrt':     [ f_sqrt,       ['NUMBER']],
     'defined':  [ f_defined,    ['NUMBER', 'CHAR', 'COMMA', 'ERROR - .*']],
+    'clock':    [ f_clock,      ['NUMBER']],     # NOTDONEYET
 #...............................................................................
 # Old musicomp functions.
     'freq':     [ f_freq,       ['NUMBER']],
