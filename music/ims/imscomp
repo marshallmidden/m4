@@ -23,6 +23,31 @@
 #   g) standard-print-stuff.include
 #       doit invention-4.gcs            > AAA.20 2>&1
 #       macro i did not match terminators correctly...
+#       The replace-macro routine calls separate arguments, but that doesn't work right for 'separators'.
+#       If a separator is hit, if it is inside a parens group ... Does it stop or continue?
+#       Example:
+#           macro   i A.
+#               "@W^//s2A"
+#           endmacro
+#           macro   j A B.
+#                   i A.
+#                   i B.
+#           endmacro
+#           macro   k A B C.
+#                   j A B.
+#                   i C.
+#           endmacro
+#           macro   m A.
+#                   "@X^//s2A"
+#           endmacro
+#           macro   n A B.
+#                   m B.
+#                   m A.
+#           endmacro
+#           macro   o A B C.
+#                   m C.
+#                   n A B.
+#           endmacro
 #   g2) linecount=392 line='d:      2g4d m 4. b8  g4 g+'
 #       WARNING - m:24 #B macro m did not match terminators correctly...
 #         File oh-lady-be-good.gcs Line 392
@@ -996,7 +1021,7 @@ def print_some_variable_values(s, varnams):
     for wary in calculate.local_arrays + calculate.arrays:
         name = wary[numarry_name]
         if name in varnams:
-            print_debug("{}: name={:8s} ML={:1d} MA={:5s} dim={} values={} types={}".format(s, name, wary[numarry_maclevel], str(wary[numarry_macro_arg]), wary[numarry_indexes], wary[numarry_values], wary[numarry_value_type]))
+            print_debug(f"{s}: name={name:8s} ML={wary[numarry_maclevel]:1d} MA={str(wary[numarry_macro_arg]):5s} dim={wary[numarry_indexes]} values={wary[numarry_values]} types={wary[numarry_value_type]}")
 #--            printed.append(wary[numarry_name])
         # fi
     # rof
@@ -1330,10 +1355,9 @@ def find_terminator_in_string(strng, terminators, doparens, original_line):
 #                 - None if voice numbers - staff_name -> voice numbers.
 #                 - "volume" or "volumes" for 'f', etc.
 #   nospaces      - True if do not split on spaces.
-#   allow_bad_parens - True if do not check parens.
 #   original_line - Line for error messages.
 
-def separate_args(wline, integers, nospaces, original_line, allow_bad_parens = False):
+def separate_args(wline, integers, nospaces, original_line):
     def b4it(array_args, b4, integers, nospaces, original_line):
         global staff_name
 
@@ -1395,7 +1419,7 @@ def separate_args(wline, integers, nospaces, original_line, allow_bad_parens = F
     while w < len(strng):
         s = strng[w:]
 #DEBUGOPAL        print_debug(f'separate_args #C calling find_terminator_in_string - w={w} s="{s}" splitter={splitter}')    #DEBUGOPAL
-        x = find_terminator_in_string(s, splitter, not allow_bad_parens, original_line)
+        x = find_terminator_in_string(s, splitter, True, original_line)
 #DEBUGOPAL        print_debug(f'separate_args #D')    #DEBUGOPAL
         # x == -1   end of strng.
         if x < 0:                           # End of strng reached before splitter character found.
@@ -3848,7 +3872,7 @@ def print_out_v_or_h():
         if args.horizontal and m == meas[0] and len(volume) > 1:
             print_line = print_line + "* 1"
             for j in range(2, len(volume)+1):
-                print_line = print_line + ",{:>3s}".format(str(j))
+                print_line = print_line + f",{str(j):>3s}"
             # rof
             print_line = print_line + '\n'
         # fi
@@ -3933,8 +3957,7 @@ def print_out_midi1csv_ts(m, voiceon, lthworkingmeasure, last_bar_meter):
             denominator = l[1]
             print_error_no_line(f"meter denominator is not a power of two, leave as {denominator}")
         # fi
-        print_output("{}, {}, Time_signature, {}, {}, 48, 8".format(
-                voiceon+1, round(lthworkingmeasure), numerator, denominator))
+        print_output(f"{voiceon+1}, {round(lthworkingmeasure)}, Time_signature, {numerator}, {denominator}, 48, 8")
     # fi
     return last_bar_meter
 # End of print_out_midi1csv_ts
@@ -5192,7 +5215,7 @@ def pre_shift_measure(prev_m, m):
                     # Move to previous measure.
                     pre_move_note_before(prev_m, m, voice, l, vel, intens, n, a, v, p)
                 else:
-                    print_warning("pre_shift_measure - tossing {get_staff_from_voice(voice)} m='{}' n='{}' l='{}' a='{}' v='{}'".format(voice, m, n, l, a, v), 'pre_shift_measure')
+                    print_warning(f"pre_shift_measure - tossing {get_staff_from_voice(voice)} m='{m}' n='{n}' l='{l}' a='{a}' v='{v}'", 'pre_shift_measure')
                 # fi
                 # Remove from current measure.
                 bufs[voice][m].pop(0)
@@ -5218,15 +5241,15 @@ def pre_shift_measure(prev_m, m):
             # fi
             # l > s   : Need to break the note into two with a tie -- staccato? Trill? Sequence? *yuck*
             if 's' in a or 'b' in a:
-                print_error("pre_shift_measure - cannot break up a staccato note: {get_staff_from_voice(voice)} m='{}' n='{}' l='{}' a='{}' v='{}'".format(voice, m, n, l, a, v), 'pre_shift_measure')
+                print_error(f"pre_shift_measure - cannot break up a staccato note: {get_staff_from_voice(voice)} m='{m}' n='{n}' l='{l}' a='{a}' v='{v}'", 'pre_shift_measure')
                 return
             # fi
             if n[0] in ['s', 't']:
-                print_error("pre_shift_measure - cannot break up a trill or sequence: {get_staff_from_voice(voice)} m='{}' n='{}' l='{}' a='{}' v='{}'".format(voice, m, n, l, a, v), 'pre_shift_measure')
+                print_error(f"pre_shift_measure - cannot break up a trill or sequence: {get_staff_from_voice(voice)} m='{m}' n='{n}' l='{l}' a='{a}' v='{v}'", 'pre_shift_measure')
                 return
             # fi
             if n[0] in ['v', 'c', 'd']:
-                print_error("pre_shift_measure - cannot break up a vol(), cresc(), or dimin(): {get_staff_from_voice(voice)} m='{}' n='{}' l='{}' a='{}' v='{}'".format(voice, m, n, l, a, v), 'pre_shift_measure')
+                print_error(f"pre_shift_measure - cannot break up a vol(), cresc(), or dimin(): {get_staff_from_voice(voice)} m='{m}' n='{n}' l='{l}' a='{a}' v='{v}'", 'pre_shift_measure')
                 return
             # fi
             if args.vertical or args.staves:
@@ -5313,7 +5336,7 @@ def check_staves_notes_order():
         for voice in range(1, len(volume)+1):
             if m in mlth[voice]:
                 if mlth[voice][m] != ml:
-                    print_error_no_line("staves -- voice#{} measure#{} not same length({}) as 1st({})".format(voice, m, mlth[voice][m], ml))
+                    print_error_no_line(f"staves -- voice#{voice} measure#{m} not same length({mlth[voice][m]}) as 1st({ml})")
                 # fi
                 ml = max(mlth[voice][m], ml)
             else:
@@ -5860,7 +5883,7 @@ def get_next_process_line(l):
     global process_buffer
 
     if lmp_executing_type[l] != 'process' or not running_process_already:
-        print_error("get_next_process_line - lmp_executing_type[l]='{}' != 'process' or running_process_already='{}'".format(lmp_executing_type[l], running_process_already), 'in process')
+        print_error(f"get_next_process_line - lmp_executing_type[l]='{lmp_executing_type[l]}' != 'process' or running_process_already='{running_process_already}'", 'in process')
         in_process_already = False
         running_process_already = False
         return ''
@@ -5875,7 +5898,7 @@ def get_next_process_line(l):
         return retline
     # fi
     line = lines[linenumber]
-    i_line = [ 'process:      {:4d}:'.format(linenumber+1) + line ] # Line as given from process text buffer
+    i_line = [ f'process:      {(linenumber+1):4d}:' + line ]     # Line as given from process text buffer
     lmp_executing_line[l] = linenumber + 1
     return line
 # End of get_next_process_line
@@ -5910,7 +5933,7 @@ def get_next_macro_line(l):
         return retline
     # fi
     line = lines[linenumber]
-    i_line = [ 'macro:        {:4d}:'.format(linenumber+1) + line ] # Line as given from macro text buffer
+    i_line = [ f'macro:        {(linenumber+1):4d}:' + line ]     # Line as given from macro text buffer
     lmp_executing_line[l] = linenumber + 1
     return line
 # End of get_next_macro_line
@@ -6000,7 +6023,7 @@ def get_next_loop_line(l):
                 return ''
             # fi
             if f1 is None:
-                print_error('m:{measure_on} endloop expression error ("{s2}")', 'endloop')
+                print_error(f'm:{measure_on} endloop expression error ("{s2}")', 'endloop')
                 return ''
             # fi
             if f1 < 0:                                      # True
@@ -6040,7 +6063,7 @@ def get_next_loop_line(l):
                 return ''
             # fi
             if f1 is None:
-                print_error('m:{measure_on} loop incrementing error ("{s2}")', 'in loop')
+                print_error(f'm:{measure_on} loop incrementing error ("{s2}")', 'in loop')
                 return ''
             # fi
             if f1 < 0:                                      # True
@@ -6053,7 +6076,7 @@ def get_next_loop_line(l):
         return ''
     # fi
     line = lines[linenumber]
-    i_line = [ 'loop :        {:4d}:'.format(linenumber+1) + line ] # Line as given from loop text buffer
+    i_line = [ f'loop :        {(linenumber+1):4d}:' + line ] # Line as given from loop text buffer
     lmp_executing_line[l] = linenumber + 1
     return line
 # End of get_next_loop_line
@@ -6229,7 +6252,7 @@ def read_next_line():
                 sys.exit(errors_happened)
             # fi
             linecount = linecount + 1
-            i_line.append('input: {:4d}:'.format(linecount) + line)         # Line as given from input file.
+            i_line.append(f'input: {linecount:4d}:' + line)     # Line as given from input file.
             if args.platochars:
                 line = platochars(line)
             # fi
@@ -6250,18 +6273,18 @@ def read_next_line():
                     full_line = re.sub(r'[$][$].*$', '', full_line)
                 # fi
 #-- need to know continued line ... 8 spaces or start with a tab.
-                i_line.append('input: {:4d}:'.format(linecount) + full_line)            # Line as fixed.
+                i_line.append(f'input: {linecount:4d}:' + full_line)    # Line as fixed.
                 return full_line, commentdollardollar
             # fi
         except EOFError:
             if full_line != '':
-                i_line.append('input: {:4d}:'.format(linecount) + full_line)            # Line as fixed or whatever.
+                i_line.append(f'input: {linecount:4d}:' + full_line)    # Line as fixed or whatever.
                 return full_line, commentdollardollar
             # fi
             pass            # print("Read gave EOF", file=sys.stderr, flush=True)
         except SystemExit:
             if full_line != '':
-                i_line.append('input: {:4d}:'.format(linecount) + full_line)            # Line as fixed or whatever.
+                i_line.append(f'input: {linecount:4d}:' + full_line)    # Line as fixed or whatever.
                 return full_line, commentdollardollar
             # fi
             pass            # print("Read gave system exit", file=sys.stderr, flush=True)
@@ -6269,7 +6292,7 @@ def read_next_line():
             print_error_no_line("Read got keyboard interrupt")
         except:
             if full_line != '':
-                i_line.append('input: {:4d}:'.format(linecount) + full_line)            # Line as fixed or whatever.
+                i_line.append(f'input: {linecount:4d}:' + full_line)    # Line as fixed or whatever.
                 return full_line, commentdollardollar
             # fi
             print_error_no_line("Read got a processing error")
@@ -7038,7 +7061,7 @@ def fill_voice_mlth(meter_check, original_line):
                     nl = (MIDICLICKSPERQUARTER * 4) / l
                     if type(last_voice_staff) is int:
                         if not args.nofillwarning:
-                            print_warning("fill_voice_mlth - l='{}' ({}) {get_staff_from_voice(voice)} measure='{}' cis='{}'".format(l, nl, i, p_meas, cis), original_line)
+                            print_warning(f"fill_voice_mlth - l='{l}' ({nl}) {get_staff_from_voice(i)} measure='{p_meas}' cis='{cis}'", original_line)
                         # fi
                     # fi
                 # fi
@@ -7092,7 +7115,7 @@ def fill_1_voice_mlth(v, lth, original_line):
         return
     # fi
     if t > lth:
-        print_error("fill_1_voice_mlth - m='{}' voice ({}) mlth_time={} and wish to set to length={} (Cannot less than)".format(m,v,t,lth), original_line)
+        print_error(f"fill_1_voice_mlth - m='{m}' voice ({v}) mlth_time={t} and wish to set to length={lth} (Cannot less than)", original_line)
         return
     # fi
 
@@ -7255,6 +7278,7 @@ def assign_another_voice(b4, where, original_line):
 #   cnumber       - macro number (defined in order).
 #   t_args        - The arguments (rest of line).
 #   original_line - For error messages.
+# Returns false if delimiters don't match.
 
 def replace_macro(cnumber, t_args, original_line):
     global macro_name
@@ -7275,7 +7299,7 @@ def replace_macro(cnumber, t_args, original_line):
 #DEBUGOPAL    print_debug(f'replace_macro - {command} mnt="{macro_name_terminator[cnumber]}" ma={macro_arguments[cnumber]} mat={macro_arg_terminator[cnumber]} mb={macro_buffer[cnumber]}')    #DEBUGOPAL
     if t_args is None or t_args == '':
         if macro_arguments[cnumber] != []:
-            print_error("macro command {} does not have any arguments, but needs {}.".format(command, macro_arguments[cnumber]), original_line)
+            print_error(f"macro command {command} does not have any arguments, but needs {macro_arguments[cnumber]}.", original_line)
             return False
         # fi
         wargs = None
@@ -7294,15 +7318,13 @@ def replace_macro(cnumber, t_args, original_line):
         # elihw
 #DEBUGOPAL        print_debug(f'replace_macro - t_args="{t_args}" mat={macro_arg_terminator[cnumber]}')    #DEBUGOPAL
         if t_args[0] != macro_name_terminator[cnumber]:
-            if macro_name_terminator[cnumber] != ',' or t_args[0] in ' \t':
-                t_args = t_args[1:]
-#--             else:
-#DEBUGOPAL#--                 print_debug(f'replace_macro - #F1')    #DEBUGOPAL
-#--                 return False
+            if macro_name_terminator[cnumber] == ',' and t_args[0] in ' \t':
+                pass
+            else:
+                return False
             # fi
-        else:
-            t_args = t_args[1:]
         # fi
+        t_args = t_args[1:]
         wargs = []
         n = 0
         # Any extra terminators that are NOT the same as the last (or following) ones may be okay. *UGH*
@@ -7351,7 +7373,7 @@ def replace_macro(cnumber, t_args, original_line):
         w = len(wargs)
     # fi
     if w != l:
-        print_error("macro {} does not have right number of arguments ({}), needs {}.".format(command, len(wargs), len(macro_arguments[cnumber])), original_line)
+        print_error(f"macro {command} does not have right number of arguments ({len(wargs)}), needs {len(macro_arguments[cnumber])}.", original_line)
 #DEBUGOPAL        print_debug(f'replace_macro - #F5')    #DEBUGOPAL
         return False
     # fi
@@ -7367,7 +7389,7 @@ def replace_macro(cnumber, t_args, original_line):
 #DEBUGOPAL        print_debug(f'replace_macro - #F6A ({macro_arguments[cnumber][i]} {wargs[i]} {level}')    #DEBUGOPAL
         if not createlocalvar(macro_arguments[cnumber][i], wargs[i], level, type_is_string, True):
 #DEBUGOPAL            print_debug(f'replace_macro - #F6A command={command} ({macro_arguments[cnumber][i]} {wargs[i]} {level}')    #DEBUGOPAL
-            print_error("macro {} unable to create variable {}".format(command, macro_arguments[cnumber][i]), original_line)
+            print_error(f"macro {command} unable to create variable {macro_arguments[cnumber][i]}", original_line)
 #DEBUGOPAL            print_debug(f'replace_macro - #F7')    #DEBUGOPAL
             return False
         # fi
@@ -8940,7 +8962,7 @@ def get_defaults_for_note(t_args, voiceon, original_line):
 #DEBUGOPAL    print_debug(f'get_defaults_for_note - calling getnote#1') #DEBUGOPAL
     therest, midinote, typenote = getnote(w_note, voiceon, False, True, False, original_line)
     if typenote != normal_note:
-        print_error("getting default note had error with note {} -- cannot have anything but a normal note".format(w_note), original_line)
+        print_error(f"getting default note had error with note {w_note} -- cannot have anything but a normal note", original_line)
         args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc, args.staves = save_current_type
         set_staff_arr_double(voiceon, savekeyvoice, measure_on, key_voice, None, original_line)
         return None, 0, 0, 0, 0, 0, 0, 0
@@ -8955,7 +8977,7 @@ def get_defaults_for_note(t_args, voiceon, original_line):
     args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc, args.staves = save_current_type
     set_staff_arr_double(voiceon, savekeyvoice, measure_on, key_voice, None, original_line)
     if b != normal_note:
-        print_error("getting default note had error with note {} -- cannot have anything but a normal note".format(w_note), original_line)
+        print_error(f"getting default note had error with note {w_note} -- cannot have anything but a normal note", original_line)
         return None, 0, 0, 0, 0, 0, 0, 0
     # fi
 
@@ -9411,7 +9433,7 @@ def do_encode(t_args, original_line):
                 notenumber = 0
             # fi
         else:
-            print_error("encode argument '{}' unrecognized, cannot assign '{}'.".format(token, value), original_line)
+            print_error(f"encode argument '{token}' unrecognized, cannot assign '{value}'.", original_line)
             return
         # fi
     # elihw
@@ -9427,7 +9449,7 @@ def do_encode(t_args, original_line):
                         nn = 12 * octave + nametonum[notename] + 24
                         if notenumber != -1:
                             if notenumber != nn:
-                                print_error("encode argument octave({}) notename({}) != notenumber({})".format(octave, notename, notenumber), original_line)
+                                print_error(f"encode argument octave({octave}) notename({notename}) != notenumber({notenumber})", original_line)
                                 return
                             # fi
                         else:
@@ -9539,7 +9561,7 @@ def do_else_if(t_args, original_line):
     # fi
     value, type_error = is_float(wargs[0], is_float_number, False)
     if type_error is not None or value is None:
-        print_error("elseif unable to determine value ({}).".format(wargs[0]), original_line)
+        print_error(f"elseif unable to determine value ({wargs[0]}).", original_line)
         return
     # fi
     value = -1 if value < 0 or value > 0 else 0   # 0 is false, otherwise everything is true.
@@ -9622,7 +9644,7 @@ def do_endloop(t_args, original_line):
     # fi
 
     if lmp_executing_number > MAX_NESTING:
-        print_error("m:{} endloop->loop {} nesting to depth of more than {}".format(measure_on, command, MAX_NESTING), original_line)
+        print_error(f"m:{me3asure_on} endloop->loop {command} nesting to depth of more than {MAX_NESTING}", original_line)
         return                                      # Error ... ouch, many errors will follow. *sigh*
     # fi
     t_line = i_line
@@ -9761,7 +9783,7 @@ def do_goto(t_args, original_line):
 # ----------------------------------------------------------------------------
 def get_voice_others(t_args, mn, mx, command, original_line, get_voice_others = None):
     if t_args is None or t_args == '':
-        print_error("{} command does not have any arguments".format(command), original_line)
+        print_error(f"{command} command does not have any arguments", original_line)
         return None
     # fi
 
@@ -9772,7 +9794,7 @@ def get_voice_others(t_args, mn, mx, command, original_line, get_voice_others = 
 
     # If get_voice_others != None, then allow extra arguments.
     if len(vargs) < mn or (len(vargs) > mx and get_voice_others == None):
-        print_error("{} command does not have correct number of arguments (mn..{}) verses {}".format(mn,mx,len(vargs)), original_line)
+        print_error(f"{mn} command does not have correct number of arguments (mn..{mx}) verses {len(vargs)}", original_line)
         return None
     # fi
     return vargs
@@ -9810,18 +9832,18 @@ def do_key(t_args, original_line, keywordversuscommand = None):
         vs = vargs[0]
         if mm == "minor":
             if k not in minor_key_to_major:
-                print_error("key command does not recognize minor {}".format(k), original_line)
+                print_error(f"key command does not recognize minor {k}", original_line)
                 return ''
             # fi
             k = minor_key_to_major[k]
         elif mm == "major":
             if k not in key_sig:
-                print_error("key '{}' not recognized.".format(k), original_line)
+                print_error(f"key '{k}' not recognized.", original_line)
                 return ''
             # fi
         else:
             if keywordversuscommand == None:
-                print_error("key command does not recognize {} as major or minor".format(vargs[2]), original_line)
+                print_error(f"key command does not recognize {vargs[2]} as major or minor", original_line)
                 return ''
             # fi
             next_tokens = ' '.join(vargs[2:])   # slice allows going over length of list.
@@ -9832,20 +9854,20 @@ def do_key(t_args, original_line, keywordversuscommand = None):
         vs = None
         if mm == "minor":
             if k not in minor_key_to_major:
-                print_error("key command does not recognize minor {}".format(k), original_line)
+                print_error(f"key command does not recognize minor {k}", original_line)
                 return ''
             # fi
             k = minor_key_to_major[k]
         elif mm == "major":
             if k not in key_sig:
-                print_error("key '{}' not recognized.".format(k), original_line)
+                print_error(f"key '{k}' not recognized.", original_line)
                 return ''
             # fi
         else:                               # No major or minor, so "key 1,2 c-" format.
             vs = vargs[0]
             k = mm
             if k not in key_sig and k not in ['none', 'atonal']:
-                print_error("key '{}' not recognized.".format(k), original_line)
+                print_error(f"key '{k}' not recognized.", original_line)
                 return ''
             # fi
         # fi
@@ -9853,7 +9875,7 @@ def do_key(t_args, original_line, keywordversuscommand = None):
         vs = None
         k = vargs[0].lower()
         if k not in key_sig and k not in ['none', 'atonal']:
-            print_error("key '{}' not recognized.".format(k), original_line)
+            print_error(f"key '{k}' not recognized.", original_line)
             return ''
         # fi
     # fi
@@ -9900,23 +9922,23 @@ def do_key(t_args, original_line, keywordversuscommand = None):
     for w in wargs:
         f1, type_error = is_float(w, is_float_number, False)
         if type_error is not None:
-            print_error("key error - {}".format(type_error), original_line)
+            print_error(f"key error - {type_error}", original_line)
             return ''
         # fi
         if f1 is None:
-            print_error("voice {} is not a number.".format(w), original_line)
+            print_error(f"voice {w} is not a number.", original_line)
             return ''
         # fi
         f1 = round(f1)
         if f1 not in mlth:
-            print_error("key with too many voices not allowed, voice {} is too many".format(f1), original_line)
+            print_error(f"key with too many voices not allowed, voice {f1} is too many", original_line)
             return ''
         # fi
         if mlth[f1][measure_on] != 0:
             for ve in range(1, len(volume)+1):
-                print_error_no_line("mlth[{}][{}]='{}'".format(ve, measure_on, mlth[ve][measure_on]))
+                print_error_no_line(f"mlth[{ve}][{measure_on}]='{mlth[ve][measure_on]}'")
             # rof
-            print_error("key with two arguments not allowed in the middle of a measure, voice {}".format(f1), original_line)
+            print_error(f"key with two arguments not allowed in the middle of a measure, voice {f1}", original_line)
             return ''
         # fi
         set_staff_arr_double(f1, k, measure_on, key_voice, None, original_line)
@@ -9954,7 +9976,7 @@ def do_if(t_args, original_line):
         # fi
         value, type_error = is_float(wargs[0], is_float_number, False)
         if type_error is not None or value is None:
-            print_error("if unable to determine if value ({}).".format(wargs[0]), original_line)
+            print_error(f"if unable to determine if value ({wargs[0]}).", original_line)
             return
         # fi
         value = -1 if value < 0 or value > 0 else 0   # 0 is false, otherwise everything is true.
@@ -9985,7 +10007,7 @@ def do_instrument(t_args, original_line):
     # fi
     if len(vargs) == 1:
         INST = " ".join(vargs).lower()
-        vargs = ["1..{}".format(len(volume))]
+        vargs = [f"1..{len(volume)}"]
     else:
         INST = " ".join(vargs[1:]).lower()
     # fi
@@ -10005,14 +10027,14 @@ def do_instrument(t_args, original_line):
         # rof
     # fi
     if foundinstrument is None:
-        print_error("do_instrument - instruments does not have INST='{}'".format(INST), original_line)
+        print_error(f"do_instrument - instruments does not have INST='{INST}'", original_line)
         f1, type_error = is_float(INST, is_float_number, False)
         if type_error is not None:
-            print_error("instrument error - {}".format(type_error), original_line)
+            print_error(f"instrument error - {type_error}", original_line)
             return
         # fi
         if f1 is None:
-            print_error("voice does not have instrument argument {} as a number.".format(INST), original_line)
+            print_error(f"voice does not have instrument argument {INST} as a number.", original_line)
             return
         # fi
         f1 = round(f1)
@@ -10023,7 +10045,7 @@ def do_instrument(t_args, original_line):
             # fi
         # rof
         if foundinstrument is None:
-            print_error("instrument value {} not in instrument table.".format(f1), original_line)
+            print_error(f"instrument value {f1} not in instrument table.", original_line)
             return
         # fi
         INST = foundinstrument
@@ -10039,20 +10061,20 @@ def do_instrument(t_args, original_line):
     for w in wargs:
         f1, type_error = is_float(w, is_float_number, False)
         if type_error is not None:
-            print_error("instrument error - {}".format(type_error), original_line)
+            print_error(f"instrument error - {type_error}", original_line)
             return
         # fi
         if f1 is None:
-            print_error("voice {} is not a number.".format(w), original_line)
+            print_error(f"voice {w} is not a number.", original_line)
             return
         # fi
         f1 = round(f1)
         if f1 not in mlth:
-            print_error("instrument with too many voices not allowed, voice {} is too many".format(f1), original_line)
+            print_error(f"instrument with too many voices not allowed, voice {f1} is too many", original_line)
             return
         # fi
         if mlth[f1][measure_on] != 0:
-            print_error("instrument in the middle of measure '{}' not allowed, voice '{}'".format(measure_on, f1), original_line)
+            print_error(f"instrument in the middle of measure '{measure_on}' not allowed, voice '{f1}'", original_line)
             return
         # fi
         vinstrument[f1][measure_on] = foundinstrument
@@ -10077,22 +10099,22 @@ def do_intensity(t_args, original_line):
     # fi
     if len(vargs) == 1:
         intens = vargs[0]
-        vargs = [ "1..{}".format(len(volume)) ]
+        vargs = [ f"1..{len(volume)}" ]
     else:
         intens = vargs[1]
     # fi
     f1, type_error = is_float(intens, is_float_number, False)
     if type_error is not None:
-        print_error("intensity error - {}".format(type_error), original_line)
+        print_error(f"intensity error - {type_error}", original_line)
         return
     # fi
     if f1 is None:
-        print_error("voice does not have intensity argument {} as a number.".format(intens), original_line)
+        print_error(f"voice does not have intensity argument {intens} as a number.", original_line)
         return
     # fi
     intens = round(f1)
     if intens < 0 or intens > 127:
-        print_error("intensity value {} not in range 0 to 127".format(intens), original_line)
+        print_error(f"intensity value {intens} not in range 0 to 127", original_line)
         return
     # fi
     jkl = str(vargs[0])
@@ -10105,11 +10127,11 @@ def do_intensity(t_args, original_line):
     for w in wargs:
         f1, type_error = is_float(w, is_float_number, False)
         if type_error is not None:
-            print_error("intensity error - {}".format(type_error), original_line)
+            print_error(f"intensity error - {type_error}", original_line)
             return
         # fi
         if f1 is None:
-            print_error("voice {} is not a number.".format(w), original_line)
+            print_error(f"voice {w} is not a number.", original_line)
             return
         # fi
         f1 = round(f1)
@@ -10157,7 +10179,7 @@ def do_loop(t_args, original_line):
         # elihw
         x.append(sg)
         if len(x) > 3:
-            print_error("loop with too many arguments ({})".format(len(x)), original_line)
+            print_error(f"loop with too many arguments ({len(x)})", original_line)
             return
         elif len(x) <= 0:                               # No arguments, outloop/endloop to get out.
             pass
@@ -10168,7 +10190,7 @@ def do_loop(t_args, original_line):
 #DEBUGOPAL            print_debug(f'do_loop #B - calling find_terminator_in_string')    #DEBUGOPAL
             a = find_terminator_in_string(x[0], [ '=' ], True, original_line)
             if a < 0:
-                print_error("loop with {} arguments needs first to be a variable to assign to".format(len(x)), original_line)
+                print_error(f"loop with {len(x)} arguments needs first to be a variable to assign to", original_line)
                 return
             # fi
             lvv = x[0][0:a+1]                           # The assignment is present.
@@ -10177,7 +10199,7 @@ def do_loop(t_args, original_line):
             else:
                 f, type_error = is_float(x[2], is_float_number, False)    # The increment.
                 if type_error is not None:
-                    print_error("loop - increment is not a value {}".format(type_error), original_line)
+                    print_error(f"loop - increment is not a value {type_error}", original_line)
                     return
                 # fi
                 if f is None:
@@ -10188,7 +10210,7 @@ def do_loop(t_args, original_line):
             # fi
             f, type_error = is_float(x[1], is_float_number, False)        # The final value.
             if type_error is not None:
-                print_error("loop - final value is not a value {}".format(type_error), original_line)
+                print_error(f"loop - final value is not a value {type_error}", original_line)
                 return
             # fi
             if f is None:
@@ -10198,7 +10220,7 @@ def do_loop(t_args, original_line):
             lfv = f
             f, type_error = is_float(x[0], is_float_number, False)        # The first value.
             if type_error is not None:
-                print_error("loop - initial value () is not a value {}".format(x[0],type_error), original_line)
+                print_error(f"loop - initial value {x[0]} is not a value {type_error}", original_line)
                 return
             # fi
             if f is None:
@@ -10251,13 +10273,13 @@ def do_macro(t_args, original_line):
     # fi
     name = wargs[0]
     if name in commands:
-        print_error("macro ({}) would replace existing command".format(name), original_line)
+        print_error(f"macro ({name}) would replace existing command", original_line)
         return
     elif name in staff_name:
-        print_error("macro ({}) would replace existing staff name".format(name), original_line)
+        print_error(f"macro ({name}) would replace existing staff name", original_line)
         return
     elif name in staff_keywords:
-        print_error("macro ({}) would replace existing staff keyword".format(name), original_line)
+        print_error(f"macro ({name}) would replace existing staff keyword", original_line)
         return
     # fi
     wargs = wargs[1:]
@@ -10291,7 +10313,7 @@ def do_macro(t_args, original_line):
             terminator = None
         # fi
         if arg in argument_names:
-            print_error("macro {} duplicates argument named {}".format(name, arg), original_line)
+            print_error(f"macro {name} duplicates argument named {arg}", original_line)
             return
         # fi
         argument_names.append(arg)
@@ -10336,7 +10358,7 @@ def do_marker(t_args, original_line):
     else:
         value, type_error = is_float(t_args, is_float_string, False)
         if type_error is not None or value is None:
-            print_warning("marker unable to compute value({}) - using text string.".format(t_args), original_line)
+            print_warning(f"marker unable to compute value({t_args}) - using text string.", original_line)
             value = str(t_args)
         else:
             if type(value) is float and value.is_integer():
@@ -10417,7 +10439,7 @@ def do_measure(t_args, original_line):
 #DEBUGOPAL    print_debug(f'do_measure #A - t_args="{t_args}"') #DEBUGOPAL
     # Process possible --xpose argument as xpose command before first measure.
     if args.xpose != '':
-        do_xpose([args.xpose], "Argument --xpose present, processing:{}".format(args.xpose))
+        do_xpose([args.xpose], f"Argument --xpose present, processing:{args.xpose}")
         args.xpose = ''
     # fi
 
@@ -10426,7 +10448,7 @@ def do_measure(t_args, original_line):
             t_args = '1'
         else:
             if not measure_on.isnumeric():
-                print_error("Blank measure can only occur after measure is a number - was {}".format(measure_on), original_line)
+                print_error(f"Blank measure can only occur after measure is a number - was {measure_on}", original_line)
                 return
             # fi
             t_args = str(int(measure_on) + 1)
@@ -10504,7 +10526,7 @@ def do_measure(t_args, original_line):
 
     if f1 in meas:
         if not args.multiplemeasures:
-            print_warning("Measure {} already exists. Want --multiplemeasures?".format(f1), original_line)
+            print_warning(f"Measure {f1} already exists. Want --multiplemeasures?", original_line)
         # fi
         measure_on = str(f1)
         # Initialize the accidental for each note in measure.
@@ -10634,7 +10656,7 @@ def do_meter(t_args, original_line):
 
     f, type_error = is_float(m, is_float_number, False)
     if type_error is not None:
-        print_error("meter error - {}".format(type_error), original_line)
+        print_error(f"meter error - {type_error}", original_line)
         return
     # fi
     if f is None:
@@ -10675,13 +10697,13 @@ def do_middle_c(t_args, original_line):
             return
         # fi
         if thenote is None:
-            print_error("middle_c - m:{} Note is not legal '{}', computation failed".format(measure_on, note_to_decode), original_line)
+            print_error(f"middle_c - m:{measure_on} Note is not legal '{note_to_decode}', computation failed", original_line)
             return
         # fi
         note_to_decode = round(thenote)
         note_to_decode = note_to_decode + 12 + 12 - 3     # 3c -> 39 must be 60 for midi.
         if note_to_decode <= 0 or note_to_decode >= 127:
-            print_error("middle_c - m:{} Note number '{}' not in range".format(measure_on, thenote), original_line)
+            print_error(f"middle_c - m:{measure_on} Note number '{theynote}' not in range", original_line)
             return
         # fi
         compute_middle_c(round(thenote))
@@ -10689,7 +10711,7 @@ def do_middle_c(t_args, original_line):
      # fi
 
     if note_to_decode not in note_to_midi_value:
-        print_error("middle_c - m:{} note_to_decode '{}' legal note".format(measure_on, note_to_decode), original_line)
+        print_error(f"middle_c - m:{measure_on} note_to_decode '{note_to_decode}' legal note", original_line)
         return
     # fi
     number = note_to_midi_value[note_to_decode] - (60 - middle_c)
@@ -10731,11 +10753,11 @@ def do_outloop(t_args, original_line):
     else:
         f1, type_error = is_float(t_args, is_float_number, False)
         if type_error is not None:
-            print_error("m:{} outloop expression error - {}".format(measure_on, type_error), original_line)
+            print_error(f"m:{measure_on} outloop expression error - {type_error}", original_line)
             return
         # fi
         if f1 is None:
-            print_error("m:{} outloop expression error - {}".format(measure_on, type_error), original_line)
+            print_error(f"m:{measure_on} outloop expression error - {type_error}", original_line)
             return
         # fi
     # fi
@@ -10915,22 +10937,22 @@ def do_pan(t_args, original_line):
     # fi
     if len(vargs) == 1:
         p = vargs[0]
-        vargs = [ "1..{}".format(len(volume)) ]
+        vargs = [ f"1..{len(volumes)}" ]
     else:
         p = vargs[1]
     # fi
     f1, type_error = is_float(p, is_float_number, False)
     if type_error is not None:
-        print_error("pan error - {}".format(type_error), original_line)
+        print_error(f"pan error - {type_error}", original_line)
         return
     # fi
     if f1 is None:
-        print_error("voice does not have pan argument {} as a number.".format(p), original_line)
+        print_error(f"voice does not have pan argument {p} as a number.", original_line)
         return
     # fi
     p = round(f1)
     if p < 0 or p > 127:
-        print_error("pan value {} not in range 0 to 127.".format(p), original_line)
+        print_error(f"pan value {p} not in range 0 to 127.", original_line)
         return
     # fi
     jkl = str(vargs[0])
@@ -10943,11 +10965,11 @@ def do_pan(t_args, original_line):
     for w in wargs:
         f1, type_error = is_float(w, is_float_number, False)
         if type_error is not None:
-            print_error("pan error - {}".format(type_error), original_line)
+            print_error(f"pan error - {type_error}", original_line)
             return
         # fi
         if f1 is None:
-            print_error("voice {} is not a number.".format(w), original_line)
+            print_error(f"voice {w} is not a number.", original_line)
             return
         # fi
         f1 = round(f1)
@@ -11018,7 +11040,7 @@ def do_pitch(t_args, original_line):
 
     f, type_error = is_float(m, is_float_number, False)
     if type_error is not None:
-        print_error("Tempo error - {}".format(type_error), original_line)
+        print_error(f"Tempo error - {type_error}", original_line)
         return
     # fi
     if f is None:
@@ -11063,22 +11085,22 @@ def do_pitchbend(t_args, original_line):
     # fi
     if len(vargs) == 1:
         p = vargs[0]
-        vargs = [ "1..{}".format(len(volume)) ]
+        vargs = [ f"1..{len(volume)}" ]
     else:
         p = vargs[1]
     # fi
     f1, type_error = is_float(p, is_float_number, False)
     if type_error is not None:
-        print_error("pitchbend error - {} ... p='{}'".format(type_error,p), original_line)
+        print_error(f"pitchbend error - {type_error} ... p='{p}'", original_line)
         return
     # fi
     if f1 is None:
-        print_error("voice does not have pitchbend argument {} as a number.".format(p), original_line)
+        print_error(f"voice does not have pitchbend argument {p} as a number.", original_line)
         return
     # fi
     p = round(f1)
     if p < 0 or p > 16383:
-        print_error("pitchbend value {} not in range 0 to 16383.".format(p), original_line)
+        print_error(f"pitchbend value {p} not in range 0 to 16383.", original_line)
         return
     # fi
 
@@ -11093,11 +11115,11 @@ def do_pitchbend(t_args, original_line):
     for w in wargs:
         f1, type_error = is_float(w, is_float_number, False)
         if type_error is not None:
-            print_error("pitchbend error - {} ... f1='{}'".format(type_error,f1), original_line)
+            print_error(f"pitchbend error - {type_error} ... f1='{f1}'", original_line)
             return
         # fi
         if f1 is None:
-            print_error("voice {} is not a number.".format(w), original_line)
+            print_error(f"voice {w} is not a number.", original_line)
             return
         # fi
         f1 = round(f1)
@@ -11134,16 +11156,16 @@ def do_process(t_args, original_line):
     # fi
     name = wargs[0]
     if name in commands:
-        print_error("process ({}) would replace existing command".format(name), original_line)
+        print_error(f"process ({name}) would replace existing command", original_line)
         return
     elif name in staff_keywords:
-        print_error("process ({}) would replace existing staff keyword".format(name), original_line)
+        print_error(f"process ({name}) would replace existing staff keyword", original_line)
         return
     elif name in staff_name:
-        print_error("process ({}) would replace existing staff name".format(name), original_line)
+        print_error(f"process ({name}) would replace existing staff name", original_line)
         return
     elif name in process_name:
-        print_warning("process ({}) replaces existing process".format(name), original_line)
+        print_warning(f"process ({name}) replaces existing process", original_line)
         x = process_name.index(name)
         process_name[x] = name                          # Array of names, duplicates NOT allowed.
         process_argument[x] = wargs[2]                  # Argument.
@@ -11152,10 +11174,10 @@ def do_process(t_args, original_line):
         process_defining_count = process_defining_count + 1
         return
     elif wargs[1] not in  [',',';']:
-        print_error("process ({}) needs comma separator to named argument, not '{}'".format(name, wargs[1]), original_line)
+        print_error(f"process ({name}) needs comma separator to named argument, not '{wargs[1]}'", original_line)
         return
     elif not re.match(r'^\w+', wargs[2]):
-        print_error("process ({}) needs named argument, not '{}'".format(name, wargs[2]), original_line)
+        print_error(f"process ({name}) needs named argument, not '{wargs[2]}'", original_line)
         return
     # fi
     # Check if name and terminators match previous process.
@@ -11184,7 +11206,7 @@ def do_putd(t_args, original_line):
     c = t_args[0]                    # The separation character.
     two = t_args.split(c)
     if len(two) != 4 or two[0] != '' or two[3] != '':
-        print_error("putd should look like '/zzz/a,b,c/' - not right number of separators ({}).".format(c), original_line)
+        print_error(f"putd should look like '/zzz/a,b,c/' - not right number of separators ({c}).", original_line)
         return
     # fi
     putds[two[1]] = two[2]
@@ -11216,7 +11238,7 @@ def do_randp(t_args, original_line):
     computeit = wargs[0] + '=' + str(ran)       # Do the assignment.
     value, type_error = is_float(computeit, is_float_number, False)
     if type_error is not None or value is None:
-        print_error("randp unable to assign value({}) to first argument({}).".format(wargs[0], value), original_line)
+        print_error(f"randp unable to assign value({wargs[0]}) to first argument({value}).", original_line)
         return
     # fi
     return
@@ -11239,14 +11261,14 @@ def do_randu(t_args, original_line):
 
     value, type_error = is_float(wargs[1], is_float_number, False)     # From 1 to value.
     if type_error is not None or value is None or value < 1:
-        print_error("randu unable to compute reasonable value({}) to store in ({}).".format(wargs[1], wargs[0]), original_line)
+        print_error(f"randu unable to compute reasonable value({wargs[1]}) to store in ({wargs[0]}).", original_line)
         return
     # fi
     ran = random.randint(1, round(value))  # Random value.
     computeit = wargs[0] + '=' + str(ran)       # Do the assignment.
     value, type_error = is_float(computeit, is_float_number, False)
     if type_error is not None or value is None:
-        print_error("randu unable to assign value({}) to first argument({}).".format(wargs[0], value), original_line)
+        print_error(f"randu unable to assign value({wargs[0]}) to first argument({value}).", original_line)
         return
     # fi
     return
@@ -11275,11 +11297,11 @@ def do_reloop(t_args, original_line):
     else:
         f1, type_error = is_float(t_args, is_float_number, False)
         if type_error is not None:
-            print_error("m:{} reloop expression error - {}".format(measure_on, type_error), original_line)
+            print_error(f"m:{measure_on} reloop expression error - {type_error}", original_line)
             return
         # fi
         if f1 is None:
-            print_error("m:{} reloop expression error - {}".format(measure_on, type_error), original_line)
+            print_error(f"m:{measure_on} reloop expression error - {type_error}", original_line)
             return
         # fi
     # fi
@@ -11308,22 +11330,22 @@ def do_reverb(t_args, original_line):
     # fi
     if len(vargs) == 1:
         r = vargs[0]
-        vargs = [ "1..{}".format(len(volume)) ]
+        vargs = [ f"1..{len(volume)}" ]
     else:
         r = vargs[1]
     # fi
     f1, type_error = is_float(r, is_float_number, False)
     if type_error is not None:
-        print_error("reverb error - {} ... r='{}'".format(type_error,r), original_line)
+        print_error(f"reverb error - {type_error} ... r='{r}'", original_line)
         return
     # fi
     if f1 is None:
-        print_error("voice does not have reverb argument {} as a number.".format(r), original_line)
+        print_error(f"voice does not have reverb argument {r} as a number.", original_line)
         return
     # fi
     r = round(f1)
     if r < 0 or r > 127:
-        print_error("reverb value {} not in range 0to 127.".format(r), original_line)
+        print_error(f"reverb value {r} not in range 0to 127.", original_line)
         return
     # fi
 
@@ -11338,11 +11360,11 @@ def do_reverb(t_args, original_line):
     for w in wargs:
         f1, type_error = is_float(w, is_float_number, False)
         if type_error is not None:
-            print_error("reverb error - {} ... f1='{}'".format(type_error,f1), original_line)
+            print_error(f"reverb error - {type_error} ... f1='{f1}'", original_line)
             return
         # fi
         if f1 is None:
-            print_error("voice {} is not a number.".format(w), original_line)
+            print_error(f"voice {w} is not a number.", original_line)
             return
         # fi
         f1 = round(f1)
@@ -11371,7 +11393,7 @@ def do_setperm(t_args, original_line):
 
     value, type_error = is_float(wargs[0], is_float_number, False)     # From 1 to value.
     if type_error is not None or value is None or value < 1:
-        print_error("setperm unable to compute reasonable value({}) for number of unique random numbers.".format(wargs[0]), original_line)
+        print_error(f"setperm unable to compute reasonable value({wargs[0]}) for number of unique random numbers.", original_line)
         return
     # fi
     value = round(value)                   # So, python2 and python3 do round differently. *SCREAM*
@@ -11400,7 +11422,7 @@ def do_spaces(t_args, original_line):
         args.spaces = True
         return
     else:
-        print_error("spaces argument '{}' unrecognized, assuming 'on'".format(t_args), original_line)
+        print_error(f"spaces argument '{t_args}' unrecognized, assuming 'on'", original_line)
         args.spaces = True
         return
     # fi
@@ -11460,23 +11482,23 @@ def do_staff(t_args, original_line):
         for w in vs:
             f1, type_error = is_float(w, is_float_number, False)
             if type_error is not None:
-                print_error("staff error - {}".format(type_error), original_line)
+                print_error(f"staff error - {type_error}", original_line)
                 return
             # fi
             if f1 is None:
-                print_error("voice {} is not a number.".format(w), original_line)
+                print_error(f"voice {w} is not a number.", original_line)
                 return
             # fi
             f1 = round(f1)
             if f1 < 1  or f1 > MAXVOICES:               # If out of range.
-                print_error("number of voices must between 1 and {} inclusive. Not ({})".format(MAXVOICES, f1), original_line)
+                print_error(f"number of voices must between 1 and {MAXVOICES} inclusive. Not ({f1})", original_line)
                 return
             # fi
             # Check if voice already used in a stave.
             for a in staff_name:
                 # Allow staff to be redefined. Can delete voices too.
                 if f1 in staff_name[a] and a != sn:
-                    print_warning("voice {} used in staff {} already".format(w, a), original_line)
+                    print_warning(f"voice {w} used in staff {a} already", original_line)
                 # fi
             # rof
             initialize_set_voices(f1, original_line)     # If voices not set up yet, set them up.
@@ -11592,11 +11614,11 @@ def do_title(t_args, original_line):
     # fi
     # T: Title of tune        (can have multiple)
     if args.vertical or args.horizontal or args.staves:
-        header = header + "title   {}\n".format(t_args)
+        header = header + f"title   {t_args}\n"
     elif args.midi1csv or args.fluidsynth:
         header.append(t_args)
     else:           # ABC
-        header = header + "T:{}\n".format(t_args)
+        header = header + f"T:{t_args}\n"
     # fi
     return
 # End of do_title
@@ -11663,7 +11685,7 @@ def do_tempo(t_args, original_line):
     wargs = t_args.split(',')
     if wargs is None or len(wargs) == 0 or len(wargs) > 2:
         if wargs[2] in ('accel','rit'):
-            print_warning("NOTDONEYET - tempo '{}' NOTDONEYET.".format(wargs[2]), original_line)
+            print_warning(f"NOTDONEYET - tempo '{wargs[2]}' NOTDONEYET.", original_line)
         else:
             print_error("tempo - there is not one or two arguments.", original_line)
             return
@@ -11674,7 +11696,7 @@ def do_tempo(t_args, original_line):
 
     for ve in range(1, len(volume)+1):
         if mlth[ve][measure_on] != 0:
-            print_error("tempo in the middle of a measure not allowed mlth[{}][{}]='{}'".format(ve, measure_on, mlth[ve][measure_on]), original_line)
+            print_error(f"tempo in the middle of a measure not allowed mlth[{ve}][{measure_on}]='{mlth[ve][measure_on]}'", original_line)
             return
         # fi
     # rof
@@ -11683,7 +11705,7 @@ def do_tempo(t_args, original_line):
     #   type_error -- type of error
     f1, type_error = is_float(wargs[0], is_float_number, False)
     if type_error is not None:
-        print_error("tempo does not have first argument as a floating number. {}".format(type_error), original_line)
+        print_error(f"tempo does not have first argument as a floating number. {type_error}", original_line)
         return
     # fi
     if f1 is None:
@@ -11713,7 +11735,7 @@ def do_tempo(t_args, original_line):
     # f2, type_error = is_float(wargs[1], is_float_number, False)
     f2, type_error = is_float(xxx, is_float_number, False)
     if type_error is not None:
-        print_error("Tempo error - {}".format(type_error), original_line)
+        print_error(f"Tempo error - {type_error}", original_line)
         return
     # fi
     if f2 is None:
@@ -11789,7 +11811,7 @@ def do_voice(t_args, original_line):
     vargs = targs.split()
     f1, type_error = is_float(vargs[0], is_float_number, False)
     if type_error is not None:
-        print_error("voice error - {}".format(type_error), original_line)
+        print_error(f"voice error - {type_error}", original_line)
         return
     # fi
     if f1 is None:
@@ -11798,7 +11820,7 @@ def do_voice(t_args, original_line):
     # fi
     f1 = round(f1)
     if f1 < 1  or f1 > MAXVOICES:       # If out of range.
-        print_error("number of voices must be between 1 and {} inclusive. Not ({})".format(MAXVOICES, f1), original_line)
+        print_error(f"number of voices must be between 1 and {MAXVOICES} inclusive. Not ({f1})", original_line)
         return
     # fi
 
@@ -11816,7 +11838,7 @@ def do_voice(t_args, original_line):
             return
         # fi
         if len(wargs) > f1:
-            print_error("number instruments ({}) greater than voices ({})".format(len(wargs), f1), original_line)
+            print_error(f"number instruments ({len(wargs)}) greater than voices ({f1})", original_line)
         # fi
         for i in range(0, len(wargs)):
             j = str(wargs[i])    # No checking.
@@ -11858,11 +11880,11 @@ def do_voice(t_args, original_line):
             else:
                 f1, type_error = is_float(j, is_float_number, False)
                 if type_error is not None:
-                    print_error("voice error - {}".format(type_error), original_line)
+                    print_error(f"voice error - {type_error}", original_line)
                     return
                 # fi
                 if f1 is None:
-                    print_error("voice does not have instrument argument {} as a number.".format(j), original_line)
+                    print_error(f"voice does not have instrument argument {j} as a number.", original_line)
                     return
                 # fi
                 f1 = round(f1)
@@ -11875,7 +11897,7 @@ def do_voice(t_args, original_line):
                 # rof
 
                 if not flg:
-                    print_error("instrument value {} not in instrument table.".format(f1), original_line)
+                    print_error(f"instrument value {f1} not in instrument table.", original_line)
                     return
                 # fi
                 vinstrument[i+1][measure_on] = q
@@ -11975,14 +11997,14 @@ def do_xpose(t_args, original_line):
         kl = vargs[len(vargs) - 2].lower()      # Second to last argument
         if mm == 'minor':
             if kl not in minor_key_to_major:
-                print_error("xpose command, key does not recognize minor {}".format(kl), original_line)
+                print_error(f"xpose command, key does not recognize minor {kl}", original_line)
                 return
             # fi
             kl = minor_key_to_major[kl].lower()
             vargs.pop()
         elif mm == 'major':
             if kl not in key_sig:
-                print_error("xpose command, key '{}' not recognized.".format(kl), original_line)
+                print_error(f"xpose command, key '{kl}' not recognized.", original_line)
                 return
             # fi
             vargs.pop()
@@ -11992,7 +12014,7 @@ def do_xpose(t_args, original_line):
     # fi
     if len(vargs) > 1:
         if len(vargs) == 4:
-            print_error("xpose command only allows 3 arguments.".format(kl), original_line)
+            print_error(f"xpose command only allows 3 arguments.", original_line)
             return
         elif len(vargs) == 3:
             if kl is None:
@@ -12011,11 +12033,11 @@ def do_xpose(t_args, original_line):
             else:       # is a number?
                 f1, type_error = is_float(kl, is_float_number, False)
                 if type_error is not None:
-                    print_error("xpose error#1 - {}".format(type_error), original_line)
+                    print_error(f"xpose error#1 - {type_error}", original_line)
                     return
                 # fi
                 if f1 is None:
-                    print_error("voice does not have xpose argument {} as a number or key.".format(kl), original_line)
+                    print_error(f"voice does not have xpose argument {kl} as a number or key.", original_line)
                     return
                 # fi
                 x = str(round(f1)) # Must be an integer as a string.
@@ -12031,37 +12053,37 @@ def do_xpose(t_args, original_line):
             kl = vargs[0].lower()       # new key
         # fi
         if kl.lower() in key_sig:
-            x = '0'                 # shifting amount
+            x = '0'                     # shifting amount
         else:       # is a number?
             x = kl
             kl = None
             f1, type_error = is_float(x, is_float_number, False)
             if type_error is not None:
-                print_error("xpose error#2 - {}".format(type_error), original_line)
+                print_error(f"xpose error#2 - {type_error}", original_line)
                 return
             # fi
             if f1 is None:
-                print_error("voice does not have xpose argument {} as a number or key.".format(kl), original_line)
+                print_error(f"voice does not have xpose argument {kl} as a number or key.", original_line)
                 return
             # fi
             x = str(round(f1)) # Must be an integer as a string..
         # fi
-        vs = '{}..{}'.format(1, len(volume))    # all voices
+        vs = f'{1}..{len(volume)}'      # all voices
     # fi
     if type(kl) is str:
         if kl not in key_sig:
-            print_error("no key '{}' in key_sig({})".format(kl, key_sig), original_line)
+            print_error(f"no key '{kl}' in key_sig({key_sig})", original_line)
             return
         # fi
     # fi
 
     f1, type_error = is_float(x, is_float_number, False)
     if type_error is not None:
-        print_error("xpose error#3 - {}".format(type_error), original_line)
+        print_error(f"xpose error#3 - {type_error}", original_line)
         return
     # fi
     if f1 is None:
-        print_error("voice does not have xpose argument {} as a number.".format(x), original_line)
+        print_error(f"voice does not have xpose argument {x} as a number.", original_line)
         return
     # fi
     x = round(f1)              # Must be an integer.
@@ -12085,11 +12107,11 @@ def do_xpose(t_args, original_line):
     for w in wargs:
         f1, type_error = is_float(w, is_float_number, False)
         if type_error is not None:
-            print_error("xpose error#4 - {}".format(type_error), original_line)
+            print_error(f"xpose error#4 - {type_error}", original_line)
             return
         # fi
         if f1 is None:
-            print_error("voice {} is not a number.".format(w), original_line)
+            print_error(f"voice {w} is not a number.", original_line)
             return
         # fi
         f1 = round(f1)
@@ -12209,7 +12231,7 @@ def get_volume_number(name, command_name, original_line):
             # rof
         # fi
         if type_error is not None:
-            print_error(command_name + " did not get have a number or volume name. {}".format(type_error), original_line)
+            print_error(command_name + f" did not get have a number or volume name. {type_error}", original_line)
             return None
         # fi
         # Fall through, because we found it via letters.
@@ -12220,7 +12242,7 @@ def get_volume_number(name, command_name, original_line):
     # fi
     v = round(v)
     if v < 0:                       # If error or bad value
-        print_error(command_name + " for voice {} not good {}, making it zero.".format(i, v), original_line)
+        print_error(command_name + f" for voice {i} not good {v}, making it zero.", original_line)
         v = 0
     # fi
     if command_name in ['volumes', 'keyword_volumename', 'keyword_volumenumber']:
@@ -14322,13 +14344,11 @@ def find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, original_lin
 
                     if not crd:
                         if p_p <= which_pan_now:
-                            print_error("m:{} v{}: pan {} ({},{}) going left or already at {}".format(measure_on,
-                            voiceon, crd, p_p, new_second, running_pan[voiceon]), original_line)
+                            print_error(f"m:{measure_on} v{voiceon}: pan {crd} ({p_p},{new_second}) going left or already at {running_pan[voiceon]}", original_line)
                         # fi
                     else:
                         if p_p >= which_pan_now:
-                            print_error("m:{} v{}: pan {} ({},{}) going right or already at {}".format(measure_on,
-                            voiceon, crd, p_p, new_second, running_pan[voiceon]), original_line)
+                            print_error(f"m:{measure_on} v{voiceon}: pan {crd} ({p_p},{new_second}) going right or already at {running_pan[voiceon]}", original_line)
                         # fi
                     # fi
                 # fi
@@ -14391,7 +14411,7 @@ def find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, original_lin
             if new_second is not None:
                 # Do 2 argument intensity crescendo.
                 if Trd is not None:
-                    print_error("find_vol_cresc_pan_intensity - cannot have a two arguments and trailing '{}'".format(trailing[0]), original_line)
+                    print_error(f"find_vol_cresc_pan_intensity - cannot have a two arguments and trailing '{trailing[0]}'", original_line)
                     return temp1, prenote, postnote
                 # fi
                 if args.midi1csv or args.fluidsynth:
@@ -14399,11 +14419,11 @@ def find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, original_lin
 
                     if not crd:
                         if i_p <= which_intensity_now:
-                            print_error("m:{} v{}: intensity {} ({},{}) going down or already at {}".format(measure_on, voiceon, crd, i_p, new_second, running_intensity[voiceon]), original_line)
+                            print_error(f"m:{measure_on} v{voiceon}: intensity {crd} ({i_p},{new_second}) going down or already at {running_intensity[voiceon]}", original_line)
                         # fi
                     else:
                         if i_p >= which_intensity_now:
-                            print_error("m:{} v{}: intensity {} ({},{}) going up or already at {}".format(measure_on, voiceon, crd, i_p, new_second, running_intensity[voiceon]), original_line)
+                            print_error(f"m:{measure_on} v{voiceon}: intensity {crd} ({i_p},{new_second}) going up or already at {running_intensity[voiceon]}", original_line)
                         # fi
                     # fi
                 # fi
@@ -14506,7 +14526,7 @@ def get_trill_note(therest, voiceon, prenote, thenote, postnote, tie_next, legat
         leading_space = True
     # fi
     if thenote is None or thenote == 0 or thenote == '':
-        print_error("m:{} trill is not legal, no first note".format(measure_on), original_line)
+        print_error(f"m:{measure_on} trill is not legal, no first note", original_line)
         return None
     # fi
 
@@ -14524,7 +14544,7 @@ def get_trill_note(therest, voiceon, prenote, thenote, postnote, tie_next, legat
         # fi
     # fi
     if therest is None or therest == '' or therest[0] != ',':
-        print_error("m:{} trill is not legal, no comma after first note".format(measure_on), original_line)
+        print_error(f"m:{measure_on} trill is not legal, no comma after first note", original_line)
         return None
     # fi
     therest = therest[1:]                       # comma removed
@@ -14534,16 +14554,16 @@ def get_trill_note(therest, voiceon, prenote, thenote, postnote, tie_next, legat
 #DEBUGOPAL    print_debug(f'get_trill_note - calling getnote #2')   #DEBUGOPAL
     therest, thenote, typenote = getnote(therest, voiceon, True, True, True, original_line)
     if thenote is None or thenote == 0 or thenote == '':
-        print_error("m:{} trill is not legal, second note missing".format(measure_on), original_line)
+        print_error(f"m:{measure_on} trill is not legal, second note missing", original_line)
         return None
     # fi
     if typenote == trill_note or typenote == sequence_note:
-        print_error("m:{} trill is not legal, first note not correct".format(measure_on), original_line)
+        print_error(f"m:{measure_on} trill is not legal, first note not correct", original_line)
         return None
     # fi
     quotes1 = thenote
     if therest is None or therest == '':
-        print_error("m:{} trill is not legal, missing number of notes".format(measure_on), original_line)
+        print_error(f"m:{measure_on} trill is not legal, missing number of notes", original_line)
         return None
     # fi
     staccato1 = ''
@@ -14559,30 +14579,30 @@ def get_trill_note(therest, voiceon, prenote, thenote, postnote, tie_next, legat
         # fi
     # fi
     if therest is None or therest == '' or therest[0] != ',':
-        print_error("m:{} trill is not legal, no comma after second note".format(measure_on), original_line)
+        print_error(f"m:{measure_on} trill is not legal, no comma after second note", original_line)
     # fi
     therest = therest[1:]                       # comma removed
     np = temp1 = 0
     f = therest.find(')')
     if f < 0:
-        print_error("m:{} trill is not legal, missing closing parenthesis".format(measure_on), original_line)
+        print_error(f"m:{measure_on} trill is not legal, missing closing parenthesis", original_line)
         return None
     # fi
     num = therest[0:f]
     if len(therest) <= f:
-        print_error("m:{} trill is not legal, missing length after parenthesis".format(measure_on), original_line)
+        print_error(f"m:{measure_on} trill is not legal, missing length after parenthesis", original_line)
         return None
     # fi
     therest = therest[f+1:]
     np, type_error = is_float(num, is_float_number, False)
     if np is None or np == 0 or type_error is not None:
-        print_error("m:{} trill is not legal, number of notes to play".format(measure_on), original_line)
+        print_error(f"m:{measure_on} trill is not legal, number of notes to play", original_line)
         return None
     # fi
     timeofnote, r_suffixes, number_dots = get_time(therest, original_line)
     if r_suffixes is None or number_dots is None or (
        r_suffixes != suffix_normal and r_suffixes != suffix_legato):
-        print_error("m:{} trill is not legal - r_suffixes='{}'".format(measure_on, r_suffixes), original_line)
+        print_error(f"m:{measure_on} trill is not legal - r_suffixes='{r_suffixes}'", original_line)
         return None
     # fi
     if timeofnote == 0:
@@ -14609,7 +14629,7 @@ def get_trill_note(therest, voiceon, prenote, thenote, postnote, tie_next, legat
         lengthl, lengthf, ifokay = get_time_stak(timeofnote, voiceon, original_line)
         if ifokay != 0 or len(lengthl) != 1:    # if time is error
             if not args.notrillwarnings:
-                print_warning("m:{} trill time must be a printable note length, not '{}'".format(measure_on, lengthl), original_line)
+                print_warning(f"m:{measure_on} trill time must be a printable note length, not '{lengthl}'", original_line)
             # fi
             t = 0
             for l in range(0, len(lengthl)):
@@ -14617,7 +14637,7 @@ def get_trill_note(therest, voiceon, prenote, thenote, postnote, tie_next, legat
             # fi
             lengthf = [ t ]
             if not args.notrillwarnings:
-                print_warning("m:{} trill time remade '{}'".format(measure_on, lengthf), original_line)
+                print_warning(f"m:{measure_on} trill time remade '{lengthf}'", original_line)
             # fi
         # fi
 #--         l = str(Fraction(lengthf[0] / np).limit_denominator(256))
@@ -14633,7 +14653,7 @@ def get_trill_note(therest, voiceon, prenote, thenote, postnote, tie_next, legat
             # fi
         # fi
         if l not in legal_notes:
-            print_warning("m:{} #2 Time fraction '{}' is not a printable note.  ({})".format(measure_on, lengthf[0], l), original_line)
+            print_warning(f"m:{measure_on} #2 Time fraction '{lengthf[0]}' is not a printable note.  ({l})", original_line)
         # fi
         if l == '1':
             l = '1/1'
@@ -14646,8 +14666,8 @@ def get_trill_note(therest, voiceon, prenote, thenote, postnote, tie_next, legat
     tie_this = ''
     if args.horizontal or args.vertical or args.staves:
         np = round(np)
-        abc_note = "{}t({}{}{}{}{},".format(prenote, prenote0, quotes0, staccato0, legato0, postnote0)
-        abc_note += "{}{}{}{}{},{})".format(prenote1, quotes1, staccato1, legato1, postnote1, np)
+        abc_note = f"{prenote}t({prenote0}{quotes0}{staccato0}{legato0}{postnote0},"
+        abc_note += f"{prenote1}{quotes1}{staccato1}{legato1}{postnote1},{np})"
         if leading_space:
             abc_note = ' ' + abc_note
         # fi
@@ -14805,7 +14825,7 @@ def get_sequence_note(temp1, voiceon, number_in_sequence, prenote, postnote, tie
         leading_space = True
     # fi
     if temp1[0] != '(':
-        print_error("m:{} sequence is not legal, no parenthesis after number {}".format(measure_on, number_in_sequence), original_line)
+        print_error(f"m:{measure_on} sequence is not legal, no parenthesis after number {number_in_sequence}", original_line)
         return None
     # fi
     temp1 = temp1[1:]                       # parenthesis removed
@@ -14823,7 +14843,7 @@ def get_sequence_note(temp1, voiceon, number_in_sequence, prenote, postnote, tie
 #DEBUGOPAL        print_debug(f'get_sequence_note - calling getnote #1')    #DEBUGOPAL
         temp1, thenote, typenote = getnote(temp1, voiceon, True, True, True, original_line)
         if thenote is None or thenote == '':
-            print_error("m:{} sequence is not legal, no note".format(measure_on), original_line)
+            print_error(f"m:{measure_on} sequence is not legal, no note", original_line)
             return None
         # fi
         quotes = thenote
@@ -14846,11 +14866,11 @@ def get_sequence_note(temp1, voiceon, number_in_sequence, prenote, postnote, tie
         # fi
         if sn != number_in_sequence - 1:
             if temp1 is None or temp1 == '' or temp1[0] != ',':
-                print_error("m:{} sequence is not legal, no comma after note".format(measure_on), original_line)
+                print_error(f"m:{measure_on} sequence is not legal, no comma after note", original_line)
                 return None
             # fi
         elif temp1[0] != ')':
-            print_error("m:{} sequence is not legal, no right parenthesis after last note".format(measure_on), original_line)
+            print_error(f"m:{measure_on} sequence is not legal, no right parenthesis after last note", original_line)
             return None
         # fi
         temp1 = temp1[1:]                   # parenthesis removed
@@ -14863,7 +14883,7 @@ def get_sequence_note(temp1, voiceon, number_in_sequence, prenote, postnote, tie
     # rof
     timeofnote, r_suffixes, number_dots = get_time(temp1, original_line)
     if r_suffixes is None or r_suffixes != suffix_normal or number_dots is None:
-        print_error("m:{} sequence is not legal, r_suffixes='{}' number_dots='{}'".format(measure_on, r_suffixes, number_dots), original_line)
+        print_error(f"m:{measure_on} sequence is not legal, r_suffixes='{r_suffixes}' number_dots='{number_dots}'", original_line)
         return None
     # fi
     if timeofnote == 0:
@@ -14888,7 +14908,7 @@ def get_sequence_note(temp1, voiceon, number_in_sequence, prenote, postnote, tie
                 n_s = n_s + ',' + vols_prenote[i] + notes[i] + stacs[i] + glides[i] + ties[i] + vols_postnote[i]
             # fi
         # rof
-        abc_note = "s{}({})".format(number_in_sequence, n_s)
+        abc_note = f"s{number_in_sequence}({n_s})"
         if leading_space:
             abc_note = ' ' + abc_note
         # fi
@@ -14965,20 +14985,20 @@ def get_sequence_note(temp1, voiceon, number_in_sequence, prenote, postnote, tie
             dnl = timeofnote / 8
             l_time = round(timeofnote / dnl - 0.5)
         else:
-            print_error("m:{} number in sequence ({}) not 2,3,4,6,8.".format(measure_on, number_in_sequence), original_line)
+            print_error(f"m:{measure_on} number in sequence ({number_in_sequence}) not 2,3,4,6,8.", original_line)
             return None
         # fi
         dnl_str = str(Fraction(dnl).limit_denominator(256))
 
         lengthl, lengthf, ifokay = get_time_stak(timeofnote, voiceon, original_line)
         if ifokay != 0 or len(lengthl) != 1:    # if time is error
-            print_warning("m:{} sequence time must be a printable note length, not '{}'".format(measure_on, lengthl), original_line)
+            print_warning(f"m:{measure_on} sequence time must be a printable note length, not '{lengthl}'", original_line)
             t = 0
             for l in range(0, len(lengthl)):
                 t = t + lengthf[l]
             # fi
             lengthf = [ t ]
-            print_warning("m:{} sequence time remade '{}'".format(measure_on, lengthf), original_line)
+            print_warning(f"m:{measure_on} sequence time remade '{lengthf}'", original_line)
         # fi
 
         if dnl_str == '1':
@@ -15070,8 +15090,8 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
     # fi
 
     if len(rest) > 1:
+        a = separate_args(temp1, False, False, original_line)
 #DEBUGOPAL        print_debug(f'do_a_note #A - calling separate_args') #DEBUGOPAL
-        a = separate_args(temp1, False, False, original_line, allow_bad_parens = True)
         if a is None or a == []:
             temp1 = None
             rest = ''
@@ -15097,7 +15117,7 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     if type(thenote) is int and typenote != sequence_note:
         if args.vertical or args.horizontal or args.staves:
-            thenote = "({})".format(thenote)        # Put back as a number.
+            thenote = f"({thenote})"                # Put back as a number.
         elif args.midi1csv or args.fluidsynth:
             if thenote <= 0:
                 thenote = 0
@@ -15125,7 +15145,7 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
     timeofnote, r_suffixes, number_dots = get_time(therest, original_line)
     #.............................................................................
     if r_suffixes is None or number_dots is None:
-        print_error("m:{} Error getting time for note ('{}') - ('{}') -> timeofnote='{}' r_suffixes='{}' number_dots='{}' therest='{}'".format(measure_on, thenote, therest, timeofnote, r_suffixes, number_dots, therest), original_line)
+        print_error(f"m:{measure_on} Error getting time for note ('{thenote}') - ('{therest}') -> timeofnote='{timeofnote}' r_suffixes='{r_suffixes}' number_dots='{number_dots}' therest='{therest}'", original_line)
         return None, rest, prenote, postnote        # error occurred.
     # fi
     # suffix_legato = 16            -- glide to next note.
@@ -15137,7 +15157,7 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
     # number_dots are how many "d" (dotted) were found.
     if timeofnote is None or timeofnote == 0:
         if number_dots != 0:
-            print_error("m:{} cannot have dotted syntax on a default note length.".format(measure_on), original_line)
+            print_error(f"m:{measure_on} cannot have dotted syntax on a default note length.", original_line)
             return None, rest, prenote, postnote    # error occurred.
         # fi
         timeofnote = get_staff_arr(voiceon, time, 'time', 'do_a_note1 ' + original_line)
@@ -15250,7 +15270,7 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
 # ----------------------------------------------------------------------------
 def handle_one_note(p_i, voiceon, m, notestuff, suffixstuff, original_line):
     if len(notestuff) != 4:
-        print_die("handle_one_note - notestuff[] is not 4 long. notestuff='{}'".format(notestuff), original_line)
+        print_die(f"handle_one_note - notestuff[] is not 4 long. notestuff='{notestuff}'", original_line)
     # fi
     prenote = notestuff[0]
     thenote = notestuff[1]
@@ -15258,7 +15278,7 @@ def handle_one_note(p_i, voiceon, m, notestuff, suffixstuff, original_line):
     postnote = notestuff[3]
 
     if len(suffixstuff) != 4:
-        print_die("handle_one_note - suffixstuff[] is not 4 long. suffixstuff='{}'".format(suffixstuff), original_line)
+        print_die(f"handle_one_note - suffixstuff[] is not 4 long. suffixstuff='{suffixstuff}'", original_line)
     # fi
     prev_tie = suffixstuff[0]
     tie_this = suffixstuff[1]
@@ -15316,7 +15336,7 @@ def process_notes_oldway(line, original_line):
     wargs = separate_args(wline, False, False, line)
 
     if not wargs or len(wargs) < 1:
-        print_error("m:{} no arguments on note line".format(measure_on), original_line)
+        print_error(f"m:{measure_on} no arguments on note line", original_line)
         return
     # fi
     # ...........................................................................
@@ -15328,7 +15348,7 @@ def process_notes_oldway(line, original_line):
         if 1 == len(wargs[0]):
             w = 1
             if w >= len(wargs):
-                print_error("m:{} 'v' with nothing after it.".format(measure_on), original_line)
+                print_error(f"m:{measure_on} 'v' with nothing after it.", original_line)
                 return
             # fi
             c = 0
@@ -15346,11 +15366,11 @@ def process_notes_oldway(line, original_line):
                 sc = s1.find(':')
             # fi
             if sc < 0:
-                print_error("m:{} A 'v' needs a number followed by a colon -- colon is missing".format(measure_on), original_line)
+                print_error(f"m:{measure_on} A 'v' needs a number followed by a colon -- colon is missing", original_line)
                 return
             # fi
             if sc == 0:
-                print_error("m:{} A 'v' needs a number followed by a colon -- number is missing".format(measure_on), original_line)
+                print_error(f"m:{measure_on} A 'v' needs a number followed by a colon -- number is missing", original_line)
                 return
             # fi
             s2 = s1[0:sc]
@@ -15361,12 +15381,12 @@ def process_notes_oldway(line, original_line):
                 return
             # fi
             if f1 is None:
-                print_error("m:{} voice number is not a number.".format(measure_on), original_line)
+                print_error(f"m:{measure_on} voice number is not a number.", original_line)
                 return
             # fi
             f1 = round(f1)
             if f1 < 1  or f1 > MAXVOICES:       # If out of range.
-                print_error("m:{} voice number must be between 1 and {} inclusive. Not ({})".format(measure_on, MAXVOICES, f1), original_line)
+                print_error(f"m:{measure_on} voice number must be between 1 and {MAXVOICES} inclusive. Not ({f1})", original_line)
                 return
             # fi
             last_voice_staff = f1               # For continuation lines and lines without v#:.
@@ -15374,7 +15394,7 @@ def process_notes_oldway(line, original_line):
             cis = f1
             wargs[w] = s1[sc+1:]
             if wargs[w] == '' and w + 1 > len(wargs):
-                print_error("m:{} Cannot have a blank argument after v{}".format(measure_on, cis), original_line)
+                print_error(f"m:{measure_on} Cannot have a blank argument after v{cis}", original_line)
                 return
             # fi
             if len(wargs[w]) == 0:
@@ -15391,7 +15411,7 @@ def process_notes_oldway(line, original_line):
     if cis == 0:                        # if not doing only one voice continuously for a while...
         last_voice_staff = None
         if len(wargs) > voices:
-            print_error("m:{} too many arguments ({}), greater than voices (>{})".format(measure_on, len(wargs), voices), original_line)
+            print_error(f"m:{measure_on} too many arguments ({en(wargs)}), greater than voices (>{voices})", original_line)
             return
         # fi
         measlth = 0
@@ -15430,7 +15450,7 @@ def process_notes_oldway(line, original_line):
         postnote = ''
         while True:
             if cis == 0 and len(wargs) < voiceon:
-                print_error("m:{} Not enough arguments on note line - want {}, have {}".format(measure_on, voiceon, wargs), original_line)
+                print_error(f"m:{measure_on} Not enough arguments on note line - want {voiceon}, have {wargs}", original_line)
                 return
             # fi
             if w is None:
@@ -15500,7 +15520,7 @@ def process_notes_oldway(line, original_line):
                 else:
                     f = therest.find(macro_arg_terminator[c][q-1])
                     if f < 0:
-                        print_warning("m:{} macro {} does not have a closing delimiter '{}'".format(measure_on, c, macro_arg_terminator[c][q-1]), original_line)
+                        print_warning(f"m:{measure_on} macro {c} does not have a closing delimiter '{macro_arg_terminator[c][q-1]}'", original_line)
                         continue        # Try another macro
                     # fi
                     f = f + 1
@@ -15551,7 +15571,7 @@ def parens_match(enddelim, aftertoken, w, original_line):
     e.append(enddelim)
     w = w + 1
     if w >= len(aftertoken):
-#--        print_error("Found character variable, but no closing '{}'.".format(enddelim), original_line)
+#--        print_error(f"Found character variable, but no closing '{enddelim}'.", original_line)
         return None
     # fi
     while True:
@@ -15562,7 +15582,7 @@ def parens_match(enddelim, aftertoken, w, original_line):
                 break
             # fi
             if w >= len(aftertoken):
-                print_error("Found character variable, but not closing '{}'.".format(enddelim), original_line)
+                print_error(f"Found character variable, but not closing '{enddelim}'.", original_line)
                 return None
             elif c == '(':
                 enddelim = ')'
@@ -15653,7 +15673,7 @@ def fix_limiting_char_variables(wary, aftertoken, original_line):
         aftertoken = aftertoken[prew:]
         return str(f1) + aftertoken
     else:                                               # Must have a string.
-        print_error("m:{} variable '{}' ".format(measure_on, f) + "return is not a string", original_line)
+        print_error(f"m:{measure_on} variable '{f}' return is not a string", original_line)
         return name + aftertoken
     # fi
 # End of fix_limiting_char_variables
@@ -15903,7 +15923,7 @@ def replace_all_variables(line, original_line):
         line = nline
         cnt = cnt + 1
         if cnt > MAX_LOOP_VARIABLES:
-            print_error("Over {} variable substitutions done - loop?".format(MAX_LOOP_VARIABLES), line)
+            print_error(f"Over {MAX_LOOP_VARIABLES} variable substitutions done - loop?", line)
             return line
         # fi
     # elihw
@@ -15963,7 +15983,7 @@ def char_var_subst_first_token(original_line):
         line = ntoken + rest
         cnt = cnt + 1
         if cnt > MAX_NESTING:
-            print_error("Over {} variable substitutions done on first token - loop?".format(MAX_NESTING), original_line)
+            print_error(f"Over {MAX_NESTING} variable substitutions done on first token - loop?", original_line)
             break
         # fi
     # elihw
@@ -16017,14 +16037,14 @@ def set_process_begin(token, next_tokens, original_line):
         # fi
     # fi
     if found_pn is None:
-        print_error("process named '{}' not pre-defined.".format(token), original_line)
+        print_error(f"process named '{token}' not pre-defined.", original_line)
         return False
     # fi
 
     level = lmp_executing_number + 1                    # Create variables at next level.
     if not createlocalvar(process_argument[pnumber], None, level, type_is_string, True):
 #DEBUGOPAL        print_debug(f'set_process_begin - #A token={token} ({process_argument[pnumber][i]} {level}')    #DEBUGOPAL
-        print_error("process {} unable to create variable {}".format(token, process_argument[pnumber][0]), original_line)
+        print_error(f"process {token} unable to create variable {process_argument[pnumber][0]}", original_line)
         return False
     # fi
     lmp_executing_which.append(pnumber)
@@ -16082,14 +16102,14 @@ def run_process(token, next_tokens, original_line):
     global running_process_already
 
     if lmp_executing_type[-1] != 'process':
-        print_error("run_process -ERROR, not in a process", original_line)
-        print_debug("            - lmp_executing_type='{}'".format(lmp_executing_type))
-        print_debug("            - lmp_executing_number='{}'".format(lmp_executing_number))
-        print_debug("            - lmp_executing_which='{}'".format(lmp_executing_which))
-        print_debug("            - lmp_executing_args='{}'".format(lmp_executing_args))
-        print_debug("            - lmp_executing_line='{}'".format(lmp_executing_line))
-        print_debug("            - lmp_executing_rest_of_line='{}'".format(lmp_executing_rest_of_line))
-        print_debug("            - running_process_already='{}'".format(running_process_already))
+        print_error(f"run_process -ERROR, not in a process", original_line)
+        print_debug(f"            - lmp_executing_type='{lmp_executing_type}'")
+        print_debug(f"            - lmp_executing_number='{lmp_executing_number}'")
+        print_debug(f"            - lmp_executing_which='{lmp_executing_which}'")
+        print_debug(f"            - lmp_executing_args='{lmp_executing_args}'")
+        print_debug(f"            - lmp_executing_line='{lmp_executing_line}'")
+        print_debug(f"            - lmp_executing_rest_of_line='{lmp_executing_rest_of_line}'")
+        print_debug(f"            - running_process_already='{running_process_already}'")
         return
     # fi
     n = lmp_executing_number
@@ -16101,7 +16121,7 @@ def run_process(token, next_tokens, original_line):
     if wary is None or (len(wary[numarry_indexes]) > 1 and wary[numarry_indexes][0] > 1):
         # Does not exist, was deleted with end of last run.
         if not createlocalvar(p_a, token, lmp_executing_number, type_is_string, True):
-            print_error("process {} unable to create variable {}".format(token, process_argument[pnumber][0]), original_line)
+            print_error(f"process {token} unable to create variable {process_argument[pnumber][0]}", original_line)
         # fi
     else:
         setvar(p_a, token, type_is_string)
@@ -16113,7 +16133,7 @@ def run_process(token, next_tokens, original_line):
 # ----------------------------------------------------------------------------
 def keyword_midi(token, delimiter, next_tokens, original_line):     # NOTDONEYET
     command, t_args, delimiter = compute_command_args(next_tokens)
-    print_warning("NOTDONEYET - keyword midi '{}'".format(command), original_line)
+    print_warning(f"NOTDONEYET - keyword midi '{command}'", original_line)
     return t_args
 # End of keyword_midi
 
@@ -16178,7 +16198,7 @@ def keyword_arp(token, delimiter, next_tokens, original_line):          # NOTDON
 
 # ----------------------------------------------------------------------------
 def keyword_fermata(token, delimiter, next_tokens, original_line):      # NOTDONEYET
-    print_warning("NOTDONEYET - keyword fermata - {}".format(next_tokens), original_line)
+    print_warning(f"NOTDONEYET - keyword fermata - {next_tokens}", original_line)
     return next_tokens
 # End of keyword_fermata
 
@@ -16198,25 +16218,25 @@ def keyword_key(token, delimiter, next_tokens, original_line):
 
 # ----------------------------------------------------------------------------
 def keyword_tremolo(token, delimiter, next_tokens, original_line):      # NOTDONEYET
-    print_warning("NOTDONEYET - tremolo '{}' '{}' '{}'".format(token, delimiter, next_tokens), original_line)
+    print_warning(f"NOTDONEYET - tremolo '{token}' '{delimiter}' '{next_tokens}'", original_line)
     return next_tokens
 # End of keyword_tremolo
 
 # ----------------------------------------------------------------------------
 def keyword_note_modifier(token, delimiter, next_tokens, original_line):    # NOTDONEYET
-    print_warning("NOTDONEYET - keyword_note_modifier '{}' '{}' '{}'".format(token, delimiter, next_tokens), original_line)
+    print_warning(f"NOTDONEYET - keyword_note_modifier '{token}' '{delimiter}' '{next_tokens}'", original_line)
     return next_tokens
 # End of keyword_modifiers
 
 # ----------------------------------------------------------------------------
 def keyword_note_show(token, delimiter, next_tokens, original_line):    # NOTDONEYET
-    print_warning("NOTDONEYET - keyword_note_show '{}' '{}' '{}'".format(token, delimiter, next_tokens), original_line)
+    print_warning(f"NOTDONEYET - keyword_note_show '{token}' '{delimiter}' '{next_tokens}'", original_line)
     return next_tokens
 # End of keyword_note_show
 
 # ----------------------------------------------------------------------------
 def keyword_note_show1(token, delimiter, next_tokens, original_line):   # NOTDONEYET
-    print_warning("keyword_note_show1 - ignoring '{}' '{}' '{}'".format(token, delimiter, next_tokens), original_line)
+    print_warning(f"keyword_note_show1 - ignoring '{token}' '{delimiter}' '{next_tokens}'", original_line)
     command, t_args, newdelimiter = compute_command_args(next_tokens)
     return t_args
 # End of keyword_note_show
@@ -16237,13 +16257,13 @@ def keyword_clefs(token, delimiter, next_tokens, original_line):
 def keyword_glide(token, delimiter, next_tokens, original_line):    # NOTDONEYET
     # There is a token after this keyword. Toss it.
     command, t_args, delimiter = compute_command_args(next_tokens)
-    print_warning("NOTDONEYET - keyword_glide '{}' '{}' '{}' ignore argument='{}'".format(token, delimiter, next_tokens, command), original_line)
+    print_warning(f"NOTDONEYET - keyword_glide '{token}' '{delimiter}' '{next_tokens}' ignore argument='{command}'", original_line)
     return t_args
 # End of keyword_glide
 
 # ----------------------------------------------------------------------------
 def keyword_tie(token, delimiter, next_tokens, original_line):  # NOTDONEYET
-    print_warning("NOTDONEYET - keyword_tie '{}' '{}' '{}'".format(token, delimiter, next_tokens), original_line)
+    print_warning(f"NOTDONEYET - keyword_tie '{token}' '{delimiter}' '{next_tokens}'", original_line)
     return next_tokens
 # End of keyword_tie
 
@@ -16349,7 +16369,7 @@ def find_mlth_values(stfs, m, original_line):
     # fi
     for v in staff_name[stfs]:              # voice numbers for staff.
         if m not in mlth[v]:
-            print_error("NOTDONEYET - m='{}' not in mlth[{}]".format(m,v), original_line)
+            print_error(f"NOTDONEYET - m='{m}' not in mlth[{v}]", original_line)
             mlth[v][m] = 0
         # fi
         f = float(mlth[v][m])
@@ -16384,7 +16404,7 @@ def macro_here(send_these_notes, original_line):
             t_args = delimiter + t_args
         # fi
         if lmp_executing_number > MAX_NESTING:
-            print_error("m:{} all_unique_macro_names#2 {} nesting to depth of more than {}".format(measure_on, command, MAX_NESTING), original_line)
+            print_error(f"m:{measure_on} all_unique_macro_names#2 {command} nesting to depth of more than {MAX_NESTING}", original_line)
             return send_these_notes
         # fi
         for cnumber in all_unique_macro_names[command]:
@@ -16393,7 +16413,7 @@ def macro_here(send_these_notes, original_line):
                 return ''
             # fi
         # rof
-        print_warning("m:{} #A macro {} did not match terminators correctly...".format(measure_on, command), original_line)
+        print_warning(f"m:{measure_on} #A macro {command} did not match terminators correctly.", original_line)
     # fi
     return send_these_notes
 # End of macro_here
@@ -16485,8 +16505,7 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):      
         postnote = ''
         #.............................................................................
 #DEBUGOPAL        print_debug(f'process_notes_for_staff #D3 - calling separate_args')    #DEBUGOPAL
-        a = separate_args(temp1, False, False, original_line, allow_bad_parens = True)
-#DEBUGOPAL        print_debug(f'process_notes_for_staff #D4')    #DEBUGOPAL
+        a = separate_args(temp1, False, False, original_line)
         nt = a[0]
         rest = ' '.join(a[1:])
         #.............................................................................
@@ -16606,9 +16625,10 @@ def process_staff_notes(command, delimiter, t_args, original_line):
            (next_tokens is not None and next_tokens != '') or
            (tdelim is not None and tdelim != '')):
 #DEBUGOPAL        print_debug(f'process_staff_notes B# - token="{token}" tdelim="{tdelim}" next_tokens="{next_tokens}"')    #DEBUGOPAL
+        # Delete quotes ... double or single.
         if len(token) > 0 and token[0] in ("'", '"'):
-            next_tokens = re.sub(r"^'[^']*'", '', next_tokens)
-            next_tokens = re.sub(r'^"[^"]*"', '', next_tokens)
+            next_tokens = re.sub(r"^'[^']*'", '', next_tokens)  # Delete single quotes and contents.
+            next_tokens = re.sub(r'^"[^"]*"', '', next_tokens)  # Delete double quotes and contents.
             token = ''
             tdelim = ''
         # fi
@@ -16618,7 +16638,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                 next_tokens = (tdelim + next_tokens).strip()
             # fi
             if lmp_executing_number > MAX_NESTING:
-                print_error('m:{} all_unique_macro_names#1 {} nesting to depth of more than {}'.format(measure_on, token, MAX_NESTING), original_line)
+                print_error(f'm:{measure_on} all_unique_macro_names#1 {token} nesting to depth of more than {MAX_NESTING}', original_line)
                 return                                      # Error ... ouch, many errors will follow. *sigh*
             # fi
             for cnumber in all_unique_macro_names[token]:
@@ -16628,7 +16648,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                     return                                  # Henceforth get lines from macro_buffer.
                 # fi
             # rof
-            print_warning('m:{} #B macro {} did not match terminators correctly...'.format(measure_on, token), original_line)
+            print_warning(f'm:{measure_on} #B macro {token} did not match terminators correctly.', original_line)
         # fi
         if token == 'begin':
             if in_process_already:
@@ -16656,7 +16676,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                 # fi
                 token, next_tokens, tdelim = compute_command_args(next_tokens)
                 if token not in staff_name:
-                    print_error("process_staff_notes - staff names must be followed by a colon (':') - token={} next_tokens='{}' tdelim='{}'".format(token,next_tokens,tdelim), original_line)
+                    print_error(f"process_staff_notes - staff names must be followed by a colon (':') - token={token} next_tokens='{next_tokens}' tdelim='{tdelim}'", original_line)
                     return
                 # fi
             # elihw
@@ -16720,7 +16740,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
             for st in last_voice_staff:                     # Go through staves
                 if st in staff_chord:
                     if type(staff_chord[st]) is int:
-                        print_error("Starting chord for staff {} and already in the middle of a chord({})".format(st,staff_chord[st]), original_line)
+                        print_error(f"Starting chord for staff {st} and already in the middle of a chord({staff_chord[st]})", original_line)
                         err = True
                     else:
                         staff_chord[st] = 0
@@ -16741,7 +16761,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
             err = False
             for st in last_voice_staff:
                 if st not in staff_chord or type(staff_chord[st]) is not int:
-                    print_error("Ending chord for staff {} but not in the middle of a chord".format(st), original_line)
+                    print_error(f"Ending chord for staff {st} but not in the middle of a chord", original_line)
                     err = True
                 # fi
             # rof
@@ -16966,7 +16986,7 @@ def process_line(original_line):
         qline = nline
         numcharvar = numcharvar + 1
         if numcharvar > MAX_LOOP_VARIABLES:
-            print_error("Over {} character variable substitutions done on arguments - loop?".format(MAX_LOOP_VARIABLES), original_line)
+            print_error(f"Over {MAX_LOOP_VARIABLES} character variable substitutions done on arguments - loop?", original_line)
             break
         # fi
     # ehihw
@@ -16980,7 +17000,7 @@ def process_line(original_line):
             t_args = delimiter + t_args
         # fi
         if lmp_executing_number > MAX_NESTING:
-            print_error("m:{} all_unique_macro_names#2 {} nesting to depth of more than {}".format(measure_on, command, MAX_NESTING), original_line)
+            print_error(f"m:{measure_on} all_unique_macro_names#2 {command} nesting to depth of more than {MAX_NESTING}", original_line)
             return False                                    # Error ... ouch, many errors will follow. *sigh*
         # fi
         for cnumber in all_unique_macro_names[command]:
@@ -16990,7 +17010,7 @@ def process_line(original_line):
                 return False                                # Henceforth get lines from macro_buffer.
             # fi
         # rof
-        print_warning("m:{} #C macro {} did not match terminators correctly...".format(measure_on, command), original_line)
+        print_warning(f"m:{measure_on} #C macro {command} did not match terminators correctly.", original_line)
     elif len(command) > 0 and command[0] == '%':            # Change single percent to double percent signs.
         command = '%%'                                      # Only the 'command' not reality.
     # fi
@@ -17003,13 +17023,13 @@ def process_line(original_line):
         try:
             r = commands[command][0]                        # Had an error once ... thus try/expect.
         except:
-            print_error("m:{} not found processing routine for command '{}'".format(measure_on), command)
+            print_error(f"m:{measure_on} not found processing routine for command '{command}'", command)
             print('   ', sys.exc_info()[0], sys.exc_info, file=sys.stderr, flush=True)
         # yrt
         r(t_args, original_line)
         return False
     elif measure_on in goto_table:
-        print_error("Notes after a goto are not allowed. measure='{}'".format(measure_on), original_line)
+        print_error(f"Notes after a goto are not allowed. measure='{measure_on}'", original_line)
         return False
     # fi
     if staff_name == {}:                                    # Not running in staff mode.
@@ -17069,7 +17089,7 @@ def readthefile():
             else:
                 extra = ''
             # fi
-            print_eoln("linecount={}{} line='{}'".format(linecount,extra,line))
+            print_eoln(f"linecount={linecount}{extra} line='{line}'")
             # Below is variables in process trill in file P2.gcs.
             print_these_vars('readthefile#1')
         # fi
@@ -17103,7 +17123,7 @@ def readthefile():
                     line = nline
                     numcharvar = numcharvar + 1
                     if numcharvar > MAX_LOOP_VARIABLES:
-                        print_error("Over {} character variable substitutions done on line".format(MAX_LOOP_VARIABLES), line)
+                        print_error(f"Over {MAX_LOOP_VARIABLES} character variable substitutions done on line", line)
                         break
                     # fi
                     i_line.append('3chvs: ' + line)         # Line as fixed or whatever.
@@ -17136,7 +17156,7 @@ def readthefile():
                 if len(line) > 0 and line[0] == '=':
                     num_putd += 1
                     if num_putd > MAX_PUTDS:
-                        print_error("Over {} putd's done on line".format(MAX_PUTDS), line)
+                        print_error(f"Over {MAX_PUTDS} putd's done on line", line)
                         break
                     # fi
                     continue                                # If more things that might change...
@@ -17240,7 +17260,7 @@ def main():
             output_name = open(args.rest[1], 'w')
         # fi
         if len(args.rest) > 2:              # Too many.
-            print_error_no_line("Too many arguments, input, output only.  {}".format(args.rest))
+            print_error_no_line(f"Too many arguments, input, output only.  {args.rest}")
             sys.exit(1)
         # fi
     # fi
