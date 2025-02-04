@@ -10,17 +10,24 @@
 # Bugs not fixed yet:
 #   a) Lyrics ... Just didn't do them, saw no reason ... *sigh*
 #   b) tempo rit and tempo acc.  I thought it was too difficult to implement. YUCK.
-#   c) what-a-fool-believes.gcs
+#   c) v(p)> ... >v(pp)   The >v needs to be deleted. Checked if last is same direction?
+#   d) what-a-fool-believes.gcs
 #      staff one
 #      staff two
 #       measure 5 messed up on 2. Adding voice to staff doesn't initialize 
 #       WARNING-fill_voice_mlth-measure='5' voice='8' staff='two:[2, 6, 8]' measure_meter_value='1' nl='0.125' x='240'
 #       1963.gcs ... first measure, rest (adds 1 voice), then 3 notes in chord and somehow the rest is not added to lth.
-#   d) Djokja - runs forever -- processes needed for each staff or voice:
+#   e) Djokja - runs forever -- processes needed for each staff or voice:
 #        ../imscomp --fs --platochars --lines Djokja.gcs Djokja.fs
-#   e) process-samenote.gcs - process names and macro names can have () around argument.
-#   f) do_goto command(s) needs to have variables computed. Look at do_measure for how to do it.
-#   g) standard-print-stuff.include
+#      Well, processes must be on a staff/voice, not overall. Keeping straight when
+#      inside a macro? Defining macro inside process? (Can't do it due to command?)
+#   f) process-samenote.gcs - process names and macro names can have () around argument.
+#   g) do_goto command(s) needs to have variables computed. Look at do_measure for how to do it.
+#   h) Note notation must not do whole line parsing (tokenizing) ahead of usage.
+#      Do one token at a time. This allows for macros anywhere. The macro processing
+#      will NOT do parenthesis matching, if not needed. This is current state of h2,h3,i2,i3.
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+#   h2) standard-print-stuff.include
 #       doit invention-4.gcs            > AAA.20 2>&1
 #       macro i did not match terminators correctly...
 #       The replace-macro routine calls separate arguments, but that doesn't work right for 'separators'.
@@ -48,13 +55,14 @@
 #                   m C.
 #                   n A B.
 #           endmacro
-#   g2) linecount=392 line='d:      2g4d m 4. b8  g4 g+'
+#       m4c.gcs:two: 2c m 4. e m 2. a m 1. 3e c e a treble 4e c e a 5e c e n (1 2. a
+#   h3) linecount=392 line='d:      2g4d m 4. b8  g4 g+'
 #       WARNING - m:24 #B macro m did not match terminators correctly...
 #         File oh-lady-be-good.gcs Line 392
 #                         - 'input:  392:d:      2g4d m 4. b8@X g4 g+'
 #                         - 'input:  392:d:      2g4d m 4. b8  g4 g+'
 #                         - 'line:  d:      2g4d m 4. b8  g4 g+'
-#   h) invention-4.gcs
+#   i2) invention-4.gcs
 #     Traceback (most recent call last):
 #     File "/Users/m4/ims/tc-testing/../imscomp", line 17145, in <module>
 #       main()
@@ -69,7 +77,7 @@
 #     File "/Users/m4/ims/tc-testing/../imscomp", line 15932, in set_process_begin
 #       print_debug(f'set_process_begin - #A token={token} ({process_argument[pnumber][i]} {level}')
 #   UnboundLocalError: local variable 'i' referenced before assignment
-#   h2) true-faith.gcs -- same as above.
+#   i3) true-faith.gcs -- same as above.
 # ----------------------------------------------------------------------------
 # TO DO:
 # 1) b-6 ... some 1/2 notes that are vol(sf) -- should they be shortened?
@@ -7295,8 +7303,8 @@ def replace_macro(cnumber, t_args, original_line):
     global i_line
 
     command = macro_name[cnumber]
-#DEBUGOPAL    print_debug(f'replace_macro - targs="{t_args}"')    #DEBUGOPAL
-#DEBUGOPAL    print_debug(f'replace_macro - {command} mnt="{macro_name_terminator[cnumber]}" ma={macro_arguments[cnumber]} mat={macro_arg_terminator[cnumber]} mb={macro_buffer[cnumber]}')    #DEBUGOPAL
+#DEBUGOPAL    print_debug(f'replace_macro A - targs="{t_args}"')    #DEBUGOPAL
+#DEBUGOPAL    print_debug(f'replace_macro B - command={command} macro_name_terminator="{macro_name_terminator[cnumber]}" macro_arguments={macro_arguments[cnumber]} macro_arg_terminator={macro_arg_terminator[cnumber]}\n                        - mb={macro_buffer[cnumber]}')    #DEBUGOPAL
     if t_args is None or t_args == '':
         if macro_arguments[cnumber] != []:
             print_error(f"macro command {command} does not have any arguments, but needs {macro_arguments[cnumber]}.", original_line)
@@ -7304,34 +7312,29 @@ def replace_macro(cnumber, t_args, original_line):
         # fi
         wargs = None
     else:
-        # Get rid of multiple spaces/tabs.
+        if macro_name_terminator[cnumber] in [' ',','] and t_args[0] in [',',' ']:  # Allow optional space or comma.
+            t_args = t_args[1:]
+        elif macro_name_terminator[cnumber] == t_args[0]:                       # The terminators match.
+            t_args = t_args[1:]
+        elif macro_name_terminator[cnumber] == ' ' and t_args[0].isalnum():     # Does not match.
+            pass                                                                # Space not present in t_args!
+        else:
+            return False                                                        # Not a space, and first in t_args doesn't match.
+        # fi
         t_args = re.sub(r'\s+', r' ', t_args)
         # Get rid of spaces before/after commas/semicolons.
-        t_args = re.sub(r'\s*([,;])\s*', r'\1', t_args)
-        t_args = re.sub(r'\s*([()\[\]])\s*', r'\1', t_args)
-        # Leading spaces before terminators are ignored here.
-        while 1 < len(t_args):
-            if t_args[0] != ' ' or re.match(r'\w', t_args[1]):
-                break
-            # fi
-            t_args = t_args[1:]
-        # elihw
-#DEBUGOPAL        print_debug(f'replace_macro - t_args="{t_args}" mat={macro_arg_terminator[cnumber]}')    #DEBUGOPAL
-        if t_args[0] != macro_name_terminator[cnumber]:
-            if macro_name_terminator[cnumber] == ',' and t_args[0] in ' \t':
-                pass
-            else:
-                return False
-            # fi
-        # fi
-        t_args = t_args[1:]
+#DEBUGOPAL        print_debug(f'replace_macro C - t_args="{t_args}" macro_arg_terminator={macro_arg_terminator[cnumber]}')    #DEBUGOPAL
+        t_args = re.sub(r'\s*([,;])\s*', r'\1', t_args)                          # ,; - no spaces before/after them.
+        t_args = re.sub(r'\s*([()\[\]])\s*', r'\1', t_args)                      # ()[] - no spaces before/after them.
+        # macro_arg_terminator is separator between macro name and first argument.
+#DEBUGOPAL        print_debug(f'replace_macro D - t_args="{t_args}" macro_arg_terminator={macro_arg_terminator[cnumber]}')    #DEBUGOPAL
         wargs = []
         n = 0
         # Any extra terminators that are NOT the same as the last (or following) ones may be okay. *UGH*
         err = False
         for a in macro_arguments[cnumber]:
             c = macro_arg_terminator[cnumber][n]
-#DEBUGOPAL            print_debug(f'replace_macro - c="{c}" a="{a}" n={n} #F1.5')    #DEBUGOPAL
+#DEBUGOPAL            print_debug(f'replace_macro D - c="{c}" a="{a}" n={n} #F1.5')    #DEBUGOPAL
             # End of line terminator (it is known to be the last argument).
             if c is None and (n == len(macro_arg_terminator[cnumber]) - 1) and (t_args or t_args == ''):
                 terminator_at = len(t_args)             # CANNOT CHECK, might want those terminators!
@@ -7340,9 +7343,10 @@ def replace_macro(cnumber, t_args, original_line):
                 return False
             else:
                 # Get to terminator here.        NOTDONEYET - the following needs to tokenize and find terminator.
-#DEBUGOPAL                print_debug(f'replace_macro - calling find_terminator_in_string')    #DEBUGOPAL
-                terminator_at = find_terminator_in_string(t_args, c, c in ['(','[','{'], original_line)
-#DEBUGOPAL                print_debug(f'replace_macro - terminator_at="{terminator_at}" t_args="{t_args}" c={c} #F2.5')    #DEBUGOPAL
+#DEBUGOPAL                print_debug(f'replace_macro G - calling find_terminator_in_string')    #DEBUGOPAL
+                terminator_at = t_args.find(c)
+#--                terminator_at = find_terminator_in_string(t_args, c, c in ['(','[','{'], original_line)
+#DEBUGOPAL                print_debug(f'replace_macro H - terminator_at="{terminator_at}" t_args="{t_args}" c={c} #F2.5')    #DEBUGOPAL
                 if terminator_at < 0:
 #DEBUGOPAL                    print_debug(f'replace_macro - #F3')    #DEBUGOPAL
                     return False
@@ -7386,7 +7390,7 @@ def replace_macro(cnumber, t_args, original_line):
         # fi
     # fi
     for i in range(0, len(macro_arguments[cnumber])):    # Create them!
-#DEBUGOPAL        print_debug(f'replace_macro - #F6A ({macro_arguments[cnumber][i]} {wargs[i]} {level}')    #DEBUGOPAL
+#DEBUGOPAL        print_debug(f'replace_macro - #F6A "{macro_arguments[cnumber][i]}" "{wargs[i]}" "{level}"')    #DEBUGOPAL
         if not createlocalvar(macro_arguments[cnumber][i], wargs[i], level, type_is_string, True):
 #DEBUGOPAL            print_debug(f'replace_macro - #F6A command={command} ({macro_arguments[cnumber][i]} {wargs[i]} {level}')    #DEBUGOPAL
             print_error(f"macro {command} unable to create variable {macro_arguments[cnumber][i]}", original_line)
@@ -15408,7 +15412,7 @@ def process_notes_oldway(line, original_line):
     if cis == 0:                        # if not doing only one voice continuously for a while...
         last_voice_staff = None
         if len(wargs) > voices:
-            print_error(f"m:{measure_on} too many arguments ({en(wargs)}), greater than voices (>{voices})", original_line)
+            print_error(f"m:{measure_on} too many arguments ({len(wargs)}), greater than voices (>{voices})", original_line)
             return
         # fi
         measlth = 0
@@ -15522,6 +15526,7 @@ def process_notes_oldway(line, original_line):
                     # fi
                     f = f + 1
                 # fi
+#DEBUGOPAL                print_debug(f'calling replace_macro Z - {c} ="{md+therest}"')    #DEBUGOPAL
                 if replace_macro(c, md + therest, line):
                     return                                  # Go out and read line for macro.
                 # fi
@@ -16406,6 +16411,7 @@ def macro_here(send_these_notes, original_line):
         # fi
         for cnumber in all_unique_macro_names[command]:
             # NOTE: return from replace_macro of false means macro didn't match correctly.
+#DEBUGOPAL            print_debug(f'calling replace_macro Y - {cnumber} ="{t_args}"')    #DEBUGOPAL
             if replace_macro(cnumber, t_args, original_line):
                 return ''
             # fi
@@ -16641,6 +16647,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
             for cnumber in all_unique_macro_names[token]:
                 # Need to put this line to be processed after macro...
                 # NOTE: return from replace_macro of false means macro didn't match correctly.
+#DEBUGOPAL                print_debug(f'calling replace_macro X - {cnumber} ="{next_tokens}"')    #DEBUGOPAL
                 if replace_macro(cnumber, next_tokens, original_line):
                     return                                  # Henceforth get lines from macro_buffer.
                 # fi
@@ -16793,12 +16800,14 @@ def process_staff_notes(command, delimiter, t_args, original_line):
             # rof
             setvar('in_chord', in_chord[last_voice_staff[0]], type_is_number)   # Set at same time as voice.
         elif token == '' and tdelim == '':
+#DEBUGOPAL            print_debug(f'process_staff_notes #E1 - next_tokens={next_tokens}') #DEBUGOPAL
             if next_tokens is not None:
                 next_tokens = next_tokens.strip()
             #
+#DEBUGOPAL            print_debug(f'process_staff_notes #E2 - next_tokens={next_tokens}') #DEBUGOPAL
         else:
             if token == '(':
-#DEBUGOPAL                print_debug(f'process_staff_notes #E - calling separate_args') #DEBUGOPAL
+#DEBUGOPAL                print_debug(f'process_staff_notes #E3 - calling separate_args') #DEBUGOPAL
                 array_args = separate_args('(' + next_tokens, False, False, original_line)
                 if len(array_args) < 1:
                     print_error("token was (, but separate_args did not return anything", original_line)
@@ -16881,6 +16890,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                 tdelim = ''
             # fi
         # fi
+#DEBUGOPAL        print_debug(f'process_staff_notes Z2# - token="{token}" tdelim="{tdelim}" next_tokens="{next_tokens}"')    #DEBUGOPAL
     # elihw
     return
 # End of process_staff_notes
@@ -16945,7 +16955,7 @@ def process_line(original_line):
             # fi
             return False
         # fi
-#DEBUGOPAL        print_debug(f'process_line #B - "{qline}", command="{command}" t_args="{t_args}" delimiter="{delimiter}"')  #DEBUGOPAL
+#DEBUGOPAL        print_debug(f'process_line #B1 - "{qline}", command="{command}" t_args="{t_args}" delimiter="{delimiter}"')  #DEBUGOPAL
         # Doing if section or else section or NORMAL processing.
         # Try to process command. If not a command, process notes.
         if command is None:                                     # Ignore nothing given.
@@ -16973,10 +16983,10 @@ def process_line(original_line):
         # fi
         # Replace variables here. Lots of checks above.
         qline = command + delimiter + t_args
-#DEBUGOPAL        print_debug(f'process_line #B - "{qline}", command="{command}" t_args="{t_args}" delimiter="{delimiter}"')  #DEBUGOPAL
+#DEBUGOPAL        print_debug(f'process_line #B2 - "{qline}", command="{command}" t_args="{t_args}" delimiter="{delimiter}"')  #DEBUGOPAL
         nline = replace_character_variables(qline, original_line).rstrip()
         command, t_args, delimiter = compute_command_args(nline)
-#DEBUGOPAL        print_debug(f'process_line #C - "{nline}", command="{command}" t_args="{t_args}" delimiter="{delimiter}"')  #DEBUGOPAL
+#DEBUGOPAL        print_debug(f'process_line #C  - "{nline}", command="{command}" t_args="{t_args}" delimiter="{delimiter}"')  #DEBUGOPAL
         if nline == qline:
             break
         # fi
@@ -16988,7 +16998,7 @@ def process_line(original_line):
         # fi
     # ehihw
 
-#DEBUGOPAL    print_debug(f'process_line #D - command="{command}" delimiter="{delimiter}" t_args="{t_args}"')   #DEBUGOPAL
+#DEBUGOPAL    print_debug(f'process_line #D  - command="{command}" delimiter="{delimiter}" t_args="{t_args}"')   #DEBUGOPAL
 
     if command is None:
         return False
@@ -17003,6 +17013,7 @@ def process_line(original_line):
         for cnumber in all_unique_macro_names[command]:
 #DEBUGOPAL            print_debug(f'process_line #E - cnumber="{cnumber}" t_args="{t_args}"')  #DEBUGOPAL
             # NOTE: return from replace_macro of false means macro didn't match correctly.
+#DEBUGOPAL            print_debug(f'calling replace_macro W - {cnumber} ="{t_args}"')    #DEBUGOPAL
             if replace_macro(cnumber, t_args, original_line):
                 return False                                # Henceforth get lines from macro_buffer.
             # fi
@@ -17114,6 +17125,7 @@ def readthefile():
         while True:                         # Character variable substitution loop, etc. (till no more).
             if macro_defining is not None:
                 # Replace any macro arguments - in macro definitions.
+#DEBUGOPAL                print_debug(f'calling replace_macro V - line="{line}"')    #DEBUGOPAL
                 nline = replace_macro_arguments(line, line).rstrip()
 #DEBUGOPAL                print_debug(f'readthefile #02 - "{nline}"')  #DEBUGOPAL
                 if nline != line:
@@ -17146,6 +17158,7 @@ def readthefile():
 #--                 break
 #--             # elihw
             if line and line[0] == '=':
+#DEBUGOPAL                print_debug(f'calling replace_macro U - line="{line}"')    #DEBUGOPAL
                 nline = replace_macro_arguments(line, line).rstrip()
                 nline = process_putd(nline)
                 i_line.append('putd:  ' + nline)            # Line as fixed or whatever.
