@@ -4,6 +4,8 @@
 # ----------------------------------------------------------------------------
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 # ----------------------------------------------------------------------------
+# compute_command_args() returns command, delimiter, t_args.strip() -- delimiter of space gone.
+# ----------------------------------------------------------------------------
 # Variables to do - NOTDONEYET:
 #       accent, aaccent, arp, fermata, ferma, stac, marc
 # ----------------------------------------------------------------------------
@@ -15968,16 +15970,14 @@ def compute_command_args(expand_line):
     t0 = re.sub(r'^([a-zA-Z0-9%_*><]*).*$', r'\1', expand_line, count=1)   # First token on line.
     t1 = re.sub(r'^[a-zA-Z0-9%_*><]*(.*)$', r'\1', expand_line, count=1)   # Rest of line.
 
-    command = t0.lstrip()
-    t_args = t1.strip()
-
     if len(t1) > 0:
         delimiter = t1[0]
+        t_args = t1.strip()             # Get rid of spaces for argument. Delimiter already set.
     else:
         delimiter = ''
+        t_args = ''
     # fi
-    # Note: t0 + t1 = line. :) [Thus know how to do things in character variable substitution.]
-    return command, t_args, delimiter
+    return t0, delimiter, t_args
 # End of compute_command_args
 
 # ----------------------------------------------------------------------------
@@ -16098,8 +16098,10 @@ def run_process(token, next_tokens, original_line):
 # End of run_process
 
 # ----------------------------------------------------------------------------
+# Toss argument.
+
 def keyword_midi(token, delimiter, next_tokens, original_line):     # NOTDONEYET
-    command, t_args, delimiter = compute_command_args(next_tokens)
+    command, delimiter, t_args = compute_command_args(next_tokens)
     print_warning(f"NOTDONEYET - keyword midi '{command}'", original_line)
     return t_args
 # End of keyword_midi
@@ -16202,9 +16204,11 @@ def keyword_note_show(token, delimiter, next_tokens, original_line):    # NOTDON
 # End of keyword_note_show
 
 # ----------------------------------------------------------------------------
+# Toss argument.
+
 def keyword_note_show1(token, delimiter, next_tokens, original_line):   # NOTDONEYET
     print_warning(f"keyword_note_show1 - ignoring '{token}' '{delimiter}' '{next_tokens}'", original_line)
-    command, t_args, newdelimiter = compute_command_args(next_tokens)
+    command, newdelimiter, t_args = compute_command_args(next_tokens)
     return t_args
 # End of keyword_note_show
 
@@ -16221,9 +16225,11 @@ def keyword_clefs(token, delimiter, next_tokens, original_line):
 # End of keyword_clefs
 
 # ----------------------------------------------------------------------------
+# Toss argument.
+
 def keyword_glide(token, delimiter, next_tokens, original_line):    # NOTDONEYET
     # There is a token after this keyword. Toss it.
-    command, t_args, delimiter = compute_command_args(next_tokens)
+    command, delimiter, t_args = compute_command_args(next_tokens)
     print_warning(f"NOTDONEYET - keyword_glide '{token}' '{delimiter}' '{next_tokens}' ignore argument='{command}'", original_line)
     return t_args
 # End of keyword_glide
@@ -16364,10 +16370,10 @@ def find_mlth_values(stfs, m, original_line):
 # return line to process.
 def macro_here(send_these_notes, original_line):
 #DEBUGOPAL    print_debug(f'macro_here - "{send_these_notes}"')     #DEBUGOPAL
-    command, t_args, delimiter = compute_command_args(send_these_notes)
+    command, delimiter, t_args = compute_command_args(send_these_notes)
 #DEBUGOPAL    print_debug(f'macro_here - "{command}" "{delimiter}" "{t_args}"')   #DEBUGOPAL
     if command in all_unique_macro_names:
-        if delimiter in ' \t\n\r\f\v':
+        if delimiter in ' \t\n\r\f\v':              # OKAY - compute_command_args
             t_args = delimiter + t_args
         # fi
         if lmp_executing_number > MAX_NESTING:
@@ -16616,17 +16622,19 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                 # NOTE: return from replace_macro of false means macro didn't match correctly.
 #DEBUGOPAL                print_debug(f'calling replace_macro X - {cnumber} ="{next_tokens}"')    #DEBUGOPAL
                 if replace_macro(cnumber, next_tokens, original_line):
+#DEBUGOPAL                    print_debug(f'replace_macro did something')    #DEBUGOPAL
                     return                                  # Henceforth get lines from macro_buffer.
                 # fi
             # rof
             print_warning(f'm:{measure_on} #B macro {token} did not match terminators correctly.', original_line)
         # fi
+#DEBUGOPAL        print_debug(f'process_staff_notes C2# - token="{token}" tdelim="{tdelim}" next_tokens="{next_tokens}"')    #DEBUGOPAL
         if token == 'begin':
             if in_process_already:
                 # Delete process from stack.
                 set_process_quit()
             # fi
-            token, next_tokens, tdelim = compute_command_args(next_tokens)
+            token, tdelim, next_tokens = compute_command_args(next_tokens)
             in_process_already = set_process_begin(token, next_tokens, original_line)
             running_process_already = False
         elif token == 'quit':
@@ -16637,14 +16645,14 @@ def process_staff_notes(command, delimiter, t_args, original_line):
             else:
                 print_error('quit without being in a process.', original_line)
             # fi
-        elif token in staff_name and tdelim in [':', ',']:
+        elif token in staff_name and tdelim in ':,':
             next_staff = []
             while tdelim in ', \t' or tdelim == '':
                 next_staff.append(token)
                 if tdelim != '' and tdelim == next_tokens[0]:
                     next_tokens = next_tokens[1:].strip()
                 # fi
-                token, next_tokens, tdelim = compute_command_args(next_tokens)
+                token, tdelim, next_tokens = compute_command_args(next_tokens)
                 if token not in staff_name:
                     print_error(f"process_staff_notes - staff names must be followed by a colon (':') - token={token} next_tokens='{next_tokens}' tdelim='{tdelim}'", original_line)
                     return
@@ -16832,10 +16840,11 @@ def process_staff_notes(command, delimiter, t_args, original_line):
             # fi
             if next_tokens is not None:
                 next_tokens = next_tokens.strip()
+#DEBUGOPAL                print_debug(f'process_notes_for_staff #S2 - next_tokens={next_tokens}')    #DEBUGOPAL
             #
         # fi
         # Get next token and tdelim.
-        token, next_tokens, tdelim = compute_command_args(next_tokens)
+        token, tdelim, next_tokens = compute_command_args(next_tokens)
 #DEBUGOPAL        print_debug(f'process_staff_notes Y# - token="{token}" tdelim="{tdelim}" next_tokens="{next_tokens}"')    #DEBUGOPAL
         token = token.strip()
         if len(next_tokens) > 0 and next_tokens[0] in ("'", '"'):
@@ -16883,7 +16892,7 @@ def process_line(original_line):
     # Replace variables for rest of 'some' lines. :)
     numcharvar = 0
     while True:
-        command, t_args, delimiter = compute_command_args(qline)
+        command, delimiter, t_args = compute_command_args(qline)
 #DEBUGOPAL        print_debug(f'process_line #A - "{qline}", command="{command}" t_args="{t_args}" delimiter="{delimiter}"')  #DEBUGOPAL
         if cstop_processing:
             # Read until cstart found (or end of file)
@@ -16952,7 +16961,7 @@ def process_line(original_line):
         qline = command + delimiter + t_args
 #DEBUGOPAL        print_debug(f'process_line #B2 - "{qline}", command="{command}" t_args="{t_args}" delimiter="{delimiter}"')  #DEBUGOPAL
         nline = replace_character_variables(qline, original_line).rstrip()
-        command, t_args, delimiter = compute_command_args(nline)
+        command, delimiter, t_args = compute_command_args(nline)
 #DEBUGOPAL        print_debug(f'process_line #C  - "{nline}", command="{command}" t_args="{t_args}" delimiter="{delimiter}"')  #DEBUGOPAL
         if nline == qline:
             break
