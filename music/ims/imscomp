@@ -4683,12 +4683,14 @@ def print_out_midi1csv_notes():
                 # fi
 
                 # The note to be turned on then off later.
-                try:
-                    n = int(n) + pitch[m]
-                except:
-                    print_error_no_line(f"v:{voice} m:{m} Not integer: n='{n}' pitch='{pitch[m]}'")
-                    break
-                # yrt
+                if pitch[m] != 0:
+                    try:
+                        n = int(n) + pitch[m]
+                    except:
+                        print_error_no_line(f"v:{voice} m:{m} Not integer: n='{n}' pitch='{pitch[m]}'")
+                        break
+                    # yrt
+                # fi
 
                 if 't' in last_suffixes:            # This note is tied to previous.
                     if legato_on:
@@ -16149,8 +16151,79 @@ def keyword_midi(token, delimiter, next_tokens, original_line):     # NOTDONEYET
 # End of keyword_midi
 
 # ----------------------------------------------------------------------------
+# transcribe down 2 octaves
+# transcribe down to g+ major
+# transcribe down to d major
+# transcribe down to c+ major
+# transcribe up 0 octaves
+# transcribe up 1 octave
+# transcribe up 2 octaves
+# transcribe up to d major
+# transcribe up to d major
+# transcribe up to b major".
+
+def keyword_transcribe(token, delimiter, next_tokens, original_line):    # NOTDONEYET
+#--     print_debug(f'keyword_transcribe - token="{token}" delimiter="{delimiter}" next_tokens="{next_tokens}"')
+    (direction, next_a) = next_tokens.split(maxsplit=1)
+    if direction not in [ 'up', 'down']:
+        print_error(f'keyword_transcribe expects direction of up or down', original_line)
+        return next_a           # Guess - let do rest.
+    # fi
+    (possible_to, next_b) = next_a.split(maxsplit=1)
+    if possible_to == 'to':
+        if next_b == '':
+            print_error(f'keyword_transcribe expects key and major/minor after "to"', original_line)
+            return ''
+        # fi
+        (keyl, mm, next_tokens) = next_b.split(maxsplit=2)
+        # Don't check them yet. -- NOTDONEYET
+#--         print_debug(f'direction="{direction}" possible_to="{possible_to}" keyl="{keyl}" mm="{mm}" next_tokens="{next_tokens}"')
+        return next_tokens          # Guess - let do rest.
+    # fi
+    # If here, then a number followed by octave or octaves.
+    number = possible_to
+    # Don't check if really a number. -- NOTDONEYET
+    (octav, next_tokens) = next_b.split(maxsplit=1)
+    if octav not in [ "octave", "octaves" ]:
+        print_error(f'keyword_transcribe (or keyword_transpose) needs octave(s) after integer (got "{octav}").', original_line)
+        return next_tokens          # Guess - let do rest.
+    # fi
+#--     print_debug(f'direction="{direction}" number="{number}" octav="{octav}"  next_tokens="{next_tokens}"')
+    return next_tokens
+# End of keyword_transcribe
+
+# ----------------------------------------------------------------------------
+# transpose nn      - integer up or down.
+
 def keyword_xpose(token, delimiter, next_tokens, original_line):    # NOTDONEYET
-    print_warning("NOTDONEYET - keyword xpose", original_line)
+    global last_voice_staff
+
+#--     print_debug(f'keyword_xpose - token="{token}" delimiter="{delimiter}" next_tokens="{next_tokens}"')
+    number = next_tokens.split(maxsplit=1)
+#--    print_debug(f'              - type(number)={type(number)} number="{number}" next_tokens="{next_tokens}"')
+    if len(number) <= 1:
+        next_tokens = ''
+    else:
+        next_tokens = number[1]
+    # fi
+    number = number[0]
+    if number is None or number == '':
+        print_error(f'keyword_xpose (or keyword_transpose) needs one integer argument after it.', original_line)
+        return ''
+    # fi
+    x = number
+    f1, type_error = is_float(x, is_float_number, False)
+    if type_error is not None:
+        print_error(f'keyword_xpose - "{type_error}" f1="{f1}"', original_line)
+        return ''
+    # fi
+    if f1 is None:
+        print_error(f"voice does not have keyword_xpose argument {x} as a number.", original_line)
+        return ''
+    # fi
+    x = str(round(f1)) # Must be an integer as a string..
+    staves = ','.join(last_voice_staff)
+    do_xpose(staves + ' ' + x, original_line)
     return next_tokens
 # End of keyword_xpose
 
@@ -16344,6 +16417,7 @@ staff_keywords = {
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     'glide': keyword_glide,
     'tie': keyword_tie,
+    'transcribe': keyword_transcribe,
 }
 for i in range(128):
     staff_keywords['v' + str(i)] = keyword_volumename   # Allow v10 to work.
@@ -16718,7 +16792,8 @@ def process_staff_notes(command, delimiter, t_args, original_line):
 #DEBUGOPAL            print_debug(f'process_staff_notes C5# - staff_keywords')    #DEBUGOPAL
             # process keyword - Might take multiple tokens.
             next_tokens = process_keyword(token, tdelim, next_tokens, original_line)
-            if next_tokens is not None:
+            if next_tokens is not None and next_tokens != '':
+#--                 print_debug(f'type(next_tokens)={type(next_tokens)} next_tokens="{next_tokens}"')
                 next_tokens = next_tokens.strip()
             # fi
         elif in_process_already and not running_process_already:
