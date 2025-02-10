@@ -23,63 +23,6 @@
 #        ../imscomp --fs --platochars --lines Djokja.gcs Djokja.fs
 #      Well, processes must be on a staff/voice, not overall. Keeping straight when
 #      inside a macro? Defining macro inside process? (Can't do it due to command?)
-#   f) process-samenote.gcs - process names and macro names can have () around argument.
-#   g) do_goto command(s) needs to have variables computed. Look at do_measure for how to do it.
-#   h) Note notation must not do whole line parsing (tokenizing) ahead of usage.
-#      Do one token at a time. This allows for macros anywhere. The macro processing
-#      will NOT do parenthesis matching, if not needed. This is current state of h2,h3,i2,i3.
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-#   h2) standard-print-stuff.include
-#       doit invention-4.gcs            > AAA.20 2>&1
-#       macro i did not match terminators correctly...
-#       The replace-macro routine calls separate arguments, but that doesn't work right for 'separators'.
-#       If a separator is hit, if it is inside a parens group ... Does it stop or continue?
-#       Example:
-#           macro   i A.
-#               "@W^//s2A"
-#           endmacro
-#           macro   j A B.
-#                   i A.
-#                   i B.
-#           endmacro
-#           macro   k A B C.
-#                   j A B.
-#                   i C.
-#           endmacro
-#           macro   m A.
-#                   "@X^//s2A"
-#           endmacro
-#           macro   n A B.
-#                   m B.
-#                   m A.
-#           endmacro
-#           macro   o A B C.
-#                   m C.
-#                   n A B.
-#           endmacro
-#       m4c.gcs:two: 2c m 4. e m 2. a m 1. 3e c e a treble 4e c e a 5e c e n (1 2. a
-#   h3) linecount=392 line='d:      2g4d m 4. b8  g4 g+'
-#       WARNING - m:24 #B macro m did not match terminators correctly...
-#         File oh-lady-be-good.gcs Line 392
-#                         - 'input:  392:d:      2g4d m 4. b8@X g4 g+'
-#                         - 'input:  392:d:      2g4d m 4. b8  g4 g+'
-#                         - 'line:  d:      2g4d m 4. b8  g4 g+'
-#   i2) invention-4.gcs
-#     Traceback (most recent call last):
-#     File "/Users/m4/ims/tc-testing/../imscomp", line 17145, in <module>
-#       main()
-#     File "/Users/m4/ims/tc-testing/../imscomp", line 17137, in main
-#       readthefile()
-#     File "/Users/m4/ims/tc-testing/../imscomp", line 17067, in readthefile
-#       ifdone = process_line(line)
-#     File "/Users/m4/ims/tc-testing/../imscomp", line 16914, in process_line
-#       process_staff_notes(command, delimiter, t_args, original_line)
-#     File "/Users/m4/ims/tc-testing/../imscomp", line 16533, in process_staff_notes
-#       in_process_already = set_process_begin(token, next_tokens, original_line)
-#     File "/Users/m4/ims/tc-testing/../imscomp", line 15932, in set_process_begin
-#       print_debug(f'set_process_begin - #A token={token} ({process_argument[pnumber][i]} {level}')
-#   UnboundLocalError: local variable 'i' referenced before assignment
-#   i3) true-faith.gcs -- same as above.
 # ----------------------------------------------------------------------------
 # TO DO:
 # 1) b-6 ... some 1/2 notes that are vol(sf) -- should they be shortened?
@@ -1403,7 +1346,7 @@ def separate_args(wline, integers, nospaces, original_line):
     def b4it(array_args, b4, integers, nospaces, original_line):
         global staff_name
 
-#DEBUGOPAL        print_debug(f'b4it #A')    #DEBUGOPAL
+#DEBUGOPAL        print_debug(f'b4it #A - original_line={original_line} array_args={array_args} b4="{b4}" integers={integers} nospaces={nospaces}')    #DEBUGOPAL
         if b4 == '':
             array_args.append(b4)
         elif integers is None or (type(integers) == str and integers == 'volumes'):
@@ -1475,10 +1418,9 @@ def separate_args(wline, integers, nospaces, original_line):
         b4 = ''
         w = w + x + 1
     # elihw
-    ti = integers
 #DEBUGOPAL    print_debug(f'separate_args #Y')    #DEBUGOPAL
-    array_args = b4it(array_args, b4, ti, nospaces, original_line)
-#DEBUGOPAL    print_debug(f'separate_args #Z')    #DEBUGOPAL
+    array_args = b4it(array_args, b4, integers, nospaces, original_line)
+#DEBUGOPAL    print_debug(f'separate_args #Z - array_args={array_args}')    #DEBUGOPAL
     return array_args
 # End of separate_args
 
@@ -2377,11 +2319,13 @@ last_voice_staff = None             # For continuation lines.
 global staff_chord                  # If in the middle of a chord for staff_name.
 staff_chord = {}                    # Not collected any chords for any staff/staves yet.
 global staff_chord_voices
+staff_chord_voices = {}             # number of voices (max) for current chord -- else assign more voices.
 global in_chord                     # 0 if false, -1 for true. (Matches tutor.)
 in_chord = {}                       # Index via staff.
-staff_chord_voices = {}             # number of voices (max) for current chord -- else assign more voices.
 global staff_chord_minlth
 staff_chord_minlth = {}             # minimum time length of chord notes.
+global staff_chord_pad_rest
+staff_chord_pad_rest = {}           # Used only for auto-assigned voices for staff chords.
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global args
 global errors_happened
@@ -5582,6 +5526,8 @@ def print_debug_bufs(s, *varargs):
         if staff_name[st] is not None:
             for v in staff_name[st]:
                 print_debug(f'    staff:{st} voice_prenote[{v}]={voice_prenote[v]}')
+            # rof
+        # fi
         print_debug(f'    save_voice_prenote[{st}]={save_voice_prenote[st]}')
         print_debug(f'    save_cresc_volume[{st}]={save_cresc_volume[st]}')
         print_debug(f'    save_cresc_volume_time[{st}]={save_cresc_volume_time[st]}')
@@ -7207,7 +7153,9 @@ def assign_another_voice(b4, where, original_line):
     global time
     global vinstrument
     global mlth
+    global staff_chord_pad_rest
 
+#DEBUGOPAL    print_debug(f'assign_another_voice - Entering b4={b4} called from {where}')   #DEBUGOPAL
     # If not any staves, nor notes on any voices, and #voices == 1, use 1 for first, else one more than used.
     mv_a = { }
     max_a = 1
@@ -7241,81 +7189,73 @@ def assign_another_voice(b4, where, original_line):
         staff_chord_voices[b4] = []
     # fi
     # Get mlth for the chord we are working on.
-    scml = None                                         # Staff Chord mlth.
     m = measure_on
 
     # Get an old voice in chord's note length, which we can then subtract from
     # mlth (measure length) for voice. This is the fill length for new voice.
-    if staff_chord_voices[b4] is not None and staff_chord_voices[b4] != []:
-        for v in staff_name[b4]:
-            if v not in staff_chord_voices[b4]:
-                if m not in mlth[v]:
-                    mlth[v][m] = 0
-                elif v in bufs_length and m in bufs_length[v]:
-                    t = mlth[v][m] - bufs_length[v][m][-1]
-                    if scml is None or scml < scml:
-                        scml = t
-                    # fi
-                else:
-                    scml = mlth[v][m]
-                # fi
-            # fi
-        # rof
-    # fi
+#DEBUGOPAL    print_debug(f'assign_another_voice - staff_chord_voices={staff_chord_voices}')    #DEBUGOPAL
+#DEBUGOPAL    print_debug(f'assign_another_voice - mlth={mlth}')                # DEBUGOPAL
+#DEBUGOPAL    print_debug(f'assign_another_voice - bufs_length={bufs_length}')  # DEBUGOPAL
+#DEBUGOPAL    print_debug_bufs('From assign_another_voice')                     # DEBUGOPAL
 
-    nv = mv
-    initialize_set_voices(nv, original_line)
-    if scml is not None:
-        fill_1_voice_mlth(nv, scml, original_line)      # Need to make measure for this voice in staff up to here "mlth".
+    initialize_set_voices(mv, original_line)
+#DEBUGOPAL    print_debug(f'staff_chord_pad_rest={staff_chord_pad_rest} b4={b4}')   #DEBUGOPAL
+    if staff_chord_pad_rest == {} or b4 not in staff_chord_pad_rest:
+        staff_chord_pad_rest[b4] = 0
+    # fi
+    if staff_chord_pad_rest[b4] is not None and staff_chord_pad_rest[b4] != 0:
+#DEBUGOPAL        print_debug(f'assign_another_voice - fill_1_voice_mlth mv={mv} staff_chord_pad_rest[b4]={staff_chord_pad_rest[b4]}')   #DEBUGOPAL
+        fill_1_voice_mlth(mv, staff_chord_pad_rest[b4], original_line)  # Need to make measure for this voice in staff up to here "mlth".
     # fi
     if staff_name[b4] is None:
-        ns = [ nv ]
+        ns = [ mv ]
     else:
-        ns = staff_name[b4] + [ nv ]
+        ns = staff_name[b4] + [ mv ]
     # fi
+#--     print_debug(f'assign_another_voice - b4={b4} staff_name[b4]={staff_name[b4]} ns={ns} measure_on={measure_on}')
     print_debug(f'assign_new_voice - b4={b4} ns={ns} measure_on={measure_on}')
     if staff_name[b4] is not None:
         ov = staff_name[b4][0]                          # An old voice.
-        bufs_velocity[nv] = copy.deepcopy(bufs_velocity[ov])
-        key_voice[nv] = copy.deepcopy(key_voice[ov])
-        oct[nv] = copy.deepcopy(oct[ov])
-        reverb[nv] = copy.deepcopy(reverb[ov])
-        time[nv] = copy.deepcopy(time[ov])
-        vinstrument[nv] = copy.deepcopy(vinstrument[ov])
+        bufs_velocity[mv] = copy.deepcopy(bufs_velocity[ov])
+        key_voice[mv] = copy.deepcopy(key_voice[ov])
+        oct[mv] = copy.deepcopy(oct[ov])
+        reverb[mv] = copy.deepcopy(reverb[ov])
+        time[mv] = copy.deepcopy(time[ov])
+        vinstrument[mv] = copy.deepcopy(vinstrument[ov])
 
-        bufs_intensity[nv] = copy.deepcopy(bufs_intensity[ov])
-        intensity[nv] = copy.deepcopy(intensity[ov])
-        running_intensity[nv] = running_intensity[ov]
+        bufs_intensity[mv] = copy.deepcopy(bufs_intensity[ov])
+        intensity[mv] = copy.deepcopy(intensity[ov])
+        running_intensity[mv] = running_intensity[ov]
 
-        bufs_pan[nv] = copy.deepcopy(bufs_pan[ov])
-        pan[nv] = copy.deepcopy(pan[ov])
-        running_pan[nv] = running_pan[ov]
+        bufs_pan[mv] = copy.deepcopy(bufs_pan[ov])
+        pan[mv] = copy.deepcopy(pan[ov])
+        running_pan[mv] = running_pan[ov]
 
-        bufs_volume[nv] = copy.deepcopy(bufs_volume[ov])
-        volume[nv] = volume[ov]
-        running_volume[nv] = running_volume[ov]
-        running_volume_next[nv] = running_volume_next[ov]
+        bufs_volume[mv] = copy.deepcopy(bufs_volume[ov])
+        volume[mv] = volume[ov]
+        running_volume[mv] = running_volume[ov]
+        running_volume_next[mv] = running_volume_next[ov]
 
         # Following have to be saved with chord start, because they can change with notes that happen... .
-        voice_prenote[nv] = save_voice_prenote[b4]
+        voice_prenote[mv] = save_voice_prenote[b4]
 
-        cresc_volume[nv] = copy.deepcopy(save_cresc_volume[b4])
-        cresc_volume_time[nv] = copy.deepcopy(save_cresc_volume_time[b4])
-        cresc_volume_direction[nv] = copy.deepcopy(save_cresc_volume_direction[b4])
-        future_volume_cresc_dimin[nv] = copy.deepcopy(save_future_volume_cresc_dimin[b4])
-        future_volume_cresc_time[nv] = copy.deepcopy(save_future_volume_cresc_time[b4])
+        cresc_volume[mv] = copy.deepcopy(save_cresc_volume[b4])
+        cresc_volume_time[mv] = copy.deepcopy(save_cresc_volume_time[b4])
+        cresc_volume_direction[mv] = copy.deepcopy(save_cresc_volume_direction[b4])
+        future_volume_cresc_dimin[mv] = copy.deepcopy(save_future_volume_cresc_dimin[b4])
+        future_volume_cresc_time[mv] = copy.deepcopy(save_future_volume_cresc_time[b4])
 
-        cresc_intensity[nv] = copy.deepcopy(save_cresc_intensity[b4])
-        cresc_intensity_time[nv] = copy.deepcopy(save_cresc_intensity_time[b4])
-        cresc_intensity_direction[nv] = copy.deepcopy(save_cresc_intensity_direction[b4])
-        future_intensity_cresc_dimin[nv] = copy.deepcopy(save_future_intensity_cresc_dimin[b4])
-        future_intensity_cresc_time[nv] = copy.deepcopy(save_future_intensity_cresc_time[b4])
+        cresc_intensity[mv] = copy.deepcopy(save_cresc_intensity[b4])
+        cresc_intensity_time[mv] = copy.deepcopy(save_cresc_intensity_time[b4])
+        cresc_intensity_direction[mv] = copy.deepcopy(save_cresc_intensity_direction[b4])
+        future_intensity_cresc_dimin[mv] = copy.deepcopy(save_future_intensity_cresc_dimin[b4])
+        future_intensity_cresc_time[mv] = copy.deepcopy(save_future_intensity_cresc_time[b4])
 
-        cresc_pan[nv] = copy.deepcopy(save_cresc_pan[b4])
-        cresc_pan_time[nv] = copy.deepcopy(save_cresc_pan_time[b4])
-        cresc_pan_direction[nv] = copy.deepcopy(save_cresc_pan_direction[b4])
-        future_pan_cresc_dimin[nv] = copy.deepcopy(save_future_pan_cresc_dimin[b4])
-        future_pan_cresc_time[nv] = copy.deepcopy(save_future_pan_cresc_time[b4])
+        cresc_pan[mv] = copy.deepcopy(save_cresc_pan[b4])
+        cresc_pan_time[mv] = copy.deepcopy(save_cresc_pan_time[b4])
+        cresc_pan_direction[mv] = copy.deepcopy(save_cresc_pan_direction[b4])
+        future_pan_cresc_dimin[mv] = copy.deepcopy(save_future_pan_cresc_dimin[b4])
+        future_pan_cresc_time[mv] = copy.deepcopy(save_future_pan_cresc_time[b4])
     # fi
     staff_name[b4] = ns
 # End of assign_another_voice
@@ -8680,7 +8620,7 @@ def do_clef(t_args, original_line):
     clf = vargs[1]
     next_tokens = ' '.join(vargs[2:])                       # slice allows going over length of list.
     jkl = str(vargs[0])
-#DEBUGOPAL    print_debug(f'do_clef #B - calling separate_args') #DEBUGOPAL
+#DEBUGOPAL    print_debug(f'do_clef #B - calling separate_args jkl={jkl}') #DEBUGOPAL
     wargs = separate_args(jkl, None, True, original_line)   # Allow staff_name and voice numbers.
     if not wargs or len(wargs) < 1:
         print_error("no voice arguments on clef line", original_line)
@@ -16177,7 +16117,6 @@ def keyword_midi(token, delimiter, next_tokens, original_line):     # NOTDONEYET
 # transcribe up to b major".
 
 def keyword_transcribe(token, delimiter, next_tokens, original_line):    # NOTDONEYET
-#--     print_debug(f'keyword_transcribe - token="{token}" delimiter="{delimiter}" next_tokens="{next_tokens}"')
     (direction, next_a) = next_tokens.split(maxsplit=1)
     if direction not in [ 'up', 'down']:
         print_error(f'keyword_transcribe expects direction of up or down', original_line)
@@ -16191,7 +16130,7 @@ def keyword_transcribe(token, delimiter, next_tokens, original_line):    # NOTDO
         # fi
         (keyl, mm, next_tokens) = next_b.split(maxsplit=2)
         # Don't check them yet. -- NOTDONEYET
-#--         print_debug(f'direction="{direction}" possible_to="{possible_to}" keyl="{keyl}" mm="{mm}" next_tokens="{next_tokens}"')
+        print_warning(f'keyword_transcribe - NOTDONEYET - direction="{direction}" keyl="{keyl}" mm="{mm}"  next_tokens="{next_tokens}"')
         return next_tokens          # Guess - let do rest.
     # fi
     # If here, then a number followed by octave or octaves.
@@ -16202,7 +16141,7 @@ def keyword_transcribe(token, delimiter, next_tokens, original_line):    # NOTDO
         print_error(f'keyword_transcribe (or keyword_transpose) needs octave(s) after integer (got "{octav}").', original_line)
         return next_tokens          # Guess - let do rest.
     # fi
-#--     print_debug(f'direction="{direction}" number="{number}" octav="{octav}"  next_tokens="{next_tokens}"')
+    print_warning(f'keyword_transcribe - NOTDONEYET - direction="{direction}" number="{number}" octav="{octav}"  next_tokens="{next_tokens}"')
     return next_tokens
 # End of keyword_transcribe
 
@@ -16212,9 +16151,7 @@ def keyword_transcribe(token, delimiter, next_tokens, original_line):    # NOTDO
 def keyword_xpose(token, delimiter, next_tokens, original_line):    # NOTDONEYET
     global last_voice_staff
 
-#--     print_debug(f'keyword_xpose - token="{token}" delimiter="{delimiter}" next_tokens="{next_tokens}"')
     number = next_tokens.split(maxsplit=1)
-#--    print_debug(f'              - type(number)={type(number)} number="{number}" next_tokens="{next_tokens}"')
     if len(number) <= 1:
         next_tokens = ''
     else:
@@ -16807,7 +16744,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
             # process keyword - Might take multiple tokens.
             next_tokens = process_keyword(token, tdelim, next_tokens, original_line)
             if next_tokens is not None and next_tokens != '':
-#--                 print_debug(f'type(next_tokens)={type(next_tokens)} next_tokens="{next_tokens}"')
+#DEBUGOPAL                print_debug(f'type(next_tokens)={type(next_tokens)} next_tokens="{next_tokens}"')
                 next_tokens = next_tokens.strip()
             # fi
         elif in_process_already and not running_process_already:
@@ -16863,6 +16800,15 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                 # fi
                 # The voices that are at the same time playing length. (array)
                 staff_chord_voices[st] = find_mlth_values(st, measure_on, original_line)
+                global staff_chord_pad_rest
+                if st not in staff_chord_pad_rest or staff_chord_voices[st] == None:
+                    staff_chord_pad_rest[st] = 0
+                # fi
+                for x in staff_chord_voices[st]:
+                    staff_chord_pad_rest[st] =  mlth[x][measure_on]
+                    break
+                # rof
+
                 staff_chord_minlth[st] = None               # No chords, start with next note... .
                 in_chord[st] = -1                           # -1 for true
             # rof
