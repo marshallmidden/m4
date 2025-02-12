@@ -2,18 +2,19 @@
 SONGS  = 18notes
 SONGS += 1963
 SONGS += Chromatic
-#-- DOESN'T WORK	SONGS += Djokja
 SONGS += Entroid
 SONGS += Entroid_
 SONGS += Horizons
+SONGS += Joy
 SONGS += Kanon
 SONGS += Miditest
 SONGS += Poppers
 SONGS += Roundoff
+
 SONGS += changes-idea
 SONGS += char-print
-#-- DOESN'T WORK	SONGS += e-minor
-SONGS += etude-1-chopin
+SONGS += clock-tower
+#-- DOESN'T WORK	SONGS += e-minor	No notes.
 SONGS += fru-uhlingserwachen
 SONGS += idea
 SONGS += joy-piano-part
@@ -21,45 +22,37 @@ SONGS += ma-solitude
 SONGS += maple-leaf-rag
 SONGS += miscellaneous-ideas
 SONGS += mozart
+SONGS += oh-lady-be-good
 SONGS += opus10-chopin
 SONGS += opus8-scriabin
+SONGS += poj-prelude
 SONGS += random-chords
 SONGS += replot
 SONGS += revolution-midi
 SONGS += song-without-words
 SONGS += theme
-
-# Had tempo in middle of measure (fix by moving to next measure).
-SONGS += Joy
+SONGS += what-a-fool-believes
 #-----------------------------------------------------------------------------
-# Problems with assigning new voices in measure 19.
-#     File "/Users/m4/ims/tc-testing/../imscomp", line 6446, in fill_future_pvi
-#         b = bufs_suffixes[voiceon][ms][n]
-BROKEN += Phantasm
+# Problems with processes needed for each staff.
+BROKEN += Djokja
 
-# Problems with goto -- really want a loop, not a goto. (see ../clock-tower.gcs)
-# repeat is a goto. Insert fake measure?
-BROKEN += clock-tower
+# Traceback
+BROKEN += etude-1-chopin
+
+# Octave is zero of negative (0) or not an integer.
+# Traceback
+# File "/Users/m4/ims/tc-testing/../imscomp", line 6792, in put_on_bufs
+#     bufs_volume[voiceon][p_meas].append(running_volume[voiceon])        # Add volume stuff for this note.
+SONGS += Phantasm
 
 # Process should be for each staff, not one for everything - 
 #   ERROR - process invert unable to create variable A
-#     File invention-4.gcs Line 67
-#                     - 'input:   67:two:    begin invert'
-#                     - 'line:  two:    begin invert'
-BROKEN += invention-4
-
-# A tied note is wrong.
-BROKEN += oh-lady-be-good
-
-# A rit tempo, and cut time. A bunch of tied notes are wrong.
-BROKEN += poj-prelude
+SONGS += invention-4
 
 # Need process per staff/voice.
-# Something about a variable that cannot be created.
-BROKEN += true-faith
+# ERROR - process invert unable to create variable A
+SONGS += true-faith
 
-# Many tied notes.
-BROKEN += what-a-fool-believes
 #-----------------------------------------------------------------------------
 SONGS_E = ${SONGS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
