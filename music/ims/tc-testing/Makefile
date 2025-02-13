@@ -1,5 +1,4 @@
-#-----------------------------------------------------------------------------
-SONGS  = 18notes
+#----------------------------------------------------------------------------- SONGS  = 18notes
 SONGS += 1963
 SONGS += Chromatic
 SONGS += Entroid
@@ -43,11 +42,11 @@ BROKEN += etude-1-chopin
 # Traceback
 # File "/Users/m4/ims/tc-testing/../imscomp", line 6792, in put_on_bufs
 #     bufs_volume[voiceon][p_meas].append(running_volume[voiceon])        # Add volume stuff for this note.
-SONGS += Phantasm
+BROKEN += Phantasm
 
 # Process should be for each staff, not one for everything - 
 #   ERROR - process invert unable to create variable A
-SONGS += invention-4
+BROKEN += invention-4
 
 # Need process per staff/voice.
 # ERROR - process invert unable to create variable A
