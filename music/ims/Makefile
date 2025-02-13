@@ -1,10 +1,6 @@
 #-----------------------------------------------------------------------------
 SONGS  = A-Flat-Prelude-Chopin
 SONGS += clock_tower
-#-- SONGS += m4
-#-- SONGS += m4b
-#-- SONGS += m4c
-#-- SONGS += m4d
 #-----------------------------------------------------------------------------
 TESTS  = A0
 TESTS += A1
@@ -57,18 +53,33 @@ TESTS += W7
 TESTS += W8
 TESTS += W8.i.no.10
 TESTS += W9
+TESTS += X1
 TESTS += debugstaffvol
+TESTS += m4
+TESTS += m4b
+TESTS += m4c
+TESTS += m4d
+TESTS += m4e
+TESTS += m4f
+TESTS += m4g
+TESTS += m4h
 TESTS += s14
+TESTS += s15
 TESTS += sequence
+TESTS += tempo
 TESTS += test-cresc-chord
 TESTS += test-cresc-staff
 TESTS += test-cresc
+TESTS += test-stacc
+TESTS += test-vol-sf
+TESTS += test
+TESTS += testinline
 TESTS += trills
+TESTS += vars-test
 TESTS += vc1-test
 TESTS += vc2-test
 TESTS += vc3-test
 TESTS += vc4-test
-TESTS += vars-test
 #-----------------------------------------------------------------------------
 SONGS_E = ${SONGS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
