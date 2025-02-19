@@ -733,6 +733,7 @@ def print_i_line(original_line):
     global i_line
     global lmp_executing_i_line
     global lmp_executing_number
+    global which_lmp_staff_voice
 
     k = None
     if lmp_executing_number > 0:
@@ -2683,7 +2684,7 @@ macro_buffer = [ ]
 # Process definition.
 global process_number               # Increment for each process defined.
 process_number = 0                  # Matches len(following).
-global process_name                 # process number: array of process names - No duplicates.
+global process_name                 # Index by process number: array of process names - No duplicates.
 process_name = [ ]
 global process_argument             # Index by process number: Single argument for process.
 process_argument = [ ]
@@ -2709,7 +2710,9 @@ loop_buffer = [ ]
 global all_unique_macro_names       # Dictionary 'name': [ numbers ] -- From numbers, get terminators, etc.
 all_unique_macro_names = { }
 
-# Following are for executing macros.
+# Following are for executing macros - and loops.
+global which_lmp_staff_voice        # Which lmp_stacks to use -- last_voice_staff to 1 only.
+which_lmp_staff_voice = None
 global lmp_executing_number         # The depth (number) of executing macros/process/loop. (nested number)
 lmp_executing_number = 0
 global lmp_executing_which          # The {macro/process/loop}_number (above groups) we are executing.
@@ -5464,6 +5467,28 @@ def create_staves():
 # End of create_staves
 
 # ----------------------------------------------------------------------------
+def print_debug_lmp(s):
+    global which_lmp_staff_voice        # Which lmp_stacks to use -- last_voice_staff to 1 only.
+    global lmp_executing_number         # The depth (number) of executing macros/process/loop. (nested number)
+    global lmp_executing_which          # The {macro/process/loop}_number (above groups) we are executing.
+    global lmp_executing_type           # "loop", "macro", "process" - type for "which", line, args, number... .
+    global lmp_executing_args           # Array of argument(s) given to macro. (None for loop, one for process.)
+    global lmp_executing_line           # Line number in macro/loop/process array currently processing.
+    global lmp_executing_rest_of_line   # Rest of line - for in-line macro/process. Loop doesn't have this.
+    global lmp_executing_i_line         # Saved i_line in entered macro.
+
+    print_debug(f'print_debug_lmp - {s}')
+    print_debug(f'print_debug_lmp - which_lmp_staff_voice={which_lmp_staff_voice}')
+    print_debug(f'print_debug_lmp - lmp_executing_number={lmp_executing_number}')
+    print_debug(f'print_debug_lmp - lmp_executing_which={lmp_executing_which}')
+    print_debug(f'print_debug_lmp - lmp_executing_type={lmp_executing_type}')
+    print_debug(f'print_debug_lmp - lmp_executing_args={lmp_executing_args}')
+    print_debug(f'print_debug_lmp - lmp_executing_line={lmp_executing_line}')
+    print_debug(f'print_debug_lmp - lmp_executing_rest_of_line={lmp_executing_rest_of_line}')
+    print_debug(f'print_debug_lmp - lmp_executing_i_line={lmp_executing_i_line}')
+# End of print_debug_lmp
+
+# ----------------------------------------------------------------------------
 def print_debug_bufs(s, *varargs):
     global staff_name
     global staff_chord_voices
@@ -5641,6 +5666,8 @@ def pass2():
     global process_defining
     global in_process_already
     global process_name
+    global last_voice_staff
+    global which_lmp_staff_voice
     global lmp_executing_type
     global lmp_executing_number
     global bufs_pan
@@ -5649,6 +5676,7 @@ def pass2():
     global intensity_percentage
     global errors_happened
 
+#--     print_debug_lmp('pass2')
     if measure_on == '':
         print_error_no_line(f'No measures defined.')
         quick_exit()
@@ -5670,6 +5698,7 @@ def pass2():
     if loop_defining is not None:
         print_error_no_line(f'Inside defining loop {loop_defining} at line number {loop_location[loop_defining]}, no endloop reached.')
     # fi
+
     if lmp_executing_number > 0:
         print_error_no_line(f'Processing {lmp_executing_type[lmp_executing_number]} depth (nesting) is {lmp_executing_number}.')
     # fi
@@ -5857,6 +5886,7 @@ def delete_executing_variables(l):
 
 # ----------------------------------------------------------------------------
 def get_next_process_line(l):
+    global which_lmp_staff_voice
     global lmp_executing_which
     global lmp_executing_type
     global lmp_executing_line
@@ -5889,35 +5919,30 @@ def get_next_process_line(l):
 
 # ----------------------------------------------------------------------------
 def get_next_macro_line(l):
-    global lmp_executing_number
+#--     global lmp_executing_number
     global lmp_executing_which
-    global lmp_executing_type
+#--     global lmp_executing_type
     global lmp_executing_line
-    global lmp_executing_i_line
-    global lmp_executing_args
-    global lmp_executing_rest_of_line
+#--     global lmp_executing_i_line
+#--     global lmp_executing_args
+#--     global lmp_executing_rest_of_line
     global i_line
     global macro_buffer
+    global which_lmp_staff_voice
 
+#--     print_debug_lmp(f'get_next_macro_line - Entering l={l}')
     the_macro = lmp_executing_which[l]
     linenumber = lmp_executing_line[l]
     lines = macro_buffer[the_macro]
     if linenumber >= len(lines):
         delete_executing_variables(l)
-        # Delete rest of macro variables.
-        del lmp_executing_which[l]
-        del lmp_executing_type[l]
-        del lmp_executing_args[l]
-        del lmp_executing_line[l]
-        del lmp_executing_i_line[l]
-        retline = lmp_executing_rest_of_line[l]                   # Stuff after this macro (if not EOLN)
-        del lmp_executing_rest_of_line[l]
-        lmp_executing_number = lmp_executing_number - 1
-        return retline
+#--        print_debug_lmp(f'get_next_macro_line - Exiting done with macro')
+        return remove_lmp(l)
     # fi
     line = lines[linenumber]
     i_line = [ f'macro:        {(linenumber+1):4d}:' + line ]     # Line as given from macro text buffer
     lmp_executing_line[l] = linenumber + 1
+#--     print_debug_lmp(f'get_next_macro_line - Exiting - return line')
     return line
 # End of get_next_macro_line
 
@@ -6018,13 +6043,14 @@ def get_next_loop_line(l):
         delete_executing_variables(l)
         if not flag:                                        # END OF LOOP
             # Delete rest of loop variables.
-            del lmp_executing_which[l]
-            del lmp_executing_type[l]
-            del lmp_executing_args[l]
-            del lmp_executing_line[l]
-            del lmp_executing_i_line[l]
-            del lmp_executing_rest_of_line[l]       # No stuff after loop. Ignore it.
-            lmp_executing_number = lmp_executing_number - 1
+#--             del lmp_executing_which[which_lmp_staff_voice][l]
+#--             del lmp_executing_type[which_lmp_staff_voice][l]
+#--             del lmp_executing_args[which_lmp_staff_voice][l]
+#--             del lmp_executing_line[which_lmp_staff_voice][l]
+#--             del lmp_executing_i_line[which_lmp_staff_voice][l]
+#--             del lmp_executing_rest_of_line[which_lmp_staff_voice][l]       # No stuff after loop. Ignore it.
+#--             lmp_executing_number[which_lmp_staff_voice] = lmp_executing_number[which_lmp_staff_voice] - 1
+            remove_lmp(l)
 
             loop_location.pop()
             loop_increment.pop()
@@ -6175,6 +6201,7 @@ def read_next_line():
     global lmp_executing_type
     global running_process_already
 
+#--     print_debug_lmp(f'read_next_line')
     if lmp_executing_number > 0:
         l = lmp_executing_number
         if lmp_executing_type[l] == 'macro':
@@ -6184,6 +6211,7 @@ def read_next_line():
                 print_these_vars('read_next_line,macro')
             # fi
             return tline, ''
+# NOTDONEYET - PROCESS
         elif lmp_executing_type[l] == 'loop':
             tline = get_next_loop_line(l)
             if args.lines:
@@ -7248,6 +7276,7 @@ def replace_macro(cnumber, t_args, original_line):
     global lmp_executing_type
     global i_line
 
+#--     print_debug_lmp(f'replace_macro - cnumber={cnumber} t_args={t_args}')
     command = macro_name[cnumber]
     if t_args is None or t_args == '':
         if macro_arguments[cnumber] != []:
@@ -8827,7 +8856,6 @@ def do_delay(t_args, original_line):
     for onvoice in range(loopstart+1, voices + 1):
         r = r + f',r({rvalue}/60.0)'
     # rof
-# NOTDONEYET - staff - process_staff_notes if last_voice_staff ... .
     process_notes_oldway(r, original_line)
     return
 # End of do_delay
@@ -9577,6 +9605,7 @@ def do_endm(t_args, original_line):
         return
     # fi
     macro_defining = None
+#--     print_debug_lmp('do_endm')
     return
 # End of do_endm
 
@@ -10217,6 +10246,7 @@ def do_macro(t_args, original_line):
         all_unique_macro_names[name].append(macro_number)
     # fi
     macro_number = macro_number + 1
+#--     print_debug_lmp('do_macro')
     return
 # End of do_macro
 
@@ -10640,13 +10670,14 @@ def do_outloop(t_args, original_line):
     if f1 < 0:
         delete_executing_variables(l)
         # Delete rest of loop variables.
-        del lmp_executing_which[l]
-        del lmp_executing_type[l]
-        del lmp_executing_args[l]
-        del lmp_executing_line[l]
-        del lmp_executing_i_line[l]
-        del lmp_executing_rest_of_line[l]       # No stuff after loop. Ignore it.
-        lmp_executing_number = lmp_executing_number - 1
+        remove_lmp(l)
+#--         del lmp_executing_which[which_lmp_staff_voice][l]
+#--         del lmp_executing_type[which_lmp_staff_voice][l]
+#--         del lmp_executing_args[which_lmp_staff_voice][l]
+#--         del lmp_executing_line[which_lmp_staff_voice][l]
+#--         del lmp_executing_i_line[which_lmp_staff_voice][l]
+#--         del lmp_executing_rest_of_line[which_lmp_staff_voice][l]       # No stuff after loop. Ignore it.
+#--         lmp_executing_number[which_lmp_staff_voice] = lmp_executing_number[which_lmp_staff_voice] - 1
 
         loop_location.pop()
         loop_increment.pop()
@@ -11421,6 +11452,30 @@ def do_staff(t_args, original_line):
 # End of do_staff
 
 # ----------------------------------------------------------------------------
+def remove_lmp(l):
+    global lmp_executing_number
+    global lmp_executing_which
+    global lmp_executing_type
+    global lmp_executing_line
+    global lmp_executing_i_line
+    global lmp_executing_args
+    global lmp_executing_rest_of_line
+    global which_lmp_staff_voice
+
+    # Delete rest of macro variables.
+    del lmp_executing_which[l]
+    del lmp_executing_type[l]
+    del lmp_executing_args[l]
+    del lmp_executing_line[l]
+    del lmp_executing_i_line[l]
+    retline = lmp_executing_rest_of_line[l]                   # Stuff after this macro (if not EOLN)
+    del lmp_executing_rest_of_line[l]
+    lmp_executing_number = lmp_executing_number - 1
+#--     print_debug_lmp(f'remove_lmp - Exiting')
+    return retline
+# End of remove_lmp
+
+# ----------------------------------------------------------------------------
 # See abc notation for format of %%staves command for printing.
 #       %%staves [(1 2) 3 (4 5)]
 #       =%%staves [(fluteA fluteB) (oboeA oboeB) (clarinetA clarinetB) \
@@ -11638,7 +11693,9 @@ def do_tempo(t_args, original_line):
 def do_vars(t_args, original_line):
 # NOTDONEYET - PROCESS variables
     global lmp_executing_number
+    global which_lmp_staff_voice
 
+#--     print_debug_lmp('do_vars - Entering')
     handle_vars_and_global(t_args, lmp_executing_number, original_line)
     return
 # End of do_vars
@@ -12324,7 +12381,9 @@ def initialize_set_voices(f1, original_line):
 def handle_vars_parens(arg, a, create_it, original_line):
 # NOTDONEYET - PROCESS variables
     global lmp_executing_number
+    global which_lmp_staff_voice
 
+#--     print_debug_lmp('handle_vars_parens - Entering')
     if a == 0:
         print_error(f"variable definition {arg} does not have a name before parenthesis.", original_line)
         return None, None
@@ -12480,7 +12539,9 @@ def handle_vars_parens(arg, a, create_it, original_line):
 def handle_vars_and_global(t_args, level, original_line):
 # NOTDONEYET - PROCESS
     global lmp_executing_number
+    global which_lmp_staff_voice
 
+#--     print_debug_lmp('handle_vars_and_global - Entering')
     if t_args is None or t_args == '':
         print_error("vars needs at least one argument", original_line)
         return
@@ -15127,6 +15188,7 @@ def handle_one_note(p_i, voiceon, m, notestuff, suffixstuff, original_line):
 
 def process_notes_oldway(line, original_line):
     global last_voice_staff
+    global which_lmp_staff_voice
     global voices                       # number of voices
     global cis                          # if cis active, non-zero.
     global measure_on                   # The measure we are on.
@@ -15142,6 +15204,9 @@ def process_notes_oldway(line, original_line):
     global bufs_tie_next
     global voice_prenote
     global MIDICLICKSPERQUARTER
+    global lmp_executing_which
+
+#--     print_debug_lmp('handle_vars_and_global - Entering')
 
     if not measure_on or measure_on == '':  # no measure yet
         print_error("no measure processed yet - must have one before notes.", original_line)
@@ -15228,6 +15293,7 @@ def process_notes_oldway(line, original_line):
     # ...........................................................................
     if cis == 0:                        # if not doing only one voice continuously for a while...
         last_voice_staff = None
+        which_lmp_staff_voice = None
         if len(wargs) > voices:
             print_error(f"m:{measure_on} too many arguments ({len(wargs)}), greater than voices (>{voices})", original_line)
             return
@@ -15824,6 +15890,7 @@ def compute_command_args(expand_line):
 # End of compute_command_args
 
 # ----------------------------------------------------------------------------
+# Start a process for all 'last_voice_staff'.
 # return True if going to be in a process upon exit. False for error.
 
 def set_process_begin(token, next_tokens, original_line):
@@ -16280,6 +16347,11 @@ def find_mlth_values(stfs, m, original_line):
 # ----------------------------------------------------------------------------
 # return line to process.
 def macro_here(send_these_notes, original_line):
+    global lmp_executing_number
+    global which_lmp_staff_voice
+
+#--     print_debug_lmp('macro_here - Entering')
+
     command, delimiter, t_args = compute_command_args(send_these_notes)
     if command in all_unique_macro_names:
         if delimiter in ' \t\n\r\f\v':              # OKAY - compute_command_args
@@ -16452,6 +16524,11 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):
 #           d) If ':' error.
 #`      2) after token name, delimiter matters: ',' or ':' gather tokens until possible ':' ( look-ahead ).
 #
+global multiple_staves_processes_once       # Does not do what you want! (Different proceses on each staff.)
+multiple_staves_processes_once = False
+global multiple_staves_processes_ooo        # Not same number of processes on staves. (WON'T WORK RIGHT EITHER!)
+multiple_staves_processes_ooo = False
+
 def process_staff_notes(command, delimiter, t_args, original_line):
     global measure_on
     global process
@@ -16464,6 +16541,8 @@ def process_staff_notes(command, delimiter, t_args, original_line):
     global staff_keywords
     global staff_name
     global in_chord                     # 0 if false, -1 for true. (Matches tutor.)
+
+#--     print_debug_lmp('process_staff_notes - Entering')
 
     if len(command) > 1 and command[0] in ("'", '"'):
         command = re.sub(r"^'[^']*'", '', command)
@@ -16907,6 +16986,7 @@ def readthefile():
     global loop_location
     global process_name
     global running_process_already
+    global which_lmp_staff_voice
 
     ifdone = False
     precomment = ''
