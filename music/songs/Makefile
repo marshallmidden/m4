@@ -130,7 +130,7 @@ BROKEN += slidall
 
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ../musicomp2abc/musicomp2abc
-IMSCOMP = ~/ims/imscomp
+IMSCOMP = ../ims/imscomp
 #-- YAPS         = yaps
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf

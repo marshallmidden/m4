@@ -5,7 +5,7 @@ MCOMP        = ~/src/abc/mcomp/mcomp
 MCOMPINPUT   = b2m3.mid
 MCOMPOUTPUT  = b2m3.gcs-auto
 #-----------------------------------------------------------------------------
-MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
+MUSICOMP2ABC = ../../musicomp2abc/musicomp2abc
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------

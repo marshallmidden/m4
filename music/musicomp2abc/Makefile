@@ -69,7 +69,7 @@ TESTS_2H = ${TESTS:=_2.h}
 TESTS_2V = ${TESTS:=_2.v}
 #-----------------------------------------------------------------------------
 MUSICOMP = ./musicomp2abc
-IMSCOMP = ~/ims/imscomp
+IMSCOMP = ../ims/imscomp
 MC_ARGS ?=
 #++ MC_ARGS = --warn_octave_accidental
 #-- MC_ARGS = --noxpose --voices=9

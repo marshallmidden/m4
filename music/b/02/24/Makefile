@@ -1,7 +1,7 @@
 V4           = v2-4
 #-----------------------------------------------------------------------------
-MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
-IMSCOMP = ~/ims/imscomp
+MUSICOMP2ABC = ../../../musicomp2abc/musicomp2abc
+IMSCOMP      = ../../../ims/imscomp
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------

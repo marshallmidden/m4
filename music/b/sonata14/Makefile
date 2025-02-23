@@ -3,7 +3,7 @@ V            = s14
 MCOMP        = ~/src/abc/mcomp/mcomp
 #++ MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 #++ IMSCOMP      = ~/ims/imscomp
-MUSICOMP2ABC = ~/ims/imscomp
+MUSICOMP2ABC = ../../ims/imscomp
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------

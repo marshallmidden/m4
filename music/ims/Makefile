@@ -102,7 +102,7 @@ TESTS_PDF= ${TESTS:=.pdf}
 TESTS_M_PDF= ${TESTS:=_m.pdf}
 #-----------------------------------------------------------------------------
 IMSCOMP = ./imscomp
-MUSICOMP = ~/musicomp2abc/musicomp2abc
+MUSICOMP = ../musicomp2abc/musicomp2abc
 MC_ARGS ?=
 ABCM2PS	     = abcm2ps
 PS2PDF       = ps2pdf

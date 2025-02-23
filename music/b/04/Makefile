@@ -19,8 +19,8 @@ SONGS_2_PS = ${SONGS:=_2.ps}
 SONGS_PDF= ${SONGS:=.pdf}
 SONGS_2_PDF= ${SONGS:=_2.pdf}
 #-----------------------------------------------------------------------------
-MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
-IMSCOMP = ~/ims/imscomp
+MUSICOMP2ABC = ../../../musicomp2abc/musicomp2abc
+IMSCOMP      = ../../../ims/imscomp
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------
