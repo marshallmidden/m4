@@ -228,7 +228,7 @@
 # ./musicomp --fluidsynth song.gcs song.fs  # Input to fluidsynth.
 # ./musicomp --fluidsynth song.csv song.fs  # Input can be CSV file, output can ONLY be fluidsynth.
 # ----------------------------------------------------------------------------
-# NOTDONEYET - Note processing:
+# NOTDONEYET - Notes of different types and how sharp/flat/natural is stored:
 #   print_error("NOTDONEYET - doing gsw_operand type of note", line)    - Not related to MIDI.
 #   print_error("NOTDONEYET - COMMAND do_temper", line)     -- no real need for this?
 #   print_error("NOTDONEYET - COMMAND do_sharp", line)      -- no real need for this?
@@ -366,7 +366,7 @@
 # (Remember - a curved line written closest to 2 noteheads in the same space or
 # on the same line is a tie!)
 # ----------------------------------------------------------------------------
-# Additional note processing:
+# Additional note information:
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # If the file format is in 'vertical' mode (i.e. 'v4: 3c8,3d8,3e8, 3f8,3g8'),
 # Then for --abc format, the comma followed by a space means to separate the
@@ -424,10 +424,10 @@
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Macro substitution is done for the first non-space item -- when looking for
 # commands. Arguments to a command are NOT looked at for macros.
-# Note lines have every argument looked at for possible macro processing.
+# Note lines have every argument looked at for possible macro replacement.
 # An argument of a command or macro are NOT looked at for macros.
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-# Macro substitution during note processing.
+# Macro substitution during note replacement.
 # A line that looks like notes may use the macro whenever a complete note or
 # vol(), cresc(),dimin() may appear. Example follows:
 #   macro   abc(A,B,C)
@@ -439,7 +439,7 @@
 #   0e4, 0g4
 #   vol(ff) abc(1c,1e,1g) abc(2e,2c,2g) 3g4, vol(sf) 3a4
 #
-# The whole line is processed, left to right -- with the new lines from the
+# The whole line is handled, left to right -- with the new lines from the
 # macro inserted into place. NOTE: The "vol(ff)" refers to the next note in the
 # line, but there is none, so it is tossed away. *NOTE*
 #
@@ -479,7 +479,7 @@
 #   ERROR - Not enough arguments on note line - want 2, have ['vol(sf)3a4']
 #   Line 8 - vol(sf)3a4
 #
-# This shows that if not a command, spaces are eliminated for note processing.
+# This shows that if not a command, spaces are eliminated for note handling.
 # By the way, the arguments on the voice line for for instruments, 0=default.
 # ----------------------------------------------------------------------------
 # putd substitution lines are done in the order that they are defined. Once
@@ -1511,7 +1511,7 @@ def parse_args():
 #--                        help='Offset for midi instruments +1, -1, -12 -- because they CAN differ for playing.')
     parser.add_argument('--xpose', '-xpose',
                         default='', action='store',
-                        help='Arguments to process as an xpose command before procssing first measure.')
+                        help='Arguments to an xpose command before procssing first measure.')
 
     parser.add_argument('--pages', '--page', '-pages', '-page',
                         default='', action='store',
@@ -1719,7 +1719,7 @@ parse_args()
 MAX_LOOP_VARIABLES = 10
 #-- MAX_LOOP_VARIABLES = 25
 #-- MAX_LOOP_VARIABLES = 50
-#-- MAX_NESTING = 50                                # Maximum number of loops + macros + processes.
+#-- MAX_NESTING = 50                            # Maximum number of loops + macros + processes.
 MAX_NESTING = 10                                # Maximum number of loops + macros + processes.
 MAX_PUTDS = 25                                  # Maximum number of putd substitutions.
 # ----------------------------------------------------------------------------
@@ -2336,7 +2336,7 @@ global putds                        # "micro" and it's replacement/substitution.
 putds    = { }                      # dictionary of from:to
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global goto_table                   # Goto is ONLY at end of measure. (Put in extra measures.)
-global goto_variables               # When processing gotos for output, the count of times hit.
+global goto_variables               # When executing gotos for output, the count of times hit.
 goto_table = { }                    # first index is measure number. Value is array of measures in goto.
 goto_variables = { }                # first index is measure number. Value is number of times goto is hit.
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
@@ -2640,20 +2640,20 @@ global bufs_intensity               # intensity(xx) for each note.  bufs_intensi
 bufs_intensity = { 1: {} }
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global iftest                       # check if after if or else.
-iftest = { 0:-1 }                   # -1 = processing in if, 0 = skip till else,
-#                                   # 1 processing in else, 2 = skip till endif,
+iftest = { 0:-1 }                   # -1 = within if, 0 = skip till else,
+#                                   # 1 within else, 2 = skip till endif,
 #                                   # 3 = skip both if and else.
 global ifdepth                      # level of if/else/endif
 ifdepth = 0
 
-global cstop_processing
-cstop_processing = False            # True if after a cstop.
+global cstop_happening
+cstop_happening = False             # True if after a cstop.
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global macro_defining               # If currently defining a macro.
 macro_defining = None
 global macro_defining_count         # Nested macro defining count.
 macro_defining_count = 0
-# Processes execute on a staff line. (process_notes_oldway -- maybe rename/change/fix/modify to process_staves?)
+# Processes execute on a staff line. (do_notes_oldway -- maybe rename/change/fix/modify to process_staves?)
 global process_defining             # If currently defining a process.
 process_defining = None
 global process_defining_count       # Nested process defining count.
@@ -2748,7 +2748,7 @@ global lmp_executing_type           # "loop", "macro", "process" - type for "whi
 lmp_executing_type = [ None ]
 global lmp_executing_args           # Array of argument(s) given to macro. (None for loop, one for process.)
 lmp_executing_args = [ None ]
-global lmp_executing_line           # Line number in macro/loop/process array currently processing.
+global lmp_executing_line           # Line number in macro/loop/process array currently handling.
 lmp_executing_line = [ None ]
 global lmp_executing_rest_of_line   # Rest of line - for in-line macro/process. Loop doesn't have this.
 lmp_executing_rest_of_line = [ None ]
@@ -4250,7 +4250,7 @@ def print_header():
             # Do not do instruments here.
             lthworkingmeasure = lthworkingmeasure + mlth[voice][m]
 
-            if m in goto_table:             # If goto exists, process it.
+            if m in goto_table:             # If goto exists, go there.
                 f = goto_variables[m]
                 g = goto_table[m][f]
 #++                print_warning_no_line(f"goto at end measure='{m}' value='{f}' new_measure='{g}'")
@@ -4897,7 +4897,7 @@ global gotoflg
 gotoflg = ''
 gotolast = ''
 # ----------------------------------------------------------------------------
-def process_fs_check(what, lth, min_next, vtlines, tempo_s, tempo_l):
+def fs_check(what, lth, min_next, vtlines, tempo_s, tempo_l):
     global this_time
     global meas_1stonly
     global fs_other_echo
@@ -5011,7 +5011,7 @@ def process_fs_check(what, lth, min_next, vtlines, tempo_s, tempo_l):
         # elihw
     # rof
     return tempo_s, tempo_l
-# End of process_fs_check
+# End of fs_check
 
 # ----------------------------------------------------------------------------
 # Thinking if we get each of the tracks in csvmidi format, in array, then go
@@ -5140,9 +5140,9 @@ def print_out_fluidsynth():
         current_time = min_next
         # Move all this_time voices forward past min_next.
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-        tempo_s, tempo_l = process_fs_check('cc ', 3, min_next, v_t_lines, tempo_s, tempo_l)
-        tempo_s, tempo_l = process_fs_check('noteoff ', 8, min_next, v_t_lines, tempo_s, tempo_l)
-        tempo_s, tempo_l = process_fs_check('noteon ', 7, min_next, v_t_lines, tempo_s, tempo_l)
+        tempo_s, tempo_l = fs_check('cc ', 3, min_next, v_t_lines, tempo_s, tempo_l)
+        tempo_s, tempo_l = fs_check('noteoff ', 8, min_next, v_t_lines, tempo_s, tempo_l)
+        tempo_s, tempo_l = fs_check('noteon ', 7, min_next, v_t_lines, tempo_s, tempo_l)
     # elihw
 
     really_print_output("quit")
@@ -5500,7 +5500,7 @@ def print_debug_lmp(s):
     global lmp_executing_which          # The {macro/process/loop}_number (above groups) we are executing.
     global lmp_executing_type           # "loop", "macro", "process" - type for "which", line, args, number... .
     global lmp_executing_args           # Array of argument(s) given to macro. (None for loop, one for process.)
-    global lmp_executing_line           # Line number in macro/loop/process array currently processing.
+    global lmp_executing_line           # Line number in macro/loop/process array currently handling.
     global lmp_executing_rest_of_line   # Rest of line - for in-line macro/process. Loop doesn't have this.
     global lmp_executing_i_line         # Saved i_line in entered macro.
 
@@ -5737,23 +5737,23 @@ def pass2():
     # fi
 # NOTDONEYET - This is by staff, with int, None, and [] as possible dictionary keys as well as staff names.
     if lmp_executing_number > 0:
-        print_error_no_line(f'Processing {lmp_executing_type[lmp_executing_number]} depth (nesting) is {lmp_executing_number}.')
+        print_error_no_line(f'Handling {lmp_executing_type[lmp_executing_number]} depth (nesting) is {lmp_executing_number}.')
     # fi
 
     if args.abc:
         pass2_put_prenote_on_bufs()
     # fi
 
-    process_line('measure EOF')
+    do_line('measure EOF')
     # Put effect "null" rest at end of song for each staff/voice.
     if args.midi1csv or args.fluidsynth:
         if len(staff_name) != 0:            # Do staves.
             for s in staff_name:
-                process_line(f"{s}: [ {','.join(('r(1/1000000)' for v in staff_name[s]))} ]")
+                do_line(f"{s}: [ {','.join(('r(1/1000000)' for v in staff_name[s]))} ]")
             # rof
         else:                               # Do voices.
             for v in range(1,voices+1):
-                process_line(f'v{v}: r(1/1000000)')
+                do_line(f'v{v}: r(1/1000000)')
             # rof
         # fi
     # fi
@@ -5774,7 +5774,7 @@ def pass2():
         quick_exit()
     # fi
 
-    # Fix other voices before continuing to process.
+    # Fix other voices before continuing.
     fill_voice_mlth(True, 'pass2')      # Need to make measure for other voices up to here "mlth".
 
     # First get the empty measures to have rests of appropriate length.
@@ -5849,7 +5849,7 @@ def pass2():
         print_output("")
     # fi
 
-    # End of song processing.
+    # End of song handling.
     if args.vertical or args.horizontal or args.staves:
         print_output("cstop*")
     elif args.midi1csv:
@@ -5932,13 +5932,13 @@ def get_next_process_line(l):
     global i_line
 NOTDONEYET - PROCESS running_process_already
     global running_process_already
-#-- NOTDONEYET - PROCESS in_process_already
+NOTDONEYET - PROCESS in_process_already
     global in_process_already
     global process_buffer
 
     if lmp_executing_type[l] != 'process' or not running_process_already:
         print_error(f"get_next_process_line - lmp_executing_type[l]='{lmp_executing_type[l]}' != 'process' or running_process_already='{running_process_already}'", 'in process')
-#-- NOTDONEYET - PROCESS in_process_already
+NOTDONEYET - PROCESS in_process_already running_process_already
         in_process_already = False
         running_process_already = False
         return ''
@@ -6349,7 +6349,7 @@ NOTDONEYET - PROCESS running_process_already
                 i_line.append(f'input: {linecount:4d}:' + full_line)    # Line as fixed or whatever.
                 return full_line, commentdollardollar
             # fi
-            print_error_no_line("Read got a processing error")
+            print_error_no_line("Read got a handling error")
             print('   ', sys.exc_info()[0], sys.exc_info, file=sys.stderr, flush=True)
         # yrt
         break
@@ -7317,7 +7317,7 @@ def replace_macro(cnumber, t_args, original_line):
     global macro_name_terminator
     global macro_arguments              # Array of arguments for macro.
     global macro_arg_terminator
-    global lmp_executing_number         # If processing macro ... reading from macro buffer.
+    global lmp_executing_number         # If handling macro ... reading from macro buffer.
     global lmp_executing_which          # Which macro being executed. Means cannot reorder. *drats*
     global lmp_executing_args           # Array of arguments given to macro.
     global lmp_executing_line           # Line number in macro array.
@@ -7507,7 +7507,7 @@ def loop_define(command, t_args, original_line):
 # End of loop_define
 
 # ----------------------------------------------------------------------------
-def process_putd(line):
+def replace_putd(line):
     global putds
 
     newline = line[1:]                  # Toss '=' (putd) character.
@@ -7515,7 +7515,7 @@ def process_putd(line):
         newline = newline.replace(a, putds[a])
     # rof
     return newline
-# End of process_putd
+# End of replace_putd
 
 # ----------------------------------------------------------------------------
 def to_abc_note(note_number):
@@ -7571,7 +7571,7 @@ def set_default_ims(t_args, original_line):
     elif type(voice) is str:
         voice = voice.replace(' ','').split(',')
     # fi
-    # Save what type of processing we are doing.
+    # Save what type of handling we are doing.
     save_current_type = [args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc, args.staves]
     savekeyvoice = get_staff_arr_double(voice, measure_on, key_voice, None, original_line)
     # ------------------------------------------------------------------------------
@@ -7601,7 +7601,7 @@ def set_default_ims(t_args, original_line):
 
     wnote = wargs[0]
     therest, thenote, typenote = getnote(wnote, voice, True, True, False, original_line)  # Set defaults.
-    # Restore type of processing we are doing.
+    # Restore type of handling we are doing.
     args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc, args.staves = save_current_type
     set_staff_arr_double(voice, savekeyvoice, measure_on, key_voice, None, original_line)
     if typenote != normal_note:
@@ -7684,7 +7684,7 @@ def decode_gsw(t_args, original_line):
     elif type(voice) is str:
         voice = voice.replace(' ','').split(',')
     # fi
-    # Save what type of processing we are doing.
+    # Save what type of handling we are doing.
     save_current_type = [args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc, args.staves]
     savekeyvoice = get_staff_arr_double(voice, measure_on, key_voice, None, original_line)
     # ------------------------------------------------------------------------------
@@ -7722,7 +7722,7 @@ def decode_gsw(t_args, original_line):
     w_note = nline
     # Ignore leading space.
     therest, thenote, typenote = getnote(w_note, voice, False, True, False, original_line)
-    # Restore type of processing we are doing.
+    # Restore type of handling we are doing.
     args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc, args.staves = save_current_type
     set_staff_arr_double(voice, savekeyvoice, measure_on, key_voice, None, original_line)
     if typenote != normal_note:
@@ -7886,7 +7886,7 @@ def decode_ims(t_args, original_line):
         t.append(None)                                      # The terminator.
     # fi
 
-    # Save what type of processing we are doing.
+    # Save what type of handling we are doing.
     save_current_type = [args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc, args.staves]
     savekeyvoice = get_staff_arr_double(voice, measure_on, key_voice, None, original_line)
     # ------------------------------------------------------------------------------
@@ -7930,7 +7930,7 @@ def decode_ims(t_args, original_line):
     args.staves = False
     set_staff_arr_double(voice, key_sig_int[k], measure_on, key_voice, None, original_line)
     a, thenote, b = getnote(w_note, voice, False, True, False, original_line)
-    # Restore type of processing we are doing.
+    # Restore type of handling we are doing.
     args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc, args.staves = save_current_type
     set_staff_arr_double(voice, savekeyvoice, measure_on, key_voice, None, original_line)
     if b != normal_note:
@@ -7970,7 +7970,7 @@ def decode_ims(t_args, original_line):
     note_sharp = -1
     note_flat = -1
     note_natural = -1
-    note_tuplet = -1                    # NOTDONEYET
+    note_tuplet = -1                    # NOTDONEYET - keyword
     note_notelength = -1
     note_dot = number_dots
     note_duration = -1                  # Set far below.
@@ -8010,11 +8010,11 @@ def decode_ims(t_args, original_line):
     note_s = 0
     note_m = 0
     note_t = 0
-    note_z = 0                              # Same as note_l here. May be NOTDONEYET.
-    note_a = 0                              # NOTDONEYET
-    note_aa = 0                             # NOTDONEYET
-    note_g = 0                              # NOTDONEYET
-    note_gg = 0                             # NOTDONEYET
+    note_z = 0                              # Same as note_l here.
+    note_a = 0                              # NOTDONEYET - suffix
+    note_aa = 0                             # NOTDONEYET - suffix
+    note_g = 0                              # NOTDONEYET - suffix
+    note_gg = 0                             # NOTDONEYET - suffix
     note_suffixes = ''
     if (r_suffixes & suffix_legato) != 0:
         note_l = 1
@@ -8039,16 +8039,16 @@ def decode_ims(t_args, original_line):
 #   [ ]                     : start/end of chord (1, 0 if not)
 #   type, treble, bass, soprano, alto, tenor, normal, perc, nohead, oloz, floz,
 #   oharm, fharm, trem0, trem1, trem2, trem3, stemsoff, stemson
-    note_arp = 0                    # NOTDONEYET
-    note_fermata = 0                # NOTDONEYET
-    note_legato = 0                 # NOTDONEYET
-    note_marcato = 0                # NOTDONEYET
-    note_staccato = 0               # NOTDONEYET
-    note_tie = 0                    # NOTDONEYET
-    note_slur = 0                   # NOTDONEYET
-    note_lh = 0                     # NOTDONEYET
-    note_rh = 0                     # NOTDONEYET
-    note_chord_start = 0            # NOTDONEYET
+    note_arp = 0                    # NOTDONEYET - keyword
+    note_fermata = 0                # NOTDONEYET - keyword
+    note_legato = 0                 # NOTDONEYET - keyword
+    note_marcato = 0                # NOTDONEYET - keyword
+    note_staccato = 0               # NOTDONEYET - keyword
+    note_tie = 0                    # NOTDONEYET - keyword
+    note_slur = 0                   # NOTDONEYET - keyword
+    note_lh = 0                     # NOTDONEYET - keyword
+    note_rh = 0                     # NOTDONEYET - keyword
+    note_chord_start = 0            # NOTDONEYET - keyword
     note_chord_end = 0              # NOTDONEYET [ ] : start/end of chord (1, 0 if not)
     note_glissando = 0              # NOTDONEYET    : Starting pitch of glissando = 1
     note_volumenumber = get_staff_arr_double(voice, measure_on, volume, 'volume', original_line)
@@ -8059,24 +8059,24 @@ def decode_ims(t_args, original_line):
     note_pan = get_staff_arr_double(voice, measure_on, pan, 'pan', original_line)
 
     note_type = -1                  # Set this later.
-    note_treble = 0                 # NOTDONEYET ??
-    note_bass = 0                   # NOTDONEYET ??
-    note_soprano = 0                # NOTDONEYET ??
-    note_alto = 0                   # NOTDONEYET ??
-    note_tenor = 0                  # NOTDONEYET ??
-    note_normal = 0                 # NOTDONEYET ??
-    note_perc = 0                   # NOTDONEYET ??
-    note_nohead = 0                 # NOTDONEYET ??
-    note_oloz = 0                   # NOTDONEYET ??
-    note_floz = 0                   # NOTDONEYET ??
-    note_oharm = 0                  # NOTDONEYET ??
-    note_fharm = 0                  # NOTDONEYET ??
-    note_trem0 = 0                  # NOTDONEYET ??
-    note_trem1 = 0                  # NOTDONEYET ??
-    note_trem2 = 0                  # NOTDONEYET ??
-    note_trem3 = 0                  # NOTDONEYET ??
-    note_stemsoff = 0               # NOTDONEYET ??
-    note_stemson = 0                # NOTDONEYET ??
+    note_treble = 0                 # NOTDONEYET - keyword
+    note_bass = 0                   # NOTDONEYET - keyword
+    note_soprano = 0                # NOTDONEYET - keyword
+    note_alto = 0                   # NOTDONEYET - keyword
+    note_tenor = 0                  # NOTDONEYET - keyword
+    note_normal = 0                 # NOTDONEYET - keyword
+    note_perc = 0                   # NOTDONEYET - keyword
+    note_nohead = 0                 # NOTDONEYET - keyword
+    note_oloz = 0                   # NOTDONEYET - keyword
+    note_floz = 0                   # NOTDONEYET - keyword
+    note_oharm = 0                  # NOTDONEYET - keyword
+    note_fharm = 0                  # NOTDONEYET - keyword
+    note_trem0 = 0                  # NOTDONEYET - keyword
+    note_trem1 = 0                  # NOTDONEYET - keyword
+    note_trem2 = 0                  # NOTDONEYET - keyword
+    note_trem3 = 0                  # NOTDONEYET - keyword
+    note_stemsoff = 0               # NOTDONEYET - keyword
+    note_stemson = 0                # NOTDONEYET - keyword
 
     if timeofnote is None or timeofnote == 0:
         timeofnote = get_staff_arr(voice, time, 'time', 'decode_ims ' + original_line)
@@ -8625,7 +8625,7 @@ def do_clef(t_args, original_line):
         return ''
     # fi
 
-    # keyword processing comes here.
+    # keyword handling comes here.
     clf = vargs[1]
     next_tokens = ' '.join(vargs[2:])                       # slice allows going over length of list.
     jkl = str(vargs[0])
@@ -8728,21 +8728,21 @@ def do_copy(t_args, original_line):
 # In the C language, (like #if 0 ... #endif // 0)
 
 def do_cstart(t_args, original_line):
-    global cstop_processing
+    global cstop_handling
 
-    if not cstop_processing:
-        print_error("Not in cstop processing and got a cstart", original_line)
+    if not cstop_handling:
+        print_error("Not in cstop handling and got a cstart", original_line)
     # fi
-    cstop_processing = False
+    cstop_handling = False
     return
 # End of do_cstart
 
 # ----------------------------------------------------------------------------
 #       cstop               $$ stop till cstart or cstop* found.
 def do_cstop(t_args, original_line):
-    global cstop_processing
+    global cstop_handling
 
-    cstop_processing = True
+    cstop_handling = True
     return
 # End of do_cstop
 
@@ -8750,8 +8750,7 @@ def do_cstop(t_args, original_line):
 #       cstop*      $$ Do not go beyond this line. Start second pass.
 
 def do_cstopnow(t_args, original_line):
-
-    print_error("cstop* processing should be done elsewhere?", original_line)
+    print_error("cstop* handling should be done elsewhere?", original_line)
     pass2()
     quick_exit()
 # End of do_cstopnow
@@ -8906,7 +8905,7 @@ def do_delay(t_args, original_line):
     for onvoice in range(loopstart+1, voices + 1):
         r = r + f',r({rvalue}/60.0)'
     # rof
-    process_notes_oldway(r, original_line)
+    do_notes_oldway(r, original_line)
     return
 # End of do_delay
 
@@ -8920,7 +8919,7 @@ def get_defaults_for_note(t_args, voiceon, original_line):
     global key_sig_int
     global key_voice
 
-    # Save what type of processing we are doing.
+    # Save what type of input/output we are doing.
     save_current_type = [args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc, args.staves]
     savekeyvoice = get_staff_arr_double(voiceon, measure_on, key_voice, None, original_line)
     # ------------------------------------------------------------------------------
@@ -8968,7 +8967,7 @@ def get_defaults_for_note(t_args, voiceon, original_line):
         return None, 0, 0, 0, 0, 0, 0, 0
     # fi
 
-    # Restore type of processing we are doing.
+    # Restore type of input/output we are doing.
     if therest is None or thenote is None:
         print_error(f'note had error with note {w_note}', original_line)
         return None, 0, 0, 0, 0, 0, 0, 0
@@ -9146,7 +9145,7 @@ def do_encode(t_args, original_line):
 
     need_to_decode = True
     tagtype = 0                                 # 0=none, 1=string, 2=note
-    newstrng = ''                               # New string for string processing.
+    newstrng = ''                               # New string for string handling.
     newnumber = ''                              # Number(s) to append at end.
     restore_staff = ''                          # Insert staff name.
     suffix = ''
@@ -9212,7 +9211,7 @@ def do_encode(t_args, original_line):
             continue
         elif token == 'staffname':
             if tagtype == 2:
-                print_error(f'encode "{token}" done after note processing', original_line)
+                print_error(f'encode "{token}" done after note handling', original_line)
                 return
             # fi
             tagtype = 1
@@ -9253,7 +9252,7 @@ def do_encode(t_args, original_line):
         # 'after', 'upto', 'number'
         if token == 'after':
             if tagtype == 2:
-                print_error(f'encode "{token}" after note processing directives.', original_line)
+                print_error(f'encode "{token}" after note handling directives.', original_line)
             # fi
             tagtype = 1
             a = strng.find(secondary)
@@ -9265,7 +9264,7 @@ def do_encode(t_args, original_line):
             continue
         elif token in ['before', 'upto']:
             if tagtype == 2:
-                print_error(f'encode "{token}" after note processing directives.', original_line)
+                print_error(f'encode "{token}" after note handling directives.', original_line)
             # fi
             tagtype = 1
             a = strng.find(secondary)
@@ -9277,7 +9276,7 @@ def do_encode(t_args, original_line):
             continue
         elif token == 'number':
             if tagtype == 2:
-                print_error(f'encode "{token}" done after note processing', original_line)
+                print_error(f'encode "{token}" done after note handling', original_line)
             # fi
             tagtype = 1
             # Convert number to string and append to end of string.
@@ -9294,7 +9293,7 @@ def do_encode(t_args, original_line):
             continue
         elif token == 'string':
             if tagtype == 2:
-                print_error(f'encode "{token}" done after note processing', original_line)
+                print_error(f'encode "{token}" done after note handling', original_line)
             # fi
             tagtype = 1
             if type(secondary) is str:
@@ -9308,7 +9307,7 @@ def do_encode(t_args, original_line):
         # fi:
 
         if tagtype == 1:
-            print_error(f'encode "{token}" done after string processing', original_line)
+            print_error(f'encode "{token}" done after string handling', original_line)
         elif tagtype == 0:
             octave, notename, notelength, notenumber, duration, sharp, flat, natural = get_defaults_for_note(strng, voiceon, original_line)
             if octave is None:
@@ -9521,7 +9520,7 @@ def do_else_if(t_args, original_line):
         print_error("elseif command while not in an if command", original_line)
         return
     # fi
-    if iftest[ifdepth] == -1:           # already processing, handle as normal if.
+    if iftest[ifdepth] == -1:           # already within, handle as normal if.
         iftest[ifdepth] = 3             # Switch to skipping elseif and else.
         return
     # fi
@@ -9542,7 +9541,7 @@ def do_else_if(t_args, original_line):
     # fi
     value = -1 if value < 0 or value > 0 else 0   # 0 is false, otherwise everything is true.
     if value < 0:
-        iftest[ifdepth] = -1            # Switch to as if processing.
+        iftest[ifdepth] = -1            # Switch to as if within.
     # fi
     return
 # End of do_else_if
@@ -9559,12 +9558,12 @@ def do_else(t_args, original_line):
         return
     # fi
 
-    if iftest[ifdepth] == -1:           # already processing, handle as normal if.
+    if iftest[ifdepth] == -1:           # already within, handle as normal if.
         iftest[ifdepth] = 2             # Switch to skipping elseif and else.
         return
     # fi
     if iftest[ifdepth] == 0:            # skipping if, want to do else or elseif.
-        iftest[ifdepth] = 1             # Switch to processing else.
+        iftest[ifdepth] = 1             # Switch to within else.
         return
     # fi
     # if iftest[ifdepth] == 3:            # skip both if and else, want endif
@@ -9582,10 +9581,10 @@ def do_endif(t_args, original_line):
         print_error("endif command while not in an if command", original_line)
         return
     # fi
-    # if iftest[ifdepth] == -1:           # already processing, handle as normal if.
+    # if iftest[ifdepth] == -1:           # already within, handle as normal if.
     # if iftest[ifdepth] == 0:            # skipping if, want to do else.
-    # if iftest[ifdepth] == 1:            # processing in else, want to do as normal if.
-    # if iftest[ifdepth] == 2:            # skipping in else, ignore if and else processing, want endif.
+    # if iftest[ifdepth] == 1:            # within else, want to do as normal if.
+    # if iftest[ifdepth] == 2:            # skipping in else, ignore if and else handling, want endif.
     # if iftest[ifdepth] == 3:            # skip both if and else, want endif
     ifdepth = ifdepth - 1
     return
@@ -9930,10 +9929,10 @@ def do_if(t_args, original_line):
         print_error("if command does not have exactly one argument.", original_line)
         return
     # fi
-    # if iftest[ifdepth] == -1:           # already processing, handle as normal if.
+    # if iftest[ifdepth] == -1:           # already handling, handle as normal if.
     # if iftest[ifdepth] == 0:            # skipping if, want to do else.
-    # if iftest[ifdepth] == 1:            # processing in else, want to do as normal if.
-    # if iftest[ifdepth] == 2:            # skipping in else, ignore if and else processing, want endif.
+    # if iftest[ifdepth] == 1:            # within else, want to do as normal if.
+    # if iftest[ifdepth] == 2:            # skipping in else, ignore if and else within, want endif.
     # if iftest[ifdepth] == 3:            # skip both if and else, want endif
     if iftest[ifdepth] == -1 or iftest[ifdepth] == 1:   # process this if normally.
         wargs = separate_args(t_args, False, True, original_line)
@@ -10394,12 +10393,12 @@ def do_measure(t_args, original_line):
     global precomment
     global commentonline
     global measures_to_do
-    global cstop_processing
+    global cstop_handling
     global measure_warn_once
 
     # Process possible --xpose argument as xpose command before first measure.
     if args.xpose != '':
-        do_xpose([args.xpose], f'Argument --xpose present, processing:{args.xpose}')
+        do_xpose([args.xpose], f'Argument --xpose present, handling:{args.xpose}')
         args.xpose = ''
     # fi
 
@@ -10465,10 +10464,10 @@ def do_measure(t_args, original_line):
     # Check if in measures_to_do
     if args.measures and args.measures != '':
         if f1 not in measures_to_do:
-            cstop_processing = True
+            cstop_handling = True
         else:
             # Do cstart.
-            cstop_processing = False
+            cstop_handling = False
         # fi
     # fi
 
@@ -10748,7 +10747,7 @@ global page_warn_once
 page_warn_once = True
 
 def do_page(t_args, original_line):
-    global cstop_processing
+    global cstop_handling
     global pages_to_do
     global args
     global page_warn_once
@@ -10794,11 +10793,11 @@ def do_page(t_args, original_line):
         return
     # fi
     if n not in pages_to_do:
-        cstop_processing = True
+        cstop_handling = True
         return
     # fi
     # Do cstart.
-    cstop_processing = False
+    cstop_handling = False
     return
 # End of do_page
 
@@ -11641,7 +11640,7 @@ def do_title(t_args, original_line):
 #   tempo  150,4        $$ Number of notes of given length in a minute.
 #   tempo  30           $$ Number of frames (1/57.1429 seconds) per whole note.
 #   tempo  200,8        $$ So fast you won't recognize individual notes (:-)>[=<
-# NOTDONEYET (below) tempo - accel and rit.
+# NOTDONEYET - TEMPO - accel and rit.
 #   tempo  accel        $$ accelerate from current tempo to next tempo command.             NOTDONEYET - TEMPO
 #   tempo  120,4,accel  $$ Change to current tempo, and accelerate to next tempo command    NOTDONEYET - TEMPO
 #   tempo  120,4,rit    $$ Change to current tempo, and decelerate to next tempo command.   NOTDONEYET - TEMPO
@@ -12661,7 +12660,7 @@ def do_flat(t_args, original_line):                              # NOTDONEYET - 
 # End of do_flat
 
 # ----------------------------------------------------------------------------
-# Not likely to do. Doesn't make sense until other IMS processing is done.
+# Not likely to do. Doesn't make sense until other IMS handling is done.
 #   pause, density, display, key, combine, lyrics, staff, systems, page
 
 def do_format(t_args, original_line):                            # NOTDONEYET - COMMAND
@@ -12678,7 +12677,7 @@ def do_include(t_args, original_line):                           # NOTDONEYET - 
 # End of do_include
 
 # ----------------------------------------------------------------------------
-# Not likely to do. No nameset processing ... use "instrument" instead.
+# Not likely to do. No nameset handling ... use "instrument" instead.
 
 def do_instr(t_args, original_line):                             # NOTDONEYET - COMMAND
     print_warning("NOTDONEYET - COMMAND do_instr", original_line)
@@ -12713,7 +12712,7 @@ def do_percus(t_args, original_line):                            # NOTDONEYET - 
 # End of do_percus
 
 # ----------------------------------------------------------------------------
-# Not likely to do. Doesn't make sense until other IMS processing is done.
+# Not likely to do. Doesn't make sense until other IMS handling is done.
 
 def do_print(t_args, original_line):                             # NOTDONEYET - COMMAND
     print_warning(f"NOTDONEYET - COMMAND do_print - {t_args}", original_line)
@@ -12854,7 +12853,7 @@ commands = {
            }
 
 # ----------------------------------------------------------------------------
-# For plato calc command processing :)
+# For plato calc command handling :)
 # w=1,h=2,q=4,e=8,th=+0k        # for plato calc command
 # s=(1),d=(1),b=(1),t=(1)       # for plato calc command
 # m1, m2, m3, m4, m5, m6, m7, m8, m9
@@ -13185,7 +13184,7 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
             number_in_sequence = round(number_in_sequence)
             therest = note_to_decode[sc:]
             if leading_space:
-                therest = ' ' + therest         # Flag for later processing.
+                therest = ' ' + therest         # Flag for later handling.
             # fi
             return therest, number_in_sequence, sequence_note
         elif note_to_decode[0] == 't':          # check for trill
@@ -13208,7 +13207,7 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
             #-- # fi
             therest = note_to_decode[2:]
             if leading_space:
-                therest = ' ' + therest         # Flag for later processing.
+                therest = ' ' + therest         # Flag for later handling.
             # fi
             return therest, 't(', trill_note
         elif note_to_decode[0] == 'r':          # check for rest
@@ -13224,7 +13223,7 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
             # get ready for time computation
             therest = note_to_decode[temp3:]
             if leading_space:
-                therest = ' ' + therest         # Flag for later processing.
+                therest = ' ' + therest         # Flag for later handling.
             # fi
             return therest, thenote, normal_note
         # fi
@@ -15018,7 +15017,7 @@ def get_sequence_note(temp1, voiceon, number_in_sequence, prenote, postnote, tie
 #
 # Output:
 #   lth      - time of total note(s) added.
-#   rest     - text for more processing
+#   rest     - text for more handling
 #   prenote  - For --vertical and --horizontal.
 #   postnote - For --vertical and --horizontal.
 
@@ -15073,7 +15072,7 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
         lth = get_sequence_note(therest, voiceon, thenote, prenote, postnote, tie_next, legato_next, original_line)
         return lth, rest, '', ''                    # get next note for this voice (old way) (put_on_bufs)
     # fi
-    # Normal note processing follows.
+    # Normal note handling follows.
     #.............................................................................
     timeofnote, r_suffixes, number_dots = get_time(therest, original_line)
     #.............................................................................
@@ -15240,7 +15239,7 @@ def handle_one_note(p_i, voiceon, m, notestuff, suffixstuff, original_line):
 # Both have measure terminate them.  NOTE: a second measure the same is allowed.
 # --spaces means allow: ' ' between notes, instead of commas. No pre/post spacing.
 
-def process_notes_oldway(line, original_line):
+def do_notes_oldway(line, original_line):
     global last_voice_staff
     global voices                       # number of voices
     global cis                          # if cis active, non-zero.
@@ -15362,7 +15361,7 @@ def process_notes_oldway(line, original_line):
                 if l > 0:
                     nl = (MIDICLICKSPERQUARTER * 4) / l
                     if not args.norestswarning:
-                        print_warning(f"process_notes_oldway - missing rests l='{l}' ({nl}) {get_staff_from_voice(i+1)} measure='{measure_on}'", original_line)
+                        print_warning(f"do_notes_oldway - missing rests l='{l}' ({nl}) {get_staff_from_voice(i+1)} measure='{measure_on}'", original_line)
                     # fi
                     if args.horizontal or args.vertical or args.staves:
                         instak(i+1, measure_on, '', 'r', l, '', '', original_line)
@@ -15471,10 +15470,10 @@ def process_notes_oldway(line, original_line):
             #.............................................................................
             temp1,prenote, postnote = find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, original_line)
             #.............................................................................
-            next_tie = get_staff_arr(voiceon, bufs_tie_next, 'bufs_tie_next', 'process_notes_oldway ' + original_line)
-            next_legato = get_staff_arr(voiceon, bufs_legato_next, 'bufs_legato_next', 'process_notes_oldway ' + original_line)
+            next_tie = get_staff_arr(voiceon, bufs_tie_next, 'bufs_tie_next', 'do_notes_oldway ' + original_line)
+            next_legato = get_staff_arr(voiceon, bufs_legato_next, 'bufs_legato_next', 'do_notes_oldway ' + original_line)
             lth, rest, prenote, postnote = do_a_note(temp1, '', voiceon, prenote, postnote, w, next_tie, next_legato, original_line)
-            # Don't need lth in non-staff processing mode.
+            # Don't need lth in non-staff handling mode.
             voice_prenote[voiceon] = prenote
             if w is None:
                 break
@@ -15483,7 +15482,7 @@ def process_notes_oldway(line, original_line):
         # elihw
     # rof
     return
-# End of process_notes_oldway
+# End of do_notes_oldway
 
 # ----------------------------------------------------------------------------
 #  w = parens_match(enddelim, aftertoken, w, original_line)
@@ -15950,16 +15949,7 @@ def compute_command_args(expand_line):
 def set_process_begin(token, next_tokens, original_line):
     global last_voice_staff
     global process_per_staff
-#--    global running_process_already
     global process_name                             # The name of the processes.
-#--    global process_argument
-#--    global process_buffer
-#--    global lmp_executing_which                        # Which process being executed. Means cannot reorder. *drats*
-#--    global lmp_executing_line                         # Line number in process array.
-#--    global lmp_executing_rest_of_line
-#--    global lmp_executing_i_line
-#--    global lmp_executing_number
-#?    global i_line
 
     print_debug(f'set_process_begin - Entering last_voice_staff={last_voice_staff} token={token} next_tokens={next_tokens}')
 
@@ -15984,30 +15974,6 @@ def set_process_begin(token, next_tokens, original_line):
         process_per_staff[ls] = pnumber
     # rof
     return
-
-#-- #--- This happens for each NOTE passed to the process, not with begin.
-#-- #--    level = lmp_executing_number + 1             # Create variables at next level.
-#--     for ls in last_voice_staff:
-#-- # NOTDONEYET - PROCESS createlocalvar()
-#--         if not createlocalvar(process_argument[pnumber], None, level, type_is_string, True):
-#--             print_debug(f'set_process_begin - #A token={token} ({process_argument[pnumber]} {level}')    #DEBUGOPAL
-#--             print_error(f"process {token} unable to create variable {process_argument[pnumber]}", original_line)
-#--             set_process_quit(original_line)         # Stop any possibly created processes.
-#--             return
-#--         # fi
-#--         lmp_executing_which[ls] = pnumber
-#--         lmp_executing_line[ls] = 0                    # First line in buffer.
-#--         lmp_executing_rest_of_line[ls] = None         # Rest of this line - set in run_process.
-#-- # NOTDONEYET - PROCESS saving line depth for warnings/errors...
-#--         t_line = i_line
-#--         for i in range(0, len(t_line)):             # Save current depth of line.
-#--            t_line[i] = 'prcss: ' + t_line[i]
-#--         # rof
-#--         lmp_executing_i_line[ls] = t_line             # Save current depth of line.
-#-- NOTDONEYET - PROCESS in_process_already
-#--         in_process_already[ls] = tmpproc
-#--         running_process_already[ls] = False
-#--     # rof
 # End of set_process_begin
 
 # ----------------------------------------------------------------------------
@@ -16015,7 +15981,6 @@ def set_process_begin(token, next_tokens, original_line):
 
 def set_process_quit(original_line):
     global process_per_staff
-NOTDONEYET - PROCESS running_process_already
     global running_process_already
     global last_voice_staff
 
@@ -16025,14 +15990,7 @@ NOTDONEYET - PROCESS running_process_already
         if ls not in process_per_staff:
             print_error(f'set_process_quit - staff {ls} not in last_voice_staff {last_voice_staff}', original_line)
         # fi
-NOTDONEYET - PROCESS
         process_per_staff[ls] = None                    # No process on this staff.
-NOTDONEYET - PROCESS running_process_already
-        running_process_already[ls] = False
-#--         lmp_executing_which[ls] = None
-#--         lmp_executing_line[ls] = None
-#--         lmp_executing_rest_of_line[ls] = None
-#--         lmp_executing_i_line[ls] = None
     # rof
     pop_process(original_line)
     return
@@ -16522,7 +16480,7 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):
     # fi
     #.............................................................................
     # Need to go through all staves, getting the voice to put note on,
-    # bufs_{legato,tie}_next, and afterwards processing too.
+    # bufs_{legato,tie}_next, and afterwards handling too.
     for st in last_voice_staff:                     # Go through staves
         voiceon = staff_chord_voices[st][staff_chord[st]]
         prenote = voice_prenote[voiceon]
@@ -16576,8 +16534,8 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):
 # If not in a process, then need to use the token to process it as:
 #       1) staffname
 #       2) keyward
-#       3) note processing.
-#       4) [ ] - chord ... with note processing ...
+#       3) note handling.
+#       4) [ ] - chord ... with note handling ...
 #           Chords are strange, notes may be different lengths, then shortest
 #           one(s) are connected with the next note(s) [if the chord does not
 #           have all notes with the same length].
@@ -16932,11 +16890,11 @@ def process_staff_notes(command, delimiter, t_args, original_line):
 # ----------------------------------------------------------------------------
 # Parse and process line.
 
-def process_line(original_line):
+def do_line(original_line):
     global iftest                       # check if after if or else.
     global ifdepth                      # level of if/else/endif
     global commands
-    global cstop_processing
+    global cstop_handling
     global macro_defining               # If defining macro.
     global process_defining             # If defining process.
     global loop_defining                # If defining loop.
@@ -16951,14 +16909,14 @@ def process_line(original_line):
     numcharvar = 0
     while True:
         command, delimiter, t_args = compute_command_args(qline)
-        if cstop_processing:
+        if cstop_handling:
             # Read until cstart found (or end of file)
             if command in commands and commands[command][0] == do_cstopnow:
                 return True                                     # End of file!
             elif command in commands and commands[command][1]:  # If flag to process while in cstop.
                 commands[command][0](t_args, original_line)     # Process some commands while cstop-ped.
             # fi
-            return False                                        # Done with current cstop processing.
+            return False                                        # Done with current cstop handling.
         elif macro_defining is not None:
             if command in commands and commands[command][0] == do_cstopnow:
                 return True                                     # End of file!
@@ -16988,7 +16946,7 @@ def process_line(original_line):
             # fi
             return False
         # fi
-        # Doing if section or else section or NORMAL processing.
+        # Doing if section or else section or NORMAL handling.
         # Try to process command. If not a command, process notes.
         if command is None:                                     # Ignore nothing given.
             return False
@@ -17056,7 +17014,7 @@ def process_line(original_line):
         try:
             r = commands[command][0]                        # Had an error once ... thus try/expect.
         except:
-            print_error(f"m:{measure_on} not found processing routine for command '{command}'", command)
+            print_error(f"m:{measure_on} not found handling routine for command '{command}'", command)
             print('   ', sys.exc_info()[0], sys.exc_info, file=sys.stderr, flush=True)
         # yrt
         r(t_args, original_line)
@@ -17071,12 +17029,12 @@ def process_line(original_line):
         else:
             nline = command + t_args
         # fi
-        process_notes_oldway(nline, original_line)
+        do_notes_oldway(nline, original_line)
         return False
     # fi
     process_staff_notes(command, delimiter, t_args, original_line)
     return False
-# End of process_line
+# End of do_line
 
 # ----------------------------------------------------------------------------
 def readthefile():
@@ -17162,7 +17120,7 @@ NOTDONEYET - PROCESS running_process_already
                 break
             elif line and (line[0] == '\t' or re.match(r'^        ', line)):
                 # This is a continuation line.
-# NOTDONEYET - may NOT have to do this? process_notes_oldway should take care of staff and voices?
+# NOTDONEYET - may NOT have to do this? do_notes_oldway should take care of staff and voices?
                 if last_voice_staff is not None:
                     if type(last_voice_staff) is int:
                         line = 'v' + str(last_voice_staff) + ': ' + line.strip()
@@ -17172,7 +17130,7 @@ NOTDONEYET - PROCESS running_process_already
             line = line.lstrip()
             if line and line[0] == '=':
                 nline = replace_macro_arguments(line, line).rstrip()
-                nline = process_putd(nline)
+                nline = replace_putd(nline)
                 i_line.append('putd:  ' + nline)            # Line as fixed or whatever.
                 line = nline
                 if len(line) > 0 and line[0] == '=':
@@ -17207,13 +17165,13 @@ NOTDONEYET - PROCESS running_process_already
             if line != '*' and line[0:4] != '* --' and line[0:3] != '*--' and line[0:7] != '* v' + 'im: ':
                 precomment = precomment + line + '\n'        # Comment line.
             # fi
-        elif line[0] == '#' and re.match('^# ([0-9]+) "([^"]+)".*$', line):  # Only process 1 type C preprocessor line.
+        elif line[0] == '#' and re.match('^# ([0-9]+) "([^"]+)".*$', line):  # Only the 1 type C preprocessor line.
             uxit = re.sub('^# ([0-9]+) "([^"]+)".*$', r"\1 \2", line)
             wxit = re.split(r' ', uxit, maxsplit = 1)
             linecount = int(wxit[0]) - 1
             which_file_in = wxit[1]
         else:                                               # Note: empty blank line NOT passed through.
-            ifdone = process_line(line)
+            ifdone = do_line(line)
         # fi
     # elihw
     return
