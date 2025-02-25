@@ -2661,20 +2661,9 @@ process_defining_count = 0
 
 global process_per_staff            # If not None, the process number run till quit or another begin or end of file.
 process_per_staff = { None: None }  # Indexed by staff_name -- None means no process (or missing from dictionary).
+global in_process_already
+in_process_already = False
 # Can only be running one process at a time, and for one staff only at a time. Changing means "pop_process()".
-
-def in_proc_already():              # True or False for process if any last_voice_staff is involved.
-    global last_voice_staff
-    global in_process_already
-
-    for ls in last_voice_staff:
-        if ls in process_per_staff and process_per_staff[ls] is not None:
-            return True
-        # fi
-    # rof
-    return False
-# End of in_proc_already
-
 global running_process_already      # If in a process -- so notes get processed as notes, not passed to process.
 running_process_already = False     # True if running a process (on the lmp stack).
 
@@ -5706,7 +5695,7 @@ def pass2():
         # fi
     # rof
     if last_voice_staff != []:
-        print_warning_no_line(f'Process(es) running for staff/voices: {last_voice_staff} - quiting them.')
+        print_warning_no_line(f'pass2 - Process(es) running for staff/voices: {last_voice_staff} - quiting them.')
         set_process_quit('pass2')
         last_voice_staff = []
     # fi
@@ -5918,8 +5907,8 @@ def get_next_process_line(l):
     global lmp_executing_line
     global lmp_executing_rest_of_line
     global i_line
-    global running_process_already
     global in_process_already
+    global running_process_already
     global process_buffer
 
     if lmp_executing_type[l] != 'process' or not running_process_already:
@@ -11727,7 +11716,6 @@ def do_tempo(t_args, original_line):
 # calls. Newly defined variables are initialized to zero.
 
 def do_vars(t_args, original_line):
-# NOTDONEYET - PROCESS variables
     global lmp_executing_number
 
 #--     print_debug_lmp('do_vars - Entering')
@@ -12415,7 +12403,6 @@ def initialize_set_voices(f1, original_line):
 # create_it     - True if should create variable. False means it must exist correctly.
 
 def handle_vars_parens(arg, a, create_it, original_line):
-# NOTDONEYET - PROCESS variables
     global lmp_executing_number
 
 #--     print_debug_lmp('handle_vars_parens - Entering')
@@ -12572,7 +12559,6 @@ def handle_vars_parens(arg, a, create_it, original_line):
 
 # ----------------------------------------------------------------------------
 def handle_vars_and_global(t_args, level, original_line):
-# NOTDONEYET - PROCESS
     global lmp_executing_number
 
 #--     print_debug_lmp('handle_vars_and_global - Entering')
@@ -15948,7 +15934,9 @@ def set_process_begin(token, next_tokens, original_line):
             last_voice_staff.append(ls)
         # fi
     # rof
-    set_process_quit(original_line)
+    if last_voice_staff != []:
+        set_process_quit(original_line)
+    # fi
     last_voice_staff = save_last_voice_staff
 
     # Set the process number for the staff. Used for each note on the staff.
@@ -15971,13 +15959,15 @@ def set_process_quit(original_line):
         if ls not in process_per_staff:
             print_error(f'set_process_quit - staff {ls} not in last_voice_staff {last_voice_staff}', original_line)
         # fi
-        process_per_staff[ls] = None                    # No process on this staff.
+        process_per_staff[ls] = None                # No process on this staff.
     # rof
     pop_process(original_line)
     return
 # End of set_process_quit
 
 # ----------------------------------------------------------------------------
+# This happens for each NOTE passed to each process, not with begin.
+
 def run_process(token, next_tokens, original_line):
     global process_argument             # Index by process number: Single argument for process.
     global lmp_executing_which           # The {process}_number for executing we are executing, by staff.
@@ -15986,11 +15976,13 @@ def run_process(token, next_tokens, original_line):
     global lmp_executing_i_line          # Saved i_line in entered process, by staff.
     global lmp_executing_number
     global lmp_executing_type
+    global in_process_already
+    global running_process_already
 
-    print_debug(f'run_process - Entering token={token} next_tokens{next_tokens}')
+    print_debug(f'run_process - Entering token={token} next_tokens={next_tokens}')
 
-    if lmp_executing_type[-1] != 'process':
-        print_error(f"run_process -ERROR, not in a process", original_line)
+    if lmp_executing_type[-1] == 'process':
+        print_error(f"run_process -ERROR, ALREADY IN A PROCESS", original_line)
         print_debug(f"            - lmp_executing_type='{lmp_executing_type}'")
         print_debug(f"            - lmp_executing_number='{lmp_executing_number}'")
         print_debug(f"            - lmp_executing_which='{lmp_executing_which}'")
@@ -15999,22 +15991,32 @@ def run_process(token, next_tokens, original_line):
         print_debug(f"            - running_process_already='{running_process_already}'")
         return
     # fi
-    n = lmp_executing_number
-    l = lmp_executing_which[n]
-    lmp_executing_line[n] = 0                       # First line in buffer.
-    lmp_executing_rest_of_line[n] = next_tokens     # Rest of this line.
-    p_a = process_argument[l]                       # process argument name
-    wary = chkvar(p_a)
-    if wary is None or (len(wary[numarry_indexes]) > 1 and wary[numarry_indexes][0] > 1):
-        # Does not exist, was deleted with end of last run.
-        if not createlocalvar(p_a, token, lmp_executing_number, type_is_string, True):
-            print_debug(f'run_process - #Z token={token} ({p_a[0]} {lmp_executing_number}')    #DEBUGOPAL
-            print_error(f"process begin {token} unable to create variable {p_a[0]}", original_line)
+
+    # Create a number of processes, one for each in last_voice_staff.
+    print_debug_lmp('Entering run_process')
+    for ls in last_voice_staff:
+        pn = process_per_staff[ls]
+        lmp_executing_number = lmp_executing_number + 1
+        if not createlocalvar(process_argument[pn], token, lmp_executing_number, type_is_string, True):
+            print_debug(f'run_process - ({process_argument[pn]} {lmp_executing_number}')    #DEBUGOPAL
+            print_error(f"process {token} unable to create variable {process_argument[pn]}", original_line)
+            set_process_quit(original_line)         # Stop any possibly created processes.
+            return
         # fi
-    else:
-        setvar(p_a, token, type_is_string)
-    # fi
-    running_process_already = True
+        lmp_executing_which.append(pn)
+        lmp_executing_type.append('process')
+        lmp_executing_args.append(None)             # ??
+        lmp_executing_line.append(0)                # First line in buffer.
+        lmp_executing_rest_of_line.append(next_tokens)  # Rest of this line - set in run_process.
+        t_line = i_line
+        for i in range(0, len(t_line)):             # Save current depth of line.
+            t_line[i] = 'prcss: ' + t_line[i]
+        # rof
+        lmp_executing_i_line.append(t_line)         # Save current depth of line.
+        in_process_already = True
+        running_process_already = False
+    # rof
+    print_debug_lmp('Exiting run_process')
     return
 # End of run_process
 
@@ -16612,7 +16614,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
             set_process_begin(token, next_tokens, original_line)
         elif token == 'quit':
             print_debug(f'                    - quit')
-            if in_proc_already():
+            if in_process_already:
                 set_process_quit(original_line)             # Pop from stack.
             else:
                 print_error(f'quit without being in a process. staff(es)={last_voice_staff}', original_line)
@@ -16650,8 +16652,8 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                 next_tokens = next_tokens.strip()
             # fi
         # Below - we have a process to run, and are not running it now, and only note stuff left to check.
-        elif in_proc_already() and not running_process_already:
-            print_debug(f'                    - in_proc_already() and not running_process_already')
+        elif in_process_already and not running_process_already:
+            print_debug(f'                    - in_process_already and not running_process_already')
             if token == '(':
                 token, next_tokens = get_next_argument(token+tdelim+next_tokens, original_line)
                 if len(token) <= 1:
@@ -16757,7 +16759,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                 next_tokens = next_tokens.strip()
             #
         else:
-            print_debug(f'                    - do notes last_voice_staff={last_voice_staff}')
+            print_debug(f'                    - do notes last_voice_staff={last_voice_staff} token={token}')
             if token == '(':
                 token, next_tokens = get_next_argument('('+next_tokens, original_line)
                 if next_tokens == '':
@@ -16769,6 +16771,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
             flag = False
             for st in last_voice_staff:                     # Go through staves
                 if st not in staff_chord or staff_chord[st] is None:    # Single note, not chord.
+# This may not be true for all voices ... NOTDONEYET
                     flag = True                             # Flag that we have not gotten start chord.
                     staff_chord[st] = 0                     # First voice for staff.
                     staff_chord_voices[st] = find_mlth_values(st, measure_on, original_line)
@@ -16778,31 +16781,39 @@ def process_staff_notes(command, delimiter, t_args, original_line):
 
             if len(last_voice_staff) > 1:
                 cnt = 0
+                which = None
+                whichcnt = 0
                 for ls in last_voice_staff:                 # Go through staves
                     if ls in process_per_staff and process_per_staff[ls] is not None:
                         cnt = cnt + 1
+                        if which is not None and which != process_per_staff[ls]:
+                            whichcnt = whichcnt + 1
+                        # fi
+                        which = process_per_staff[ls]
                     # fi
                 # rof
-                if cnt == len(last_voice_staff):
+                print_debug(f'       cnt={cnt} whichcnt={whichcnt} last_voice_staff={last_voice_staff} len()={len(last_voice_staff)} process_per_staff={process_per_staff}')
+#--                 if cnt == len(last_voice_staff):
+                if whichcnt != 0:
                     # Warn once that this does not work as might be expected.
                     if not multiple_staves_processes_once:
                         if not args.nooncewarning:
-                            print_warning('ONCE: Multiple staves active at same time with processes is BAD NEWS! Does not do what you think it might do. Runs 1st staff process, others get that note. Not other processes, nor time value, etc.', original_line)
+                            print_warning('ONCE: Multiple staves active at same time with different processes is BAD NEWS! Does not do what you think it might do. Runs 1st staff process, others get that note. Not other processes, nor time value, etc.', original_line)
                         # fi
                         multiple_staves_processes_once = True
                     # fi
-                else:
-                    # WARNING, processes on some but not all staves -- probably don't want multiple staves active!
-                    if not multiple_staves_processes_ooo:
-                        if not args.nooncewarning:
-                            print_warning('ONCE: Multiple staves active at same time. Number of processes does not match. Probably does not do what you want EITHER!', original_line)
-                        # fi
-                        multiple_staves_processes_ooo = True
-                    # fi
+#--                 elif cnt != 0:
+#--                     # WARNING, processes on some but not all staves -- probably don't want multiple staves active!
+#--                     if not multiple_staves_processes_ooo:
+#--                         if not args.nooncewarning:
+#--                             print_warning('ONCE: Multiple staves active at same time. Number of processes does not match. Probably does not do what you want EITHER!', original_line)
+#--                         # fi
+#--                         multiple_staves_processes_ooo = True
+#--                     # fi
                 # fi
             # fi
             # Might take multiple tokens.
-            print_debug(f'                    - calling process_notes_for_staff')
+            print_debug(f'                    - calling process_notes_for_staff token={token} tdelim={tdelim} next_tokens={next_tokens}')
             pvi_tf, next_tokens = process_notes_for_staff(token, tdelim, next_tokens, original_line)
 
             if flag:                                        # If doing a single note (not chord).
@@ -17036,6 +17047,7 @@ def readthefile():
     precomment = ''
     while not ifdone:                       # Read the file loop.
         line, commentonline = read_next_line()
+        print_debug(f'readthefile - line={line}')
         if args.lines:
             if lmp_executing_number > 0:
                 l = lmp_executing_number
