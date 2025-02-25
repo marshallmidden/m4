@@ -2646,8 +2646,8 @@ iftest = { 0:-1 }                   # -1 = within if, 0 = skip till else,
 global ifdepth                      # level of if/else/endif
 ifdepth = 0
 
-global cstop_happening
-cstop_happening = False             # True if after a cstop.
+global cstop_handling
+cstop_handling = False             # True if after a cstop.
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global macro_defining               # If currently defining a macro.
 macro_defining = None
@@ -2663,32 +2663,20 @@ global process_per_staff            # If not None, the process number run till q
 process_per_staff = { None: None }  # Indexed by staff_name -- None means no process (or missing from dictionary).
 # Can only be running one process at a time, and for one staff only at a time. Changing means "pop_process()".
 
-NOTDONEYET - PROCESS in_process_already
 def in_proc_already():              # True or False for process if any last_voice_staff is involved.
     global last_voice_staff
     global in_process_already
 
     for ls in last_voice_staff:
-        if ls in in_process_already and in_process_already[ls]:
+        if ls in process_per_staff and process_per_staff[ls] is not None:
             return True
         # fi
     # rof
     return False
 # End of in_proc_already
 
-NOTDONEYET - PROCESS running_process_already
 global running_process_already      # If in a process -- so notes get processed as notes, not passed to process.
-running_process_already = { None: False }
-def running_proc_already():         # True or False for process if any last_voice_staff is involved.
-    global running_process_already
-
-    for ls in last_voice_staff:
-        if ls in running_process_already and running_process_already[ls]:
-            return True
-        # fi
-    # rof
-    return False
-# End of running_proc_already
+running_process_already = False     # True if running a process (on the lmp stack).
 
 # loop -> endloop.  Count nested.
 global loop_defining                # If currently defining a loop.
@@ -5930,15 +5918,12 @@ def get_next_process_line(l):
     global lmp_executing_line
     global lmp_executing_rest_of_line
     global i_line
-NOTDONEYET - PROCESS running_process_already
     global running_process_already
-NOTDONEYET - PROCESS in_process_already
     global in_process_already
     global process_buffer
 
     if lmp_executing_type[l] != 'process' or not running_process_already:
         print_error(f"get_next_process_line - lmp_executing_type[l]='{lmp_executing_type[l]}' != 'process' or running_process_already='{running_process_already}'", 'in process')
-NOTDONEYET - PROCESS in_process_already running_process_already
         in_process_already = False
         running_process_already = False
         return ''
@@ -6240,7 +6225,6 @@ def read_next_line():
     global file_name
     global lmp_executing_number
     global lmp_executing_type
-NOTDONEYET - PROCESS running_process_already
     global running_process_already
 
 #--     print_debug_lmp(f'read_next_line')
@@ -6261,9 +6245,7 @@ NOTDONEYET - PROCESS running_process_already
                 print_these_vars('read_next_line,loop')
             # fi
             return tline, ''
-# NOTDONEYET - PROCESS
         elif lmp_executing_type[l] == 'process':
-NOTDONEYET - PROCESS running_process_already
             if running_process_already:
                 tline = get_next_process_line(l)
                 if args.lines:
@@ -15258,7 +15240,7 @@ def do_notes_oldway(line, original_line):
     global MIDICLICKSPERQUARTER
     global lmp_executing_which
 
-#--     print_debug_lmp('handle_vars_and_global - Entering')
+#--     print_debug_lmp('do_notes_oldway - Entering')
 
     if not measure_on or measure_on == '':  # no measure yet
         print_error("no measure processed yet - must have one before notes.", original_line)
@@ -15981,7 +15963,6 @@ def set_process_begin(token, next_tokens, original_line):
 
 def set_process_quit(original_line):
     global process_per_staff
-    global running_process_already
     global last_voice_staff
 
     print_debug(f'set_process_quit - Entering')
@@ -16005,8 +15986,6 @@ def run_process(token, next_tokens, original_line):
     global lmp_executing_i_line          # Saved i_line in entered process, by staff.
     global lmp_executing_number
     global lmp_executing_type
-NOTDONEYET - PROCESS running_process_already
-    global running_process_already
 
     print_debug(f'run_process - Entering token={token} next_tokens{next_tokens}')
 
@@ -16017,7 +15996,6 @@ NOTDONEYET - PROCESS running_process_already
         print_debug(f"            - lmp_executing_which='{lmp_executing_which}'")
         print_debug(f"            - lmp_executing_line='{lmp_executing_line}'")
         print_debug(f"            - lmp_executing_rest_of_line='{lmp_executing_rest_of_line}'")
-NOTDONEYET - PROCESS running_process_already
         print_debug(f"            - running_process_already='{running_process_already}'")
         return
     # fi
@@ -16036,7 +16014,6 @@ NOTDONEYET - PROCESS running_process_already
     else:
         setvar(p_a, token, type_is_string)
     # fi
-NOTDONEYET - PROCESS running_process_already
     running_process_already = True
     return
 # End of run_process
@@ -16635,7 +16612,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
             set_process_begin(token, next_tokens, original_line)
         elif token == 'quit':
             print_debug(f'                    - quit')
-            if in_proc_already:
+            if in_proc_already():
                 set_process_quit(original_line)             # Pop from stack.
             else:
                 print_error(f'quit without being in a process. staff(es)={last_voice_staff}', original_line)
@@ -16673,8 +16650,8 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                 next_tokens = next_tokens.strip()
             # fi
         # Below - we have a process to run, and are not running it now, and only note stuff left to check.
-        elif in_proc_already() and not running_proc_already():
-            print_debug(f'                    - in_proc_already and not running_proc_already')
+        elif in_proc_already() and not running_process_already:
+            print_debug(f'                    - in_proc_already() and not running_process_already')
             if token == '(':
                 token, next_tokens = get_next_argument(token+tdelim+next_tokens, original_line)
                 if len(token) <= 1:
@@ -17053,7 +17030,6 @@ def readthefile():
     global macro_name
     global loop_location
     global process_name
-NOTDONEYET - PROCESS running_process_already
     global running_process_already
 
     ifdone = False
@@ -17071,7 +17047,6 @@ NOTDONEYET - PROCESS running_process_already
                     name_mpl = str(loop_location[the_lmp])
                 elif lt == 'process':
                     name_mpl = process_name[the_lmp]
-NOTDONEYET - PROCESS running_process_already
                     if not running_process_already:
                         name_mpl = name_mpl + ' - Not_running'
                     # fi
