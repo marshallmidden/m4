@@ -5480,11 +5480,14 @@ def print_debug_lmp(s):
     global lmp_executing_line           # Line number in macro/loop/process array currently handling.
     global lmp_executing_rest_of_line   # Rest of line - for in-line macro/process. Loop doesn't have this.
     global lmp_executing_i_line         # Saved i_line in entered macro.
+    global process_per_staff
+    global in_process_already
+    global running_process_already
 
     print_debug(f'------------------------------------------------------------------------------')
-    print_debug(f'print_debug_lmp - {s}')
-    print_debug(f'print_debug_lmp - lmp_executing_number={lmp_executing_number}')
-    print_debug(f'print_debug_lmp - lmp_executing_which={lmp_executing_which}')
+    print_debug(f'print_debug_lmp - {s} p/s={process_per_staff} in={in_process_already} running={running_process_already}')
+   
+    print_debug(f'print_debug_lmp - lmp_executing_number={lmp_executing_number} lmp_executing_which={lmp_executing_which}')
     print_debug(f'print_debug_lmp - lmp_executing_type={lmp_executing_type}')
     print_debug(f'print_debug_lmp - lmp_executing_args={lmp_executing_args}')
     print_debug(f'print_debug_lmp - lmp_executing_line={lmp_executing_line}')
@@ -5910,20 +5913,26 @@ def get_next_process_line(l):
     global in_process_already
     global running_process_already
     global process_buffer
+    global last_voice_staff
+
+    print_debug_lmp(f'get_next_process_line - l={l} last_voice_staff={last_voice_staff}')
 
     if lmp_executing_type[l] != 'process' or not running_process_already:
         print_error(f"get_next_process_line - lmp_executing_type[l]='{lmp_executing_type[l]}' != 'process' or running_process_already='{running_process_already}'", 'in process')
         in_process_already = False
         running_process_already = False
+        print_debug_bufs(f'get_next_process_line, ({l})')
         return ''
     # fi
     the_process = lmp_executing_which[l]
     linenumber = lmp_executing_line[l]
     lines = process_buffer[the_process]
+    print_debug_lmp(f'get_next_process_line - linenumber={linenumber} lines={lines}')
     if linenumber >= len(lines):
         delete_executing_variables(l)
         retline = lmp_executing_rest_of_line[l]                   # Stuff after this process (if not EOLN)
         running_process_already = False
+        print_debug_lmp(f'get_next_process_line - no more lines retline={retline}')
         return retline
     # fi
     line = lines[linenumber]
@@ -6216,10 +6225,10 @@ def read_next_line():
     global lmp_executing_type
     global running_process_already
 
-#--     print_debug_lmp(f'read_next_line')
+    print_debug_lmp(f'read_next_line')
     if lmp_executing_number > 0:
         l = lmp_executing_number
-#--         print_debug(f'lmp_executing_type={lmp_executing_type}')
+        print_debug(f'lmp_executing_type={lmp_executing_type}')
         if lmp_executing_type[l] == 'macro':
             tline = get_next_macro_line(l)
             if args.lines:
@@ -6235,7 +6244,9 @@ def read_next_line():
             # fi
             return tline, ''
         elif lmp_executing_type[l] == 'process':
+            print_debug(f'lmp_executing_type[{l}]={lmp_executing_type[l]}')
             if running_process_already:
+                print_debug(f'running_process_already={running_process_already}')
                 tline = get_next_process_line(l)
                 if args.lines:
                     print_eoln(f'  read_next_line: tline="{tline}"')
@@ -15917,6 +15928,7 @@ def compute_command_args(expand_line):
 def set_process_begin(token, next_tokens, original_line):
     global last_voice_staff
     global process_per_staff
+    global in_process_already
     global process_name                             # The name of the processes.
 
     print_debug(f'set_process_begin - Entering last_voice_staff={last_voice_staff} token={token} next_tokens={next_tokens}')
@@ -15943,6 +15955,7 @@ def set_process_begin(token, next_tokens, original_line):
     for ls in last_voice_staff:
         process_per_staff[ls] = pnumber
     # rof
+    in_process_already = True
     return
 # End of set_process_begin
 
@@ -15993,10 +16006,11 @@ def run_process(token, next_tokens, original_line):
     # fi
 
     # Create a number of processes, one for each in last_voice_staff.
-    print_debug_lmp('Entering run_process')
+#--     print_debug_lmp('Entering run_process')
     for ls in last_voice_staff:
         pn = process_per_staff[ls]
         lmp_executing_number = lmp_executing_number + 1
+        print_debug(f'run_process - pn={pn} lmp_executing_number={lmp_executing_number}')
         if not createlocalvar(process_argument[pn], token, lmp_executing_number, type_is_string, True):
             print_debug(f'run_process - ({process_argument[pn]} {lmp_executing_number}')    #DEBUGOPAL
             print_error(f"process {token} unable to create variable {process_argument[pn]}", original_line)
@@ -16014,7 +16028,7 @@ def run_process(token, next_tokens, original_line):
         # rof
         lmp_executing_i_line.append(t_line)         # Save current depth of line.
         in_process_already = True
-        running_process_already = False
+        running_process_already = True
     # rof
     print_debug_lmp('Exiting run_process')
     return
@@ -16404,6 +16418,7 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):
     global time
     global in_chord
 
+#--     print_debug(f'process_notes_for_staff A# - token={token} delimiter={delimiter} next_tokens={next_tokens}')
     if delimiter == '':                             # End of line.
         send_these_notes = (token + ' ' + next_tokens).strip()
     elif len(next_tokens) > 0 and next_tokens[0] == delimiter:
@@ -16440,7 +16455,15 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):
 
     send_these_notes = macro_here(send_these_notes, original_line)
 
+# Need to go through last_voice_staff and do following for each. - NOTDONEYET
+# Can a process be created?
+
+#--     print_debug(f'process_notes_for_staff B# - send_these_notes={send_these_notes}')
+
     temp1, prenote, postnote = find_vol_cresc_pan_intensity(send_these_notes, voiceon, prenote, postnote, original_line)
+
+#--     print_debug(f'process_notes_for_staff C# - temp1={temp1} prenote={prenote} postnote={postnote}')
+
     if send_these_notes != temp1:
         for st in last_voice_staff:         # Go through staves
             if staff_name[st] is not None:
@@ -16452,10 +16475,12 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):
         # rof
     # fi
     if temp1 is None or temp1 == '':
-        return True, ''
+        print_debug(f"process_notes_for_staff W# - ''")
+        return ''
     # fi
     if temp1 != send_these_notes:
-        return True, temp1
+        print_debug(f"process_notes_for_staff X# - {temp1}")
+        return temp1
     # fi
     #.............................................................................
     # Need to go through all staves, getting the voice to put note on,
@@ -16470,6 +16495,7 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):
         next_tie = get_staff_arr(voiceon, bufs_tie_next, 'bufs_tie_next', 'process_notes_for_staff ' + original_line)
         next_legato = get_staff_arr(voiceon, bufs_legato_next, 'bufs_legato_next', 'process_notes_for_staff ' + original_line)
         lth, rest, prenote, postnote = do_a_note(nt, rest, voiceon, prenote, postnote, 'staff', next_tie, next_legato, original_line)
+        print_debug(f"process_notes_for_staff D# - st={st} nt={nt} lth={lth} rest={rest} prenote={prenote} postnote={postnote}")
 
         voice_prenote[voiceon] = prenote
         if lth is not None:
@@ -16499,7 +16525,8 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):
         staff_chord[st] = staff_chord[st] + 1
     # rof
 
-    return False, rest
+#--     print_debug(f"process_notes_for_staff Y# - {rest}")
+    return rest
 # End of process_notes_for_staff
 
 # ----------------------------------------------------------------------------
@@ -16583,7 +16610,8 @@ def process_staff_notes(command, delimiter, t_args, original_line):
     while ((token is not None and token != '') or
            (next_tokens is not None and next_tokens != '') or
            (tdelim is not None and tdelim != '')):
-        print_debug(f'process_staff_notes - token={token} tdelim={tdelim} next_tokens={next_tokens}')
+        print_debug(f'==============================================================================')
+        print_debug(f'process_staff_notes A# - token={token} tdelim={tdelim} next_tokens={next_tokens}')
         # Delete quotes ... double or single.
         if len(token) > 0 and token[0] in ("'", '"'):
             next_tokens = re.sub(r"^'[^']*'", '', next_tokens)  # Delete single quotes and contents.
@@ -16609,18 +16637,21 @@ def process_staff_notes(command, delimiter, t_args, original_line):
             print_warning(f'm:{measure_on} #B macro {token} did not match terminators correctly.', original_line)
         # fi
         if token == 'begin':
-            print_debug(f'                    - begin')
+#--             print_debug(f'        - begin')
+            print_debug_lmp('process_staff_notes - b4 begin')
             token, tdelim, next_tokens = compute_command_args(next_tokens)
             set_process_begin(token, next_tokens, original_line)
+            print_debug_lmp('process_staff_notes - aft begin')
         elif token == 'quit':
-            print_debug(f'                    - quit')
+            print_debug(f'        - quit')
+            print_debug_lmp('process_staff_notes - quit token')
             if in_process_already:
                 set_process_quit(original_line)             # Pop from stack.
             else:
                 print_error(f'quit without being in a process. staff(es)={last_voice_staff}', original_line)
             # fi
         elif token in staff_name and tdelim != '' and tdelim in ':,':   # Cannot have space as a possible delimiter.
-            print_debug(f'                    - staff_name')
+            print_debug(f'        - staff_name')
             next_staff = []
 # The following is hosed. Must stop after : and add those with ',' and ':'.
             while tdelim in ', \t' or tdelim == '':
@@ -16629,7 +16660,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                     next_tokens = next_tokens[1:].strip()
                 # fi
                 token, tdelim, next_tokens = compute_command_args(next_tokens)
-                print_debug(f'                    #A - next_staff={next_staff} token={token} tdelim={tdelim} next_tokens={next_tokens}')
+                print_debug(f'        #A - next_staff={next_staff} token={token} tdelim={tdelim} next_tokens={next_tokens}')
                 if token not in staff_name:
                     print_error(f"process_staff_notes #B- token='{token}' not in staff_names={staff_name}  - next_tokens='{next_tokens}' tdelim='{tdelim}'", original_line)
                     return
@@ -16640,12 +16671,11 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                 next_tokens = next_tokens[1:].strip()
             # fi
             last_voice_staff = next_staff                   # Switch to first staff_name for stack (lmp_...).
-#--            ns = last_voice_staff[0]
-            print_debug(f'                    #C - next_staff={next_staff} last_voice_staff={last_voice_staff}')
+#--             print_debug(f'        #C - next_staff={next_staff} last_voice_staff={last_voice_staff}')
             setvar('voice', ','.join(last_voice_staff), type_is_string) # Doesn't need join, but do it for consistency.
             setvar('in_chord', in_chord[last_voice_staff[0]], type_is_number)   # Set at same time as voice.
         elif token in staff_keywords:
-            print_debug(f'                    - calling process_keyword')
+            print_debug(f'        - calling process_keyword')
             # process keyword - Might take multiple tokens.
             next_tokens = process_keyword(token, tdelim, next_tokens, original_line)
             if next_tokens is not None and next_tokens != '':
@@ -16653,7 +16683,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
             # fi
         # Below - we have a process to run, and are not running it now, and only note stuff left to check.
         elif in_process_already and not running_process_already:
-            print_debug(f'                    - in_process_already and not running_process_already')
+            print_debug(f'        - in_process_already and not running_process_already')
             if token == '(':
                 token, next_tokens = get_next_argument(token+tdelim+next_tokens, original_line)
                 if len(token) <= 1:
@@ -16679,11 +16709,11 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                     tdelim = ' '
                 # fi
             # fi
-            print_debug(f'                    - calling run_process')
+            print_debug(f'        - calling run_process')
             run_process(token, next_tokens, original_line)
             return
         elif token == '[':
-            print_debug(f'                    - start chord')
+            print_debug(f'        - start chord')
             err = False
             for st in last_voice_staff:                     # Go through staves
                 if st in staff_chord:
@@ -16715,7 +16745,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
             # fi
             setvar('in_chord', in_chord[last_voice_staff[0]], type_is_number)   # Set at same time as voice.
         elif token == ']':
-            print_debug(f'                    - end chord')
+            print_debug(f'        - end chord')
             err = False
             for st in last_voice_staff:
                 if st not in staff_chord or type(staff_chord[st]) is not int:
@@ -16754,12 +16784,12 @@ def process_staff_notes(command, delimiter, t_args, original_line):
             # rof
             setvar('in_chord', in_chord[last_voice_staff[0]], type_is_number)   # Set at same time as voice.
         elif (token == '' or token == ',') and tdelim == '':
-            print_debug(f'                    - no token and no delimiter')
+            print_debug(f'        - no token and no delimiter')
             if next_tokens is not None:
                 next_tokens = next_tokens.strip()
             #
         else:
-            print_debug(f'                    - do notes last_voice_staff={last_voice_staff} token={token}')
+            print_debug(f'        - do notes last_voice_staff={last_voice_staff} token={token}')
             if token == '(':
                 token, next_tokens = get_next_argument('('+next_tokens, original_line)
                 if next_tokens == '':
@@ -16792,8 +16822,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                         which = process_per_staff[ls]
                     # fi
                 # rof
-                print_debug(f'       cnt={cnt} whichcnt={whichcnt} last_voice_staff={last_voice_staff} len()={len(last_voice_staff)} process_per_staff={process_per_staff}')
-#--                 if cnt == len(last_voice_staff):
+#--                 print_debug(f'       cnt={cnt} whichcnt={whichcnt} last_voice_staff={last_voice_staff} len()={len(last_voice_staff)} process_per_staff={process_per_staff}')
                 if whichcnt != 0:
                     # Warn once that this does not work as might be expected.
                     if not multiple_staves_processes_once:
@@ -16813,8 +16842,8 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                 # fi
             # fi
             # Might take multiple tokens.
-            print_debug(f'                    - calling process_notes_for_staff token={token} tdelim={tdelim} next_tokens={next_tokens}')
-            pvi_tf, next_tokens = process_notes_for_staff(token, tdelim, next_tokens, original_line)
+            print_debug(f'        - calling process_notes_for_staff token={token} tdelim={tdelim} next_tokens={next_tokens}')
+            next_tokens = process_notes_for_staff(token, tdelim, next_tokens, original_line)
 
             if flag:                                        # If doing a single note (not chord).
                 pflag = False
@@ -16852,7 +16881,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
         next_tokens = next_tokens.lstrip()
         token, tdelim, next_tokens = compute_command_args(next_tokens)
         token = token.strip()
-        print_debug(f'                    #Y - last_voice_staff={last_voice_staff} token={token} tdelim={tdelim} next_tokens={next_tokens}')
+#--         print_debug(f'        #Y - last_voice_staff={last_voice_staff} token={token} tdelim={tdelim} next_tokens={next_tokens}')
         if len(next_tokens) > 0 and next_tokens[0] in ("'", '"'):
             next_tokens = re.sub(r"^'[^']*'", '', next_tokens)
             next_tokens = re.sub(r'^"[^"]*"', '', next_tokens)
@@ -16870,7 +16899,7 @@ def process_staff_notes(command, delimiter, t_args, original_line):
                 tdelim = ''
             # fi
         # fi
-        print_debug(f'                    #Z - last_voice_staff={last_voice_staff} token={token} tdelim={tdelim} next_tokens={next_tokens}')
+#--         print_debug(f'        #Z - last_voice_staff={last_voice_staff} token={token} tdelim={tdelim} next_tokens={next_tokens}')
     # elihw
     return
 # End of process_staff_notes
