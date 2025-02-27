@@ -5909,6 +5909,7 @@ def delete_executing_variables(l):
 
 # ----------------------------------------------------------------------------
 def get_next_process_line(l):           # PROCESS
+    global lmp_executing_number
     global lmp_executing_which
     global lmp_executing_type
     global lmp_executing_line
@@ -5918,7 +5919,7 @@ def get_next_process_line(l):           # PROCESS
     global process_buffer
     global last_voice_staff
 
-    print_debug(f'get_next_process_line - l={l} last_voice_staff={last_voice_staff}')
+    print_debug_lmp(f'get_next_process_line - l={l} last_voice_staff={last_voice_staff}')
 
     if lmp_executing_type[l] != 'process' or not running_process_already:
         print_error(f"get_next_process_line - lmp_executing_type[l]='{lmp_executing_type[l]}' != 'process' or running_process_already='{running_process_already}'", 'in process')
@@ -5932,16 +5933,31 @@ def get_next_process_line(l):           # PROCESS
     print_debug(f'get_next_process_line - linenumber={linenumber} lines={lines}')
     if linenumber >= len(lines):
         delete_executing_variables(l)
-        l = lmp_executing_number
-        running_process_already = False
         abc = remove_lmp(l)
-        print_debug_lmp(f'get_next_process_line - no more lines after pop process')
-        return abc
+        l = lmp_executing_number
+        print_debug(f'get_next_process_line - no more lines after pop process l={l} type(l)={type(l)}')
+        print_debug(f'get_next_process_line -    lmp_executing_type[{l}]={lmp_executing_type[l]}')
+        if l <= 0 or lmp_executing_type[l] != 'process':
+            running_process_already = False
+            print_debug(f'get_next_process_line -    abc={abc}  last_voice_staff={last_voice_staff}')
+            return abc
+        # fi
+        last_voice_staff = lmp_executing_args[l]
+        the_process = lmp_executing_which[l]
+        if the_process is None:
+            delete_executing_variables(l)
+            abc = remove_lmp(l)
+            print_debug_lmp(f'get_next_process_line - last process, abc={abc}')
+            running_process_already = False
+            return abc
+        # fi
+        linenumber = lmp_executing_line[l]
+        lines = process_buffer[the_process]
     # fi
     line = lines[linenumber]
     i_line = [ f'process:      {(linenumber+1):4d}:' + line ]     # Line as given from process text buffer
     lmp_executing_line[l] = linenumber + 1
-    print_debug(f'get_next_process_line - line={line}')
+    print_debug_lmp(f'get_next_process_line - line={line}')
     return line
 # End of get_next_process_line
 
@@ -6229,10 +6245,10 @@ def read_next_line():
     global lmp_executing_type
     global running_process_already
 
-    print_debug_lmp(f'read_next_line')
+    print_debug_lmp(f'read_next_line - lmp_executing_number={lmp_executing_number}')
     if lmp_executing_number > 0:
         l = lmp_executing_number
-        print_debug(f'lmp_executing_type={lmp_executing_type}')
+        print_debug(f'lmp_executing_type[{l}]={lmp_executing_type[l]}')
         if lmp_executing_type[l] == 'macro':
             tline = get_next_macro_line(l)
             if args.lines:
@@ -6248,7 +6264,7 @@ def read_next_line():
             # fi
             return tline, ''
         elif lmp_executing_type[l] == 'process':
-            print_debug(f'lmp_executing_type[{l}]={lmp_executing_type[l]}')
+            print_debug(f'lmp_executing_type[{l}]={lmp_executing_type[l]} running_process_already={running_process_already}')
             if running_process_already:
                 print_debug(f'running_process_already={running_process_already}')
                 tline = get_next_process_line(l)
@@ -6256,9 +6272,11 @@ def read_next_line():
                     print_eoln(f'  read_next_line: tline="{tline}"')
                     print_these_vars('read_next_line,process')
                 # fi
+                print_debug(f'running_process_already={running_process_already} - tline={tline}')
                 return tline, ''
             # fi
         else:
+            print_debug(f'Not macro, loop, nor process.')
             return '', ''
         # fi
     # fi
@@ -15962,6 +15980,36 @@ def set_process_begin(token, next_tokens, original_line):   # PROCESS
 # End of set_process_begin
 
 # ----------------------------------------------------------------------------
+def pop_process(original_line):           # PROCESS
+    global lmp_executing_number
+    global lmp_executing_which
+    global lmp_executing_type
+    global lmp_executing_line
+    global lmp_executing_rest_of_line
+    global i_line
+    global running_process_already
+    global process_buffer
+    global last_voice_staff
+
+    print_debug_lmp(f'pop_propcess - lmp_executing_number={lmp_executing_number} last_voice_staff={last_voice_staff}')
+
+    while True:
+        l = lmp_executing_number
+        if l == 0 or lmp_executing_type[l] != 'process':
+            break
+        # fi
+        if lmp_executing_which[l] == None:
+            last_voice_staff = lmp_executing_args[l]
+        # fi
+        delete_executing_variables(l)
+        remove_lmp(l)
+        l = lmp_executing_number
+    # elihw
+    running_process_already = False
+    return
+# End of pop_process
+
+# ----------------------------------------------------------------------------
 # Stop running a process for all last_voice_staff's.
 
 def set_process_quit(original_line):    # PROCESS
@@ -15976,6 +16024,7 @@ def set_process_quit(original_line):    # PROCESS
         # fi
         process_per_staff[ls] = None                # No process on this staff.
     # rof
+    print_debug_lmp(f'set_process_quit - before cleaning up stack')
     pop_process(original_line)
     return
 # End of set_process_quit
@@ -16039,7 +16088,8 @@ def run_process(token, next_tokens, original_line):         # PROCESS
         # fi
         lmp_executing_which.append(pn)
         lmp_executing_type.append('process')
-        lmp_executing_args.append(ls)
+        last_ls = [ ls ]
+        lmp_executing_args.append(last_ls)
         lmp_executing_line.append(0)            # First line in buffer.
         lmp_executing_rest_of_line.append('')   # Rest of this line - set in run_process - nothing.
         t_line = i_line
@@ -16047,7 +16097,6 @@ def run_process(token, next_tokens, original_line):         # PROCESS
             t_line[i] = 'prcss: ' + t_line[i]
         # rof
         lmp_executing_i_line.append(t_line)     # Save current depth of line.
-        last_ls = [ ls ]
     # rof
     running_process_already = True              # PROCESS - NOTDONEYET ???
     last_voice_staff = last_ls
@@ -16671,7 +16720,7 @@ def do_staff_notes(command, delimiter, t_args, original_line):
             save_last_voice_staff = last_voice_staff
             last_voice_staff = []
             no_process = []
-            for ls in last_voice_staff:
+            for ls in save_last_voice_staff:
                 if ls in process_per_staff and process_per_staff[ls] is not None:
                     last_voice_staff.append(ls)
                 else:
@@ -17140,12 +17189,15 @@ def readthefile():
             print_these_vars('readthefile#1')
         # fi
         if line is None and commentonline is None:  # If end of file.
+            print_debug(f'readthefile #2 - line={line}')
             return
         elif not line or len(line) <= 0 or line == '':
+            print_debug(f'readthefile #3 - line={line}')
             continue
         # fi
         line = line.rstrip()
         if not line or len(line) <= 0 or line == '':
+            print_debug(f'readthefile #4 - line={line}')
             continue
         # fi
         # If command == '*' ignore.
@@ -17196,9 +17248,11 @@ def readthefile():
                     continue                                # If more things that might change...
                 # fi
             # fi
+            print_debug(f'readthefile #5 - line={line}')
             break
         # elihw
         if len(line) == 0:                                  # Ignore empty line.
+            print_debug(f'readthefile #6 - line={line}')
             continue
         elif line[0] == '\t':
             line = (' ' * 8) + line[1:]
@@ -17206,12 +17260,14 @@ def readthefile():
         if line.startswith('^        '):
             line = line.rstrip()                            # Strip trailing spaces.
             if not line or line == '':                      # Ignore empty continuation lines.
+                print_debug(f'readthefile #7 - line={line}')
                 continue
             # fi
         else:
             line = line.strip()                             # Strip non-continuation leading and trailing spaces.
         # fi
         if len(line) == 0:                                  # Ignore empty line.
+            print_debug(f'readthefile #8 - line={line}')
             continue
         # fi
         # If command == '*' -- ignore the "comment" line.
@@ -17225,7 +17281,9 @@ def readthefile():
             linecount = int(wxit[0]) - 1
             which_file_in = wxit[1]
         else:                                               # Note: empty blank line NOT passed through.
+            print_debug(f'readthefile #9 - line={line}')
             ifdone = do_line(line)
+            print_debug(f'readthefile #10 - ifdone={ifdone} (False means continue.)')
         # fi
     # elihw
     return
