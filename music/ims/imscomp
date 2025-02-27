@@ -5874,7 +5874,7 @@ def delete_one_variable(name, l):
 
 # ----------------------------------------------------------------------------
 def delete_executing_variables(l):
-    # No lines left, delete macro created variables.
+    # No lines left, delete macro / process / loop created variables.
     c = []
     for w in range(0, len(calculate.arrays)):
         if calculate.arrays[w][numarry_maclevel] == l:
@@ -5904,7 +5904,7 @@ def delete_executing_variables(l):
 # End of delete_executing_variables
 
 # ----------------------------------------------------------------------------
-def get_next_process_line(l):
+def get_next_process_line(l):           # PROCESS
     global lmp_executing_which
     global lmp_executing_type
     global lmp_executing_line
@@ -5915,7 +5915,7 @@ def get_next_process_line(l):
     global process_buffer
     global last_voice_staff
 
-    print_debug_lmp(f'get_next_process_line - l={l} last_voice_staff={last_voice_staff}')
+    print_debug(f'get_next_process_line - l={l} last_voice_staff={last_voice_staff}')
 
     if lmp_executing_type[l] != 'process' or not running_process_already:
         print_error(f"get_next_process_line - lmp_executing_type[l]='{lmp_executing_type[l]}' != 'process' or running_process_already='{running_process_already}'", 'in process')
@@ -5927,17 +5927,19 @@ def get_next_process_line(l):
     the_process = lmp_executing_which[l]
     linenumber = lmp_executing_line[l]
     lines = process_buffer[the_process]
-    print_debug_lmp(f'get_next_process_line - linenumber={linenumber} lines={lines}')
+    print_debug(f'get_next_process_line - linenumber={linenumber} lines={lines}')
     if linenumber >= len(lines):
         delete_executing_variables(l)
         retline = lmp_executing_rest_of_line[l]                   # Stuff after this process (if not EOLN)
         running_process_already = False
-        print_debug_lmp(f'get_next_process_line - no more lines retline={retline}')
+        in_process_already = False
+        print_debug(f'get_next_process_line - no more lines retline={retline}')
         return retline
     # fi
     line = lines[linenumber]
     i_line = [ f'process:      {(linenumber+1):4d}:' + line ]     # Line as given from process text buffer
     lmp_executing_line[l] = linenumber + 1
+    print_debug(f'get_next_process_line - line={line}')
     return line
 # End of get_next_process_line
 
@@ -15925,7 +15927,7 @@ def compute_command_args(expand_line):
 # Start a process for all 'last_voice_staff'.
 # return True if going to be in a process upon exit. False for error.
 
-def set_process_begin(token, next_tokens, original_line):
+def set_process_begin(token, next_tokens, original_line):   # PROCESS
     global last_voice_staff
     global process_per_staff
     global in_process_already
@@ -15981,21 +15983,23 @@ def set_process_quit(original_line):
 # ----------------------------------------------------------------------------
 # This happens for each NOTE passed to each process, not with begin.
 
-def run_process(token, next_tokens, original_line):
+def run_process(token, next_tokens, original_line):         # PROCESS
     global process_argument             # Index by process number: Single argument for process.
-    global lmp_executing_which           # The {process}_number for executing we are executing, by staff.
-    global lmp_executing_line            # Line number in process array currently processing, by staff.
-    global lmp_executing_rest_of_line    # Rest of line - for in-line process, by staff.
-    global lmp_executing_i_line          # Saved i_line in entered process, by staff.
+    global lmp_executing_which          # The {process}_number for executing we are executing, by staff.
+    global lmp_executing_line           # Line number in process array currently processing, by staff.
+    global lmp_executing_rest_of_line   # Rest of line - for in-line process, by staff.
+    global lmp_executing_i_line         # Saved i_line in entered process, by staff.
     global lmp_executing_number
     global lmp_executing_type
     global in_process_already
     global running_process_already
+    global process_per_staff
+    global last_voice_staff
 
-    print_debug(f'run_process - Entering token={token} next_tokens={next_tokens}')
+    print_debug(f'run_process - Entering token={token} next_tokens={next_tokens} type(last_voice_staff)={type(last_voice_staff)} last_voice_staff={last_voice_staff}')
 
     if lmp_executing_type[-1] == 'process':
-        print_error(f"run_process -ERROR, ALREADY IN A PROCESS", original_line)
+        print_error(f"run_process -ERROR, ALREADY IN A process", original_line)
         print_debug(f"            - lmp_executing_type='{lmp_executing_type}'")
         print_debug(f"            - lmp_executing_number='{lmp_executing_number}'")
         print_debug(f"            - lmp_executing_which='{lmp_executing_which}'")
@@ -16007,10 +16011,13 @@ def run_process(token, next_tokens, original_line):
 
     # Create a number of processes, one for each in last_voice_staff.
 #--     print_debug_lmp('Entering run_process')
-    for ls in last_voice_staff:
+    prev_lvs = last_voice_staff                     # Revert to this last_voice_staf upon popping.
+    rv_lvs = list(reversed(last_voice_staff))
+    print_debug(f'type(rv_lvs)={type(rv_lvs)} rv_lvs={rv_lvs}')
+    for ls in rv_lvs:
         pn = process_per_staff[ls]
         lmp_executing_number = lmp_executing_number + 1
-        print_debug(f'run_process - pn={pn} lmp_executing_number={lmp_executing_number}')
+        print_debug(f'run_process - pn={pn} lmp_executing_number={lmp_executing_number} ls={ls}')
         if not createlocalvar(process_argument[pn], token, lmp_executing_number, type_is_string, True):
             print_debug(f'run_process - ({process_argument[pn]} {lmp_executing_number}')    #DEBUGOPAL
             print_error(f"process {token} unable to create variable {process_argument[pn]}", original_line)
@@ -16019,7 +16026,8 @@ def run_process(token, next_tokens, original_line):
         # fi
         lmp_executing_which.append(pn)
         lmp_executing_type.append('process')
-        lmp_executing_args.append(None)             # ??
+        lmp_executing_args.append(prev_lvs)         # Previous last_voice_staff
+        prev_lvs = [ ls  ]                          # For next one, pop into this one.
         lmp_executing_line.append(0)                # First line in buffer.
         lmp_executing_rest_of_line.append(next_tokens)  # Rest of this line - set in run_process.
         t_line = i_line
@@ -16030,7 +16038,8 @@ def run_process(token, next_tokens, original_line):
         in_process_already = True
         running_process_already = True
     # rof
-    print_debug_lmp('Exiting run_process')
+    last_voice_staff = prev_lvs
+    print_debug_lmp('Exiting run_process - last_voice_staff={last_voice_staff}')
     return
 # End of run_process
 
@@ -16339,6 +16348,7 @@ def find_mlth_values(stfs, m, original_line):
     global staff_name
     global mlth
 
+    print_debug(f'find_mlth_values - stfs={stfs} m={m}')
     num0s = []
     minvalue = None
     nummins = []
@@ -16525,7 +16535,7 @@ def process_notes_for_staff(token, delimiter, next_tokens, original_line):
         staff_chord[st] = staff_chord[st] + 1
     # rof
 
-#--     print_debug(f"process_notes_for_staff Y# - {rest}")
+    print_debug(f"process_notes_for_staff Y# - {rest}")
     return rest
 # End of process_notes_for_staff
 
@@ -17087,6 +17097,7 @@ def readthefile():
                 elif lt == 'loop':
                     name_mpl = str(loop_location[the_lmp])
                 elif lt == 'process':
+                    print_debug(f'readthefile - lt==process')
                     name_mpl = process_name[the_lmp]
                     if not running_process_already:
                         name_mpl = name_mpl + ' - Not_running'
