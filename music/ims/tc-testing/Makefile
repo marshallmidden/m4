@@ -1,56 +1,103 @@
-#----------------------------------------------------------------------------- SONGS  = 18notes
+#-----------------------------------------------------------------------------
+SONGS  = 18notes
 SONGS += 1963
+
+# Chromatic.gcs - Lots of tied note errors.
 SONGS += Chromatic
+
 SONGS += Entroid
 SONGS += Entroid_
 SONGS += Horizons
 SONGS += Joy
+
+# Kanon.gcs - Lots of tied note errors.
 SONGS += Kanon
+
 SONGS += Miditest
+
+# Phantasm.gcs - Lots of tied note errors.
+SONGS += Phantasm
+
 SONGS += Poppers
 SONGS += Roundoff
-
 SONGS += changes-idea
 SONGS += char-print
-SONGS += clock-tower
-#-- DOESN'T WORK	SONGS += e-minor	No notes.
+SONGS += etude-1-chopin
+
+# fru-uhlingserwachen.gcs - Lots of tied note errors.
 SONGS += fru-uhlingserwachen
+
 SONGS += idea
 SONGS += joy-piano-part
+
+# ma-solitude.gcs - Lots of tied note errors.
 SONGS += ma-solitude
+
 SONGS += maple-leaf-rag
+
+# miscellaneous-ideas.gcs - Lots of tied note errors.
 SONGS += miscellaneous-ideas
+
+# mozart.gcs - One tied note error.
 SONGS += mozart
+
+# oh-lady-be-good.gcs - Two tied note errors.
 SONGS += oh-lady-be-good
+
+# opus10-chopin.gcs - Two tied note errors.
 SONGS += opus10-chopin
+
+# opus8-scriabin.gcs - Lots of tied note errors.
 SONGS += opus8-scriabin
+
+# poj-prelude.gcs - Lots of tied note errors.
 SONGS += poj-prelude
+
 SONGS += random-chords
 SONGS += replot
 SONGS += revolution-midi
 SONGS += song-without-words
 SONGS += theme
+
+# what-a-fool-believes.gcs - Lots of tied note errors.
 SONGS += what-a-fool-believes
 #-----------------------------------------------------------------------------
-# Problems with processes needed for each staff.
+# Runs a VERY long time. Needs debugging as to what is wrong.
 BROKEN += Djokja
 
-# Traceback
-BROKEN += etude-1-chopin
+# ERROR - Second goto in measure not allowed.
+BROKEN += clock-tower
 
-# Octave is zero of negative (0) or not an integer.
-# Traceback
-# File "/Users/m4/ims/tc-testing/../imscomp", line 6792, in put_on_bufs
-#     bufs_volume[voiceon][p_meas].append(running_volume[voiceon])        # Add volume stuff for this note.
-BROKEN += Phantasm
+# No notes.
+BROKEN += e-minor
 
-# Process should be for each staff, not one for everything - 
-#   ERROR - process invert unable to create variable A
+# linecount=39 line='one:    DN 2. 4d16 DN 1. e f g a b'
+#   read_next_line: tline="" \/s2A""
+# linecount=39 l=1 macro i line#1 line='" \/s2A"'
+#   read_next_line: tline=" 4d16 i 1. e f g a b"
+# linecount=39 line=' 4d16 i 1. e f g a b'
+#   read_next_line: tline="encode DEF=A;explicit"
+# linecount=39 l=2 process invert line#1 line='encode DEF=A;explicit'
+#   read_next_line: tline="decode A;type,typ;octave,oct;notename,name;sharp,shr;flat,flt"
+# linecount=39 l=2 process invert line#2 line='decode A;type,typ;octave,oct;notename,name;sharp,shr;flat,flt'
+#   read_next_line: tline="if typ == 0"
+# linecount=39 l=2 process invert line#3 line='if typ == 0'
+#   read_next_line: tline="if in(0, name, 2)"
+# linecount=39 l=2 process invert line#4 line='if in(0, name, 2)'
+# ERROR - if unable to determine if value (in(0, d, 2)).
+#.............................................................................
+#  read_next_line: tline="calc name = mod((9 - name), 7)"
+#linecount=39 l=2 process invert line#9 line='calc name = mod((9 - name), 7)'
+#ERROR - calc error - ERROR - function 'mod' called with wrong argument type ERROR - get_value - unrecognized variable='['ID', 'd']' vs ['COMMA']
 BROKEN += invention-4
 
-# Need process per staff/voice.
-# ERROR - process invert unable to create variable A
-SONGS += true-faith
+# ERROR - m:1 v['right'] Note is not legal 'vmf<' unknown
+# ERROR - decode note had error with note vmf<
+# Traceback (most recent call last):
+#   File "/Users/m4/ims/tc-testing/../imscomp", line 9163, in do_encode
+#     if (strng[0] != '' and strng[0] in 'vp') or strng[0:5] in ['cresc', 'dimin']:
+# IndexError: string index out of range
+BROKEN += true-faith
 
 #-----------------------------------------------------------------------------
 SONGS_E = ${SONGS:=.E}
