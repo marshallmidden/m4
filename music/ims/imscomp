@@ -492,7 +492,6 @@
 # Start like "horn: begin longdelay 3c4".
 # There needs to be variables that are for the process. They disappear when the
 # process finishes. (quit, new staff, begin another)
-# Need a pop_process() -- that if in a macro for process, pops upwards to process.
 # ----------------------------------------------------------------------------
 # xpose command is done for --vertical, --horizontal, and --midi1csv, but NOT abc format.
 # ABC format thus will "print" right, but not "play" (abc2midi) right.
@@ -15995,6 +15994,7 @@ def run_process(token, next_tokens, original_line):         # PROCESS
     global running_process_already
     global process_per_staff
     global last_voice_staff
+    global args
 
     if lmp_executing_type[-1] == 'process':
         print_error(f"run_process -ERROR, ALREADY IN A process", original_line)
@@ -16004,7 +16004,24 @@ def run_process(token, next_tokens, original_line):         # PROCESS
         print_debug(f"            - lmp_executing_line='{lmp_executing_line}'")
         print_debug(f"            - lmp_executing_rest_of_line='{lmp_executing_rest_of_line}'")
         print_debug(f"            - running_process_already='{running_process_already}'")
-        return
+        return token, next_tokens
+    # fi
+
+    # Special for volume/pan/intensity/cresc/dimin -- .
+    whichone = re.search(r'^(volume|vol|v|pan|p|intensity|i|cresc|dimin).*$', token)
+#--     print_debug(f'#F last_voice_staff={last_voice_staff} token="{token}" next_tokens="{next_tokens}" whichone="{whichone}"')
+    if whichone:
+        # NOTDONEYET - PROCESS
+        # Save args.midi, args.horizontal, args.fluidsynth, args.midi1csv, args.staves, args.vertical
+        # Set args.vertical
+        save_args = (args.horizontal, args.fluidsynth, args.midi1csv, args.staves, args.vertical)
+        (args.horizontal, args.fluidsynth, args.midi1csv, args.staves, args.vertical) = (False, False, False, False, True)
+        m4_temp1, m4_prenote, m4_postnote = find_vol_cresc_pan_intensity(token+next_tokens, last_voice_staff, '', '', original_line)
+        # Restore args.horizontal, args.fluidsynth, args.midi1csv, args.staves, args.vertical
+        (args.horizontal, args.fluidsynth, args.midi1csv, args.staves, args.vertical) = save_args
+#--         print_debug(f'#G m4_temp1="{m4_temp1}" m4_prenote="{m4_prenote}" m4_postnote="{m4_postnote}"')
+        next_tokens = m4_temp1
+        token = m4_prenote
     # fi
 
     # Create first process - which contains last_voice_staff and rest.
@@ -16030,7 +16047,7 @@ def run_process(token, next_tokens, original_line):         # PROCESS
         if not createlocalvar(process_argument[pn], token, lmp_executing_number, type_is_string, True):
             print_error(f"process {token} unable to create variable {process_argument[pn]}", original_line)
             set_process_quit(original_line)     # Stop any possibly created processes.
-            return
+            return token, next_tokens
         # fi
         lmp_executing_which.append(pn)
         lmp_executing_type.append('process')
@@ -16046,7 +16063,7 @@ def run_process(token, next_tokens, original_line):         # PROCESS
     # rof
     running_process_already = True              # PROCESS - NOTDONEYET ???
     last_voice_staff = last_ls
-    return
+    return token, next_tokens
 # End of run_process
 
 # ----------------------------------------------------------------------------
@@ -16640,7 +16657,9 @@ def do_staff_notes(command, delimiter, t_args, original_line):
             # rof
             print_warning(f'm:{measure_on} #B macro {token} did not match terminators correctly.', original_line)
         # fi
-#??        print_debug(f'last_voice_staff={last_voice_staff} token="{token}" tdelim="{tdelim}" next_tokens={next_tokens} in_process()={in_process()} running={running_process_already}')
+#--         print_debug(f'#A last_voice_staff={last_voice_staff} token="{token}" tdelim="{tdelim}" next_tokens="{next_tokens}" in_process()={in_process()} running={running_process_already}')
+        text_token = re.sub(r'^([a-zA-Z0-9]*).*$', r'\1', token, count=1)
+#--         print_debug(f'#B text_token="{text_token}"')
         if token == 'begin':
             token, tdelim, next_tokens = compute_command_args(next_tokens)
             set_process_begin(token, next_tokens, original_line)
@@ -16683,15 +16702,26 @@ def do_staff_notes(command, delimiter, t_args, original_line):
             last_voice_staff = next_staff                   # Switch to first staff_name for stack (lmp_...).
             setvar('voice', ','.join(last_voice_staff), type_is_string) # Doesn't need join, but do it for consistency.
             setvar('in_chord', in_chord[last_voice_staff[0]], type_is_number)   # Set at same time as voice.
-        elif token in staff_keywords:
+        elif text_token in staff_keywords:
+#--             print_debug(f'#C last_voice_staff={last_voice_staff} text_token="{text_token}"')
+            t1 = re.sub(r'^[a-zA-Z0-9]*(.*)$', r'\1', token, count=1)   # Rest of line.
+            if len(t1) > 0:
+                tdelim = t1[0]
+                next_tokens = t1.strip() + next_tokens
+#++            else:
+#++                pass     # tdelim and next_tokens remains the same
+            # fi
+            token = text_token
+#--             print_debug(f'#D last_voice_staff={last_voice_staff} token="{token}" tdelim="{tdelim}" next_tokens="{next_tokens}" in_process()={in_process()} running={running_process_already}')
             # process keyword - Might take multiple tokens.
             next_tokens = do_keyword(token, tdelim, next_tokens, original_line)
+#--             print_debug(f'#E last_voice_staff={last_voice_staff} token="{token}" tdelim="{tdelim}" next_tokens="{next_tokens}" in_process()={in_process()} running={running_process_already}')
             if next_tokens is not None and next_tokens != '':
                 next_tokens = next_tokens.strip()
             # fi
         # Below - we have a process to run, and are not running it now, and only note stuff left to check.
-#--         elif token != '' and in_process() and not running_process_already:
         elif in_process() and not running_process_already:
+#--             print_debug(f'    run_process_already={running_process_already} token="{token}" tdelim="{tdelim}" next_tokens="{next_tokens}"')
             if token == '(':
                 token, next_tokens = get_next_argument(token+tdelim+next_tokens, original_line)
                 if len(token) <= 1:
@@ -16722,8 +16752,9 @@ def do_staff_notes(command, delimiter, t_args, original_line):
                     tdelim = ' '
                 # fi
             # fi
-#??            print_debug(f'    calling run_process with token={token} tdelim="{tdelim}" next_tokens={next_tokens}')
-            run_process(token, next_tokens, original_line)
+#--             print_debug(f'    calling run_process with token={token} tdelim="{tdelim}" next_tokens="{next_tokens}"')
+            token, next_tokens = run_process(token, next_tokens, original_line)
+#--             print_debug(f'    after run_process with token={token} next_tokens="{next_tokens}"')
             return
         elif token == '[':
             err = False
