@@ -973,7 +973,7 @@ def print_some_variable_values(s, varnams):
 
     for wary in calculate.local_arrays + calculate.arrays:
         name = wary[numarry_name]
-        if name in varnams:
+        if varnams == [] or name in varnams:
             print_debug(f"{s}: name={name:8s} ML={wary[numarry_maclevel]:1d} MA={str(wary[numarry_macro_arg]):5s} dim={wary[numarry_indexes]} values={wary[numarry_values]} types={wary[numarry_value_type]}")
 #--            printed.append(wary[numarry_name])
         # fi
@@ -7532,7 +7532,7 @@ def set_default_ims(t_args, original_line):
     global time
     global key_voice
 
-    nline = replace_character_variables(t_args, original_line).strip()
+    nline = replace_all_variables(t_args, original_line)
     wargs = separate_args(nline, False, True, original_line)
 
     if not wargs or len(wargs) < 1:
@@ -7696,7 +7696,7 @@ def decode_gsw(t_args, original_line):
     else:                   # 4
         w_note = wargs[3]       # decode m1,m2,m3,3c4
     # fi
-    nline = replace_character_variables(w_note, original_line).strip()
+    nline = replace_all_variables(w_note, original_line)
     w_note = nline
     # Ignore leading space.
     therest, thenote, typenote = getnote(w_note, voice, False, True, False, original_line)
@@ -7862,8 +7862,7 @@ def decode_ims(t_args, original_line):
     if len(sg) > 0:
         x.append(sg.strip())                                # The argument.
         t.append(None)                                      # The terminator.
-    # fi
-
+    # fi 
     # Save what type of handling we are doing.
     save_current_type = [args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc, args.staves]
     savekeyvoice = get_staff_arr_double(voice, measure_on, key_voice, None, original_line)
@@ -7891,12 +7890,10 @@ def decode_ims(t_args, original_line):
     args.staves = False
     set_staff_arr_double(voice, k, measure_on, key_voice, None, original_line)
 
-    w_note = x[0]
-    nline = replace_character_variables(w_note, original_line).strip()
-    w_note = nline
-    therest, midinote, typenote = getnote(w_note, voice, False, True, False, original_line)
+    nline = replace_all_variables(x[0], original_line)
+    therest, midinote, typenote = getnote(nline, voice, False, True, False, original_line)
     if typenote != normal_note:
-        print_error(f'decode note had error with note {w_note} -- cannot have anything but a normal note, not: {typenote}', original_line)
+        print_error(f'decode note had error with note {nline} -- cannot have anything but a normal note, not: {typenote}', original_line)
         args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc, args.staves = save_current_type
         set_staff_arr_double(voice, savekeyvoice, measure_on, key_voice, None, original_line)
         return
@@ -7907,18 +7904,18 @@ def decode_ims(t_args, original_line):
     args.midi1csv = False
     args.staves = False
     set_staff_arr_double(voice, key_sig_int[k], measure_on, key_voice, None, original_line)
-    a, thenote, b = getnote(w_note, voice, False, True, False, original_line)
+    a, thenote, b = getnote(nline, voice, False, True, False, original_line)
     # Restore type of handling we are doing.
     args.horizontal, args.vertical, args.midi1csv, args.fluidsynth, args.abc, args.staves = save_current_type
     set_staff_arr_double(voice, savekeyvoice, measure_on, key_voice, None, original_line)
     if b != normal_note:
-        print_error(f'decode note had error with note {w_note} -- cannot have anything but a normal note, not: {b}', original_line)
+        print_error(f'decode note had error with note {nline} -- cannot have anything but a normal note, not: {b}', original_line)
         return
     # fi
 
 
     if therest is None or thenote is None:
-        print_error(f'decode note had error with note {w_note}', original_line)
+        print_error(f'decode note had error with note {nline}', original_line)
         return
     # fi
 
@@ -7957,29 +7954,30 @@ def decode_ims(t_args, original_line):
     if type(thenote) is str:
         note_notetext = thenote
         if len(thenote) < 1:
-            note_octave = 0
-        else:
-            note_octave = thenote[0]
-            if len(thenote) < 2:
-                note_notename = 0
+            note_octave = 0             # -1 or 0?      NOTDONEYET
+        elif len(thenote) == 1 or thenote[1] in '+-n':
+            if thenote[0] in allkeys:
+                note_notename = allkeys.index(thenote[0])
+            elif thenote[0] == 'r':
+                notenumber = 0
             else:
-                if thenote[1] in allkeys:
-                    note_notename = allkeys.index(thenote[1])
-                else:
-                    print_error(f'decode - note not in allkeys : "{thenote}"', original_line)
-                # fi
+                print_error(f'get_defaults_for_note - note not in allkeys : "{thenote}"', original_line)
             # fi
+            wh = 1
+        else:
+            wh = 2
+            note_octave = thenote[0]
         # fi
-        if len(thenote) > 2:
-            sfn = thenote[2:]
+        if len(thenote) > wh:
+            sfn = thenote[wh:]
             if sfn == '+':
                 note_sharp = 1
             elif sfn == '++':
-                note_sharp = 2
+                note_sharp = wh
             elif sfn == '-':
                 note_flat = 1
             elif sfn == '--':
-                note_flat = 2
+                note_flat = wh
             elif sfn == 'n':
                 note_natural = 1
             else:
@@ -8969,10 +8967,21 @@ def get_defaults_for_note(t_args, voiceon, original_line):
     note_sharp = note_flat = note_natural = note_octave = -1
     note_notename = ''
     if type(thenote) is str:
-        note_octave = thenote[0]
-        note_notename = thenote[1]
-        if len(thenote) >= 2:
-            sfn = thenote[2:]
+        if len(thenote) == 1 or thenote[1] in '+-n':
+            if thenote[0] in allkeys:
+                note_notename = allkeys.index(thenote[0])
+            elif thenote[0] == 'r':
+                notenumber = 0
+            else:
+                print_error(f'get_defaults_for_note - note not in allkeys : "{thenote}"', original_line)
+            # fi
+            wh = 1
+        else:
+            wh = 2
+            note_octave = thenote[0]
+        # fi
+        if len(thenote) >= wh:
+            sfn = thenote[wh:]
             if sfn == '+':
                 note_sharp = 1
             elif sfn == '++':
@@ -8989,6 +8998,10 @@ def get_defaults_for_note(t_args, voiceon, original_line):
         # fi
     # fi
     if timeofnote is None or timeofnote == 0:
+        if number_dots != 0:
+            print_error("cannot have dotted syntax on a default note length.", original_line)
+            return
+        # fi
         v = getvar_checkokay('voice', original_line)     # Interesting - get last time used. :)
         if type(v) is int and v < 1:
             v = 1
@@ -8997,6 +9010,14 @@ def get_defaults_for_note(t_args, voiceon, original_line):
         # fi
         timeofnote = get_staff_arr(v, time, 'time', 'get_defaults_for_note ' + original_line)
     # fi
+    if number_dots != 0:
+        p = timeofnote / 2.0
+        for i in range(1, number_dots+1):
+            timeofnote = timeofnote + p
+            p = p / 2.0
+        # rof
+    # fi
+
     note_duration = timeofnote      #               : 0.25 if 1/4 note. -1 if not a note.
     note_notenumber = midinote      #               : IMS 48 = 4c, etc. Default 3c=60, as per cyber1 (1978) musicomp.
     if timeofnote == 0:
@@ -9109,20 +9130,9 @@ def do_encode(t_args, original_line):
     # semi-colons with comma pairs -- except for explict. ... pairs starts here.
     pairs = strng[a+1:].strip()                 # Toss semi-colon, now get paired arguments i.e. x,y;
     strng = strng[0:a].strip()                  # Set strng to string up to the semi-colon.
-    cnt = 0
-    while True:
-        nstrng = replace_all_variables(strng, original_line)
-        if nstrng == strng:
-            break
-        # fi
-        strng = nstrng.strip()
-        cnt = cnt + 1
-        if cnt > MAX_LOOP_VARIABLES:
-            print_error(f'Over {MAX_LOOP_VARIABLES} variable substitutions done on right argument - loop?', original_line)
-            return
-        # fi
-        i_line.append('2enco: encode ' + variable + '=' + strng)    # Line as fixed or whatever.
-    # elihw
+    strng = replace_all_variables(strng, original_line).strip()
+    i_line.append('2enco: encode ' + variable + '=' + strng)    # Line as fixed or whatever.
+
     set_var_string(variable, strng, original_line)
 
     need_to_decode = True
@@ -9402,9 +9412,13 @@ def do_encode(t_args, original_line):
             nn = -1
             if notename != -1:
                 nametonum = { 'c':0, 'd':2, 'e':4, 'f':5, 'g':7, 'a':9, 'b':11}
+                if notename != 'r' and (notename < 0 or notename > 7):
+                    print_error(f"encode argument notename({notename}) is < 0 or > 7.", original_line)
+                    return
+                notename = allkeys[notename]
                 if notename in nametonum:
                     if octave != -1:
-                        nn = 12 * octave + nametonum[notename] + 24
+                        nn = 12 * int(octave) + nametonum[notename] + 24
                         if notenumber != -1:
                             if notenumber != nn:
                                 print_error(f"encode argument octave({octave}) notename({notename}) != notenumber({notenumber})", original_line)
@@ -9426,10 +9440,15 @@ def do_encode(t_args, original_line):
             # fi
         else:
             nn = notenumber
+            if notenumber == 0:
+                notename = 'r'
+            # fi
         # fi
         n = ''
         if nn != -1 and nn != 0 and nn in midi_value_to_note_flat:
             n = midi_value_to_note_flat[nn]
+        elif octave == -1 and notename == -1:
+            n = 'r'
         else:
             if octave != -1:
                 if notename != -1:
@@ -9512,22 +9531,8 @@ def do_else_if(t_args, original_line):
         return;
     # fi
 
-    numcharvar = 0
-    # Replace variables here. Lots of checks above.
-    while True:
-        nline = replace_character_variables(t_args, original_line).rstrip()
-        if nline == t_args:
-            break
-        # fi
-        t_args = nline
-        numcharvar = numcharvar + 1
-        if numcharvar > MAX_LOOP_VARIABLES:
-            print_error(f"Over {MAX_LOOP_VARIABLES} character variable substitutions done on arguments - loop?", original_line)
-            break
-        # fi
-    # elihw
-
-    wargs = separate_args(t_args, False, True, original_line)
+    nline = replace_all_variables(t_args, original_line)
+    wargs = separate_args(nline, False, True, original_line)
     if not wargs or len(wargs) < 1:
         print_error("no elseif argument.", original_line)
         return
@@ -9932,22 +9937,8 @@ def do_if(t_args, original_line):
     # if iftest[ifdepth] == 2:            # skipping in else, ignore if and else within, want endif.
     # if iftest[ifdepth] == 3:            # skip both if and else, want endif
     if iftest[ifdepth] == -1 or iftest[ifdepth] == 1:   # process this if normally.
-        numcharvar = 0
-        # Replace variables here. Lots of checks above.
-        while True:
-            nline = replace_character_variables(t_args, original_line).rstrip()
-            if nline == t_args:
-                break
-            # fi
-            t_args = nline
-            numcharvar = numcharvar + 1
-            if numcharvar > MAX_LOOP_VARIABLES:
-                print_error(f"Over {MAX_LOOP_VARIABLES} character variable substitutions done on arguments - loop?", original_line)
-                break
-            # fi
-        # elihw
-
-        wargs = separate_args(t_args, False, True, original_line)
+        nline = replace_all_variables(t_args, original_line)
+        wargs = separate_args(nline, False, True, original_line)
         if not wargs or len(wargs) < 1:
             print_error("no if argument.", original_line)
             return
@@ -16018,7 +16009,7 @@ def set_process_quit(original_line):    # PROCESS
 # ----------------------------------------------------------------------------
 # This happens for each NOTE passed to each process, not with begin.
 
-def run_process(token, next_tokens, original_line):         # PROCESS
+def run_process(token, tdelim, next_tokens, original_line):         # PROCESS
     global process_argument             # Index by process number: Single argument for process.
     global lmp_executing_which          # The {process}_number for executing we are executing, by staff.
     global lmp_executing_line           # Line number in process array currently processing, by staff.
@@ -16042,9 +16033,17 @@ def run_process(token, next_tokens, original_line):         # PROCESS
         return token, next_tokens
     # fi
 
+    if tdelim == '':                    # End of line.
+        send_these_notes = (token + ' ' + next_tokens).strip()
+    elif len(next_tokens) > 0 and next_tokens[0] == tdelim:
+        send_these_notes = (token + next_tokens).strip()
+    else:
+        send_these_notes = (token + tdelim + next_tokens).strip()
+    # fi
+    token, next_tokens = get_next_argument(send_these_notes, original_line)
+
     # Special for volume/pan/intensity/cresc/dimin -- .
     whichone = re.search(r'^(volume|vol|v|pan|p|intensity|i|cresc|dimin).*$', token)
-#--     print_debug(f'#F last_voice_staff={last_voice_staff} token="{token}" next_tokens="{next_tokens}" whichone="{whichone}"')
     if whichone:
         # NOTDONEYET - PROCESS
         # Save args.midi, args.horizontal, args.fluidsynth, args.midi1csv, args.staves, args.vertical
@@ -16054,7 +16053,6 @@ def run_process(token, next_tokens, original_line):         # PROCESS
         m4_temp1, m4_prenote, m4_postnote = find_vol_cresc_pan_intensity(token+next_tokens, last_voice_staff, '', '', original_line)
         # Restore args.horizontal, args.fluidsynth, args.midi1csv, args.staves, args.vertical
         (args.horizontal, args.fluidsynth, args.midi1csv, args.staves, args.vertical) = save_args
-#--         print_debug(f'#G m4_temp1="{m4_temp1}" m4_prenote="{m4_prenote}" m4_postnote="{m4_postnote}"')
         next_tokens = m4_temp1
         token = m4_prenote
     # fi
@@ -16661,9 +16659,6 @@ def do_staff_notes(command, delimiter, t_args, original_line):
     next_tokens = t_args.strip()
     if token is None or token == '':
         if next_tokens is not None and len(next_tokens) > 0 and tdelim == next_tokens[0]:
-#--             token = next_tokens
-#--             tdelim = ''
-#--             next_tokens = ''
             token = tdelim
             tdelim = ''
             next_tokens = next_tokens[1:]
@@ -16700,9 +16695,7 @@ def do_staff_notes(command, delimiter, t_args, original_line):
             # rof
             print_warning(f'm:{measure_on} #B macro {token} did not match terminators correctly.', original_line)
         # fi
-#--         print_debug(f'#A last_voice_staff={last_voice_staff} token="{token}" tdelim="{tdelim}" next_tokens="{next_tokens}" in_process()={in_process()} running={running_process_already}')
         text_token = re.sub(r'^([a-zA-Z0-9]*).*$', r'\1', token, count=1)
-#--         print_debug(f'#B text_token="{text_token}"')
         if token == 'begin':
             token, tdelim, next_tokens = compute_command_args(next_tokens)
             set_process_begin(token, next_tokens, original_line)
@@ -16746,58 +16739,27 @@ def do_staff_notes(command, delimiter, t_args, original_line):
             setvar('voice', ','.join(last_voice_staff), type_is_string) # Doesn't need join, but do it for consistency.
             setvar('in_chord', in_chord[last_voice_staff[0]], type_is_number)   # Set at same time as voice.
         elif text_token in staff_keywords:
-#--             print_debug(f'#C last_voice_staff={last_voice_staff} text_token="{text_token}"')
             t1 = re.sub(r'^[a-zA-Z0-9]*(.*)$', r'\1', token, count=1)   # Rest of line.
             if len(t1) > 0:
                 tdelim = t1[0]
                 next_tokens = t1.strip() + next_tokens
-#++            else:
-#++                pass     # tdelim and next_tokens remains the same
             # fi
             token = text_token
-#--             print_debug(f'#D last_voice_staff={last_voice_staff} token="{token}" tdelim="{tdelim}" next_tokens="{next_tokens}" in_process()={in_process()} running={running_process_already}')
             # process keyword - Might take multiple tokens.
             next_tokens = do_keyword(token, tdelim, next_tokens, original_line)
-#--             print_debug(f'#E last_voice_staff={last_voice_staff} token="{token}" tdelim="{tdelim}" next_tokens="{next_tokens}" in_process()={in_process()} running={running_process_already}')
             if next_tokens is not None and next_tokens != '':
                 next_tokens = next_tokens.strip()
             # fi
         # Below - we have a process to run, and are not running it now, and only note stuff left to check.
         elif in_process() and not running_process_already:
-#--             print_debug(f'    run_process_already={running_process_already} token="{token}" tdelim="{tdelim}" next_tokens="{next_tokens}"')
             if token == '(':
                 token, next_tokens = get_next_argument(token+tdelim+next_tokens, original_line)
                 if len(token) <= 1:
                     print_error("token was (, but separate_args did not return anything useful", original_line)
                     return
                 # fi
-                if next_tokens == '':
-                    tdelim = ''
-                else:
-                    tdelim = ' '
-                # fi
-            else:
-#??                print_debug(f'#1  token="{token}" tdelim="{tdelim}" next_tokens="{next_tokens}"')
-#--                if tdelim != '' and len(next_tokens) > 0 and tdelim != next_tokens[0]:
-#--                    token, next_tokens = get_next_argument(token+tdelim+next_tokens, original_line)
-#--                    print_debug(f'#2  token="{token}" tdelim="{tdelim}" next_tokens="{next_tokens}"')
-#--                elif tdelim == '' and len(next_tokens) > 0:
-#--                    token, next_tokens = get_next_argument(token+' '+next_tokens, original_line)
-#--                    print_debug(f'#3  token="{token}" tdelim="{tdelim}" next_tokens="{next_tokens}"')
-#--                else:
-#--                    token, next_tokens = get_next_argument(token+next_tokens, original_line)
-#--                    print_debug(f'#4  token="{token}" tdelim="{tdelim}" next_tokens="{next_tokens}"')
-#--                # fi
-#--                print_debug(f'#5  token="{token}" tdelim="{tdelim}" next_tokens="{next_tokens}"')
-                if next_tokens == '':
-                    tdelim = ''
-                else:
-                    tdelim = ' '
-                # fi
             # fi
-#--             print_debug(f'    calling run_process with token={token} tdelim="{tdelim}" next_tokens="{next_tokens}"')
-            token, next_tokens = run_process(token, next_tokens, original_line)
-#--             print_debug(f'    after run_process with token={token} next_tokens="{next_tokens}"')
+            token, next_tokens = run_process(token, tdelim, next_tokens, original_line)
             return
         elif token == '[':
             err = False
