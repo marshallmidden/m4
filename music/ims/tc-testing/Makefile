@@ -186,6 +186,7 @@ clean:
 	rm -f ${SONGS_E} ${BROKEN_E}
 	rm -f *.stderr
 	rm -f *.h *.v *.csv *.mid *.E *.fs *.pdf *.ps *.abc
+	rm -f AAA.[0-9][0-9] BBB.[0-9][0-9]
 #-----------------------------------------------------------------------------
 .PHONY: check
 check:
