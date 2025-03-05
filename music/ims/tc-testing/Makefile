@@ -20,6 +20,7 @@ SONGS += Phantasm
 
 SONGS += Poppers
 SONGS += Roundoff
+SONGS += clock-tower
 SONGS += changes-idea
 SONGS += char-print
 SONGS += etude-1-chopin
@@ -28,6 +29,7 @@ SONGS += etude-1-chopin
 SONGS += fru-uhlingserwachen
 
 SONGS += idea
+SONGS += invention-4
 SONGS += joy-piano-part
 
 # ma-solitude.gcs - Lots of tied note errors.
@@ -65,38 +67,10 @@ SONGS += what-a-fool-believes
 # Runs a VERY long time. Needs debugging as to what is wrong.
 BROKEN += Djokja
 
-# ERROR - Second goto in measure not allowed.
-BROKEN += clock-tower
-
 # No notes.
 BROKEN += e-minor
 
-# linecount=39 line='one:    DN 2. 4d16 DN 1. e f g a b'
-#   read_next_line: tline="" \/s2A""
-# linecount=39 l=1 macro i line#1 line='" \/s2A"'
-#   read_next_line: tline=" 4d16 i 1. e f g a b"
-# linecount=39 line=' 4d16 i 1. e f g a b'
-#   read_next_line: tline="encode DEF=A;explicit"
-# linecount=39 l=2 process invert line#1 line='encode DEF=A;explicit'
-#   read_next_line: tline="decode A;type,typ;octave,oct;notename,name;sharp,shr;flat,flt"
-# linecount=39 l=2 process invert line#2 line='decode A;type,typ;octave,oct;notename,name;sharp,shr;flat,flt'
-#   read_next_line: tline="if typ == 0"
-# linecount=39 l=2 process invert line#3 line='if typ == 0'
-#   read_next_line: tline="if in(0, name, 2)"
-# linecount=39 l=2 process invert line#4 line='if in(0, name, 2)'
-# ERROR - if unable to determine if value (in(0, d, 2)).
-#.............................................................................
-#  read_next_line: tline="calc name = mod((9 - name), 7)"
-#linecount=39 l=2 process invert line#9 line='calc name = mod((9 - name), 7)'
-#ERROR - calc error - ERROR - function 'mod' called with wrong argument type ERROR - get_value - unrecognized variable='['ID', 'd']' vs ['COMMA']
-BROKEN += invention-4
-
-# ERROR - m:1 v['right'] Note is not legal 'vmf<' unknown
-# ERROR - decode note had error with note vmf<
-# Traceback (most recent call last):
-#   File "/Users/m4/ims/tc-testing/../imscomp", line 9163, in do_encode
-#     if (strng[0] != '' and strng[0] in 'vp') or strng[0:5] in ['cresc', 'dimin']:
-# IndexError: string index out of range
+# Runs a VERY long time. Needs debugging as to what is wrong.
 BROKEN += true-faith
 
 #-----------------------------------------------------------------------------
