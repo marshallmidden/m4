@@ -2,20 +2,23 @@
 SONGS  = 18notes
 SONGS += 1963
 
-# Chromatic.gcs - Lots of tied note errors.
+# Chromatic.gcs - 4 tied note errors.
 SONGS += Chromatic
+
+# Djokja.gcs - 14 tied note errors.
+SONGS += Djokja
 
 SONGS += Entroid
 SONGS += Entroid_
 SONGS += Horizons
 SONGS += Joy
 
-# Kanon.gcs - Lots of tied note errors.
+# Kanon.gcs - 479 tied note errors.
 SONGS += Kanon
 
 SONGS += Miditest
 
-# Phantasm.gcs - Lots of tied note errors.
+# Phantasm.gcs - 6 tied note errors.
 SONGS += Phantasm
 
 SONGS += Poppers
@@ -25,34 +28,34 @@ SONGS += changes-idea
 SONGS += char-print
 SONGS += etude-1-chopin
 
-# fru-uhlingserwachen.gcs - Lots of tied note errors.
+# fru-uhlingserwachen.gcs - 156 tied note errors.
 SONGS += fru-uhlingserwachen
 
 SONGS += idea
 SONGS += invention-4
 SONGS += joy-piano-part
 
-# ma-solitude.gcs - Lots of tied note errors.
+# ma-solitude.gcs - 717 tied note errors.
 SONGS += ma-solitude
 
 SONGS += maple-leaf-rag
 
-# miscellaneous-ideas.gcs - Lots of tied note errors.
+# miscellaneous-ideas.gcs - 346 tied note errors.
 SONGS += miscellaneous-ideas
 
-# mozart.gcs - One tied note error.
+# mozart.gcs - 1 tied note error.
 SONGS += mozart
 
-# oh-lady-be-good.gcs - Two tied note errors.
+# oh-lady-be-good.gcs - 1 tied note errors.
 SONGS += oh-lady-be-good
 
-# opus10-chopin.gcs - Two tied note errors.
+# opus10-chopin.gcs - 2 tied note errors.
 SONGS += opus10-chopin
 
-# opus8-scriabin.gcs - Lots of tied note errors.
+# opus8-scriabin.gcs - 211 tied note errors.
 SONGS += opus8-scriabin
 
-# poj-prelude.gcs - Lots of tied note errors.
+# poj-prelude.gcs - 153 tied note errors.
 SONGS += poj-prelude
 
 SONGS += random-chords
@@ -60,19 +63,13 @@ SONGS += replot
 SONGS += revolution-midi
 SONGS += song-without-words
 SONGS += theme
+SONGS += true-faith
 
-# what-a-fool-believes.gcs - Lots of tied note errors.
+# what-a-fool-believes.gcs - 20 tied note errors.
 SONGS += what-a-fool-believes
 #-----------------------------------------------------------------------------
-# Runs a VERY long time. Needs debugging as to what is wrong.
-BROKEN += Djokja
-
 # No notes.
 BROKEN += e-minor
-
-# Runs a VERY long time. Needs debugging as to what is wrong.
-BROKEN += true-faith
-
 #-----------------------------------------------------------------------------
 SONGS_E = ${SONGS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
