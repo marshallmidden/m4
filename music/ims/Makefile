@@ -150,6 +150,8 @@ CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp -Wno-inv
 	${PS2PDF} $< $@
 %.E: %.gcs
 	${CPP} $< -o $@
+%.staves: %.E ${IMSCOMP}
+	${IMSCOMP} ${MC_ARGS} --staves $< $@
 %.v:    %.E ${IMSCOMP}
 	${IMSCOMP} ${MC_ARGS} --vert $< $@
 %_m.v:    %.E ${MUSICOMP}
@@ -183,7 +185,7 @@ clean:
 	rm -f ${SONGS_PDF} ${TESTS_PDF} ${SONGS_M_PDF} ${TESTS_M_PDF}
 	rm -f ${SONGS_E} ${TESTS_E}
 	rm -f *.stderr
-	rm -f *.h *.v *.csv *.mid *.E *.fs *.pdf *.ps *.abc
+	rm -f *.h *.v *.csv *.mid *.E *.fs *.pdf *.ps *.abc *.staves
 	rm -f Y.0*
 #-----------------------------------------------------------------------------
 .PHONY: check
