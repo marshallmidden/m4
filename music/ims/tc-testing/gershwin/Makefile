@@ -22,7 +22,8 @@ SONGS_PS = ${SONGS:=.ps}
 SONGS_PDF= ${SONGS:=.pdf}
 #-----------------------------------------------------------------------------
 IMSCOMP = ../../imscomp
-MC_ARGS ?= --platochars --lines
+#-- MC_ARGS ?= --platochars --lines
+MC_ARGS ?= --platochars
 ABCM2PS	     = abcm2ps
 PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------
@@ -106,4 +107,8 @@ check:
 	@echo "ABCM2PS=${ABCM2PS}"
 	@echo "PS2PDF=${PS2PDF}"
 	@echo "CPP=${CPP}"
+#-----------------------------------------------------------------------------
+new-g3.ps: new-g3.abc
+# Unique options for new-g3.abc. Grumble.
+	(${ABCM2PS} -M -b 0 $< -i -N 2 -j 1 ; mv Out.ps $@)
 #-----------------------------------------------------------------------------
