@@ -11,35 +11,25 @@
 #   a) Lyrics ... Just didn't do them, saw no reason ... *sigh*
 #   b) tempo rit and tempo acc.  I thought it was too difficult to implement. YUCK.
 #   c) v(p)> ... >v(pp)   The >v needs to be deleted. Checked if last is same direction?
-#   d) Djokja - runs forever -- processes needed for each staff or voice:
-#        ../imscomp --fs --platochars --lines Djokja.gcs Djokja.fs
-#      Well, processes must be on a staff/voice, not overall. Keeping straight when
-#      inside a macro? Defining macro inside process? (Can't do it due to command?)
-#      Others:
-#           Miditest.gcs
-#           Djokja.gcs
-#           invention-4
-#           true-faith.gcs
-#   e) 0b ... if middlec is 4c.
-#   f) Some warnings about:
+#   d) Some warnings about:
 #      WARNING - previous note 'e' voiceon voice='1' staff='one:[1, 2, 3]' in measure 31 was '-' and this note is default - FIXING
 #       and tied note later is not changed for the 2nd note. WTF?
+#   e) emphasis ("a" suffix) -- abc notation displays, what should midi and fluidsynth do?
 # ----------------------------------------------------------------------------
 # TO DO:
 # 1) b-6 ... some 1/2 notes that are vol(sf) -- should they be shortened?
 # 2) --fluidsynth input of a .csv file -- MIDI_port commands -- WTF?
 # 3) vol(sfp) -- how long for s and then switching to p? Example tied whole note over 3 measures.
 # 4) lilypond output for printing.
-# 5) If middle_c is not 39 for --vert/--horiformat, nor 39+12 for staff, it --abc is broken. And --vert/--hori.
+# 5) If "middlec" middle_c is not 39 for --vert/--horiformat, nor 39+12 for staff, --abc is broken. And --vert/--hori.
 # 6) cresc/dimin - future (< or >) does not do abc format for it.
-# 7) staff format - volumes must go for all notes "after" this one. Including "add a new voice".
-# 8) in8 ...
-# 9) loco -
-# 10) unis - All instruments of a given type play same notes.
-# 11) clef change in middle of measure.
+# 7) in8 ...
+# 8) loco -
+# 9) unis - All instruments of a given type play same notes.
+# 10) clef change in middle of measure.
 #
-# 12) --musicxml    Instead of --abc or --staves, print out in musicxml format. (Learn musicxml.)
-#+ 13) --staves      Print out like --vertical and --horizontal but with staves!
+# 11) --musicxml    Instead of --abc or --staves, print out in musicxml format. (Learn musicxml.)
+#+ 12) --staves      Print out like --vertical and --horizontal but with staves!
 #       print_measure_abc()
 #       print_out_abc()
 #       print_header()
@@ -933,7 +923,7 @@ def chkvarlevel(arg, maclev):
     for wary in calculate.arrays + calculate.local_arrays:
         if arg == wary[numarry_name]:
             if wary[numarry_maclevel] == maclev:
-                return False                    # Already exists.
+                return False                        # Already exists.
             # fi
         # fi
     # rof
@@ -1633,12 +1623,12 @@ def parse_args():
         measures_to_do = separate_args(n, True, True, 'parsing --measures')
     # fi
 
-    if args.voices is not None and args.voices != '':
-        n = re.sub(r'\s*,\s*', ',', args.voices)
-        n = re.sub(r'\s*,\s*', ',', n)
-        voices_to_do = separate_args(n, True, True, 'parsing --voices')
-    # fi
-
+#--    if args.voices is not None and args.voices != '':
+#--        n = re.sub(r'\s*,\s*', ',', args.voices)
+#--        n = re.sub(r'\s*,\s*', ',', n)
+#--        voices_to_do = separate_args(n, True, True, 'parsing --voices')
+#--    # fi
+#--
     if args.rest is not None:
         for indx in range(len(args.rest)):
             if args.rest[indx][0] == '=':
@@ -2305,6 +2295,8 @@ drum_sounds = {
 # ----------------------------------------------------------------------------
 global staff_name                   # Staff names, with key pair as array of voice numbers.
 staff_name = {}
+global brief_label                  # For abc notation, the brief label on the staff.
+brief_label = {}
 global last_voice_staff             # Staff/staves active. (array)
 last_voice_staff = None             # For continuation lines.
 global staff_chord                  # If in the middle of a chord for staff_name.
@@ -2744,6 +2736,12 @@ global meter_note                   # Last note for beat of meter.
 global measure_meter                # Each measure change can have a different meter.
 global measure_meter_value          # Computed value for meter for this measure.
 global measure_meter_note           # note length for beat of meter for this measure.
+global new_meter                    # Save text for meter on measure
+new_meter = {}                      # Save text for meter on measure
+global new_meter_value              # Save value for meter on measure
+new_meter_value = {}                # Save value for meter on measure
+global new_meter_note               # Save note for meter on measure
+new_meter_note = {}                 # Save note for meter on measure
 
 global key_default                  # First key applies globally, if not voice number arguments.
 key_default = None
@@ -3247,6 +3245,21 @@ def rests_in_empty_measure_voices(m, voiceon):
 # End of rests_in_empty_measure_voices
 
 # ----------------------------------------------------------------------------
+def firstvoiceinstaff(v):
+    if staff_name == {}:
+        return None
+    # fi
+    for st in staff_name:         # Go through staves
+        if staff_name[st] is not None:
+            if staff_name[st][0] == v:
+                return st
+            # fi
+        # rof
+    # rof
+    return None
+#   End of firstvoiceinstaff
+
+# ----------------------------------------------------------------------------
 def print_measure_abc(m, print_V, voiceon, l_meter, l_tempo, l_dl, l_clef, l_instrument, l_vl, l_txt, l_ky, l_pitch):
     global bufs
     global measure_meter                    # meter by measure.
@@ -3263,6 +3276,8 @@ def print_measure_abc(m, print_V, voiceon, l_meter, l_tempo, l_dl, l_clef, l_ins
     global drum_sounds
     global instruments
     global goto_table
+    global staff_name
+    global brief_label
 
     if type(voiceon) is not int:
         print_error('print_measure_abc - voice type is not int ({type(voiceon)})', 'print_measure_abc')
@@ -3283,6 +3298,13 @@ def print_measure_abc(m, print_V, voiceon, l_meter, l_tempo, l_dl, l_clef, l_ins
             if clef[voiceon][m] != l_clef:
                 l_clef = clef[voiceon][m]
                 pr = pr + f' clef={l_clef}'
+            # fi
+        # fi
+        fvi = firstvoiceinstaff(voiceon)
+        if fvi is not None:
+            pr = pr + f' name="{fvi}"'
+            if brief_label[fvi] != '':
+                pr = pr + f' snm="{brief_label[fvi]}"'
             # fi
         # fi
         pr = pr + '\n'
@@ -3611,6 +3633,7 @@ def print_measure_vh_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l_ky,
     # fi
 
     for voice in range(1, len(volume)+1):
+
         if args.voices and args.voices != '':
             if str(voice) not in voices_to_do:
                 continue
@@ -3734,11 +3757,8 @@ def print_out_notes_v_or_h(m, print_line):
         # rof
         print_line = print_line + txt
         return print_line
-    elif args.staves:
-        print_error_no_line('NOTDONEYET - args.staves -- print_out_notes_v_or_h')
-        return ''
     elif not args.horizontal:
-        print_error_no_line('NOTDONEYET - unknown args.staves/vertical/horizontal -- print_out_notes_v_or_h')
+        print_error_no_line('NOTDONEYET - unknown vertical/horizontal -- print_out_notes_v_or_h')
         return ''
     # fi
     # else - horizontal
@@ -3897,6 +3917,17 @@ def print_out_v_or_h():
     # fi
     return
 # End of print_out_v_or_h
+
+# ----------------------------------------------------------------------------
+# Need
+def print_out_staves():
+
+    print_output(f'------------------------------------------------------------------------------\n')
+    print_output(f'------------------------------------------------------------------------------\n')
+    print_output(f'NOTDONEYET - print_out_staves\n')
+    print_output(f'------------------------------------------------------------------------------\n')
+    print_output(f'------------------------------------------------------------------------------\n')
+# End of print_out_staves
 
 # ----------------------------------------------------------------------------
 def print_out_midi1csv_start(voiceon):
@@ -5451,8 +5482,10 @@ def create_staves():
     global staves
     global percentstaves
     global percents
+    global voices_to_do
 
     new_staves = []
+    ct = 1
     for st in staff_name:
         if staff_name[st] is None or staff_name[st] == []:
             continue
@@ -5460,9 +5493,18 @@ def create_staves():
         # The complicated thing to do here is like check_staves() for ordering.
         v = []
         for x in staff_name[st]:
-            v.append(str(x))
+            if args.voices is not None and args.voices != '':
+                if str(x) in voices_to_do:
+                    v.append(str(ct))
+                    ct = ct + 1
+                # fi
+            else:
+                v.append(str(x))
+            # fi
         # rof
-        new_staves.append(v)
+        if v != []:
+            new_staves.append(v)
+        # fi
     # rof
     percentstaves = True
     staves = new_staves
@@ -5590,19 +5632,19 @@ def print_debug_bufs(s, *varargs):
                 if ve not in bufs_length or m not in bufs_length[ve]:
                     print_debug(f'    NO bufs_length[{ve}][{m}]')
                 else:
-                    print_debug(f'    bufs_length[{ve}][{m}]={bufs_length[ve][m]}')
+                    print_debug(f'      bufs_length[{ve}][{m}]={bufs_length[ve][m]}')
                 # fi
                 if ve not in bufs_suffixes or m not in bufs_suffixes[ve]:
                     print_debug(f'    NO bufs_suffixes[{ve}][{m}]')
                 else:
-                    print_debug(f'    bufs_suffixes[{ve}][{m}]={bufs_suffixes[ve][m]}')
-                    print_debug(f'    bufs_var_values[{ve}][{m}]={bufs_var_values[ve][m]}')
+                    print_debug(f'      bufs_suffixes[{ve}][{m}]={bufs_suffixes[ve][m]}')
+                    print_debug(f'      bufs_var_values[{ve}][{m}]={bufs_var_values[ve][m]}')
                 # fi
-                print_debug(f'    bufs_volume[{ve}][{m}]={bufs_volume[ve][m]}')
-                print_debug(f'    volume[{ve}][{m}]={volume[ve][m]}')
-                print_debug(f'    bufs_pan[{ve}][{m}]={bufs_pan[ve][m]}')
-                print_debug(f'    intensity[{ve}][{m}]={intensity[ve][m]}')
-                print_debug(f'    bufs_intensity[{ve}][{m}]={bufs_intensity[ve][m]}')
+                print_debug(f'      bufs_volume[{ve}][{m}]={bufs_volume[ve][m]}')
+                print_debug(f'      volume[{ve}][{m}]={volume[ve][m]}')
+                print_debug(f'      bufs_pan[{ve}][{m}]={bufs_pan[ve][m]}')
+                print_debug(f'      intensity[{ve}][{m}]={intensity[ve][m]}')
+                print_debug(f'      bufs_intensity[{ve}][{m}]={bufs_intensity[ve][m]}')
             # fi
         # rof
         print_debug(f'    running_volume[{ve}]={running_volume[ve]}')
@@ -5623,6 +5665,30 @@ def print_debug_bufs(s, *varargs):
 
         print_debug(f'    pitchbend[{ve}]={pitchbend[ve]}')
     # rof
+
+    the_meas_keys = list(measure_meter_note.keys())
+    the_meas_keys.remove('')
+    the_meas_keys.remove('EOF')
+    not_in_meas = [ ]
+    nmk = sorted(new_meter.keys())
+    for me in nmk:
+        sme = str(me)
+        if sme in the_meas_keys:
+            the_meas_keys.remove(sme)
+            print_debug(f'    new meter for measure "{sme}" "{new_meter[me]}"')
+            del new_meter[me]
+            del new_meter_value[me]
+            del new_meter_note[me]
+        else:
+            not_in_meas.append(sme)
+        # fi
+    # rof
+    if not_in_meas != []:
+        print_warning(f'New measures not in defined measures removed: {", ".join(not_in_meas)}', 'print_debug_bufs')
+    # fi
+    if new_meter != {}:
+        print_debug(f'    new_meter={new_meter}')
+    # fi
     return
 #   End of print_debug_bufs
 
@@ -5654,11 +5720,8 @@ def quick_exit():
     global warnings_happened
 
     if warnings_happened > 0: print_eoln(f'Warnings occurred: {warnings_happened}')
-    if errors_happened > 0:
-        print_eoln(f'Errors occurred: {errors_happened}')
-        sys.exit(errors_happened)
-    # fi
-    sys.exit(0)
+    if errors_happened > 0: print_eoln(f'Errors occurred: {errors_happened}')
+    sys.exit(errors_happened)
 # End of quick_exit
 
 # ----------------------------------------------------------------------------
@@ -5688,6 +5751,7 @@ def pass2():
     global intensity_offset
     global intensity_percentage
     global errors_happened
+    global voices_to_do
 
     if measure_on == '':
         print_error_no_line(f'No measures defined.')
@@ -5797,6 +5861,15 @@ def pass2():
         # rof
     # rof
 
+    # --voices ... so staff names work.
+    if args.voices is not None and args.voices != '':
+        n = re.sub(r'\s*,\s*', ',', args.voices)
+        n = re.sub(r'\s*,\s*', ',', n)
+        voices_to_do = separate_args(n, None, True, 'parsing --voices')
+        print_debug(f'args.voices={args.voices}')
+        print_debug(f'voices_to_do={voices_to_do}')
+    # fi
+
     if len(staff_name) >= 1:            # If using staff mode.
         if not percentstaves:           # Create staves.
             create_staves()
@@ -5817,12 +5890,18 @@ def pass2():
         pre_shift()
     # fi
 
+    if args.staves:
+        print_debug_bufs('pass2 before print_header')
+    # fi
+
     # Now print out the header (then the file).
     print_header()
 
     # Print out the file.
-    if args.vertical or args.horizontal or args.staves:
+    if args.vertical or args.horizontal:
         print_out_v_or_h()
+    elif args.staves:
+        print_out_staves()
     elif args.midi1csv or args.fluidsynth:
         print_out_midi1csv_notes()
         check_voices_without_notes()
@@ -7605,6 +7684,7 @@ def set_default_ims(t_args, original_line):
 #--        print_error("decode - set_default_ims, Error getting time for note", original_line)
         return
     # fi
+    # suffix_emphasis = 32          -- emphasis
     # suffix_legato = 16            -- glide to next note.
     # suffix_tied = 2               -- tied
     # suffix_staccato = 1           -- staccato
@@ -7750,6 +7830,7 @@ def decode_gsw(t_args, original_line):
         print_error("decode - decode_gsw, Error getting time for note", original_line)
         return
     # fi
+    # suffix_emphasis = 32          -- emphasis
     # suffix_legato = 16            -- glide to next note.
     # suffix_tied = 2               -- tied
     # suffix_staccato = 1           -- staccato
@@ -8100,15 +8181,19 @@ def decode_ims(t_args, original_line):
                     note_l = 1
                     note_z = 1
                     note_suffixes = note_suffixes + 'l'
+                # fi
                 if (r_suffixes & suffix_staccato) != 0:
                     note_s = 1
                     note_suffixes = note_suffixes + 's'
+                # fi
                 if (r_suffixes & suffix_marcato) != 0:
                     note_m = 1
                     note_suffixes = note_suffixes + 'm'
+                # fi
                 if (r_suffixes & suffix_tied) != 0:
                     note_t = 1
                     note_suffixes = note_suffixes + 't'
+                # fi
                 if (r_suffixes & suffix_emphasis) != 0:
                     note_a = 1
                     note_suffixes = note_suffixes + 'a'
@@ -8651,6 +8736,7 @@ def do_cis(t_args, original_line):
 
 # ----------------------------------------------------------------------------
 #       clef    1,2,3   treble          $$ Set voices 1,2,3 to treble.
+#       clef    oboe,flute treble       $$ Set all voices for oboe and flute to treble.
 #       clef    4       alto
 #       clef    treble,bass,alto,tenor  $$ A different way to do it.
 # NOTE: The argument is put into the .abc file, and NOT checked in any way.
@@ -9740,6 +9826,17 @@ def do_endm(t_args, original_line):
 # End of do_endm
 
 # ----------------------------------------------------------------------------
+# For a voice or staff, all notes are sent through the process for handling.
+#   process modify,STRING
+#   .       vars    secs,dur,num
+#   .       encode  STRING =STRING;explicit
+#   .       decode  STRING;notenumber,num;duration,dur
+#   .       calc    secs = round(1000*dur*mult)/1000
+#   .       calc    tics(curstaf) = tics(curstaf)+secs
+#   .       encode  NEW =STRING;type,2;notenumber,num;duration,secs
+#   .       NEW
+#   endprocess
+
 def do_endprocess(t_args, original_line):
     global process_defining
 
@@ -9752,6 +9849,14 @@ def do_endprocess(t_args, original_line):
 # End of do_endprocess
 
 # ----------------------------------------------------------------------------
+# This is like vars, but define at level 0, instead of at current nested level.
+# Thus if a higher level has a "var A", it will be used instead of the global.
+#   globals A,B,C
+#   global  D
+#   calc A=B=C=D=4
+#
+# NOTE: There are arrays, portions of strings, etc. See "vars" (def do_vars).
+
 def do_global(t_args, original_line):
     handle_vars_and_global(t_args, 0, original_line)     # Macro depth 0 is global variables.
     return
@@ -10037,6 +10142,7 @@ def do_if(t_args, original_line):
 
 # ----------------------------------------------------------------------------
 #   instrument 1,2 flute                $$ voices for an instrument.
+#   instrument Oboe1,Oboe2 flute        $$ Staves.
 # See source for list of all instruments.
 
 def do_instrument(t_args, original_line):
@@ -10286,6 +10392,18 @@ def do_loop(t_args, original_line):
 # End of do_loop
 
 # ----------------------------------------------------------------------------
+# This separators after/around name, arguments, termination are allowed to be
+# specified. If terminates with end of line, a space or end of line is allowed
+# when the macro is used. A macro may be used anywhere in a note line, or if at
+# the start of a line, as a command.
+#   macro this(a,b.c)
+#   calc a = b + c
+#   endm
+#   this(A,4.5)
+#   vars A
+#   Flute: 3c4 this(A,60.3) (A)4
+# i.e. 60=3c, 3d+ or 3e-.
+
 def do_macro(t_args, original_line):
     global macro_number
     global macro_name
@@ -10653,6 +10771,9 @@ def do_measure(t_args, original_line):
 #       meter   4,4             $$ 4 quarter notes per measure.
 #       time    cut             $$ 2 half note beats per measure.
 # Note: the comma allows for IMS format "time" command.
+#
+# For --staves option, the following is parsed and saved.
+#       meter  1..4,7..9   3/4      $$ measures time-signature
 
 def do_meter(t_args, original_line):
     global meter                        # Last meter text -- for starting measure.
@@ -10669,7 +10790,6 @@ def do_meter(t_args, original_line):
         print_error("meter does not have an expression to process", original_line)
         return
     # fi
-
     for ve in range(1, len(volume)+1):
         if mlth[ve][measure_on] != 0:
             print_error("meter in the middle of a measure not allowed", original_line)
@@ -10677,7 +10797,24 @@ def do_meter(t_args, original_line):
         # fi
     # rof
 
-    m = t_args
+    vargs = get_voice_others(t_args, 1,2, 'meter', original_line)
+    if vargs is None:
+        print_error("meter does not have an expression to process", original_line)
+        return
+    # fi
+    if len(vargs) == 1:
+        m = vargs[0]
+    elif args.staves and len(vargs) > 2:
+        print_error("meter has more than 2 arguments with --staves", original_line)
+        return
+    elif not args.staves and len(vargs) != 1:
+        print_error("meter has more than 1 argument", original_line)
+        return
+    else:
+        m = vargs[1]
+        me = vargs[0]
+    # fi
+
     m = re.sub(r',', r'/', m)           # Change 4,4 to 4/4. :)
     n = re.sub(r'^.*/', '', m)          # Note value for meter.
 
@@ -10701,6 +10838,36 @@ def do_meter(t_args, original_line):
     meter = measure_meter[measure_on] = m               # Save text for meter.
     meter_value = measure_meter_value[measure_on] = f   # Save value.
     meter_note = measure_meter_note[measure_on] = n     # Save note for beat.
+
+    if not args.staves or len(vargs) == 1:
+        return
+    # fi
+    jkl = str(me)
+    wargs = separate_args(jkl, None, True, original_line)   # Allow staff_name and voice numbers.
+
+    if not wargs or len(wargs) < 1:
+        print_error("no measure arguments on meter line", original_line)
+        return
+    # fi
+    for w in wargs:
+        f1, type_error = is_float(w, is_float_number, False)
+        if type_error is not None:
+            print_error(f"meter measure error - {type_error} ... f1='{f1}'", original_line)
+            return
+        # fi
+        if f1 is None:
+            print_warning(f"meter measure {w} is not a number.", original_line)
+            f1 = w
+        else:
+            f1 = round(f1)
+        # fi
+        global new_meter                                # Save text for meter on measure
+        global new_meter_value                          # Save value for meter on measure
+        global new_meter_note                           # Save value for meter on measure
+        new_meter[f1] = str(m)                          # Save text for meter on measure
+        new_meter_value[f1] = str(f)                    # Save value for meter on measure
+        new_meter_note[f1] = str(n)                     # Save note for meter on measure
+    # rof
     return
 # End of do_meter
 
@@ -10749,7 +10916,11 @@ def do_middle_c(t_args, original_line):
         print_error(f"middle_c - m:{measure_on} note_to_decode '{note_to_decode}' legal note", original_line)
         return
     # fi
-    number = note_to_midi_value[note_to_decode] - (60 - middle_c)
+    if middle_c is None:
+        number = note_to_midi_value[note_to_decode] - (60 - 39)
+    else:
+        number = note_to_midi_value[note_to_decode] - (60 - middle_c)
+    # fi
     compute_middle_c(number)
     return
 # End of do_middle_c
@@ -10816,6 +10987,8 @@ def do_outloop(t_args, original_line):
 # ----------------------------------------------------------------------------
 # Set page. This is only used for --pages argument to musicomp2abc command to
 # limit which pages to do output for (.fs, .mid, .csv, .abc, .v, .h).
+# There are scripts that will use "bars" (per staff line) and "pages" to make
+# the measures say what page and bar within the staff line they are on.
 
 global page_warn_once
 page_warn_once = True
@@ -11010,7 +11183,9 @@ def do_pan(t_args, original_line):
 # End of do_pan
 
 # ----------------------------------------------------------------------------
+# These are directives to abcm2ps for printing.
 # '%%'      : do_percents,
+
 def do_percents(t_args, original_line):
     global measure_on
     global percents
@@ -11158,6 +11333,17 @@ def do_pitchbend(t_args, original_line):
 # End of do_pitchbend
 
 # ----------------------------------------------------------------------------
+# For a voice or staff, all notes are sent through the process for handling.
+#   process modify,STRING
+#   .       vars    secs,dur,num
+#   .       encode  STRING =STRING;explicit
+#   .       decode  STRING;notenumber,num;duration,dur
+#   .       calc    secs = round(1000*dur*mult)/1000
+#   .       calc    tics(curstaf) = tics(curstaf)+secs
+#   .       encode  NEW =STRING;type,2;notenumber,num;duration,secs
+#   .       NEW
+#   endprocess
+
 def do_process(t_args, original_line):
     global process_defining
     global process_defining_count
@@ -11298,6 +11484,7 @@ def do_randu(t_args, original_line):
 # ----------------------------------------------------------------------------
 #   reloop                                      # Always reloop. (Go to endloop, then to top.)
 #   reloop m1 == 0                              # Reloop if true. (Go to endloop, then to top.)
+#   continue                                    # Alternative name for reloop - go to top of loop.
 
 def do_reloop(t_args, original_line):
     global measure_on
@@ -11338,7 +11525,8 @@ def do_reloop(t_args, original_line):
 
 # ----------------------------------------------------------------------------
 # Set MIDI reverb value for voice.
-#       reverb  1..4  90        $$ MIDI value 0 to 127.
+#   reverb  1..4  90        $$ MIDI value 0 to 127.
+#   reverb  Flute 20
 
 def do_reverb(t_args, original_line):
     global reverb
@@ -11450,9 +11638,13 @@ def do_spaces(t_args, original_line):
 
 # ----------------------------------------------------------------------------
 #   staff -- complicated arguments, staff name, voices, etc.
+# staff ABC: 1,2,4          $$ staff named ABC with voices 1,2,4
+# staff abc                 $$ staff named abc with automatically assigned voices.
+# staff Piano_upper,Pno.u: 50,51,52 $$ long name for first staves, short name for next pages.
 
 def do_staff(t_args, original_line):
     global staff_name
+    global brief_label
     global last_voice_staff
     global staves
     global middle_c
@@ -11466,7 +11658,7 @@ def do_staff(t_args, original_line):
         print_error("staff command after notes in different format.", original_line)
         return
     # fi
-    if middle_c == 39:                                  # Default to 72 for 4c for IMS format input.
+    if middle_c is None:                                  # Default to 72 for 4c for IMS format input.
         compute_middle_c(39 + 12)
     # fi
 
@@ -11495,8 +11687,23 @@ def do_staff(t_args, original_line):
             v = targs[x+1:]
         # fi
     # fi
+    # Label is staff_name, and BriefLabel is after a possible comma (else nothing).
+#-----------------------------------------------------------------------------
+    a = sn.find(',')
+    if a == 0 or sn[-1] == ',':
+        print_error("Label must not start or end with comma.", original_line)
+        return
+    elif a < 0:                                         # Does not have a brief label. 
+        brieflabel = ''
+    else:
+        brieflabel = sn[a+1:]
+        sn = sn[0:a]
+    # fi
+#-----------------------------------------------------------------------------
     if sn in staff_name and staff_name[sn] != []:
-        print_warning(f"staff {sn} already exists with voices {staff_name[sn]} - removing them.", original_line)
+        if not args.staves:
+            print_warning(f"staff {sn} already exists with voices {staff_name[sn]} - removing them.", original_line)
+        # fi
         staff_name[sn] = []
     # fi
     if v is not None:
@@ -11514,14 +11721,16 @@ def do_staff(t_args, original_line):
             # fi
             f1 = round(f1)
             if f1 < 1  or f1 > MAXVOICES:               # If out of range.
-                print_error(f"number of voices must between 1 and {MAXVOICES} inclusive. Not ({f1})", original_line)
+                print_error(f"number of voices must be between 1 and {MAXVOICES} inclusive. Not ({f1})", original_line)
                 return
             # fi
             # Check if voice already used in a stave.
             for a in staff_name:
                 # Allow staff to be redefined. Can delete voices too.
                 if f1 in staff_name[a] and a != sn:
-                    print_warning(f"voice {w} used in staff {a} already removing it.", original_line)
+                    if not args.staves:
+                        print_warning(f"voice {w} used in staff {a} already removing it.", original_line)
+                    # fi
                     staff_name[a].remove(f1)
                 # fi
             # rof
@@ -11542,6 +11751,7 @@ def do_staff(t_args, original_line):
     # fi
 
     staff_name[sn] = v                                  # Create or change it.
+    brief_label[sn] = brieflabel
 
     # Things to save for assign_another_voice. (Initialize to nothing.)
     save_voice_prenote[sn] = ''                         # No predefined information before notes.
@@ -11814,6 +12024,15 @@ def do_tempo(t_args, original_line):
 #
 # Variables defined within a macro are local to that macro and any macros it
 # calls. Newly defined variables are initialized to zero.
+#
+# Variables defined within a loop are local to that loop and those thereafter.
+#
+# Note: see "global" to define a new global. If a nested macro/loop defines
+# the same variable as the one(s) before, the new one is used and the old
+# one is left alone.
+#
+# Note: in this implementation int/float/string are defined by usage, not by
+# capital letters.
 
 def do_vars(t_args, original_line):
     global lmp_executing_number
@@ -11825,7 +12044,7 @@ def do_vars(t_args, original_line):
 # ----------------------------------------------------------------------------
 #   voice 4                             $$ number of voices from now onwards.   sets volume too. Default 4?
 #   voice 4   50,60,70,80               $$ Set the instruments %%MIDI program 50 ...
-# NOTE: use "instrument" command instead. :)
+# NOTE: use "instrument" command instead of multi-argument voice command. :)
 
 def do_voice(t_args, original_line):
     global cis                          # non-zero if doing one voice only.
@@ -11980,8 +12199,9 @@ def do_volume(t_args, original_line):
 
 # ----------------------------------------------------------------------------
 # This allows numbers 1 to 128.
-#      =volumes fluteA..contrabassA f       $$ Set lots of voices to volume "f".
-#       volumes mf, f, fff                  $$ Voice 1 at mf, 2 at f and 3 at fff.
+#   =volumes fluteA..contrabassA f          $$ Set lots of voices to volume "f". (Using putd -- the =.)
+#   volumes mf, f, fff                      $$ Voice 1 at mf, 2 at f and 3 at fff.
+#   volumes flute,oboe,clarinet,bassoon,french_horn,trumpet,timpani,violin1,violin2,viola,cello,contrabass ff
 
 def do_volumes(t_args, original_line):
     handle_volume_both(t_args, 'volumes', original_line)
@@ -12146,7 +12366,10 @@ def do_xpose(t_args, original_line):
     if args.vertical or args.horizontal or args.staves:
         kprint_lc = key_default                 # printing and used in xpose are the same.
     else:
-        kprint_lc = key_sig_int[key_default]    # Key name extracted.
+        if key_default is None or key_default == 'atonal':
+            kprint_lc = key_sig_int[0]          # Key name extracted.
+        else:
+            kprint_lc = key_sig_int[key_default]    # Key name extracted.
     # fi
     for w in wargs:
         f1, type_error = is_float(w, is_float_number, False)
@@ -12735,6 +12958,7 @@ def do_format(t_args, original_line):                            # NOTDONEYET - 
 
 # ----------------------------------------------------------------------------
 # Not likely to do. Use "cpp" or similar preprocessors instead.
+# i.e. #include "abc.include"
 
 def do_include(t_args, original_line):                           # NOTDONEYET - COMMAND
     print_warning(f"NOTDONEYET - COMMAND do_include - {t_args}", original_line)
@@ -13001,7 +13225,7 @@ global midi_value_to_note_sharp_39
 midi_value_to_note_sharp_39 = { }
 
 global middle_c
-middle_c = 39                   # Default to 60, as per cyber1 (1978 era) musicomp.
+middle_c = None                 # Default to 60, as per cyber1 (1978 era) musicomp.
 
 def compute_middle_c(f):
     global note_in_octave_value
@@ -13013,7 +13237,11 @@ def compute_middle_c(f):
     global midi_value_to_note_flat_39
     global middle_c
 
-    middle_c = f
+    if f is None:
+        f = 39
+    else:
+        middle_c = f
+    # fi
     f = f + 12 + 12 - 3             # 3c -> 39 must be 60 for midi.
     f39 = 39 + 12 + 12 - 3         # 3c -> 39 must be 60 for midi.
     note_to_midi_value = {}
@@ -13531,6 +13759,7 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
             return '', None, normal_note
         # fi
         lkj = note_to_midi_value[jkl] + xv
+#--         print_debug(f'lkj="{lkj}"   jkl="{jkl}"  xv={xv}')
         if lkj not in midi_value_to_note_flat or lkj not in midi_value_to_note_sharp:
             if do_errors:
                 print_error(f"note jkl='{jkl}' lkj='{lkj}' for m:{measure_on} voiceon {get_staff_from_voice(voiceon)} not in midi_value_to_note_flat array", original_line)
@@ -13540,6 +13769,8 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
         ksxnk = xnk
         if ksxnk == '':
             ksxnk = ky                              # Convert back to key it was in.
+        elif ksxnk == 'atonal':
+            ksxnk = 'c'
         # fi
         if type(ksxnk) is str:
             nksxnk = key_sig[ksxnk]
@@ -13557,6 +13788,7 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
             # fi
         elif nksxnk <= 0:                            # If flat's on staff for key.
             if sub_mid_c:
+#--                 print_debug(f'lkj="{lkj}"')
                 lkj = midi_value_to_note_flat_39[lkj]
             else:
                 lkj = midi_value_to_note_flat[lkj]
@@ -13616,7 +13848,7 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
     if args.horizontal or args.vertical or args.staves:
         if middle_c == (39 + 12) and sub_mid_c:
             o = int(o)
-            if o <= 0:
+            if o < 0:
                 print_error(f"octave is zero or negative ({o}) or not an integer", original_line)
                 return '', None, normal_note
             # fi
@@ -14853,6 +15085,8 @@ def get_sequence_note(temp1, voiceon, number_in_sequence, prenote, postnote, tie
     intensities_onenote = []
     stacs = []
     glides = []
+    marcatos = []
+    accents = []
     ties = []
     for sn in range(0, number_in_sequence):
         temp1, s_prenote, s_postnote = find_vol_cresc_pan_intensity(temp1, voiceon, '', '', original_line)
@@ -14864,21 +15098,37 @@ def get_sequence_note(temp1, voiceon, number_in_sequence, prenote, postnote, tie
         quotes = thenote
         staccato = ''
         legato = ''
+        marcato = ''
+        accent = ''
         tied = ''
-        if temp1 is not None and temp1 != '':   # Check for staccato after note.
+        while temp1 is not None and temp1 != '':   # Check for staccato after note.
             if temp1[0] == 's':
                 staccato = 's'
                 temp1 = temp1[1:]
+                continue
             # fi
-            if temp1[0] == 'l':
+            if temp1[0] in ['l','z']:
                 legato = 'l'
                 temp1 = temp1[1:]
+                continue
+            # fi
+            if temp1[0] == 'm':
+                marcato = 'm'
+                temp1 = temp1[1:]
+                continue
+            # fi
+            if temp1[0] == 'a':
+                accent = 'a'
+                temp1 = temp1[1:]
+                continue
             # fi
             if temp1[0] == 't':
                 tied = 't'
                 temp1 = temp1[1:]
+                continue
             # fi
-        # fi
+            break
+        # elihw
         if sn != number_in_sequence - 1:
             if temp1 is None or temp1 == '' or temp1[0] != ',':
                 print_error(f"m:{measure_on} sequence is not legal, no comma after note", original_line)
@@ -14894,6 +15144,8 @@ def get_sequence_note(temp1, voiceon, number_in_sequence, prenote, postnote, tie
         vols_postnote.append(s_postnote)
         stacs.append(staccato)
         glides.append(legato)
+        marcatos.append(marcato)
+        accents.append(accent)
         ties.append(tied)
     # rof
     timeofnote, r_suffixes, number_dots = get_time(temp1, original_line)
@@ -14918,9 +15170,9 @@ def get_sequence_note(temp1, voiceon, number_in_sequence, prenote, postnote, tie
         n_s = ''
         for i in range(0, len(notes)):
             if i == 0:
-                n_s = vols_prenote[i] + notes[i] + stacs[i] + glides[i] + ties[i] + vols_postnote[i]
+                n_s = vols_prenote[i] + notes[i] + stacs[i] + glides[i] + marcatos[i] + accents[i] + ties[i] + vols_postnote[i]
             else:
-                n_s = n_s + ',' + vols_prenote[i] + notes[i] + stacs[i] + glides[i] + ties[i] + vols_postnote[i]
+                n_s = n_s + ',' + vols_prenote[i] + notes[i] + stacs[i] + marcatos[i] + accents[i] + glides[i] + ties[i] + vols_postnote[i]
             # fi
         # rof
         abc_note = f's{number_in_sequence}({n_s})'
@@ -15092,6 +15344,7 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
     global measure_on
     global sequence_note
     global trill_note
+    global suffix_emphasis
     global suffix_legato
     global suffix_staccato
     global suffix_tied
@@ -15146,6 +15399,7 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
         print_error(f"m:{measure_on} Error getting time for note ('{thenote}') - ('{therest}') -> timeofnote='{timeofnote}' r_suffixes='{r_suffixes}' number_dots='{number_dots}' therest='{therest}'", original_line)
         return None, rest, prenote, postnote        # error occurred.
     # fi
+    # suffix_emphasis = 32        # Emphasis
     # suffix_legato = 16            -- glide to next note.
     # suffix_tied = 2               -- tied
     # suffix_staccato = 1           -- staccato
@@ -15256,6 +15510,16 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
             # fi
         # fi
         legato_next = ''
+    # fi
+    # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+    # Emphasis
+    add_emphasis = ''
+    if (r_suffixes & suffix_emphasis) != 0:
+        if args.horizontal or args.vertical or args.midi1csv or args.fluidsynth or args.staves:
+            append_emphasis = 'a'
+        else:           # ABC
+            thenote = DECORATIONS + 'emphasis' + DECORATIONS + thenote     # '<' after the note for emphasis
+        # fi
     # fi
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 # Use instak() to process note.
@@ -16432,10 +16696,10 @@ staff_keywords = {
     'trem0': keyword_tremolo,         'trem1': keyword_tremolo,
     'trem2': keyword_tremolo,         'trem3': keyword_tremolo,
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-    'legato': keyword_note_modifier,  'staccato': keyword_note_modifier,
-    'leg': keyword_note_modifier,
-    'marcato': keyword_note_modifier, 'tie': keyword_note_modifier,
-    'slur': keyword_note_modifier,
+    'legato': keyword_note_modifier,  'leg': keyword_note_modifier,
+    'staccato': keyword_note_modifier,
+    'marc': keyword_note_modifier,    'marcato': keyword_note_modifier,
+    'tie': keyword_note_modifier,     'slur': keyword_note_modifier,
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     # percussion noteheads, nohead on note staff.
     'perc': keyword_note_show,        'nohead': keyword_note_show,
@@ -16467,6 +16731,8 @@ for i in range(128):
 # ----------------------------------------------------------------------------
 # next_tokens = do_keyword(token, delimiter, next_tokens, original_line)
 # Might take multiple tokens.
+#
+# The keywords are listed above in "staff_keywords", with routine to execute.
 
 def do_keyword(token, delimiter, next_tokens, original_line):
     global staff_keywords
