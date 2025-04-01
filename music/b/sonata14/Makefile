@@ -18,6 +18,10 @@ CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 # -s nn = page scale to (default 0.75) = %%scale.
 ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 #-----------------------------------------------------------------------------
+#-- MC_ARGS += --one
+#-- MC_ARGS += --two
+#-- MC_ARGS += --sf2=/Users/m4/thisisthesoundfont.sf2
+#-----------------------------------------------------------------------------
 .PRECIOUS: %.E
 .PRECIOUS: %.abc %.csv %_m.ps
 .PRECIOUS: %_2.abc %_2.csv %_m2.ps
@@ -26,7 +30,7 @@ ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 .SUFFIXES: _2.abc _m2.ps _2.fs _2.csv _2.mid _2.pdf
 # output $@   -- input $<
 %.fs:  %.E Makefile
-	${MUSICOMP2ABC} ${MC_ARGS} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --fluidsynth $< $@ || (rm -f $@ ; exit 1)
 %.csv:  %.E Makefile
 	${MUSICOMP2ABC} ${MC_ARGS} --midi1csv $< $@ || (rm -f $@ ; exit 1)
 %.mid:  %.csv Makefile

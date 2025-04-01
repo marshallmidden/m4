@@ -104,6 +104,10 @@ TESTS_M_PDF= ${TESTS:=_m.pdf}
 IMSCOMP = ./imscomp
 MUSICOMP = ../musicomp2abc/musicomp2abc
 MC_ARGS ?=
+#-- MC_ARGS += --one
+#-- MC_ARGS += --two
+#-- MC_ARGS += --sf2=/Users/m4/thisisthesoundfont.sf2
+#-----------------------------------------------------------------------------
 ABCM2PS	     = abcm2ps
 PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------
@@ -125,9 +129,9 @@ CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp -Wno-inv
 .SUFFIXES: .abc _m.ps .E .fs .csv .mid .pdf
 # output $@   -- input $<
 %.fs:  %.E
-	${IMSCOMP} ${MC_ARGS} --two --fluidsynth $< $@
+	${IMSCOMP} ${MC_ARGS} --fluidsynth $< $@
 %_m.fs:  %.E
-	${MUSICOMP} ${MC_ARGS} --two --fluidsynth $< $@
+	${MUSICOMP} ${MC_ARGS} --fluidsynth $< $@
 %.csv:  %.E
 	${IMSCOMP} ${MC_ARGS} --midi1csv $< $@
 %_m.csv:  %.E

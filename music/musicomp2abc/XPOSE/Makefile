@@ -21,6 +21,10 @@ MC_ARGS =
 # MC_ARGS = --xpose '1 0 c'
 #? MC_ARGS = --xpose '1 12 c'
 # MC_ARGS = --warn_octave_accidental
+#-- MC_ARGS += --one
+#-- MC_ARGS += --two
+#-- MC_ARGS += --sf2=/Users/m4/thisisthesoundfont.sf2
+#-----------------------------------------------------------------------------
 #+ YAPS	     = yaps
 ABCM2PS	     = abcm2ps
 PS2PDF       = ps2pdf
@@ -43,7 +47,7 @@ CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp -Wno-inv
 .SUFFIXES: .abc _m.ps .E .fs .csv .mid .pdf
 # output $@   -- input $<
 %.fs:  %.E
-	${MUSICOMP2ABC} ${MC_ARGS} --two --fluidsynth $< $@ || rm -f $@
+	${MUSICOMP2ABC} ${MC_ARGS} --fluidsynth $< $@ || rm -f $@
 %.csv:  %.E
 	${MUSICOMP2ABC} ${MC_ARGS} --midi1csv $< $@ || rm -f $@
 %.mid:  %.csv

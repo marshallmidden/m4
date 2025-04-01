@@ -73,6 +73,10 @@ IMSCOMP = ../ims/imscomp
 MC_ARGS ?=
 #++ MC_ARGS = --warn_octave_accidental
 #-- MC_ARGS = --noxpose --voices=9
+#-- MC_ARGS += --one
+#-- MC_ARGS += --two
+#-- MC_ARGS += --sf2=/Users/m4/thisisthesoundfont.sf2
+#-----------------------------------------------------------------------------
 #+ YAPS	     = yaps
 ABCM2PS	     = abcm2ps
 PS2PDF       = ps2pdf
@@ -97,9 +101,9 @@ CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp -Wno-inv
 .SUFFIXES: _2.abc _m2.ps _2.fs _2.csv _2.mid _2.pdf
 # output $@   -- input $<
 %.fs:   %.E
-	${MUSICOMP} ${MC_ARGS} --two --fluidsynth $< $@ || rm -f $@
+	${MUSICOMP} ${MC_ARGS} --fluidsynth $< $@ || rm -f $@
 %_2.fs: %.E
-	${IMSCOMP} ${MC_ARGS} --two --fluidsynth $< $@ || rm -f $@
+	${IMSCOMP} ${MC_ARGS} --fluidsynth $< $@ || rm -f $@
 %.csv:  %.E
 	${MUSICOMP} ${MC_ARGS} --midi1csv $< $@ || rm -f $@
 %_2.csv: %.E

@@ -37,7 +37,7 @@ MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 #-----------------------------------------------------------------------------
 .SUFFIXES: .fs
 %.fs:  %.gcs
-	${MUSICOMP2ABC} --two --fluidsynth $< $@ || rm -f $@
+	${MUSICOMP2ABC} --fluidsynth $< $@ || rm -f $@
 #-----------------------------------------------------------------------------
 .PHONY: help
 help:

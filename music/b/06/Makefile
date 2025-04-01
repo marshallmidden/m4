@@ -22,6 +22,9 @@ VOICES =
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 MC_ARGS ?= ${PAGES} ${MEASURES} ${VOICES}
 #++ MC_ARGS ?= --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES}
+#-- MC_ARGS += --one
+#-- MC_ARGS += --two
+#-- MC_ARGS += --sf2=/Users/m4/thisisthesoundfont.sf2
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.E
 .PRECIOUS: %.abc %.csv %_m.ps
@@ -31,13 +34,13 @@ MC_ARGS ?= ${PAGES} ${MEASURES} ${VOICES}
 .SUFFIXES: _2.abc _m2.ps _2.fs _2.csv _2.mid _2.pdf
 # output $@   -- input $<
 %.fs:	%.E
-	${MUSICOMP2ABC} ${MC_ARGS} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --fluidsynth $< $@ || (rm -f $@ ; exit 1)
 %_2.fs:	%.E
-	${IMSCOMP} ${MC_ARGS} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
+	${IMSCOMP} ${MC_ARGS} --fluidsynth $< $@ || (rm -f $@ ; exit 1)
 %.csv:	%.E
-	${MUSICOMP2ABC} ${MC_ARGS} --two --midi1csv $< $@ || (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --midi1csv $< $@ || (rm -f $@ ; exit 1)
 %_2.csv:	%.E
-	${IMSCOMP} ${MC_ARGS} --two --midi1csv $< $@ || (rm -f $@ ; exit 1)
+	${IMSCOMP} ${MC_ARGS} --midi1csv $< $@ || (rm -f $@ ; exit 1)
 %.mid:	%.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %_2.mid:	%._2csv

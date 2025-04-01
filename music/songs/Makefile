@@ -135,6 +135,9 @@ IMSCOMP = ../ims/imscomp
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
 MC_ARGS ?= --nofillwarning --nooncewarning --norestswarning --noleftoverwarnings --notrillwarnings
+#-- MC_ARGS += --one
+#-- MC_ARGS += --two
+#-- MC_ARGS += --sf2=/Users/m4/thisisthesoundfont.sf2
 #-----------------------------------------------------------------------------
 # -b nn = starting bar number
 # -i = put red circle around errors.
@@ -197,9 +200,9 @@ BROKEN_2MID = ${BROKEN:=_2.mid}
 .SUFFIXES: _2.csv _2.abc _2.mid _m2.ps _2.fs _2.wav _2.pdf _2.ps
 # output $@   -- input $<
 %.fs:  %.E
-	${MUSICOMP2ABC} ${MC_ARGS} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --fluidsynth $< $@ || (rm -f $@ ; exit 1)
 %_2.fs:  %.E
-	${IMSCOMP} ${MC_ARGS} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
+	${IMSCOMP} ${MC_ARGS} --fluidsynth $< $@ || (rm -f $@ ; exit 1)
 %.csv:  %.E
 	${MUSICOMP2ABC} ${MC_ARGS} --midi1csv $< $@ || (rm -f $@ ; exit 1)
 %_2.csv:  %.E

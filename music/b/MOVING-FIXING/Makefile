@@ -50,14 +50,17 @@ WHICH = "-D WHICH=0"
 CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
 MC_ARGS = ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 #-- MC_ARGS = --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
+#-- MC_ARGS += --one
+#-- MC_ARGS += --two
+#-- MC_ARGS += --sf2=/Users/m4/thisisthesoundfont.sf2
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.E %.csv %_m.ps %.mid %.fs
 .SUFFIXES: .abc _m.ps .E .fs .csv .mid .pdf
 # output $@   -- input $<
 %.fs:	%.E ${MUSICOMP2ABC}
-	${MUSICOMP2ABC} ${MC_ARGS} --two --fluidsynth $< $@ || (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --fluidsynth $< $@ || (rm -f $@ ; exit 1)
 %.csv:	%.E ${MUSICOMP2ABC}
-	${MUSICOMP2ABC} ${MC_ARGS} --two --midi1csv $< $@ || (rm -f $@ ; exit 1)
+	${MUSICOMP2ABC} ${MC_ARGS} --midi1csv $< $@ || (rm -f $@ ; exit 1)
 %.mid:	%.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.abc:	%.E ${MUSICOMP2ABC}

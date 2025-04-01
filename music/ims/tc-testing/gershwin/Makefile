@@ -47,7 +47,8 @@ CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp -Wno-inv
 %.E: %.gcs
 	${CPP} $< -o $@
 %.fs:  %.E
-	${IMSCOMP} ${MC_ARGS} --two --fluidsynth $< $@
+# --two
+	${IMSCOMP} ${MC_ARGS} --fluidsynth $< $@
 %.csv:  %.E
 	${IMSCOMP} ${MC_ARGS} --midi1csv $< $@
 %.mid:  %.csv
