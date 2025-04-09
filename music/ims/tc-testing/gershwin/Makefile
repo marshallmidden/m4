@@ -24,6 +24,11 @@ SONGS_PDF= ${SONGS:=.pdf}
 IMSCOMP = ../../imscomp
 #-- MC_ARGS ?= --platochars --lines
 MC_ARGS ?= --platochars
+#-- Default soundfont is whatever is with the system.
+#-- MC_ARGS += --one		# Defined in imscomp/musicomp2abc
+#-- MC_ARGS += --two		# Defined in imscomp/musicomp2abc
+#-- MC_ARGS += --sf /Users/m4/thisisthesoundfont.sf2
+#-----------------------------------------------------------------------------
 ABCM2PS	     = abcm2ps
 PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------
@@ -47,7 +52,6 @@ CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp -Wno-inv
 %.E: %.gcs
 	${CPP} $< -o $@
 %.fs:  %.E
-# --two
 	${IMSCOMP} ${MC_ARGS} --fluidsynth $< $@
 %.csv:  %.E
 	${IMSCOMP} ${MC_ARGS} --midi1csv $< $@

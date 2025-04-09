@@ -85,6 +85,10 @@ BROKEN_PDF= ${BROKEN:=.pdf}
 #-----------------------------------------------------------------------------
 IMSCOMP = ../imscomp
 MC_ARGS ?= --platochars --lines
+#-- MC_ARGS += --one
+#-- MC_ARGS += --two
+#-- MC_ARGS += --sf2=/Users/m4/thisisthesoundfont.sf2
+#-----------------------------------------------------------------------------
 ABCM2PS	     = abcm2ps
 PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------
@@ -108,7 +112,7 @@ CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp -Wno-inv
 %.E: %.gcs
 	${CPP} $< -o $@
 %.fs:  %.E
-	${IMSCOMP} ${MC_ARGS} --two --fluidsynth $< $@
+	${IMSCOMP} ${MC_ARGS} --fluidsynth $< $@
 %.csv:  %.E
 	${IMSCOMP} ${MC_ARGS} --midi1csv $< $@
 %.mid:  %.csv
