@@ -1136,7 +1136,7 @@ createglobalvar('default_volume', 100, 0, type_is_number, True)      # Default v
 createglobalvar('default_pan', 64, 0, type_is_number, True)          # Center of left<->right balance.
 createglobalvar('default_intensity', 100, 0, type_is_number, True)   # Volume = intensity% * velocity% * vol(ff)%.
 createglobalvar('default_reverb', 0, 0, type_is_number, True)        # No reverb.
-createglobalvar('default_velocity', 120, 0, type_is_number, True)    # Note attack.
+createglobalvar('default_velocity', 100, 0, type_is_number, True)    # Note attack.  (Was 120 - 2025-04-10)
 
 # ----------------------------------------------------------------------------
 is_float_number = 0
@@ -4082,14 +4082,14 @@ def print_out_midi1csv_instrument(m, voiceon, lthworkingmeasure, last_instrument
             print_output(f'{voiceon+1}, {lthworkingmeasure}, Control_c, {chan}, 32, {lit[1] & 0x1f}')
             if not args.fluidsynth:
                 print_output(f'{voiceon+1}, {lthworkingmeasure}, Title_t, "{last_instrument_on}"')
-                print_output(f'{voiceon+1}, {lthworkingmeasure}, MIDI_port, {midiport}')
+#-- fluidsynth midi does not support --  print_output(f'{voiceon+1}, {lthworkingmeasure}, MIDI_port, {midiport}')
                 print_output(f'{voiceon+1}, {lthworkingmeasure}, Program_c, {chan}, {lit[0]}')
             else:
                 print_output(f'{voiceon+1}, {lthworkingmeasure}, Program_c, {chan}, {lit[0]}, {lit[1]}')
             # fi
         elif last_instrument_on in drum_sounds:
             if not args.fluidsynth:
-                print_output(f'{voiceon+1}, {lthworkingmeasure}, MIDI_port, {midiport}')
+#-- fluidsynth midi does not support --  print_output(f'{voiceon+1}, {lthworkingmeasure}, MIDI_port, {midiport}')
                 print_output(f'{voiceon+1}, {lthworkingmeasure}, Program_c, {9}, {0}')
             else:
                 print_output(f'{voiceon+1}, {lthworkingmeasure}, Program_c, {9}, {0}, {0}')
@@ -4662,7 +4662,6 @@ def print_out_midi1csv_notes():
                 last_note_length = bufs_length[voice][m][nn]
                 note_velocity = bufs_velocity[voice][m][nn]
 
-
                 if n == '0' or n == 0:
                     # If a note is turned on, turn it off.
                     if last_note_on != '':
@@ -4752,6 +4751,12 @@ def print_out_midi1csv_notes():
                 else:
                     # We want a note-on here.
                     voices_having_notes[voice] = True
+                    if 'a' in last_suffixes:
+                        # Move up almost 1/2 of difference between volumes (currently 10).
+                        # Double for 'aa'. Not too high though!
+                        note_velocity = note_velocity + (5 * last_suffixes.count('a'))
+                        note_velocity = 127 if note_velocity > 127 else note_velocity
+                    # fi
                     if legato_on:
                         if l_instrument in instruments:
                             pass
@@ -4801,8 +4806,11 @@ def print_out_midi1csv_notes():
                 v_pan = bufs_pan[voice][m][nn]
                 v_intens = bufs_intensity[voice][m][nn]
                 if 'a' in last_suffixes:
-                    v_vl = v_vl + 5             # Move up about 1/2 of difference between volumes (currently 10).
-                    v_intens = v_intens + 5     # Intensity too!
+                    # Move up about 1/2 of difference between volumes (currently 10).
+                    v_vl = v_vl + (5 * last_suffixes.count('a'))
+                    v_vl = 127 if v_vl > 127 else v_vl
+                    v_intens = v_intens + (5 * last_suffixes.count('a'))
+                    v_intens = 127 if v_intens > 127 else v_intens
                 # fi
                 if last_cc11 != v_vl:
                     if last_note_on != '':
@@ -7716,6 +7724,7 @@ def set_default_ims(t_args, original_line):
 #--        print_error("decode - set_default_ims, Error getting time for note", original_line)
         return
     # fi
+    # suffix_Emphasis = 64          -- Emphasis (aa)
     # suffix_emphasis = 32          -- emphasis
     # suffix_legato = 16            -- glide to next note.
     # suffix_tied = 2               -- tied
@@ -7862,6 +7871,7 @@ def decode_gsw(t_args, original_line):
         print_error("decode - decode_gsw, Error getting time for note", original_line)
         return
     # fi
+    # suffix_Emphasis = 64          -- Emphasis (aa)
     # suffix_emphasis = 32          -- emphasis
     # suffix_legato = 16            -- glide to next note.
     # suffix_tied = 2               -- tied
@@ -7940,6 +7950,7 @@ def decode_ims(t_args, original_line):
     global key_sig_int
     global key_voice
     global pan
+    global suffix_Emphasis      # aa
     global suffix_emphasis
     global suffix_legato
     global suffix_staccato
@@ -8226,7 +8237,10 @@ def decode_ims(t_args, original_line):
                     note_t = 1
                     note_suffixes = note_suffixes + 't'
                 # fi
-                if (r_suffixes & suffix_emphasis) != 0:
+                if (r_suffixes & suffix_Emphasis) != 0:
+                    note_aa = 1
+                    note_suffixes = note_suffixes + 'aa'
+                elif (r_suffixes & suffix_emphasis) != 0:   # only aa or a allowed.
                     note_a = 1
                     note_suffixes = note_suffixes + 'a'
                 # fi
@@ -8950,6 +8964,7 @@ def do_cstopnow(t_args, original_line):
 # Special: explict (no variable paired with it). Only for encode.
 
 # NOTE: "m3" values are as follows (for first 3 examples above):
+#   suffix_Emphasis = 64        # Emphasis (aa)
 #   suffix_emphasis = 32        # Emphasis
 #   suffix_legato = 16          # glide to next note - no note attack on start of next note.
 #   suffix_broken = 8           # broken - ignored - break between notes ... because gsw didn't have it.
@@ -13934,6 +13949,7 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
 #   suffixes        Union of bits for suffixes.
 #   number_dots     Number of "dots".
 
+global suffix_Emphasis
 global suffix_emphasis
 global suffix_legato
 global suffix_broken
@@ -13942,6 +13958,7 @@ global suffix_tied
 global suffix_staccato
 global suffix_dotted        # NOTE: can others be set if this is?
 global suffix_normal
+suffix_Emphasis = 64        # Emphasis (aa)
 suffix_emphasis = 32        # Emphasis
 suffix_legato = 16          # glide to next note - no note attack on start of next note.
 suffix_broken = 8           # broken - ignored - break between notes ... because gsw didn't have it.
@@ -14037,6 +14054,9 @@ def get_time(therest, original_line):
         if i not in bit_from_character:
             print_error(f"m:{measure_on} suffix field has unrecognizable character ('{i}' of '{therest}')", original_line)
             return 0, None, None                # ?
+        # fi
+        if (work4 & suffix_emphasis) != 0:             # Already emphasis, double it.
+            work4 = work4 + suffix_Emphasis
         # fi
         work4 = work4 | bit_from_character[i]
         suf_cnt_max[i][0] = suf_cnt_max[i][0] + 1
@@ -15376,6 +15396,7 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
     global measure_on
     global sequence_note
     global trill_note
+    global suffix_Emphasis
     global suffix_emphasis
     global suffix_legato
     global suffix_staccato
@@ -15431,7 +15452,8 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
         print_error(f"m:{measure_on} Error getting time for note ('{thenote}') - ('{therest}') -> timeofnote='{timeofnote}' r_suffixes='{r_suffixes}' number_dots='{number_dots}' therest='{therest}'", original_line)
         return None, rest, prenote, postnote        # error occurred.
     # fi
-    # suffix_emphasis = 32        # Emphasis
+    # suffix_Emphasis = 64        # Emphasis (aa)
+    # suffix_emphasis = 32        # emphasis
     # suffix_legato = 16            -- glide to next note.
     # suffix_tied = 2               -- tied
     # suffix_staccato = 1           -- staccato
@@ -15545,10 +15567,12 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
     # fi
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     # Emphasis
-    add_emphasis = ''
     if (r_suffixes & suffix_emphasis) != 0:
         if args.horizontal or args.vertical or args.midi1csv or args.fluidsynth or args.staves:
-            append_emphasis = 'a'
+            append_tie = append_tie + 'a'
+            if (r_suffixes & suffix_Emphasis) != 0:
+                append_tie = append_tie + 'a'       # Doubles, because both are set.
+            # fi
         else:           # ABC
             thenote = DECORATIONS + 'emphasis' + DECORATIONS + thenote     # '<' after the note for emphasis
         # fi
