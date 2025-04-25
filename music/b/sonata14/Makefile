@@ -2,8 +2,8 @@ V            = s14
 #-----------------------------------------------------------------------------
 MCOMP        = ~/src/abc/mcomp/mcomp
 #++ MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
-#++ IMSCOMP      = ~/ims/imscomp
-MUSICOMP2ABC = ../../ims/imscomp
+IMSCOMP      = ../../ims/imscomp
+MUSICOMP2ABC = ../../ims/musicomp2abc
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------
@@ -31,28 +31,37 @@ ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 # output $@   -- input $<
 %.fs:  %.E Makefile
 	${MUSICOMP2ABC} ${MC_ARGS} --fluidsynth $< $@ || (rm -f $@ ; exit 1)
+%_2.fs: %.E
+	${IMSCOMP} ${MC_ARGS} --fluidsynth $< $@ || (rm -f $@ ; exit 1)
 %.csv:  %.E Makefile
 	${MUSICOMP2ABC} ${MC_ARGS} --midi1csv $< $@ || (rm -f $@ ; exit 1)
+%_2.csv:        %.E
+	${IMSCOMP} ${MC_ARGS} --midi1csv $< $@ || (rm -f $@ ; exit 1)
 %.mid:  %.csv Makefile
+	csvmidi $< $@ || (rm -f $@ ; exit 1)
+%_2.mid:        %_2.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.wav:  %.mid Makefile
 	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser/GeneralUser.sf2 -K 128 $< \
 		|| (rm -f $@ ; exit 1)
 %.abc:  %.E Makefile
 	${MUSICOMP2ABC} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
+%_2.abc:        %.E
+	${IMSCOMP} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
 %_m.ps: %.abc Makefile
 	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) || (rm -f $@ ; exit 1)
 %.pdf:	%_m.ps Makefile
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E: %.gcs Makefile
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
-#-----------------------------------------------------------------------------
-.SUFFIXES: .v
-%.v: %.E Makefile
-	${MUSICOMP2ABC} ${MC_ARGS} --vertical $< $@ || (rm -f $@ ; exit 1)
-.SUFFIXES: .horizontal
-%.h: %.E Makefile
-	${MUSICOMP2ABC} ${MC_ARGS} --horizontal $< $@ || (rm -f $@ ; exit 1)
+%.v:    %.E
+	${IMSCOMP} ${MC_ARGS} --vert $< $@
+%_m.v:    %.E
+	${MUSICOMP} ${MC_ARGS} --vert $< $@
+%.h:    %.E
+	${IMSCOMP} ${MC_ARGS} --hori $< $@
+%_m.h:    %.E
+	${MUSICOMP} ${MC_ARGS} --hori $< $@
 #-----------------------------------------------------------------------------
 .PHONY: help
 help::
@@ -90,6 +99,10 @@ clean:
 	rm -f ${V}.v ${V}.h
 	rm -f ${V}.fs
 	rm -f ${V}.E
+	rm -f ${V}_2.abc ${V}_2.pdf
+	rm -f ${V}_2.csv ${V}_2.mid ${V}.wav
+	rm -f ${V}_2.v ${V}_2.h
+	rm -f ${V}_2.fs
 #-----------------------------------------------------------------------------
 # End of Makefile
 #-----------------------------------------------------------------------------
