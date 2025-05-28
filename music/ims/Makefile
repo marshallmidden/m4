@@ -80,6 +80,7 @@ TESTS += vc1-test
 TESTS += vc2-test
 TESTS += vc3-test
 TESTS += vc4-test
+TESTS += xpose
 #-----------------------------------------------------------------------------
 SONGS_E = ${SONGS:=.E}
 SONGS_ABC = ${SONGS:=.abc}
