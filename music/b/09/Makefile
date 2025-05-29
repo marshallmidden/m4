@@ -1,6 +1,8 @@
 SONGS        = b9m1
 SONGS       += b9m2
 SONGS       += b9m3
+
+SONGS       += A93
 #++ SONGS       += b9m4
 INCLUDES     = instruments.include
 INCLUDES    += macros.include
