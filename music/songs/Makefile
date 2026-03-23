@@ -150,7 +150,7 @@ ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 #-----------------------------------------------------------------------------
 # -E                    Only run the preprocessor.
 # -x c                  Treat input file(s) as having <language> 'c'.
-# -Wno-invalid-pp-token
+#
 # -undef
 # -Wundef
 # -Werror               Turn warnings into errors.
@@ -160,7 +160,7 @@ ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 # -CC                   Include comments from within macros in preprocessed output.
 # -traditional-cpp      Enable some traditional CPP emulation.
 #
-CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
+CPP=gcc -E -x c -undef -Wundef -Werror -nostdinc -C -CC
 #-----------------------------------------------------------------------------
 # SONGS_GCS = ${SONGS:=.gcs}
 SONGS_E = ${SONGS:=.E} ${SONGS_NO_PS:=.E}

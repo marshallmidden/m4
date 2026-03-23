@@ -19,7 +19,7 @@ PAGES =
 MEASURES =
 VOICES =
 #-----------------------------------------------------------------------------
-CPP=gcc -E -x c -Wno-invalid-pp-token -undef -Wundef -Werror -nostdinc -C -CC
+CPP=gcc -E -x c -undef -Wundef -Werror -nostdinc -C -CC
 MC_ARGS ?= ${PAGES} ${MEASURES} ${VOICES}
 #++ MC_ARGS ?= --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES}
 #-- MC_ARGS += --one

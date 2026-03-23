@@ -1,5 +1,23 @@
 #!/usr/bin/python3 -B
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
+"""Expression parser and variable system for the music composition preprocessor.
+
+Provides a complete mathematical expression evaluator supporting:
+  - Arithmetic:  +, -, *, /, ** (power)
+  - Comparison:  ==, !=, <, >, <=, >=
+  - Bitwise:     $and$, $or$, $mask$, $union$, $diff$, $cls$, $ars$
+  - Assignment:  =
+  - Functions:   sin, cos, sqrt, log, ln, abs, ceil, floor, round, etc.
+  - Variables:   scalars and multi-dimensional arrays
+  - Strings:     character-string values with concatenation
+
+Variables are stored in two lists (global 'arrays' and 'local_arrays'),
+each entry being a list with fields accessed via module-level index constants
+(numarry_name, numarry_maclevel, etc.).
+
+Can also run standalone as an interactive calculator (python3 calculate.py).
+"""
+from __future__ import annotations
 #-----------------------------------------------------------------------------
 # Need to do a bunch of things.
 # a) m1 = abc1(1)       # CHAR
@@ -106,7 +124,8 @@ type_is_string = 1          # Type of variable is a string.
 #-- local_arrays.append(warray)
 #-----------------------------------------------------------------------------
 class SymbolDesc:
-    def __init__(self, symbol, lprio, rprio, eval):
+    def __init__(self, symbol, lprio, rprio, eval) -> None:
+        """Initialize a symbol descriptor with operator string, left/right priorities, and eval function."""
         self.symbol = symbol
         self.lprio = lprio
         self.rprio = rprio
@@ -114,12 +133,14 @@ class SymbolDesc:
     # End of __init__
 
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-    def __repr__(self):
+    def __repr__(self) -> str:
+        """Return a human-readable string representation of this symbol descriptor."""
         return "SymbolDesc: '{}',{},{}".format(self.symbol, self.lprio, self.rprio)
     # End of __repr__
 
 #-----------------------------------------------------------------------------
-def is_octal(string):
+def is_octal(string: str) -> bool:
+    """Check if a string represents an octal number (starts with 'o', followed by octal digits)."""
     pattern = r'^o[0-7]+$'
     return bool(re.match(pattern, string))
 # is_octal
@@ -130,11 +151,12 @@ def is_octal(string):
 #   token   - the token
 #   kind    - 'NUMBER' if a number
 
-def next_token(string):
+def next_token(string: str) -> tuple[str | None, str | float, str]:
+    """Extract the next token from the expression string, classifying it by type (NUMBER, ID, OPER, CHAR, SYNTAX)."""
 #PRINT    print("next_token - Entering type(string)='{}' string='{}'".format(type(string),string), file=sys.stderr, flush=True)   # PRINT
     # Make sure string exists. next_token useable by other than tokenize.
     string = string.strip()
-    if len(string) <= 0:
+    if not string:
         return None, None, None
     # fi
     # First character processing is special.
@@ -264,7 +286,8 @@ def next_token(string):
 # End of next_token
 
 #-----------------------------------------------------------------------------
-def tokenize(code):
+def tokenize(code) -> None:
+    """Generator that yields all tokens from the expression string, inserting implied multiplication where needed."""
 #PRINT    print("tokenize - Entering code='{}'".format(code), file=sys.stderr, flush=True) # PRINT
     # Get next token.
     last_kind = ''
@@ -297,10 +320,11 @@ def tokenize(code):
 # End of tokenize
 
 #-----------------------------------------------------------------------------
-def identity_eval(args):
+def identity_eval(args: list) -> list:
+    """Evaluate an identity expression (variable reference or numeric literal)."""
 #PRINT    print("identity_eval - Entering args='{}'".format(args), file=sys.stderr, flush=True)    # PRINT
     if len(args) == 1:
-        if type(args[0]) == SymbolDesc:
+        if isinstance(args[0], SymbolDesc):
             return [ args[0].symbol ]
         # fi
     elif len(args) == 2:
@@ -315,7 +339,8 @@ def identity_eval(args):
 # End of identity_eval
 
 #-----------------------------------------------------------------------------
-def get_value(arg):
+def get_value(arg: list) -> list:
+    """Retrieve the value of a variable from global or local arrays, or return a literal value."""
     global arrays
     global local_arrays
 
@@ -375,7 +400,7 @@ def get_value(arg):
 #PRINT    print("get_value - #i maxwary={}".format(maxwary), file=sys.stderr, flush=True)  # PRINT
     if maxwary is None:
         return [ "ERROR - get_value - unrecognized variable='{}'".format(arg), None ]
-    elif len(maxwary[numarry_indexes]) != 0:
+    elif maxwary[numarry_indexes]:
         return [ "ERROR - get_value - array needs '{}' arguments".format(len(maxwary[numarry_indexes])), None ]
     elif maxwary[numarry_value_type][0] is None:
         return [ "ERROR - get_value - variable is not set yet - '{}'".format(arg), None ]
@@ -391,12 +416,13 @@ def get_value(arg):
 # End of get_value
 
 #-----------------------------------------------------------------------------
-def fix_to_number(t,a):
+def fix_to_number(t,a) -> tuple:
+    """Attempt to convert a character-string value to a numeric (float) value."""
     if t == 'CHAR':
         try:
             a = float(a)
             t = 'NUMBER'
-        except:
+        except (ValueError, TypeError):
             pass
         # fi
     # fi
@@ -406,7 +432,8 @@ def fix_to_number(t,a):
 #-----------------------------------------------------------------------------
 #        t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
 # Try to make both a1 and a2 numbers.
-def fix_to_numbers(t1,a1,t2,a2):
+def fix_to_numbers(t1,a1,t2,a2) -> tuple:
+    """Attempt to convert both operands to numeric values."""
 #PRINT    print("fix_to_numbers - Entering t1={} a1={} t2={} a2={}".format(t1,a1,t2,a2), file=sys.stderr, flush=True)  # PRINT
     t1, a1 = fix_to_number(t1, a1)
     t2, a2 = fix_to_number(t2, a2)
@@ -414,7 +441,8 @@ def fix_to_numbers(t1,a1,t2,a2):
 # End of fix_to_numbers
 
 #-----------------------------------------------------------------------------
-def compute_value(op, arg1, arg2):
+def compute_value(op: str, arg1: list, arg2: list) -> list:
+    """Evaluate a binary operation: arithmetic (+,-,*,/,**), comparison (==,!=,<,>,<=,>=), logical, bitwise, or assignment (=)."""
     global arrays
     global local_arrays
 
@@ -684,7 +712,8 @@ def compute_value(op, arg1, arg2):
 # End of compute_value
 
 #-----------------------------------------------------------------------------
-def quotes_eval(args):
+def quotes_eval(args: list) -> list:
+    """Evaluate a quoted string literal, returning it as a CHAR token."""
 #PRINT    print("quotes_eval - Entering args='{}'".format(args), file=sys.stderr, flush=True) # PRINT
     if args is None or len(args) != 3:
         return [ 'ERROR - quotes_eval wrong number of arguments, args={}'.format(args), None ]
@@ -692,7 +721,7 @@ def quotes_eval(args):
     a0 = args[0]
     a1 = args[1]
     a2 = args[2]
-    if type(a0) == SymbolDesc or type(a1) != SymbolDesc or type(a2) == SymbolDesc:
+    if isinstance(a0, SymbolDesc) or type(a1) != SymbolDesc or isinstance(a2, SymbolDesc):
         return [ 'ERROR - quotes_eval args={}'.format(args), None ]
     elif a0[0] != 'NUMBER':
         return [ 'ERROR - quotes_eval first argument is not a NUMBER, args={}'.format(args), None ]
@@ -707,7 +736,8 @@ def quotes_eval(args):
 # End of quotes_eval
 
 #-----------------------------------------------------------------------------
-def binary_eval(args):
+def binary_eval(args: list) -> list:
+    """Evaluate a binary expression: look up both operands and apply the operator."""
 #PRINT    print('binary_eval - Entering args={}'.format(args), file=sys.stderr, flush=True)    # PRINT
     if args is None or len(args) != 3:
         return [ 'ERROR - binary_eval wrong number of arguments, args={}'.format(args), None ]
@@ -715,7 +745,7 @@ def binary_eval(args):
     a0 = args[0]
     a1 = args[1]
     a2 = args[2]
-    if type(a0) == SymbolDesc or type(a1) != SymbolDesc or type(a2) == SymbolDesc:
+    if isinstance(a0, SymbolDesc) or type(a1) != SymbolDesc or isinstance(a2, SymbolDesc):
         return [ 'ERROR - binary_eval args={}'.format(args), None ]
     # fi
     value = compute_value(a1.symbol, a0, a2)
@@ -723,11 +753,12 @@ def binary_eval(args):
 # End of binary_eval
 
 #-----------------------------------------------------------------------------
-def unary_eval(args):
+def unary_eval(args: list) -> list:
+    """Evaluate a unary expression (prefix minus/negation)."""
 #PRINT    print('unary_eval - Entering args={}', file=sys.stderr, flush=True)    # PRINT
     if len(args) != 2:
         return [ 'ERROR - unary_eval args={}'.format(args), None ]
-    elif type(args[0]) == SymbolDesc and type(args[1]) != SymbolDesc:
+    elif isinstance(args[0], SymbolDesc) and type(args[1]) != SymbolDesc:
         op = args[0].symbol
         arg1 = get_value(args[1])
         if arg1 is None:
@@ -744,7 +775,7 @@ def unary_eval(args):
             arg1[1] = 0.0 - arg1[1]
         # fi
         return [ arg1 ]
-    elif type(args[0]) != SymbolDesc and type(args[1]) == SymbolDesc:
+    elif type(args[0]) != SymbolDesc and isinstance(args[1], SymbolDesc):
         return [ 'ERROR - unary_eval post args={}'.format(args), None ]
     # fi
     return [ 'ERROR - unary_eval args={}'.format(args), None ]
@@ -756,13 +787,14 @@ presymbols = {}
 global postsymbols
 postsymbols = {}
 #-----------------------------------------------------------------------------
-def register_presymbol(oper, lprio, rprio, eval=None):
+def register_presymbol(oper, lprio, rprio, eval=None) -> None:
+    """Register a prefix operator with its left/right binding priorities and evaluation function."""
     global presymbols
 
     if eval is None:
         eval = unary_eval
     # fi
-    if type(oper) is str:
+    if isinstance(oper, str):
         presymbols[oper] = SymbolDesc(oper, lprio, rprio, eval)
     else:
         for op in oper:
@@ -772,13 +804,14 @@ def register_presymbol(oper, lprio, rprio, eval=None):
 # End of register_presymbol
 
 #-----------------------------------------------------------------------------
-def register_postsymbol(oper, lprio, rprio, eval=None):
+def register_postsymbol(oper, lprio, rprio, eval=None) -> None:
+    """Register an infix or postfix operator with its binding priorities and evaluation function."""
     global postsymbols
 
     if eval is None:
         eval = binary_eval
     # fi
-    if type(oper) is str:
+    if isinstance(oper, str):
         postsymbols[oper] = SymbolDesc(oper, lprio, rprio, eval)
     else:
         for op in oper:
@@ -788,16 +821,18 @@ def register_postsymbol(oper, lprio, rprio, eval=None):
 # End of register_postsymbol
 
 #-----------------------------------------------------------------------------
-def id_symbol(id):
+def id_symbol(id: str) -> SymbolDesc:
+    """Create a SymbolDesc for an identifier token."""
 #PRINT    print('id_symbol - Entering id={}'.format(id), file=sys.stderr, flush=True)  # PRINT
     return SymbolDesc(id, 99999, 100000, identity_eval)
 # End of id_symbol
 
 #-----------------------------------------------------------------------------
-def evaluate_handle(args):
+def evaluate_handle(args: list) -> list:
+    """Dispatch to the appropriate evaluation function for an operator or identifier."""
 #PRINT    print('evaluate_handle - Entering args={}'.format(args), file=sys.stderr, flush=True)  # PRINT
     for i in args:
-        if type(i) == SymbolDesc:
+        if isinstance(i, SymbolDesc):
             a = i.eval(args)
             return a
         # fi
@@ -810,7 +845,8 @@ global lexer
 global cur_token
 
 #-----------------------------------------------------------------------------
-def advance():
+def advance() -> None:
+    """Advance to the next token in the token stream."""
     global lexer
     global cur_token
 
@@ -824,7 +860,8 @@ def advance():
 # End of advance
 
 #-----------------------------------------------------------------------------
-def reset(s):
+def reset(s: str) -> None:
+    """Initialize (or reinitialize) the tokenizer with a new expression string."""
     global lexer
 
 #PRINT    print("reset - Entering s='{}'".format(s), file=sys.stderr, flush=True) # PRINT
@@ -833,7 +870,8 @@ def reset(s):
 # End of reset
 
 #-----------------------------------------------------------------------------
-def cur_sym(allow_presymbol):
+def cur_sym(allow_presymbol: bool) -> SymbolDesc | list:
+    """Get the SymbolDesc for the current token, distinguishing prefix vs. infix context."""
     global postsymbols
     global presymbols
     global cur_token
@@ -858,12 +896,13 @@ def cur_sym(allow_presymbol):
 # End of cur_sym
 
 #-----------------------------------------------------------------------------
-def parse_to(prio):
+def parse_to(prio: int) -> list | None | str:
+    """Recursive-descent parser using operator-precedence climbing."""
 #PRINT    print('parse_to - Entering', file=sys.stderr, flush=True)  # PRINT
     args = []
     while True:
-        assert len(args) == 0 or (len(args) == 1 and type(args[0]) != SymbolDesc)
-        sym = cur_sym(len(args) == 0)
+        assert not args or (len(args) == 1 and type(args[0]) != SymbolDesc)
+        sym = cur_sym(not args)
         if sym is None or prio >= sym.lprio:
             break
         # fi
@@ -906,21 +945,22 @@ def parse_to(prio):
         # fi
         a[1] = float(a[1])
         return a
-    elif len(args) == 0:
+    elif not args:
         return None
     # fi
     return "ERROR - parse_to runs off the end of routine '{}'".format(args)
 # End of parse_to
 
 #-----------------------------------------------------------------------------
-def parse(s):
+def parse(s: str) -> list:
+    """Parse and evaluate a complete expression string, returning [type, value]."""
     global cur_token
 
 #PRINT    print("parse - Entering s='{}'".format(s), file=sys.stderr, flush=True) # PRINT
     reset(s)
     try:                                # NOTDONEYET - move to only around specific OOR plaes.
         res = parse_to(0)
-    except:
+    except Exception:
         return [ None, 'error parsing' ]
     # yrt
     if cur_token is not None:
@@ -936,7 +976,8 @@ def parse(s):
 # lth   = number of tokens to get. Note: delimiters except for space/comma count as a token.
 #       = None means to go "start" to end of string.
 
-def get_tokens_from_char(strng, start, lth):
+def get_tokens_from_char(strng: str, start: int, lth: int) -> str:
+    """Extract a substring of space-separated tokens from a character-string variable."""
     start = int(round(start)) - 1
 #PRINT    print("get_tokens_from_char - Entering strng={} start={} lth={}".format(strng,start,lth), file=sys.stderr, flush=True)  # PRINT
     if strng is None or strng == '' or start < 0:
@@ -987,7 +1028,8 @@ def get_tokens_from_char(strng, start, lth):
 # End of get_tokens_from_char
 
 #-----------------------------------------------------------------------------
-def result_functions(arg1, arg2):
+def result_functions(arg1: list, arg2: list) -> list:
+    """Evaluate built-in function calls and array-subscript operations."""
     global functions
     global arrays
     global local_arrays
@@ -1040,7 +1082,7 @@ def result_functions(arg1, arg2):
             a = wh(arg2)
 #PRINT            print(f'result_functions - #12 a={a}', file=sys.stderr, flush=True)  # PRINT
             return a
-        except:
+        except Exception:
             return [ "ERROR - performing function '{}' with argument '{}'".format(arg1, arg2), None ]
         # yrt
     # fi
@@ -1116,7 +1158,7 @@ def result_functions(arg1, arg2):
     elif a1[0] == 'CHAR':
         a2 = get_value(arg2)
         if a2[0] == 'NUMBER':               # Go from token number a2[1] to end of string.
-            if type(a2[1]) is not int and type(a2[1]) is not float: 
+            if not isinstance(a2[1], int) and not isinstance(a2[1], float): 
                 return [ "ERROR - character token fetching needs first argument as integer, but this has {}".format(type(a2[1][0])), None ]
             # fi
 #PRINT            print('result_functions #1- calling get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
@@ -1126,9 +1168,9 @@ def result_functions(arg1, arg2):
             if len(a2[1]) != 2:
                 return [ "ERROR - character token fetching needs 1 or 2 arguments, but this has {}".format(len(a2[1])), None ]
             # fi
-            if type(a2[1][0]) is not int and type(a2[1][0]) is not float: 
+            if not isinstance(a2[1][0], int) and not isinstance(a2[1][0], float): 
                 return [ "ERROR - character token fetching needs first argument as integer, but this has {}".format(type(a2[1][0])), None ]
-            elif type(a2[1][1]) is not int and type(a2[1][1]) is not float: 
+            elif not isinstance(a2[1][1], int) and not isinstance(a2[1][1], float): 
                 return [ "ERROR - character token fetching needs second argument as integer, but this has {}".format(type(a2[1][0])), None ]
             # fi
 #PRINT            print('result_functions #3- calling get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
@@ -1156,15 +1198,16 @@ def result_functions(arg1, arg2):
 # End of result_functions
 
 #-----------------------------------------------------------------------------
-def common_grouping_eval(args, txt, open_char, close_char):
+def common_grouping_eval(args: list, txt: str, open_char: str, close_char: str) -> list:
+    """Common handler for subexpressions inside (), [], or {}."""
 #PRINT    print("common_grouping_eval - len(args)={} args='{}'".format(len(args),args), file=sys.stderr, flush=True)  # PRINT
     if len(args) == 3:
         r = args[0]
         s = args[1]
         t = args[2]
-        if (type(r) == SymbolDesc and args[0].symbol == open_char
+        if (isinstance(r, SymbolDesc) and args[0].symbol == open_char
             and type(s) != SymbolDesc
-            and type(t) == SymbolDesc and t.symbol == close_char):
+            and isinstance(t, SymbolDesc) and t.symbol == close_char):
             return [ s ]
         # fi
     # fi
@@ -1174,16 +1217,16 @@ def common_grouping_eval(args, txt, open_char, close_char):
         t = args[2]
         u = args[3]
         if (type(r) != SymbolDesc
-            and type(s) == SymbolDesc and s.symbol == open_char
+            and isinstance(s, SymbolDesc) and s.symbol == open_char
             and type(t) != SymbolDesc
-            and type(u) == SymbolDesc and u.symbol == close_char):
+            and isinstance(u, SymbolDesc) and u.symbol == close_char):
 #PRINT            print("common_grouping_eval - #4 - r='{}' t='{}'".format(r,t), file=sys.stderr, flush=True)  # PRINT
             a = result_functions(r, t)
             return [ a ]
         #fi
-        if (type(r) == SymbolDesc and r.symbol == open_char
+        if (isinstance(r, SymbolDesc) and r.symbol == open_char
             and type(s) != SymbolDesc
-            and type(t) == SymbolDesc and t.symbol == close_char
+            and isinstance(t, SymbolDesc) and t.symbol == close_char
             and type(u) != SymbolDesc):
             # Do implied multiply
             a1 = get_value(s)
@@ -1213,15 +1256,15 @@ def common_grouping_eval(args, txt, open_char, close_char):
         v = args[4]
         w = args[5]
 # NOTDONEYET = {}
-        if (type(r) == SymbolDesc and (r.symbol in ['(','[','{'])
+        if (isinstance(r, SymbolDesc) and (r.symbol in ['(','[','{'])
             and type(s) != SymbolDesc
 # NOTDONEYET = {}
-            and type(t) == SymbolDesc and (t.symbol in [')',']','}'])
+            and isinstance(t, SymbolDesc) and (t.symbol in [')',']','}'])
 # NOTDONEYET = {}
-            and type(u) == SymbolDesc and (u.symbol in ['(','[','{'])
+            and isinstance(u, SymbolDesc) and (u.symbol in ['(','[','{'])
             and type(v) != SymbolDesc
 # NOTDONEYET = {}
-            and type(w) == SymbolDesc and (w.symbol in [')',']','}'])):
+            and isinstance(w, SymbolDesc) and (w.symbol in [')',']','}'])):
             # Do implied multiply
             a1 = get_value(s)
             if a1 is None:
@@ -1252,18 +1295,18 @@ def common_grouping_eval(args, txt, open_char, close_char):
         x = args[6]
         if (type(r) != SymbolDesc                           # ID m
 # NOTDONEYET = {}
-            and type(s) == SymbolDesc and (s.symbol in ['(','[','{'])
+            and isinstance(s, SymbolDesc) and (s.symbol in ['(','[','{'])
             and type(t) != SymbolDesc                       # NUMBER abc
 # NOTDONEYET = {}
-            and type(u) == SymbolDesc and (u.symbol in [')',']','}'])
+            and isinstance(u, SymbolDesc) and (u.symbol in [')',']','}'])
 # NOTDONEYET = {}
-            and type(v) == SymbolDesc and (v.symbol in ['(','[','{'])
+            and isinstance(v, SymbolDesc) and (v.symbol in ['(','[','{'])
             and type(w) != SymbolDesc                       # NUMBER def
 # NOTDONEYET = {}
-            and type(x) == SymbolDesc and (x.symbol in [')',']','}'])):
+            and isinstance(x, SymbolDesc) and (x.symbol in [')',']','}'])):
 #PRINT            print("common_grouping_eval - #7 - r='{}' t='{}'".format(r,t), file=sys.stderr, flush=True)  # PRINT
             a1 = result_functions(r, t)
-            if type(a1) == list and len(a1) > 0:
+            if isinstance(a1, list) and a1:
                 a1 = a1[0]
             elif a1 is None:
                 return [ "ERROR - value is None a1='{}'".format(a1), None ]
@@ -1288,49 +1331,56 @@ def common_grouping_eval(args, txt, open_char, close_char):
 # End of common_grouping_eval
 
 #-----------------------------------------------------------------------------
-def open_paren_eval(args):
+def open_paren_eval(args: list) -> list:
+    """Handle an opening parenthesis in an expression."""
 #PRINT    print("open_paren_eval - args='{}'".format(args), file=sys.stderr, flush=True)  # PRINT
     return common_grouping_eval(args, 'paren', '(', ')')
 # End of open_paren_eval
 
 #-----------------------------------------------------------------------------
-def close_paren_eval(args):
+def close_paren_eval(args: list) -> list:
+    """Handle a closing parenthesis in an expression."""
 #PRINT    print("close_paren_eval - args='{}'".format(args), file=sys.stderr, flush=True) # PRINT
     return [ "ERROR - close_paren_eval args='{}'".format(args), None ]
 # End of close_paren_eval
 
 #-----------------------------------------------------------------------------
-def open_bracket_eval(args):
+def open_bracket_eval(args: list) -> list:
+    """Handle an opening bracket in an expression."""
 #PRINT    print("open_bracket_eval - args='{}'".format(args), file=sys.stderr, flush=True)    # PRINT
     return common_grouping_eval(args, 'bracket', '[', ']')
 # End of open_bracket_eval
 
 #-----------------------------------------------------------------------------
-def close_bracket_eval(args):
+def close_bracket_eval(args: list) -> list:
+    """Handle a closing bracket in an expression."""
 #PRINT    print("close_bracket_eval - args='{}'".format(args), file=sys.stderr, flush=True)   # PRINT
     return [ "ERROR - close_bracket_eval args='{}'".format(args), None ]
 # End of close_bracket_eval
 
 #-----------------------------------------------------------------------------
-def open_brace_eval(args):
+def open_brace_eval(args: list) -> list:
+    """Handle an opening brace in an expression."""
 #PRINT    print("open_brace_eval - args='{}'".format(args), file=sys.stderr, flush=True)  # PRINT
 # NOTDONEYET = {}
     return common_grouping_eval(args, 'brace', '{', '}')
 # End of open_brace_eval
 
 #-----------------------------------------------------------------------------
-def close_brace_eval(args):
+def close_brace_eval(args: list) -> list:
+    """Handle a closing brace in an expression."""
 #PRINT    print("close_brace_eval - args='{}'".format(args), file=sys.stderr, flush=True) # PRINT
     return [ "ERROR - close_brace_eval args='{}'".format(args), None ]
 # End of close_brace_eval
 
 #-----------------------------------------------------------------------------
-def f_m(arg):
+def f_m(arg: list) -> list:
+    """Access one of the temporary variables m1-m100 by numeric index."""
 #PRINT    print("f_m - arg='{}'".format(arg), file=sys.stderr, flush=True)    # PRINT
     try:
         a = float(arg[1])
         a = int(a)
-    except:
+    except (ValueError, TypeError):
         return [ "ERROR - argument to array m is not an integer '{}'".format(txt, arg), None ]
     # yrt
     if a < 1 or a > 50:
@@ -1340,83 +1390,95 @@ def f_m(arg):
 # End of f_m
 
 #-----------------------------------------------------------------------------
-def f_ceil(arg):
+def f_ceil(arg: list) -> list:
+    """Return the ceiling (smallest integer >= value) of a number."""
     a = float(arg[1])
     a = math.ceil(a)
     return [ 'NUMBER', a ]
 # End of f_ceil
 
 #-----------------------------------------------------------------------------
-def f_floor(arg):
+def f_floor(arg: list) -> list:
+    """Return the floor (largest integer <= value) of a number."""
     a = float(arg[1])
     a = math.floor(a)
     return [ 'NUMBER', a ]
 # End of f_floor
 
 #-----------------------------------------------------------------------------
-def f_freq(arg):
+def f_freq(arg: list) -> list:
+    """Convert a MIDI note number to its frequency in Hz."""
     a = float(arg[1])
     a = 968000.0 / a
     return [ 'NUMBER', a ]
 # End of f_freq
 
 #-----------------------------------------------------------------------------
-def f_nearest(arg):
+def f_nearest(arg: list) -> list:
+    """Find the nearest MIDI note number for a given frequency in Hz."""
     a = float(arg[1])
     a = int(round(math.log(a / 27.5) * (12.0 / 0.693147)))
     return [ 'NUMBER', a ]
 # End of f_nearest
 
 #-----------------------------------------------------------------------------
-def f_abs(arg):
+def f_abs(arg: list) -> list:
+    """Return the absolute value of a number."""
     a = float(arg[1])
     a = math.fabs(a)
     return [ 'NUMBER', a ]
 # End of f_abs
 
 #-----------------------------------------------------------------------------
-def f_arctan(arg):
+def f_arctan(arg: list) -> list:
+    """Compute the arctangent (inverse tangent) in radians."""
     a = float(arg[1])
     a = math.atan(a)
     return [ 'NUMBER', a ]
 # End of f_arctan
 
 #-----------------------------------------------------------------------------
-def f_cos(arg):
+def f_cos(arg: list) -> list:
+    """Compute the cosine of an angle in radians."""
     a = float(arg[1])
     a = math.cos(a)
     return [ 'NUMBER', a ]
 # End of f_cos
 
 #-----------------------------------------------------------------------------
-def f_exp(arg):
+def f_exp(arg: list) -> list:
+    """Compute e raised to the given power."""
     a = float(arg[1])
     a = math.exp(a)
     return [ 'NUMBER', a ]
 # End of f_exp
 
 #-----------------------------------------------------------------------------
-def f_frac(arg):
+def f_frac(arg: list) -> list:
+    """Return the fractional part of a number (value minus its integer part)."""
     a = float(arg[1])
     a = int(round(a)) - a
     return [ 'NUMBER', a ]
 # End of f_frac
 
 #-----------------------------------------------------------------------------
-def f_float(arg):
+def f_float(arg: list) -> list:
+    """Convert a value to a floating-point number."""
     a = float(arg[1])
     return [ 'NUMBER', a ]
 # End of f_float
 
 #-----------------------------------------------------------------------------
-def f_int(arg):
+def f_int(arg: list) -> list:
+    """Convert a value to an integer by truncation."""
     a = float(arg[1])
     a = int(a)
     return [ 'NUMBER', a ]
 # End of f_int
 
 #-----------------------------------------------------------------------------
-def f_in(arg):
+def f_in(arg: list) -> list:
+    """Check if a value is within a range: returns 1 if min <= value <= max, else 0."""
 #PRINT    print("f_in - arg='{}'".format(arg), file=sys.stderr, flush=True)   # PRINT
     val = arg[1]
     if len(val) != 3:
@@ -1425,7 +1487,7 @@ def f_in(arg):
     # check if types of 3 arguments are float/int. 
     n = 1
     for x in val:
-        if type(x) is not float and type(x) is not int:
+        if not isinstance(x, float) and not isinstance(x, int):
             return [ "ERROR - in() needs arguments to be integer or float. #{} {} is type {}".format(n, x, type(x)), None ]
         # fi
         n = n + 1
@@ -1444,32 +1506,36 @@ def f_in(arg):
 # End of f_in
 
 #-----------------------------------------------------------------------------
-def f_log(arg):
+def f_log(arg: list) -> list:
+    """Compute the base-10 logarithm of a number."""
     a = float(arg[1])
     try:
         a = math.log(a, 10)
-    except:
+    except (ValueError, TypeError):
         a = 0
     # ytr
     return [ 'NUMBER', a ]
 # End of f_log
 
 #-----------------------------------------------------------------------------
-def f_ln(arg):
+def f_ln(arg: list) -> list:
+    """Compute the natural (base-e) logarithm of a number."""
     a = float(arg[1])
     a = math.log(a)
     return [ 'NUMBER', a ]
 # End of f_ln
 
 #-----------------------------------------------------------------------------
-def f_round(arg):
+def f_round(arg: list) -> list:
+    """Round a number to the nearest integer."""
     a = float(arg[1])
     a = int(round(a))
     return [ 'NUMBER', a ]
 # End of f_round
 
 #-----------------------------------------------------------------------------
-def f_sign(arg):
+def f_sign(arg: list) -> list:
+    """Return the sign of a number: -1, 0, or 1."""
     a = float(arg[1])
     if a < 0:
         return [ 'NUMBER', -1 ]
@@ -1480,14 +1546,16 @@ def f_sign(arg):
 # End of f_sign
 
 #-----------------------------------------------------------------------------
-def f_sin(arg):
+def f_sin(arg: list) -> list:
+    """Compute the sine of an angle in radians."""
     a = float(arg[1])
     a = math.sin(a)
     return [ 'NUMBER', a ]
 # End of f_sin
 
 #-----------------------------------------------------------------------------
-def f_sqrt(arg):
+def f_sqrt(arg: list) -> list:
+    """Compute the square root of a number."""
     a = float(arg[1])
     a = math.sqrt(a)
     return [ 'NUMBER', a ]
@@ -1495,7 +1563,8 @@ def f_sqrt(arg):
 
 #-----------------------------------------------------------------------------
 # Invert logical expression (-1 = true, 0 = false). Make anything non-zero be true.
-def f_not(arg):
+def f_not(arg: list) -> list:
+    """Logical negation: return 1 if value is 0, else return 0."""
     a = float(arg[1])
     if a < 0 or a > 0:
         a = -1
@@ -1506,7 +1575,8 @@ def f_not(arg):
 # End of f_not
 
 #-----------------------------------------------------------------------------
-def f_defined(arg):
+def f_defined(arg: list) -> list:
+    """Check if a variable is defined and has been assigned a value."""
     which = arg[0]
     val = arg[1]
     if which in [ 'NUMBER', 'CHAR', 'COMMA']:
@@ -1520,7 +1590,8 @@ def f_defined(arg):
 # End of f_defined
 
 #-----------------------------------------------------------------------------
-def f_print(arg):
+def f_print(arg: list) -> list:
+    """Print a value to stderr for debugging, then return it."""
     which = arg[0]
     val = arg[1]
     if which in [ 'NUMBER', 'CHAR']:
@@ -1543,14 +1614,15 @@ def f_print(arg):
 # End of f_print
 
 #-----------------------------------------------------------------------------
-def f_max(arg):
+def f_max(arg: list) -> list:
+    """Return the larger of two values."""
     val = arg[1]
     if len(val) != 2:
         return [ "ERROR - max needs two arguments, not: {}'".format(val), None ]
     # fi
     n = 1
     for x in val:
-        if type(x) is not float and type(x) is not int:
+        if not isinstance(x, float) and not isinstance(x, int):
             return [ "ERROR - max() needs arguments to be integer or float. #{} {} is type {}".format(n, x, type(x)), None ]
         # fi
         n = n + 1
@@ -1562,14 +1634,15 @@ def f_max(arg):
 # End of f_max
 
 #-----------------------------------------------------------------------------
-def f_min(arg):
+def f_min(arg: list) -> list:
+    """Return the smaller of two values."""
     val = arg[1]
     if len(val) != 2:
         return [ "ERROR - min needs two arguments, not: {}'".format(val), None ]
     # fi
     n = 1
     for x in val:
-        if type(x) is not float and type(x) is not int:
+        if not isinstance(x, float) and not isinstance(x, int):
             return [ "ERROR - min() needs arguments to be integer or float. #{} {} is type {}".format(n, x, type(x)), None ]
         # fi
         n = n + 1
@@ -1581,7 +1654,8 @@ def f_min(arg):
 # End of f_min
 
 #-----------------------------------------------------------------------------
-def f_mod(arg):
+def f_mod(arg: list) -> list:
+    """Compute the modulo (remainder) of two numbers."""
 #PRINT    print("f_mod - arg='{}'".format(arg), file=sys.stderr, flush=True)  # PRINT
     val = arg[1]
     if len(val) != 2:
@@ -1589,7 +1663,7 @@ def f_mod(arg):
     # fi
     n = 1
     for x in val:
-        if type(x) is not float and type(x) is not int:
+        if not isinstance(x, float) and not isinstance(x, int):
             return [ "ERROR - mod() needs arguments to be integer or float. #{} {} is type {}".format(n, x, type(x)), None ]
         # fi
         n = n + 1
@@ -1599,7 +1673,7 @@ def f_mod(arg):
     if val2 == 0:
         return [ "ERROR - mod needs second argument positive, not: {}'".format(val2), None ]
     # fi
-    if type(val1) is int and type(val2) is int:
+    if isinstance(val1, int) and isinstance(val2, int):
         value = val1 % val2
     else:
         value = math.fmod(float(val1), float(val2))
@@ -1608,7 +1682,8 @@ def f_mod(arg):
 # End of f_mod
 
 #-----------------------------------------------------------------------------
-def f_clock(arg):
+def f_clock(arg: list) -> list:
+    """Get the current date/time formatted as a string component (0=year, 1=month, etc.)."""
     now = datetime.now()
     it = arg[1]
     a = [now.year, now.month, now.day, now.hour, now.minute, now.second, now.microsecond]
@@ -1776,7 +1851,8 @@ arrays.append( [ 'm99', 0, [ ], [ 0 ],        [ 0 ] , False ] )
 
 arrays.append( [ 'm100', 0, [ ], [ 0 ],        [ 0 ] , False ] )
 #-----------------------------------------------------------------------------
-def cexp_parser():
+def cexp_parser() -> None:
+    """Initialize the expression parser: register all operators and functions with their precedence levels."""
     #                    oper,                         lprio, rprio, eval
     # Assignment.
     register_postsymbol('=',                               5,   4)                      # r to l
@@ -1813,7 +1889,8 @@ def cexp_parser():
 
 #-----------------------------------------------------------------------------
 # Get a line. Put it in 'line' and return it.
-def get_line():
+def get_line() -> str:
+    """Read a line of input from stdin or an interactive readline prompt."""
     global linecount
 
     while True:
@@ -1845,7 +1922,7 @@ def get_line():
             print('Read gave system exit', file=sys.stderr)
         except KeyboardInterrupt:
             print('Read got keyboard interrupt', file=sys.stderr)
-        except:
+        except Exception:
             print('Read got a processing error', file=sys.stderr)
             print('   ', sys.exc_info()[0], sys.exc_info, file=sys.stderr, flush=True)
         # yrt
@@ -1856,7 +1933,8 @@ def get_line():
 
 #-----------------------------------------------------------------------------
 # Parse and process line.
-def process_line(t, line):
+def process_line(t: str, line: str) -> None:
+    """Parse and evaluate a single expression line, printing the result."""
 #PRINT    print("process_line - Entering line='{}'".format(line), file=sys.stderr, flush=True)    # PRINT
     wline = line.strip()                 # Ignore leading and trailing whitespace.
     if wline == 'quit' or wline == 'exit':
@@ -1874,7 +1952,8 @@ def process_line(t, line):
 
 #-----------------------------------------------------------------------------
 # Main program follows.
-def main():
+def main() -> None:
+    """Main entry point for standalone interactive calculator mode."""
     cexp_parser()              # Set up for parsing.
 
     while True:

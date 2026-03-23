@@ -34,7 +34,7 @@ PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------
 # -E			Only run the preprocessor.
 # -x c			Treat input file(s) as having <language> 'c'.
-# -Wno-invalid-pp-token
+#
 # -undef
 # -Wundef
 # -Werror		Turn warnings into errors.
@@ -44,7 +44,7 @@ PS2PDF       = ps2pdf
 # -CC			Include comments from within macros in preprocessed output.
 # -traditional-cpp	Enable some traditional CPP emulation.
 #
-CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp -Wno-invalid-pp-token
+CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.E %.csv
 .SUFFIXES: .abc .E .fs .csv .mid .pdf
@@ -99,6 +99,7 @@ clean:
 	rm -f *.stderr
 	rm -f *.h *.v *.csv *.mid *.E *.fs *.pdf *.ps *.abc
 	rm -f AAA.[0-9][0-9] BBB.[0-9][0-9]
+	rm -f new-g3.E new-g3.abc new-g3.fs
 #-----------------------------------------------------------------------------
 .PHONY: check
 check:

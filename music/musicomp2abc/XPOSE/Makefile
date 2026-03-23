@@ -31,7 +31,7 @@ PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------
 # -E			Only run the preprocessor.
 # -x c			Treat input file(s) as having <language> 'c'.
-# -Wno-invalid-pp-token
+#
 # -undef
 # -Wundef
 # -Werror		Turn warnings into errors.
@@ -41,7 +41,7 @@ PS2PDF       = ps2pdf
 # -CC			Include comments from within macros in preprocessed output.
 # -traditional-cpp	Enable some traditional CPP emulation.
 #
-CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp -Wno-invalid-pp-token
+CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.E %.csv %_m.ps
 .SUFFIXES: .abc _m.ps .E .fs .csv .mid .pdf
