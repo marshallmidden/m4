@@ -32,7 +32,7 @@ from __future__ import annotations
 # ----------------------------------------------------------------------------
 # Bugs not fixed yet:
 #   a) Lyrics ... Just didn't do them, saw no reason ... *sigh*
-#   b) tempo rit and tempo acc.  I thought it was too difficult to implement. YUCK.
+#   b) tempo rit and tempo acc -- DONE.  Use: tempo BPM,NOTE,accel/rit/ramp
 #   c) v(p)> ... >v(pp)   The >v needs to be deleted. Checked if last is same direction?
 #   d) Some warnings about:
 #      WARNING - previous note 'e' voiceon voice='1' staff='one:[1, 2, 3]' in measure 31 was '-' and this note is default - FIXING
@@ -82,10 +82,10 @@ from __future__ import annotations
 #       # NOTDONEYET - add ' clef=bass'  (after the number)
 #       # clef can occur each measure (abc, horizontal, vertical format).
 # 2) --vertical and --horizontal: Can save comments on measures? Lines? Like before measures? * ------
-# 3) -- accelerando/ritard -- basically tempo change over time.
-#       My idea is to speed up over time -- perhaps by calculating it each time reference in --fs or --midi.
-#       Specify it as 3rd argument to tempo -- as IMS does? (i.e. acc/rit)
-#       This means it has to be kept with each note, like crescendo.
+# 3) -- accelerando/ritard -- DONE.  tempo BPM,NOTE,accel/rit/ramp
+#       Linearly interpolates tempo_speed_now across the measures between
+#       the previous tempo command and the ramp tempo command.
+#       Specify it as 3rd argument to tempo -- as IMS does (i.e. acc/rit).
 # ----------------------------------------------------------------------------
 # Turn - brise, groupe, double(french), doppleschlag(german),gruppetto(itialian).
 #       The general shape of the turn is a sequence of four notes, the note
@@ -3084,6 +3084,8 @@ global tempo_speed_now              # beats per minute for each measure.
 tempo_speed_now = { '': tempo_speed_default }
 global tempo_note_length_now        # length of a beat (note)
 tempo_note_length_now = { '': tempo_note_default } # before a measure.
+global tempo_ramp_last_measure      # measure where tempo was last explicitly set (for ramp interpolation)
+tempo_ramp_last_measure = ''        # '' = the default/header tempo
 
 global file_name                    # None = use tty.
 global output_name                  # File to print to (default is sys.stdout).
@@ -12377,16 +12379,62 @@ def do_title(t_args: str | None, original_line: str) -> None:
 #   tempo  150,4        $$ Number of notes of given length in a minute.
 #   tempo  30           $$ Number of frames (1/57.1429 seconds) per whole note.
 #   tempo  200,8        $$ So fast you won't recognize individual notes (:-)>[=<
-# NOTDONEYET - TEMPO - accel and rit.
-#   tempo  accel        $$ accelerate from current tempo to next tempo command.             NOTDONEYET - TEMPO
-#   tempo  120,4,accel  $$ Change to current tempo, and accelerate to next tempo command    NOTDONEYET - TEMPO
-#   tempo  120,4,rit    $$ Change to current tempo, and decelerate to next tempo command.   NOTDONEYET - TEMPO
+# Tempo ramp (accelerando / ritardando):
+#   tempo  120,4,accel  $$ Ramp from previous tempo to 120 BPM over the intervening measures.
+#   tempo  80,4,rit     $$ Ramp from previous tempo to 80 BPM over the intervening measures.
+#   tempo  100,4,ramp   $$ Same as accel/rit -- direction is implied by BPM change.
 
+# ----------------------------------------------------------------------------
+def fill_tempo_ramp(end_speed, original_line) -> None:
+    """Retroactively interpolate tempo_speed_now between the last explicit
+    tempo and the current measure.  Called when 'tempo BPM,N,ramp/accel/rit'
+    is encountered.  Only the BPM (speed) is ramped; the note-length stays
+    at whatever the end-tempo specifies."""
+    global tempo_speed_now
+    global tempo_ramp_last_measure
+    global meas
+    global measure_on
+
+    start_m = tempo_ramp_last_measure       # measure where previous tempo was set
+    end_m   = measure_on                    # current measure (the ramp target)
+
+    # Find indices in meas[].
+    try:
+        if start_m == '':
+            si = 0                          # header (before first measure)
+        else:
+            si = meas.index(start_m)
+        # fi
+        ei = meas.index(end_m)
+    except ValueError:
+        print_error(f"fill_tempo_ramp: cannot find measure range '{start_m}'..'{end_m}' in meas[].", original_line)
+        return
+    # yrt
+
+    if ei <= si:
+        print_warning("tempo ramp spans zero measures -- ignored.", original_line)
+        return
+    # fi
+
+    start_speed = tempo_speed_now[start_m]
+    span = ei - si                          # number of measure gaps
+    for k in range(1, span):                # measures between start and end (exclusive)
+        m = meas[si + k]
+        frac = float(k) / float(span)
+        tempo_speed_now[m] = start_speed + (end_speed - start_speed) * frac
+    # rof
+    return
+# End of fill_tempo_ramp
+
+# ----------------------------------------------------------------------------
 def do_tempo(t_args: str | None, original_line: str) -> None:
-    """Handle the 'tempo' command: set the tempo (BPM and note value)."""
+    """Handle the 'tempo' command: set the tempo (BPM and note value).
+    Optional 3rd argument: accel, rit, or ramp -- linearly interpolate
+    tempo from the previous tempo command to this one."""
     global tempo_speed_default          # beats per minute
     global tempo_note_length_now        # length of a beat (note)
     global tempo_speed_now
+    global tempo_ramp_last_measure
     global measure_on
     global mlth
     global vol
@@ -12396,13 +12444,17 @@ def do_tempo(t_args: str | None, original_line: str) -> None:
         return
     # fi
     wargs = t_args.replace(' ','').split(',')
-    if wargs is None or not wargs or len(wargs) > 2:
-        if len(wargs) == 3 and wargs[2] in ('accel','rit'):
-            print_warning(f"NOTDONEYET - TEMPO '{wargs[2]}' NOTDONEYET.", original_line)
+    ramp_mode = False
+    if len(wargs) == 3:
+        if wargs[2] in ('accel', 'rit', 'ramp'):
+            ramp_mode = True
         else:
-            print_error("tempo - there is not one or two arguments.", original_line)
+            print_error(f"tempo - unknown 3rd argument '{wargs[2]}' (expected accel, rit, or ramp).", original_line)
             return
         # fi
+    elif wargs is None or not wargs or len(wargs) > 3 or len(wargs) < 1:
+        print_error("tempo - there is not one, two, or three arguments.", original_line)
+        return
     # fi
 
     fill_voice_mlth(False, original_line)                   # Need to make measure for other voices up to here "mlth".
@@ -12432,6 +12484,7 @@ def do_tempo(t_args: str | None, original_line: str) -> None:
         # fi
         tempo_speed_now[measure_on] = x
         tempo_note_length_now[measure_on] = 1.0
+        tempo_ramp_last_measure = measure_on
         return
     # fi
     dotted = wargs[1].count('d')
@@ -12466,6 +12519,10 @@ def do_tempo(t_args: str | None, original_line: str) -> None:
     # rof
     tempo_speed_now[measure_on] = f1
     tempo_note_length_now[measure_on] = f2
+    if ramp_mode:
+        fill_tempo_ramp(f1, original_line)
+    # fi
+    tempo_ramp_last_measure = measure_on
     return
 # End of do_tempo
 
