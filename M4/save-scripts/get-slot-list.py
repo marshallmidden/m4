@@ -129,7 +129,9 @@ def main(values):
             with open(filename, 'r') as f:
                 return f.read().splitlines()
         except:
-            return []
+# DEBUG - if driver has changed and files don't exist any longer.
+#--            print(f'ERROR: file "{filename}" not found\n', file=sys.stderr)
+            return [ '' ]
     # End of readfile
 
     #-----------------------------------------------------------------------------
@@ -338,7 +340,7 @@ def main(values):
                 continue
             if not args.json:
                 tmp_output += tmp_rports
-            rp_targets = sorted(rp_targets)
+            rp_targets = sorted(rp_targets, key=lambda x: int(x.split(":")[-1]))
             if args.json:
                 rp_output = []
             else:
@@ -427,11 +429,19 @@ def main(values):
 
     #-----------------------------------------------------------------------------
     def parse_lspci():
+        def find_executable_path(cmd):
+            for path in [ '/usr/sbin/', '/usr/bin/', '/bin/', '/sbin/' ]:
+                newcmd = path + cmd
+                if os.path.isfile(newcmd) and os.access(newcmd, os.X_OK):
+                    return newcmd
+            return '/usr/sbin/' + cmd
+        #
         nonlocal args, target_wwpns, initiator_wwpns, physical_slots, physical_slots_wwn, ht
         #-- nonlocal target_slots
 
         # Information from the lspci command -- slots, etc.
-        cmd_lspci = '/usr/sbin/lspci -vmmD'         # Get physical pci devices on machine.
+#--        cmd_lspci = '/usr/sbin/lspci -vmmD'         # Get physical pci devices on machine.
+        cmd_lspci = find_executable_path('lspci') + ' -vmmD'    # Get physical pci devices on machine.
 
         verbose =''
         if args.json:
