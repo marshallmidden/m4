@@ -67,6 +67,7 @@ TESTS += s14
 TESTS += s15
 TESTS += sequence
 TESTS += tempo
+TESTS += tempo-ramp
 TESTS += test-cresc-chord
 TESTS += test-cresc-staff
 TESTS += test-cresc

@@ -40,6 +40,16 @@ import readline
 import re
 import math
 from datetime import datetime
+# Pre-compiled regex patterns for performance.
+_RE_OCTAL = re.compile(r'^o[0-7]+$')
+_RE_OPERATOR = re.compile(r'[-+*/=$<>!]')
+_RE_IDENTIFIER = re.compile(r'[_a-zA-Z0-9]+')
+_RE_NUMBER = re.compile(r'[0-9.]+')
+_RE_BRACKET = re.compile(r'[\[\](){}]')
+_RE_CHAR_SPLIT = re.compile(r'([a-zA-Z0-9_+-]+|[ \t]*[^a-zA-Z0-9_+-]+[ \t]*)')
+_RE_WHITESPACE = re.compile(r'\s+')
+_RE_WORD = re.compile(r'\w+')
+_RE_DOLLAR_COMMENT = re.compile(r'[$][$].*$')
 #-----------------------------------------------------------------------------
 #++ import inspect
 #++ print(inspect.currentframe().f_code.co_name, '#0', file=sys.stderr, flush=True)
@@ -48,6 +58,7 @@ global arrays
 arrays = [ ]
 global local_arrays
 local_arrays = [ ]
+variable_index = {}             # name -> list of wary entries (for fast lookup)
 #-----------------------------------------------------------------------------
 numarry_name = 0            # The name of the variable.
 numarry_maclevel = 1        # The macro level was in effect when created.
@@ -55,6 +66,30 @@ numarry_indexes = 2         # The array indexes. []=value, [3]=1-dimen, [2,4]=2-
 numarry_values = 3          # Array of values ([0] for not an array).
 numarry_value_type = 4      # Array of types None=not-set, 0=int/float, 1= character string.
 numarry_macro_arg = 5       # True if macro argument - normally False.
+
+def _var_index_add(wary):
+    """Add a variable entry to the variable_index for fast lookup."""
+    name = wary[numarry_name]
+    if name not in variable_index:
+        variable_index[name] = []
+    # fi
+    variable_index[name].append(wary)
+# End of _var_index_add
+
+def _var_index_remove(wary):
+    """Remove a variable entry from the variable_index."""
+    name = wary[numarry_name]
+    if name in variable_index:
+        try:
+            variable_index[name].remove(wary)
+        except ValueError:
+            pass
+        # yrt
+        if not variable_index[name]:
+            del variable_index[name]
+        # fi
+    # fi
+# End of _var_index_remove
 
 # None if variable is not set yet.
 type_is_number = 0          # Type of variable is a number.
@@ -141,8 +176,7 @@ class SymbolDesc:
 #-----------------------------------------------------------------------------
 def is_octal(string: str) -> bool:
     """Check if a string represents an octal number (starts with 'o', followed by octal digits)."""
-    pattern = r'^o[0-7]+$'
-    return bool(re.match(pattern, string))
+    return bool(_RE_OCTAL.match(string))
 # is_octal
 
 #-----------------------------------------------------------------------------
@@ -171,7 +205,7 @@ def next_token(string: str) -> tuple[str | None, str | float, str]:
             # fi
         # fi
     # fi
-    if re.match(r'[-+*/=$<>!]', c):         # Possible operation
+    if _RE_OPERATOR.match(c):         # Possible operation
         if c == '*' and len(string) >= 2:   # Possible '**'
             if string[1] == '*':
                 return string[2:], '**', 'OPER'
@@ -240,15 +274,14 @@ def next_token(string: str) -> tuple[str | None, str | float, str]:
         return None, c, 'OPER'
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     elif is_octal(string):                  # First is a leading 'o' for octal number following.
-        pattern = r'^o[0-7]+$'
-        m = re.match(pattern, string)
+        m = _RE_OCTAL.match(string)
         strg = m.group(0)[1:]
         ret = int(strg,8)
         b = float(ret)
         return string[len(strg)+1:], b, 'NUMBER'
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
     elif c.isalpha():                       # First character is [a-zA-Z].
-        m = re.match(r'[_a-zA-Z0-9]+', string)
+        m = _RE_IDENTIFIER.match(string)
         ret = strg = m.group(0)             # We know there is at least one character.
         if strg == 'lpause':                # convert a few names to the other name.
             ret = 'pause'
@@ -262,7 +295,7 @@ def next_token(string: str) -> tuple[str | None, str | float, str]:
         # fi
         return None, ret, 'ID'
     elif c.isdigit() or c == '.':           # First is a digit.
-        m = re.match(r'[0-9.]+', string)
+        m = _RE_NUMBER.match(string)
         strg = m.group(0)                   # We know there is at least one character.
         if strg.count('.') > 1:             # Only one decimal place in a number.
             return None, strg, 'MISMATCH #d strg={}'.format(strg)
@@ -271,7 +304,7 @@ def next_token(string: str) -> tuple[str | None, str | float, str]:
             return string[len(strg):], b, 'NUMBER'
         # fi
         return None, strg, 'NUMBER'
-    elif re.match(r'[\[\](){}]', c):        # Known parenthesis/brackets/braces.
+    elif _RE_BRACKET.match(c):        # Known parenthesis/brackets/braces.
         if len(string) > 1:                 # Something after this alphabetic string.
             return string[1:], c, 'SYNTAX'
         # fi
@@ -388,13 +421,11 @@ def get_value(arg: list) -> list:
     maxwary = None
 #--    print('arrays={}'.format(arrays), file=sys.stderr, flush=True)
 #--    print('local_arrays={}'.format(local_arrays), file=sys.stderr, flush=True)
-    for wary in arrays + local_arrays:
+    for wary in variable_index.get(arg[1], []):
 #PRINT        print('arg[1]={} wary[numarry_name]={} wary[numarry_values]={}'.format(arg[1],wary[numarry_name],wary[numarry_values]), file=sys.stderr, flush=True)  # PRINT
-        if arg[1] == wary[numarry_name]:
-            if wary[numarry_maclevel] >  maxmaclev:
-                maxmaclev = wary[numarry_maclevel]
-                maxwary = wary
-            # fi
+        if wary[numarry_maclevel] >  maxmaclev:
+            maxmaclev = wary[numarry_maclevel]
+            maxwary = wary
         # fi
     # rof
 #PRINT    print("get_value - #i maxwary={}".format(maxwary), file=sys.stderr, flush=True)  # PRINT
@@ -494,12 +525,10 @@ def compute_value(op: str, arg1: list, arg2: list) -> list:
         # arrays here.
         maxmaclev = -1
         maxwary = None
-        for wary in arrays + local_arrays:
-            if a == wary[numarry_name]:
-                if wary[numarry_maclevel] >  maxmaclev:
-                    maxmaclev = wary[numarry_maclevel]
-                    maxwary = wary
-                # fi
+        for wary in variable_index.get(a, []):
+            if wary[numarry_maclevel] >  maxmaclev:
+                maxmaclev = wary[numarry_maclevel]
+                maxwary = wary
             # fi
         # rof
 #PRINT        print("compute_value - #h", file=sys.stderr, flush=True)  # PRINT
@@ -507,8 +536,10 @@ def compute_value(op: str, arg1: list, arg2: list) -> list:
             print("Assignment to unknown variable '{}', creating it='{}'".format(arg1, a2), file=sys.stderr, flush=True)
             if arg2[0] == 'NUMBER':
                 local_arrays.append( [ a, 0, [ ], [ arg2[1] ], [ 0 ], False ] )
+                _var_index_add(local_arrays[-1])
             else:                               # Assume CHAR
                 local_arrays.append( [ a, 0, [ ], [ arg2[1] ], [ 1 ], False ] )
+                _var_index_add(local_arrays[-1])
             # fi
             return arg2
         elif maxwary[numarry_indexes] != []:
@@ -983,7 +1014,7 @@ def get_tokens_from_char(strng: str, start: int, lth: int) -> str:
     if strng is None or strng == '' or start < 0:
         return ''
     # fi
-    a = [i for i in re.split(r'([a-zA-Z0-9_+-]+|[ \t]*[^a-zA-Z0-9_+-]+[ \t]*)', strng) if i]
+    a = [i for i in _RE_CHAR_SPLIT.split(strng) if i]
 #PRINT    print("get_tokens_from_char - a={}".format(a), file=sys.stderr, flush=True)  # PRINT
     # Get rid of only spaces.
     new = []
@@ -994,7 +1025,7 @@ def get_tokens_from_char(strng: str, start: int, lth: int) -> str:
 #PRINT        print("get_tokens_from_char - #0a", file=sys.stderr, flush=True)  # PRINT
 #--        x = i.replace(' ', '')
 #--        x = x.replace("\t", '')
-        x = re.sub(r'\s+', r' ', i)
+        x = _RE_WHITESPACE.sub(r' ', i)
 #PRINT        print("get_tokens_from_char - #0b", file=sys.stderr, flush=True)  # PRINT
         new.append(x)
     # rof
@@ -1009,22 +1040,23 @@ def get_tokens_from_char(strng: str, start: int, lth: int) -> str:
     # fi
 #PRINT    print("get_tokens_from_char - #2", file=sys.stderr, flush=True)  # PRINT
     x = new[start : lth]
-    w = ''
+    parts = []
     prev = ''
 #PRINT    print("get_tokens_from_char - #3", file=sys.stderr, flush=True)  # PRINT
     for y in x:
         if y == '':
-            w = w + ' '
-        elif re.match(r'\w+', prev) and re.match(r'\w+', y):
-            w = w + ' ' + y
+            parts.append(' ')
+        elif _RE_WORD.match(prev) and _RE_WORD.match(y):
+            parts.append(' ')
+            parts.append(y)
         else:
-            w = w + y
+            parts.append(y)
         # fi
         prev = y
     # rof
 #PRINT    print("get_tokens_from_char - #4", file=sys.stderr, flush=True)  # PRINT
 #PRINT    print("get_tokens_from_char - return {}".format(w), file=sys.stderr, flush=True)  # PRINT
-    return w
+    return ''.join(parts)
 # End of get_tokens_from_char
 
 #-----------------------------------------------------------------------------
@@ -1598,13 +1630,7 @@ def f_print(arg: list) -> list:
         print(val)
         return arg
     elif which == 'COMMA':
-        a = ''
-        for i in val:
-            if a != '':
-                a = a + ','
-            # fi
-            a = a + str(i)
-        # rof
+        a = ','.join(str(i) for i in val)
         print(a)
         return arg
     else:
@@ -1737,119 +1763,222 @@ functions = {
 #                               Value
 #                                             Number (not character string)
 arrays.append( [ 'pi',  0, [ ], [ math.pi ],  [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'e',   0, [ ], [ math.e ],   [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'tau', 0, [ ], [ math.tau ], [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 
 arrays.append( [ 'm1',  0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm2',  0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm3',  0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm4',  0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm5',  0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm6',  0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm7',  0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm8',  0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm9',  0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 
 arrays.append( [ 'm10', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm11', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm12', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm13', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm14', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm15', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm16', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm17', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm18', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm19', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 
 arrays.append( [ 'm20', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm21', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm22', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm23', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm24', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm25', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm26', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm27', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm28', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm29', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 
 arrays.append( [ 'm30', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm31', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm32', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm33', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm34', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm35', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm36', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm37', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm38', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm39', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 
 arrays.append( [ 'm40', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm41', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm42', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm43', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm44', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm45', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm46', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm47', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm48', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm49', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 
 arrays.append( [ 'm50', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm51', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm52', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm53', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm54', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm55', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm56', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm57', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm58', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm59', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 
 arrays.append( [ 'm60', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm61', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm62', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm63', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm64', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm65', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm66', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm67', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm68', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm69', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 
 arrays.append( [ 'm70', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm71', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm72', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm73', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm74', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm75', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm76', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm77', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm78', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm79', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 
 arrays.append( [ 'm80', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm81', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm82', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm83', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm84', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm85', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm86', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm87', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm88', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm89', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 
 arrays.append( [ 'm90', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm91', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm92', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm93', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm94', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm95', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm96', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm97', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm98', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 arrays.append( [ 'm99', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 
 arrays.append( [ 'm100', 0, [ ], [ 0 ],        [ 0 ] , False ] )
+_var_index_add(arrays[-1])
 #-----------------------------------------------------------------------------
 def cexp_parser() -> None:
     """Initialize the expression parser: register all operators and functions with their precedence levels."""
@@ -1911,7 +2040,7 @@ def get_line() -> str:
             linecount = linecount + 1
             if line:
                 # delete anything from $$ onwards.
-                line = re.sub(r'[$][$].*$', r'', line)
+                line = _RE_DOLLAR_COMMENT.sub(r'', line)
                 # ignore leading and trailing spaces.
                 line = line.strip()
                 return line

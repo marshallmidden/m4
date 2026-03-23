@@ -832,6 +832,50 @@ Note: Options must use -- before them. (Except for -h meaning --help.)
 import argparse
 import os
 import re
+import bisect
+
+# Pre-compiled regex patterns for performance.
+_RE_WS = re.compile(r'\s+')
+_RE_WS_COMMA_WS = re.compile(r'\s*,\s*')
+_RE_DOLLAR_START = re.compile(r'^.*[$][$]')
+_RE_DOLLAR_END = re.compile(r'[$][$].*$')
+_RE_FLAT_BB = re.compile(r'^([a-g])bb')
+_RE_FLAT_B = re.compile(r'^([a-g])b')
+_RE_VPI = re.compile(r'^(volume|vol|v|pan|p|intensity|i|cresc|dimin)[ \t]*(.*)')
+_RE_VPI_SEARCH = re.compile(r'^(volume|vol|v|pan|p|intensity|i|cresc|dimin).*$')
+_RE_SINGLE_QUOTE = re.compile(r"^'[^']*'")
+_RE_DOUBLE_QUOTE = re.compile(r'^"[^"]*"')
+_RE_EQUALS_AFTER = re.compile(r'=.*')
+_RE_BEFORE_EQUALS = re.compile(r'^[^=]=')
+_RE_SPACE_TAB = re.compile(r'[ \t]')
+_RE_VAR_NOT_SET = re.compile(r'variable .* is not set')
+_RE_DOT_DOT_WS = re.compile(r'\s*\.\.\s*')
+_RE_WS_COMMA_SEMI_WS = re.compile(r'\s*([,;])\s*')
+_RE_WORD_OR_NONWORD = re.compile(r'(\w+|\W+)')
+_RE_COMMA = re.compile(r',')
+_RE_UPTO_SLASH = re.compile(r'^.*/')
+_RE_WS_RBRACKET_WS = re.compile(r'\s*]\s*')
+_RE_WS_LBRACKET_WS = re.compile(r'\s*\[\s*')
+_RE_LEADING_COMMA_WS = re.compile(r'^,\s')
+_RE_RBRACKET_COMMA_SP = re.compile(r'] , ')
+_RE_WS_RBRACKET = re.compile(r'\s*]')
+_RE_WS_LBRACKET = re.compile(r'\s*\[')
+_RE_LBRACKET_WS = re.compile(r'\[\s*')
+_RE_WORD_START = re.compile(r'^(\w+).*')
+_RE_AFTER_WORD_NW = re.compile(r'^\w+(\W).*')
+_RE_AFTER_WORD_NW_REST = re.compile(r'^\w+\W(.*)')
+_RE_NOT_COMMA_PAREN_SP = re.compile(r'([^,)]) ')
+_RE_WORD_CHAR = re.compile(r'\w')
+_RE_CMD_START = re.compile(r'^([a-zA-Z0-9%_*><]*).*$')
+_RE_CMD_REST = re.compile(r'^[a-zA-Z0-9%_*><]*(.*)$')
+_RE_ALNUM_START = re.compile(r'^([a-zA-Z0-9]*).*$')
+_RE_ALNUM_REST = re.compile(r'^[a-zA-Z0-9]*(.*)$')
+_RE_STAR_LINE = re.compile(r'^\s*[*]')
+_RE_8SPACES = re.compile(r'^        ')
+_RE_CPP_LINE = re.compile(r'^# ([0-9]+) "([^"]+)".*$')
+_RE_WORD_BOUNDARY = re.compile(r'^\w+')
+_RE_WS_EMPTY = re.compile(r'\s+')
+
 import readline
 import shlex
 import sys
@@ -1213,11 +1257,9 @@ def recompute_whichchars() -> None:
 # ----------------------------------------------------------------------------
 def chkvarlevel(arg: str, maclev: int) -> bool:
     """Check if a variable exists at the given macro nesting level."""
-    for wary in calculate.arrays + calculate.local_arrays:
-        if arg == wary[numarry_name]:
-            if wary[numarry_maclevel] == maclev:
-                return False                        # Already exists.
-            # fi
+    for wary in calculate.variable_index.get(arg, []):
+        if wary[numarry_maclevel] == maclev:
+            return False                        # Already exists.
         # fi
     # rof
     return True
@@ -1281,6 +1323,7 @@ def createglobalvar(arg, val, maclev, typ, macro_argument_tf) -> None:
     # fi
     wary = [ arg, maclev, [ ], [ val ], [ typ ], macro_argument_tf ]
     calculate.arrays.append(wary)
+    calculate._var_index_add(wary)
     if typ == 1:
         recompute_whichchars()
     # fi
@@ -1297,6 +1340,7 @@ def createlocalvar(arg, val, maclev, typ, macro_argument_tf) -> None:
     # fi
     wary = [ arg, maclev, [ ], [ val ], [ typ ], macro_argument_tf ]
     calculate.local_arrays.append(wary)
+    calculate._var_index_add(wary)
     if typ == 1:
         recompute_whichchars()
     # fi
@@ -1306,14 +1350,16 @@ def createlocalvar(arg, val, maclev, typ, macro_argument_tf) -> None:
 # ----------------------------------------------------------------------------
 def chkvar(arg: str) -> list | None:
     """Check if a variable with the given name exists in any scope."""
+    entries = calculate.variable_index.get(arg)
+    if not entries:
+        return None
+    # fi
     maxmaclev = -1
     maxwary = None
-    for wary in calculate.arrays + calculate.local_arrays:
-        if arg == wary[numarry_name]:
-            if wary[numarry_maclevel] > maxmaclev:
-                maxmaclev = wary[numarry_maclevel]
-                maxwary = wary
-            # fi
+    for wary in entries:
+        if wary[numarry_maclevel] > maxmaclev:
+            maxmaclev = wary[numarry_maclevel]
+            maxwary = wary
         # fi
     # rof
     return maxwary
@@ -1362,8 +1408,8 @@ def getvar_checkokay(arg: str, original_line: str) -> float | str | None:
 # ----------------------------------------------------------------------------
 def getvarmaclevel(arg, maclev) -> float | str | None:
     """Get the macro nesting level at which a variable was created."""
-    for wary in calculate.arrays + calculate.local_arrays:
-        if arg == wary[numarry_name] and maclev == wary[numarry_maclevel]:
+    for wary in calculate.variable_index.get(arg, []):
+        if maclev == wary[numarry_maclevel]:
             return wary[numarry_values][0]
         # fi
     # rof
@@ -1611,11 +1657,11 @@ def get_next_argument(wline, original_line) -> tuple[str, str]:
         return '', ''
     # fi
 
-    strng = re.sub(r'\s*]\s*', r' ] ', strng, count = 1)    # Always a single space before ].
-    strng = re.sub(r'\s*\[\s*', r' [ ', strng, count = 1)   # Always a single space before [.
-    strng = re.sub(r'^,\s', r' ', strng, count = 1)     # Change ', ' to ' '.
-    strng = re.sub(r'\s+', r' ', strng)                 # Only single spaces.
-    strng = re.sub(r'] , ', r'] ', strng, count = 1)    # Change ', ' to ' '.
+    strng = _RE_WS_RBRACKET_WS.sub(r' ] ', strng, count = 1)    # Always a single space before ].
+    strng = _RE_WS_LBRACKET_WS.sub(r' [ ', strng, count = 1)   # Always a single space before [.
+    strng = _RE_LEADING_COMMA_WS.sub(r' ', strng, count = 1)     # Change ', ' to ' '.
+    strng = _RE_WS.sub(r' ', strng)                 # Only single spaces.
+    strng = _RE_RBRACKET_COMMA_SP.sub(r'] ', strng, count = 1)    # Change ', ' to ' '.
     strng = strng.strip()                               # right and left spaces tossed.
     x = find_terminator_in_string(strng, splitter, True, original_line)
     # x == -1   end of strng.
@@ -1687,11 +1733,11 @@ def separate_args(wline, integers, nospaces, original_line) -> list:
     if not strng:
         return []
     # fi
-    strng = re.sub(r'\s*]', r' ]', strng, count = 1)
-    strng = re.sub(r'\s+', r' ', strng)
-    strng = re.sub(r'\s*\[', r' [', strng, count = 1)
-    strng = re.sub(r'\[\s*', r'[ ', strng, count = 1)
-    strng = re.sub(r'\s+', r' ', strng)
+    strng = _RE_WS_RBRACKET.sub(r' ]', strng, count = 1)
+    strng = _RE_WS.sub(r' ', strng)
+    strng = _RE_WS_LBRACKET.sub(r' [', strng, count = 1)
+    strng = _RE_LBRACKET_WS.sub(r'[ ', strng, count = 1)
+    strng = _RE_WS.sub(r' ', strng)
     array_args = []
     w = 0
     b4 = ''
@@ -1924,19 +1970,19 @@ def parse_args() -> None:
 
     if args.pages is not None and args.pages != '':
         # global pages_to_do
-        n = re.sub(r'\s*,\s*', ',', args.pages)
-        n = re.sub(r'\s*,\s*', ',', n)
+        n = _RE_WS_COMMA_WS.sub(',', args.pages)
+        n = _RE_WS_COMMA_WS.sub(',', n)
         pages_to_do = separate_args(n, True, True, 'parsing --pages')
     # fi
 
     if args.measures is not None and args.measures != '':
-        n = re.sub(r'\s*,\s*', ',', args.measures)
-        n = re.sub(r'\s*,\s*', ',', n)
+        n = _RE_WS_COMMA_WS.sub(',', args.measures)
+        n = _RE_WS_COMMA_WS.sub(',', n)
         measures_to_do = separate_args(n, True, True, 'parsing --measures')
     # fi
 
 #--    if args.voices is not None and args.voices != '':
-#--        n = re.sub(r'\s*,\s*', ',', args.voices)
+#--        n = _RE_WS_COMMA_WS.sub(',', args.voices)
 #--        n = re.sub(r'\s*,\s*', ',', n)
 #--        voices_to_do = separate_args(n, True, True, 'parsing --voices')
 #--    # fi
@@ -3086,6 +3132,8 @@ global tempo_note_length_now        # length of a beat (note)
 tempo_note_length_now = { '': tempo_note_default } # before a measure.
 global tempo_ramp_last_measure      # measure where tempo was last explicitly set (for ramp interpolation)
 tempo_ramp_last_measure = ''        # '' = the default/header tempo
+global tempo_ramp_measures          # set of measure names that are in a ramp (need per-note tempo events)
+tempo_ramp_measures = set()
 
 global file_name                    # None = use tty.
 global output_name                  # File to print to (default is sys.stdout).
@@ -4270,16 +4318,18 @@ def insert_sorted_tail(na, s='') -> None:
         tm.append(na)
         return
     # fi
-    # Otherwise, go from rear to insertion point.
-#--     print_debug(f'                                - len(tm)={len(tm)}')
-#--     print_debug(f'                                - last-tm={tm[-1]}')
-    i = len(tm) - 1
-    while i >= 0 and tm[i][1] > new_val:
-        i =  i - 1
+    # Use bisect for O(log n) search + O(n) insert instead of O(n) search + O(n) insert.
+    lo = 0
+    hi = len(tm)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if tm[mid][1] <= new_val:
+            lo = mid + 1
+        else:
+            hi = mid
+        # fi
     # elihw
-#--     while i + 1 < len(tm) and tm[i + 1][1] == new_val:
-#--         i += 1
-    tm.insert(i + 1, na)
+    tm.insert(lo, na)
     return;
 # End of insert_sorted_tail
 
@@ -4491,6 +4541,70 @@ def print_out_midi1csv_tempo(m, voiceon, lthworkingmeasure, t, l) -> None:
 # End of print_out_midi1csv_tempo
 
 # ----------------------------------------------------------------------------
+def print_out_midi1csv_tempo_ramp(m, m_number, voice, lthworkingmeasure) -> None:
+    """Emit per-note Tempo events within a measure that is part of a tempo ramp.
+
+    Linearly interpolates between this measure's tempo and the next measure's
+    tempo, placing a Tempo event at each note boundary of the reference voice."""
+    global tempo_speed_now
+    global tempo_note_length_now
+    global tempo_ramp_measures
+    global meas
+
+    if m not in tempo_ramp_measures:
+        return
+    # fi
+    if not (args.midi1csv or args.fluidsynth):
+        return
+    # fi
+
+    # Find the next measure's tempo for interpolation endpoint.
+    next_idx = m_number + 1
+    if next_idx >= len(meas):
+        return                              # last measure, nothing to interpolate toward
+    # fi
+    next_m = meas[next_idx]
+    if next_m not in tempo_speed_now:
+        return
+    # fi
+
+    t_start = tempo_speed_now[m]
+    t_end   = tempo_speed_now[next_m]
+    if t_start == t_end:
+        return                              # no change within this measure
+    # fi
+
+    # Walk the reference voice's notes to find note boundaries.
+    if voice not in bufs or m not in bufs[voice] or not bufs[voice][m]:
+        return
+    # fi
+    measure_ticks = mlth[voice][m]
+    if measure_ticks <= 0:
+        return
+    # fi
+
+    note_len = ba.length[voice][m]
+    tick_offset = 0
+    for nn in range(len(note_len)):
+        tick_offset = tick_offset + note_len[nn]
+        if tick_offset >= measure_ticks:
+            break                           # don't emit at/past measure end
+        # fi
+        frac = float(tick_offset) / float(measure_ticks)
+        t = t_start + (t_end - t_start) * frac
+        abs_tick = lthworkingmeasure + tick_offset
+        nl = tempo_note_length_now[m]
+        if args.fluidsynth:
+            insert_sorted_tail([1, abs_tick, f'Tempo, {t}, {nl}'])
+        else:
+            X = round((60.0 * 1000000.0) / ((4.0 * nl)) / t)
+            insert_sorted_tail([1, abs_tick, f'Tempo, {X}'])
+        # fi
+    # rof
+    return
+# End of print_out_midi1csv_tempo_ramp
+
+# ----------------------------------------------------------------------------
 def print_out_midi1csv_keysignature(m, voiceon, lthworkingmeasure, last_keysig, chan) -> None:
     """Write a key signature change to MIDI CSV output."""
     global key_default
@@ -4628,6 +4742,7 @@ def print_header() -> None:
 
             lastmeter = print_out_midi1csv_ts(m, 0, lthworkingmeasure, lastmeter)
             lasttempospeed, lasttempo_n_l = print_out_midi1csv_tempo(m , 0, lthworkingmeasure, lasttempospeed, lasttempo_n_l)
+            print_out_midi1csv_tempo_ramp(m, m_number, voice, lthworkingmeasure)
             # Do not do instruments here.
             lthworkingmeasure = lthworkingmeasure + mlth[voice][m]
 
@@ -4778,12 +4893,15 @@ def do_midi_vpi(voice, m, chan, last_note_on, v_vl, v_pan, v_intens, last_cc11, 
         elif fvol > 126.49:
             fvol = 127
         # fi
-        ivol = round(fvol)
-        if last_cc11 != ivol:
-            if last_note_on != '':
-                insert_sorted_tail([voice+1, T, f'Control_c, {chan}, 11, {ivol}'])
+        # Only call round() when the float has moved enough to possibly change the int.
+        if abs(fvol - last_cc11) >= 0.5:
+            ivol = round(fvol)
+            if last_cc11 != ivol:
+                if last_note_on != '':
+                    insert_sorted_tail([voice+1, T, f'Control_c, {chan}, 11, {ivol}'])
+                # fi
+                last_cc11 = ivol
             # fi
-            last_cc11 = ivol
         # fi
         fpan = fpan - dpinc
         if fpan < 1:
@@ -4791,12 +4909,14 @@ def do_midi_vpi(voice, m, chan, last_note_on, v_vl, v_pan, v_intens, last_cc11, 
         elif fpan > 126.49:
             fpan = 127
         # fi
-        ipan = round(fpan)
-        if last_cc10 != ipan:
-            if last_note_on != '':
-                insert_sorted_tail([voice+1, T, f'Control_c, {chan}, 10, {ipan}'])
+        if abs(fpan - last_cc10) >= 0.5:
+            ipan = round(fpan)
+            if last_cc10 != ipan:
+                if last_note_on != '':
+                    insert_sorted_tail([voice+1, T, f'Control_c, {chan}, 10, {ipan}'])
+                # fi
+                last_cc10 = ipan
             # fi
-            last_cc10 = ipan
         # fi
         fintens = fintens - diinc
         if fintens < 1:
@@ -4804,12 +4924,14 @@ def do_midi_vpi(voice, m, chan, last_note_on, v_vl, v_pan, v_intens, last_cc11, 
         elif fintens > 126.49:
             fintens = 127
         # fi
-        iintens = round(fintens)
-        if last_cc7 != iintens:
-            if last_note_on != '':
-                insert_sorted_tail([voice+1, T, f'Control_c, {chan}, 7, {iintens}'])
+        if abs(fintens - last_cc7) >= 0.5:
+            iintens = round(fintens)
+            if last_cc7 != iintens:
+                if last_note_on != '':
+                    insert_sorted_tail([voice+1, T, f'Control_c, {chan}, 7, {iintens}'])
+                # fi
+                last_cc7 = iintens
             # fi
-            last_cc7 = iintens
         # fi
     # rof
     return last_cc11, last_cc10, last_cc7
@@ -5801,7 +5923,9 @@ def check_staves_notes_order() -> None:
                 if mlth[voice][m] != ml:
                     print_error_no_line(f"staves -- voice#{voice} measure#{m} not same length({mlth[voice][m]}) as 1st({ml})")
                 # fi
-                ml = max(mlth[voice][m], ml)
+                v = mlth[voice][m]
+                if v > ml:
+                    ml = v
             else:
                 print_error_no_line(f'staves -- voice#{voice} not in measure#{m}')
             # fi
@@ -5894,12 +6018,7 @@ def check_staves_notes_order() -> None:
                 # rof
             # fi
 
-            nextmin = 999999
-            for voice in range(1, len(volume)+1):
-                if workingtime[voice] < nextmin:
-                    nextmin = workingtime[voice]
-                # fi
-            # rof
+            nextmin = min(workingtime[voice] for voice in range(1, len(volume)+1))
             now = nextmin
         # elihw
     # rof
@@ -6302,8 +6421,8 @@ def pass2() -> None:
 
     # --voices ... so staff names work.
     if args.voices is not None and args.voices != '':
-        n = re.sub(r'\s*,\s*', ',', args.voices)
-        n = re.sub(r'\s*,\s*', ',', n)
+        n = _RE_WS_COMMA_WS.sub(',', args.voices)
+        n = _RE_WS_COMMA_WS.sub(',', n)
         voices_to_do = separate_args(n, None, True, 'parsing --voices')
         print_debug(f'args.voices={args.voices}')
         print_debug(f'voices_to_do={voices_to_do}')
@@ -6385,6 +6504,7 @@ def delete_one_variable(name, l) -> None:
     if c != []:
         c.reverse()
         for w in c:
+            calculate._var_index_remove(calculate.arrays[w])
             del calculate.arrays[w]
         # rof
     # fi
@@ -6397,6 +6517,7 @@ def delete_one_variable(name, l) -> None:
     if c != []:
         c.reverse()
         for w in c:
+            calculate._var_index_remove(calculate.local_arrays[w])
             del calculate.local_arrays[w]
         # rof
     # fi
@@ -6417,6 +6538,7 @@ def delete_executing_variables(l) -> None:
     if c != []:
         c.reverse()
         for w in c:
+            calculate._var_index_remove(calculate.arrays[w])
             del calculate.arrays[w]
         # rof
     # fi
@@ -6429,6 +6551,7 @@ def delete_executing_variables(l) -> None:
     if c != []:
         c.reverse()
         for w in c:
+            calculate._var_index_remove(calculate.local_arrays[w])
             del calculate.local_arrays[w]
         # rof
     # fi
@@ -6814,9 +6937,9 @@ def read_next_line() -> tuple[str | None, str | None, bool]:
                 commentdollardollar = ''
                 if '$$' in full_line:
                     # delete anything from $$ onwards.
-                    commentdollardollar = re.sub(r'^.*[$][$]', '$$', full_line, count=1)
+                    commentdollardollar = _RE_DOLLAR_START.sub('$$', full_line, count=1)
                     commentdollardollar = commentdollardollar.rstrip()  # trailing spaces gone
-                    full_line = re.sub(r'[$][$].*$', '', full_line)
+                    full_line = _RE_DOLLAR_END.sub('', full_line)
                 # fi
 #-- need to know continued line ... 8 spaces or start with a tab.
                 i_line.append(f'input: {linecount:4d}:' + full_line)    # Line as fixed.
@@ -7569,7 +7692,9 @@ def fill_voice_mlth(meter_check, original_line) -> None:
             if p_meas not in mlth[i]:
                 mlth[i][p_meas] = 0
             # fi
-            m = max(mlth[i][p_meas], m)
+            v = mlth[i][p_meas]
+            if v > m:
+                m = v
         # rof
         # Put out rests for smaller in measure.
         for i in range(1, maxvoice):
@@ -7604,7 +7729,9 @@ def fill_voice_mlth(meter_check, original_line) -> None:
     t = 0
     for i in range(1, maxvoice):
         if i in tlth:
-            t = max(tlth[i], t)
+            v = tlth[i]
+            if v > t:
+                t = v
         # fi
     # rof
     for i in range(1, maxvoice):
@@ -7820,7 +7947,7 @@ def replace_macro(cnumber, t_args, original_line) -> None:
         else:
             return False                                                        # Not a space, and first in t_args doesn't match.
         # fi
-        t_args = re.sub(r'\s+', r' ', t_args)
+        t_args = _RE_WS.sub(r' ', t_args)
         # Get rid of spaces before/after commas/semicolons.
         # macro_arg_terminator is separator between macro name and first argument.
         wargs = []
@@ -8070,8 +8197,8 @@ def set_default_ims(t_args, original_line) -> None:
     else:                                   # ABC
         # Convert to normal format.
         k = savekeyvoice.lower()
-        k = re.sub(r'^([a-g])bb', r'\1--', k)
-        k = re.sub(r'^([a-g])b', r'\1-', k)
+        k = _RE_FLAT_BB.sub(r'\1--', k)
+        k = _RE_FLAT_B.sub(r'\1-', k)
         k = k.replace('#', '+')             # Does multiple sharps.
         k = k.replace('=', 'n')             # Does multiple naturals.
         k = key_sig[k]                      # Convert to number.
@@ -8195,8 +8322,8 @@ def decode_gsw(t_args, original_line) -> None:
     else:                                   # ABC
         # Convert to normal format.
         k = savekeyvoice.lower()
-        k = re.sub(r'^([a-g])bb', r'\1--', k)
-        k = re.sub(r'^([a-g])b', r'\1-', k)
+        k = _RE_FLAT_BB.sub(r'\1--', k)
+        k = _RE_FLAT_B.sub(r'\1-', k)
         k = k.replace('#', '+')             # Does multiple sharps.
         k = k.replace('=', 'n')             # Does multiple naturals.
         k = key_sig[k]                      # Convert to number.
@@ -8420,8 +8547,8 @@ def decode_ims(t_args, original_line) -> None:
         # fi
         # Convert to normal format.
         k = k.lower()
-        k = re.sub(r'^([a-g])bb', r'\1--', k)
-        k = re.sub(r'^([a-g])b', r'\1-', k)
+        k = _RE_FLAT_BB.sub(r'\1--', k)
+        k = _RE_FLAT_B.sub(r'\1-', k)
         k = k.replace('#', '+')             # Does multiple sharps.
         k = k.replace('=', 'n')             # Does multiple naturals.
         k = key_sig[k]                      # Convert to number.
@@ -8472,7 +8599,7 @@ def decode_ims(t_args, original_line) -> None:
     elif nline == 'stemsoff':   np.stemsoff = 1
     elif nline == 'stemson':    np.stemson = 1
     else:                                   # A note or volume if below
-        whichone = re.sub(r'^(volume|vol|v|pan|p|intensity|i|cresc|dimin)[ \t]*(.*)', r'\1', nline)
+        whichone = _RE_VPI.sub(r'\1', nline)
         if whichone != nline:
             for st in last_voice_staff:                     # Go through staves
                 for sn in staff_name[st]:                   # Staff names, with key pair as array of voice numbers.
@@ -8890,8 +9017,8 @@ def do_calcs(t_args, original_line):
         y = f + 2
     # fi
     if x[y] is not None and x[y] != '':
-        xstore = re.sub(r'=.*', r'', x[1])
-        x[1] = re.sub(r'^[^=]=', r'', x[1])
+        xstore = _RE_EQUALS_AFTER.sub(r'', x[1])
+        x[1] = _RE_BEFORE_EQUALS.sub(r'', x[1])
 
         compu = xstore + '=' + x[y]
         f1, type_error = is_float(compu, is_float_number, False)    # first is expression to choose others.
@@ -8984,7 +9111,7 @@ def do_change(t_args: str | None, original_line: str) -> None:
         print_error("change does not have three or four arguments.", original_line)
         return
     # fi
-    wargs = re.split(r'[ \t]', t_args)
+    wargs = _RE_SPACE_TAB.split(t_args)
     if wargs is None or len(wargs) < 3 or len(wargs) > 4:
         print_error("change -- there is not three or four arguments.", original_line)
         return
@@ -9051,7 +9178,7 @@ def do_cis(t_args: str | None, original_line: str) -> None:
         return
     # fi
 
-    targs = re.sub(r'\s*,\s*', ',', t_args)
+    targs = _RE_WS_COMMA_WS.sub(',', t_args)
 
     vargs = targs.split()
 
@@ -9246,7 +9373,7 @@ def do_copy(t_args: str | None, original_line: str) -> None:
         print_error("copy does not have three or four arguments.", original_line)
         return
     # fi
-    wargs = re.split(r'[ \t]', t_args)
+    wargs = _RE_SPACE_TAB.split(t_args)
     if wargs is None or len(wargs) < 3 or len(wargs) > 4:
         print_error("copy - there is not three or four arguments.", original_line)
         return
@@ -9416,7 +9543,7 @@ def do_debug(t_args: str | None, original_line: str) -> None:
                     message = message + ' '
                 # fi
                 if type_error is not None or value == 'error parsing':
-                    if re.match(r'variable .* is not set', type_error):
+                    if _RE_VAR_NOT_SET.match(type_error):
                         print_warning(f'w="{w}" has type_error="{type_error}"', original_line)
                     # fi
                     message = message + str(w)
@@ -9508,8 +9635,8 @@ def get_defaults_for_note(t_args, voiceon, original_line):
     else:                                   # ABC
         # Convert to normal format.
         k = savekeyvoice.lower()
-        k = re.sub(r'^([a-g])bb', r'\1--', k)
-        k = re.sub(r'^([a-g])b', r'\1-', k)
+        k = _RE_FLAT_BB.sub(r'\1--', k)
+        k = _RE_FLAT_B.sub(r'\1-', k)
         k = k.replace('#', '+')             # Does multiple sharps.
         k = k.replace('=', 'n')             # Does multiple naturals.
         k = key_sig[k]                      # Convert to number.
@@ -10019,10 +10146,15 @@ def do_encode(t_args: str | None, original_line: str) -> None:
             nn = -1
             if notename != -1:
                 nametonum = { 'c':0, 'd':2, 'e':4, 'f':5, 'g':7, 'a':9, 'b':11}
-                if notename != 'r' and (notename < 0 or notename > 7):
+                if isinstance(notename, str):
+                    # notename is already a note name string (e.g. 'c', 'd', 'r').
+                    pass
+                elif notename != 'r' and (notename < 0 or notename > 7):
                     print_error(f"encode argument notename({notename}) is < 0 or > 7.", original_line)
                     return
-                notename = allkeys[notename]
+                else:
+                    notename = allkeys[notename]
+                # fi
                 if notename in nametonum:
                     if octave != -1:
                         nn = 12 * int(octave) + nametonum[notename] + 24
@@ -10385,8 +10517,8 @@ def get_voice_others(t_args, mn, mx, command, original_line, get_voice_others = 
         return None
     # fi
 
-    targs = re.sub(r'\s*,\s*', ',', t_args)
-    targs = re.sub(r'\s*\.\.\s*', '..', targs)
+    targs = _RE_WS_COMMA_WS.sub(',', t_args)
+    targs = _RE_DOT_DOT_WS.sub('..', targs)
     # Voice numbers (optional), followed by key name, with major/minor (optional).
     vargs = targs.split()
 
@@ -10878,11 +11010,11 @@ def do_macro(t_args: str | None, original_line: str) -> None:
         return ''
     # fi
     # Get rid of multiple spaces/tabs.
-    t_args = re.sub(r'\s+', r' ', t_args)
+    t_args = _RE_WS.sub(r' ', t_args)
     # Get rid of spaces before/after commas/semicolons.
-    t_args = re.sub(r'\s*([,;])\s*', r'\1', t_args)
+    t_args = _RE_WS_COMMA_SEMI_WS.sub(r'\1', t_args)
     # Split on [a-z0-9A-Z_] and not. (Identifier alphanumeric or underscore)
-    wargs = [i for i in re.split(r'(\w+|\W+)', t_args) if i]
+    wargs = [i for i in _RE_WORD_OR_NONWORD.split(t_args) if i]
     if not wargs or len(wargs) < 1 or wargs == '':
         print_error("no macro name.", original_line)
         return
@@ -11273,8 +11405,8 @@ def do_meter(t_args: str | None, original_line: str) -> None:
         me = vargs[0]
     # fi
 
-    m = re.sub(r',', r'/', m)           # Change 4,4 to 4/4. :)
-    n = re.sub(r'^.*/', '', m)          # Note value for meter.
+    m = _RE_COMMA.sub(r'/', m)           # Change 4,4 to 4/4. :)
+    n = _RE_UPTO_SLASH.sub('', m)          # Note value for meter.
 
     if m == 'common':
         m = '4/4'
@@ -11816,11 +11948,11 @@ def do_process(t_args: str | None, original_line: str) -> None:
         return ''
     # fi
     # Get rid of multiple spaces/tabs.
-    t_args = re.sub(r'\s+', r' ', t_args)
+    t_args = _RE_WS.sub(r' ', t_args)
     # Get rid of spaces before/after commas/semicolons.
-    t_args = re.sub(r'\s*([,;])\s*', r'\1', t_args)
+    t_args = _RE_WS_COMMA_SEMI_WS.sub(r'\1', t_args)
     # Split on [a-z0-9A-Z_] and not. (Identifier alphanumeric or underscore)
-    wargs = [i for i in re.split(r'(\w+|\W+)', t_args) if i]
+    wargs = [i for i in _RE_WORD_OR_NONWORD.split(t_args) if i]
     if not wargs or wargs == '' or len(wargs) < 3:
         print_error("no process name, separator, and argument.", original_line)
         return
@@ -11845,7 +11977,7 @@ def do_process(t_args: str | None, original_line: str) -> None:
     elif len(wargs) > 3:
         print_error(f"There is more than one argument to process ({name}) .. {wargs[2:]}", original_line)
         return
-    elif not re.match(r'^\w+', wargs[2]):
+    elif not _RE_WORD_BOUNDARY.match(wargs[2]):
         print_error(f"process ({name}) needs named argument, not '{wargs[2]}'", original_line)
         return
     # fi
@@ -12128,7 +12260,7 @@ def do_staff(t_args: str | None, original_line: str) -> None:
         print_error("staff does not have a name argument.", original_line)
         return
     # fi
-    targs = re.sub(r'\s+', '', t_args)                  # Toss spaces.
+    targs = _RE_WS.sub('', t_args)                  # Toss spaces.
     if targs is None or targs == '':
         print_error("staff does not have a name argument.", original_line)
         return
@@ -12389,9 +12521,13 @@ def fill_tempo_ramp(end_speed, original_line) -> None:
     """Retroactively interpolate tempo_speed_now between the last explicit
     tempo and the current measure.  Called when 'tempo BPM,N,ramp/accel/rit'
     is encountered.  Only the BPM (speed) is ramped; the note-length stays
-    at whatever the end-tempo specifies."""
+    at whatever the end-tempo specifies.
+
+    Also marks measures si..ei-1 in tempo_ramp_measures so that the MIDI/FS
+    output can emit per-note Tempo events for a smooth ramp."""
     global tempo_speed_now
     global tempo_ramp_last_measure
+    global tempo_ramp_measures
     global meas
     global measure_on
 
@@ -12422,6 +12558,14 @@ def fill_tempo_ramp(end_speed, original_line) -> None:
         m = meas[si + k]
         frac = float(k) / float(span)
         tempo_speed_now[m] = start_speed + (end_speed - start_speed) * frac
+    # rof
+
+    # Mark measures that need per-note tempo interpolation (start through end-1).
+    for k in range(0, span):
+        m = meas[si + k]
+        if m != '':                         # skip the header pseudo-measure
+            tempo_ramp_measures.add(m)
+        # fi
     # rof
     return
 # End of fill_tempo_ramp
@@ -12586,7 +12730,7 @@ def do_voice(t_args: str | None, original_line: str) -> None:
         # fi
     # rof
 
-    targs = re.sub(r'\s*,\s*', ',', t_args)
+    targs = _RE_WS_COMMA_WS.sub(',', t_args)
 
     vargs = targs.split()
     f1, type_error = is_float(vargs[0], is_float_number, False)
@@ -12768,7 +12912,7 @@ def do_xpose(t_args: str | None, original_line: str) -> None:
         print_error("xpose does not have arguments.", original_line)
         return
     # fi
-    targs = re.sub(r'\s*,\s*', ',', t_args)
+    targs = _RE_WS_COMMA_WS.sub(',', t_args)
     vargs = targs.split()
     if not vargs or len(vargs) > 4:
         print_error("xpose does not have correct number of arguments.", original_line)
@@ -13395,6 +13539,7 @@ def handle_vars_parens(arg, a, create_it, original_line) -> None:
     # rof
     wary = [ token, lmp.number, dimensions, values, typevalues, False ]
     calculate.local_arrays.append(wary)
+    calculate._var_index_add(wary)
     return
 # End of handle_vars_parens
 
@@ -13893,10 +14038,10 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
                     temp3 = temp2 + 1           # temp2 has last matched )
                     therest = note_to_decode[temp3:]
                     note_to_decode = note_to_decode[0:temp3]
-                    note_to_decode = re.sub(r'\s+', '', note_to_decode)     # Cheat?
-                    r = re.sub(r'^(\w+).*', r'\1', note_to_decode[1:])
-                    s = re.sub(r'^\w+(\W).*', r'\1', note_to_decode[1:])
-                    t = re.sub(r'^\w+\W(.*)', r'\1', note_to_decode[1:])
+                    note_to_decode = _RE_WS.sub('', note_to_decode)     # Cheat?
+                    r = _RE_WORD_START.sub(r'\1', note_to_decode[1:])
+                    s = _RE_AFTER_WORD_NW.sub(r'\1', note_to_decode[1:])
+                    t = _RE_AFTER_WORD_NW_REST.sub(r'\1', note_to_decode[1:])
                     flag = False
                     if s in '),':               # Possible note in "r".
                         tr1, thenote, te1 = getnote(r, voiceon, update_defaults, False, sub_mid_c, original_line)
@@ -14957,12 +15102,12 @@ def find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, original_lin
     while True:
         flag = False
         temp1 = temp1.strip()                       # Toss spaces on both sides.
-        whichone = re.sub(r'^(volume|vol|v|pan|p|intensity|i|cresc|dimin)[ \t]*(.*)', r'\1', temp1)
+        whichone = _RE_VPI.sub(r'\1', temp1)
         whichone = whichone.strip()                 # Toss spaces on both sides.
         if whichone == temp1:
             return temp1, prenote, postnote
         # fi
-        whatsafter = re.sub(r'^(volume|vol|v|pan|p|intensity|i|cresc|dimin)[ \t]*(.*)', r'\2', temp1)
+        whatsafter = _RE_VPI.sub(r'\2', temp1)
         whatsafter = whatsafter.strip()             # Toss spaces on both sides.
 
         if whatsafter[0] == '(':
@@ -16218,9 +16363,9 @@ def do_notes_oldway(line, original_line):
         print_error("no measure processed yet - must have one before notes.", original_line)
         return
     # fi
-    wline = re.sub(r'\s+', ' ', line)           # multiple spaces to single space, multiple times.
+    wline = _RE_WS.sub(' ', line)           # multiple spaces to single space, multiple times.
     if not args.spaces:
-        wline = re.sub(r'([^,)]) ', r'\1', wline)    # ', ' left alone, elsewise strip spaces.
+        wline = _RE_NOT_COMMA_PAREN_SP.sub(r'\1', wline)    # ', ' left alone, elsewise strip spaces.
     # fi
     wargs = separate_args(wline, False, False, line)
 
@@ -16306,7 +16451,9 @@ def do_notes_oldway(line, original_line):
         measlth = 0
         for i in range(0, len(wargs)):
             if not(wargs[i] == '' or wargs[i] == ' ' or wargs[i] == '\t'):
-                measlth = max(measlth, mlth[i+1][measure_on])
+                v = mlth[i+1][measure_on]
+                if v > measlth:
+                    measlth = v
             # fi
         # rof
         for i in range(0, len(wargs)):
@@ -16359,12 +16506,12 @@ def do_notes_oldway(line, original_line):
                 # fi
                 temp1 = temp1[1:]
             # elihw
-            if not temp1 or not re.match(r'\w', temp1[0]):
+            if not temp1 or not _RE_WORD_CHAR.match( temp1[0]):
                 temp1 = prenote + temp1
             # fi
             temp2 = temp1
             for a in rest_wargs_on_line:
-                if a and re.match(r'\w', a[0]):
+                if a and _RE_WORD_CHAR.match( a[0]):
                     temp1 = temp1 + ' ' + a
                 else:
                     temp1 = temp1 + a
@@ -16396,8 +16543,8 @@ def do_notes_oldway(line, original_line):
                 # fi
                 therest = temp1[q+1:]
                 if therest and w and w+1 < len(wargs):
-                    if re.match(r'\w', therest[-1]):          # last character in therest is NOT terminator.
-                        if wargs[w+1] and re.match(r'\w', wargs[w+1][0]):
+                    if _RE_WORD_CHAR.match( therest[-1]):          # last character in therest is NOT terminator.
+                        if wargs[w+1] and _RE_WORD_CHAR.match( wargs[w+1][0]):
                             therest = therest + ' '
                         # fi
                     # fi
@@ -16894,8 +17041,8 @@ def compute_command_args(expand_line) -> tuple[str, str, str]:
     if not expand_line:
         return '', '', ''
     # fi
-    t0 = re.sub(r'^([a-zA-Z0-9%_*><]*).*$', r'\1', expand_line, count=1)   # First token on line.
-    t1 = re.sub(r'^[a-zA-Z0-9%_*><]*(.*)$', r'\1', expand_line, count=1)   # Rest of line.
+    t0 = _RE_CMD_START.sub(r'\1', expand_line, count=1)   # First token on line.
+    t1 = _RE_CMD_REST.sub(r'\1', expand_line, count=1)   # Rest of line.
 
     if t1:
         delimiter = t1[0]
@@ -17016,7 +17163,7 @@ def run_process(token, tdelim, next_tokens, original_line):         # PROCESS
     token, next_tokens = get_next_argument(send_these_notes, original_line)
 
     # Special for volume/pan/intensity/cresc/dimin -- .
-    whichone = re.search(r'^(volume|vol|v|pan|p|intensity|i|cresc|dimin).*$', token)
+    whichone = _RE_VPI_SEARCH.search(token)
     if whichone:
         # NOTDONEYET - PROCESS
         # Save args.midi, args.horizontal, args.fluidsynth, args.midi1csv, args.staves, args.vertical
@@ -17645,12 +17792,12 @@ def do_staff_notes(command, delimiter, t_args, original_line):
 
 
     if len(command) > 1 and command[0] in ("'", '"'):
-        command = re.sub(r"^'[^']*'", '', command)
-        command = re.sub(r'^"[^"]*"', '', command)
+        command = _RE_SINGLE_QUOTE.sub('', command)
+        command = _RE_DOUBLE_QUOTE.sub('', command)
     # fi
     if delimiter and delimiter[0] in ("'", '"') and t_args != None:
-        t_args = re.sub(r"^'[^']*'", '', t_args)
-        t_args = re.sub(r'^"[^"]*"', '', t_args)
+        t_args = _RE_SINGLE_QUOTE.sub('', t_args)
+        t_args = _RE_DOUBLE_QUOTE.sub('', t_args)
         delimiter = ''
     # fi
     token = command
@@ -17672,8 +17819,8 @@ def do_staff_notes(command, delimiter, t_args, original_line):
            (tdelim is not None and tdelim != '')):
         # Delete quotes ... double or single.       NOTDONEYET - LYRICS
         if token and token[0] in ("'", '"'):
-            next_tokens = re.sub(r"^'[^']*'", '', next_tokens)  # Delete single quotes and contents.
-            next_tokens = re.sub(r'^"[^"]*"', '', next_tokens)  # Delete double quotes and contents.
+            next_tokens = _RE_SINGLE_QUOTE.sub('', next_tokens)  # Delete single quotes and contents.
+            next_tokens = _RE_DOUBLE_QUOTE.sub('', next_tokens)  # Delete double quotes and contents.
             token = ''
             tdelim = ''
         # fi
@@ -17694,7 +17841,7 @@ def do_staff_notes(command, delimiter, t_args, original_line):
             # rof
             print_warning(f'm:{measure_on} #B macro {token} did not match terminators correctly.', original_line)
         # fi
-        text_token = re.sub(r'^([a-zA-Z0-9]*).*$', r'\1', token, count=1)
+        text_token = _RE_ALNUM_START.sub(r'\1', token, count=1)
         if token == 'begin':
             token, tdelim, next_tokens = compute_command_args(next_tokens)
             set_process_begin(token, next_tokens, original_line)
@@ -17738,7 +17885,7 @@ def do_staff_notes(command, delimiter, t_args, original_line):
             setvar('voice', ','.join(last_voice_staff), type_is_string) # Doesn't need join, but do it for consistency.
             setvar('in_chord', in_chord[last_voice_staff[0]], type_is_number)   # Set at same time as voice.
         elif text_token in staff_keywords:
-            t1 = re.sub(r'^[a-zA-Z0-9]*(.*)$', r'\1', token, count=1)   # Rest of line.
+            t1 = _RE_ALNUM_REST.sub(r'\1', token, count=1)   # Rest of line.
             if t1:
                 tdelim = t1[0]
                 next_tokens = t1.strip() + next_tokens
@@ -17916,8 +18063,8 @@ def do_staff_notes(command, delimiter, t_args, original_line):
         token, tdelim, next_tokens = compute_command_args(next_tokens)
         token = token.strip()
         if next_tokens and next_tokens[0] in ("'", '"'):
-            next_tokens = re.sub(r"^'[^']*'", '', next_tokens)
-            next_tokens = re.sub(r'^"[^"]*"', '', next_tokens)
+            next_tokens = _RE_SINGLE_QUOTE.sub('', next_tokens)
+            next_tokens = _RE_DOUBLE_QUOTE.sub('', next_tokens)
             token = ''
             tdelim = ''
         # fi
@@ -18145,7 +18292,7 @@ def readthefile() -> None:
             continue
         # fi
         # If command == '*' ignore.
-        if re.match(r'^\s*[*]', line):
+        if _RE_STAR_LINE.match(line):
             cmt = line.lstrip()                             # Ignore leading spaces.
             if cmt != '*' and cmt[0:4] != '* --' and cmt[0:3] != '*--' and cmt[0:7] != '* v' + 'im: ':
                 precomment = precomment + cmt + '\n'           # Comment line.
@@ -18168,7 +18315,7 @@ def readthefile() -> None:
                     continue        # might have putd's or continuation line.
                 # fi
                 break
-            elif line and (line[0] == '\t' or re.match(r'^        ', line)):
+            elif line and (line[0] == '\t' or _RE_8SPACES.match(line)):
                 # This is a continuation line.
 # NOTDONEYET - may NOT have to do this? do_notes_oldway should take care of staff and voices?
                 if last_voice_staff is not None:
@@ -18215,9 +18362,9 @@ def readthefile() -> None:
             if line != '*' and line[0:4] != '* --' and line[0:3] != '*--' and line[0:7] != '* v' + 'im: ':
                 precomment = precomment + line + '\n'        # Comment line.
             # fi
-        elif line[0] == '#' and re.match('^# ([0-9]+) "([^"]+)".*$', line):  # Only the 1 type C preprocessor line.
-            uxit = re.sub('^# ([0-9]+) "([^"]+)".*$', r"\1 \2", line)
-            wxit = re.split(r' ', uxit, maxsplit = 1)
+        elif line[0] == '#' and _RE_CPP_LINE.match(line):  # Only the 1 type C preprocessor line.
+            uxit = _RE_CPP_LINE.sub(r"\1 \2", line)
+            wxit = uxit.split(' ', 1)
             linecount = int(wxit[0]) - 1
             which_file_in = wxit[1]
         else:                                               # Note: empty blank line NOT passed through.
