@@ -79,7 +79,7 @@ VOICES =
 #xx WHICH = "-D WHICH=11"
 #xx VOICES = --voices 39..40
 #-----------------------------------------------------------------------------
-CPP=gcc -E -x c -undef -Wundef -Werror -nostdinc -C -CC
+CPP=gcc -E -x c -undef -Wundef -Werror -nostdinc -C -CC -traditional-cpp
 MC_ARGS ?= ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 #-- MC_ARGS ?= ${PAGES} ${MEASURES} ${VOICES}
 #-- MC_ARGS ?= --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
