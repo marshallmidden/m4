@@ -1,0 +1,214 @@
+diff --git a/include/fluidsynth/shell.h b/include/fluidsynth/shell.h
+index 1f1b3c1f..7cd32887 100644
+--- a/include/fluidsynth/shell.h
++++ b/include/fluidsynth/shell.h
+@@ -72,6 +72,9 @@ void delete_fluid_cmd_handler(fluid_cmd_handler_t *handler);
+ FLUIDSYNTH_API
+ void fluid_cmd_handler_set_synth(fluid_cmd_handler_t *handler, fluid_synth_t *synth);
+ 
++FLUIDSYNTH_API
++void fluid_cmd_handler_set_renderer(fluid_cmd_handler_t *handler, fluid_file_renderer_t *renderer);
++
+ FLUIDSYNTH_API
+ int fluid_command(fluid_cmd_handler_t *handler, const char *cmd, fluid_ostream_t out);
+ 
+diff --git a/src/bindings/fluid_cmd.c b/src/bindings/fluid_cmd.c
+index e5ebe507..4d2d46c1 100644
+--- a/src/bindings/fluid_cmd.c
++++ b/src/bindings/fluid_cmd.c
+@@ -44,6 +44,9 @@ struct _fluid_cmd_handler_t
+ 
+     fluid_midi_router_rule_t *cmd_rule;        /* Rule currently being processed by shell command handler */
+     int cmd_rule_type;                         /* Type of the rule (#fluid_midi_router_rule_type) */
++
++    fluid_file_renderer_t *renderer;           /* Non-NULL when rendering to file via stdin commands */
++    double pending_samples;                    /* Fractional sample accumulator for file rendering */
+ };
+ 
+ 
+@@ -1107,6 +1110,8 @@ fluid_handle_echo(void *data, int ac, char **av, fluid_ostream_t out)
+ int
+ fluid_handle_sleep(void *data, int ac, char **av, fluid_ostream_t out)
+ {
++    FLUID_ENTRY_COMMAND(data);
++
+     if(ac < 1)
+     {
+         fluid_ostream_printf(out, "sleep: too few arguments.\n");
+@@ -1119,7 +1124,33 @@ fluid_handle_sleep(void *data, int ac, char **av, fluid_ostream_t out)
+         return -1;
+     }
+ 
+-    fluid_msleep(atoi(av[0]));	/* delay in milliseconds */
++    if(handler->renderer != NULL)
++    {
++        /* File rendering mode: render audio frames instead of sleeping */
++        double ms = atof(av[0]);
++        double sample_rate;
++        int period_size;
++
++        fluid_settings_getnum(handler->settings, "synth.sample-rate", &sample_rate);
++        fluid_settings_getint(handler->settings, "audio.period-size", &period_size);
++
++        handler->pending_samples += ms * sample_rate / 1000.0;
++
++        while(handler->pending_samples >= period_size)
++        {
++            if(fluid_file_renderer_process_block(handler->renderer) != FLUID_OK)
++            {
++                fluid_ostream_printf(out, "sleep: file renderer error.\n");
++                return -1;
++            }
++
++            handler->pending_samples -= period_size;
++        }
++
++        return 0;
++    }
++
++    fluid_msleep(atof(av[0]));	/* delay in milliseconds */
+ 
+     return 0;
+ }
+@@ -4192,6 +4223,22 @@ fluid_cmd_handler_t *new_fluid_cmd_handler2(fluid_settings_t *settings,
+     return handler;
+ }
+ 
++/**
++ * Set the file renderer for a command handler.
++ * When set, the sleep command will render audio frames to the file
++ * instead of sleeping the thread.
++ *
++ * @param handler Command handler
++ * @param renderer File renderer instance, or NULL to disable
++ */
++void
++fluid_cmd_handler_set_renderer(fluid_cmd_handler_t *handler, fluid_file_renderer_t *renderer)
++{
++    fluid_return_if_fail(handler != NULL);
++    handler->renderer = renderer;
++    handler->pending_samples = 0.0;
++}
++
+ /**
+  * Delete a command handler.
+  *
+diff --git a/src/bindings/fluid_cmd.h b/src/bindings/fluid_cmd.h
+index 810f0719..50175290 100644
+--- a/src/bindings/fluid_cmd.h
++++ b/src/bindings/fluid_cmd.h
+@@ -100,6 +100,8 @@ int fluid_handle_breathmode(void *data, int ac, char **av, fluid_ostream_t out);
+ int fluid_handle_setbreathmode(void *data, int ac, char **av, fluid_ostream_t out);
+ int fluid_handle_sleep(void *data, int ac, char **av, fluid_ostream_t out);
+ 
++void fluid_cmd_handler_set_renderer(fluid_cmd_handler_t *handler, fluid_file_renderer_t *renderer);
++
+ #ifdef LADSPA
+ int fluid_handle_ladspa_effect(void *data, int ac, char **av, fluid_ostream_t out);
+ int fluid_handle_ladspa_link(void *data, int ac, char **av, fluid_ostream_t out);
+diff --git a/src/fluidsynth.c b/src/fluidsynth.c
+index afbe1f34..a5ee7929 100644
+--- a/src/fluidsynth.c
++++ b/src/fluidsynth.c
+@@ -18,6 +18,7 @@
+  */
+ 
+ #include "fluid_sys.h"
++#include "fluid_cmd.h"
+ 
+ #if !defined(_WIN32) && !defined(MACINTOSH)
+ #define _GNU_SOURCE
+@@ -847,7 +848,6 @@ int main(int argc, char **argv)
+     if(fast_render)
+     {
+         midi_in = 0;		/* disable MIDI driver creation */
+-        interactive = 0;	/* disable user shell creation */
+ #ifdef NETWORK_SUPPORT
+         with_server = 0;	/* disable tcp server shell creation */
+ #endif
+@@ -1078,12 +1078,6 @@ int main(int argc, char **argv)
+     {
+         char *filename;
+ 
+-        if(player == NULL)
+-        {
+-            fprintf(stderr, "No midi file specified!\n");
+-            goto cleanup;
+-        }
+-
+         fluid_settings_dupstr(settings, "audio.file.name", &filename);
+         if(filename)
+         {
+@@ -1095,7 +1089,33 @@ int main(int argc, char **argv)
+             FLUID_FREE(filename);
+         }
+ 
+-        fast_render_loop(settings, synth, player);
++        if(player != NULL)
++        {
++            /* Render from MIDI file */
++            fast_render_loop(settings, synth, player);
++        }
++        else if(interactive)
++        {
++            /* Render from stdin commands */
++            fluid_file_renderer_t *renderer = new_fluid_file_renderer(synth);
++
++            if(renderer == NULL)
++            {
++                fprintf(stderr, "Failed to create the file renderer.\n");
++                goto cleanup;
++            }
++
++            fluid_cmd_handler_set_renderer(cmd_handler, renderer);
++            fluid_settings_setstr(settings, "shell.prompt", "");
++            fluid_usershell(settings, cmd_handler);
++            fluid_cmd_handler_set_renderer(cmd_handler, NULL);
++            delete_fluid_file_renderer(renderer);
++        }
++        else
++        {
++            fprintf(stderr, "No midi file specified!\n");
++            goto cleanup;
++        }
+     }
+     else /* start the synthesis thread */
+     {
+@@ -1110,15 +1130,22 @@ int main(int argc, char **argv)
+         /* run the shell */
+         if(interactive)
+         {
+-            printf("Type 'help' for help topics.\n\n");
++            int is_tty = isatty(fileno(stdin));
++
++            if(is_tty)
++            {
++                printf("Type 'help' for help topics.\n\n");
++            }
+ 
+             /* In dump mode we set the prompt to "". The UI cannot easily
+             * handle lines, which don't end with CR.  Changing the prompt
+             * cannot be done through a command, because the current shell
+             * does not handle empty arguments.  The ordinary case is dump ==
+             * 0.
++            * When stdin is a pipe, also set prompt to "" to avoid cluttering
++            * the output with prompts for each piped command.
+             */
+-            fluid_settings_setstr(settings, "shell.prompt", dump ? "" : "> ");
++            fluid_settings_setstr(settings, "shell.prompt", (dump || !is_tty) ? "" : "> ");
+             fluid_usershell(settings, cmd_handler); /* this is a synchronous shell */
+         }
+     }
+diff --git a/src/utils/fluid_sys.c b/src/utils/fluid_sys.c
+index 24a524a4..3fbc0398 100644
+--- a/src/utils/fluid_sys.c
++++ b/src/utils/fluid_sys.c
+@@ -1166,7 +1166,7 @@ fluid_istream_readline(fluid_istream_t in, fluid_ostream_t out, char *prompt,
+ {
+ #if READLINE_SUPPORT
+ 
+-    if(in == fluid_get_stdin())
++    if(in == fluid_get_stdin() && isatty(in))
+     {
+         char *line;
+ 
