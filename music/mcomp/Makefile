@@ -35,6 +35,15 @@ CC=gcc
 #-----------------------------------------------------------------------------
 OS := ${shell uname}
 #-----------------------------------------------------------------------------
+# OS-specific settings for fluidsynth
+ifeq ($(OS),Darwin)
+    SOUNDFONT_GS = /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2
+    FLUID_AUDIO  = -a sdl2
+else
+    SOUNDFONT_GS = /home/m4/src/GeneralUser_GS/GeneralUser.sf2
+    FLUID_AUDIO  = -a pulseaudio
+endif
+#-----------------------------------------------------------------------------
 CFLAGS   +=-g
 CFLAGS   +=-O0
 #-- ifneq (${OS},Darwin)
@@ -200,7 +209,7 @@ v:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc -m v-0 >v.csv
 	csvmidi v.csv v.mid
 #	fluidsynth -a sdl2 -i -n -q --reverb=off /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 v.mid
-	fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 v.mid
+	fluidsynth ${FLUID_AUDIO} -i -n -q -g 0.5 -K 64 ${SOUNDFONT_GS} v.mid
 #-----------------------------------------------------------------------------
 .PHONY: a1
 a1:
@@ -208,7 +217,7 @@ a1:
 	#-- ~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.01 >a1.abc
 	#-- yaps a1.abc -o a1.ps -k
 	csvmidi a1.csv a1.mid
-	fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a1.mid
+	fluidsynth ${FLUID_AUDIO} -i -n -q -g 0.5 -K 64 ${SOUNDFONT_GS} a1.mid
 #-----------------------------------------------------------------------------
 .PHONY: a2
 a2:
@@ -216,7 +225,7 @@ a2:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.02 >a2.abc
 	yaps a2.abc -o a2.ps -k
 	csvmidi a2.csv a2.mid
-	fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a2.mid
+	fluidsynth ${FLUID_AUDIO} -i -n -q -g 0.5 -K 64 ${SOUNDFONT_GS} a2.mid
 #-----------------------------------------------------------------------------
 .PHONY: a3
 a3:
@@ -224,7 +233,7 @@ a3:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.03 >a3.abc
 	yaps a3.abc -o a3.ps -k
 	csvmidi a3.csv a3.mid
-	fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a3.mid
+	fluidsynth ${FLUID_AUDIO} -i -n -q -g 0.5 -K 64 ${SOUNDFONT_GS} a3.mid
 #-----------------------------------------------------------------------------
 .PHONY: a4
 a4:
@@ -232,7 +241,7 @@ a4:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.04 >a4.abc
 	yaps a4.abc -o a4.ps -k
 	csvmidi a4.csv a4.mid
-	fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a4.mid
+	fluidsynth ${FLUID_AUDIO} -i -n -q -g 0.5 -K 64 ${SOUNDFONT_GS} a4.mid
 #-----------------------------------------------------------------------------
 .PHONY: a5
 a5:
@@ -240,7 +249,7 @@ a5:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.05 >a5.abc
 	yaps a5.abc -o a5.ps -k
 	csvmidi a5.csv a5.mid
-	fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a5.mid
+	fluidsynth ${FLUID_AUDIO} -i -n -q -g 0.5 -K 64 ${SOUNDFONT_GS} a5.mid
 #-----------------------------------------------------------------------------
 .PHONY: a6
 a6:
@@ -248,7 +257,7 @@ a6:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.06 >a6.abc
 	yaps a6.abc -o a6.ps -k
 	csvmidi a6.csv a6.mid
-	fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a6.mid
+	fluidsynth ${FLUID_AUDIO} -i -n -q -g 0.5 -K 64 ${SOUNDFONT_GS} a6.mid
 #-----------------------------------------------------------------------------
 .PHONY: a7
 a7:
@@ -256,7 +265,7 @@ a7:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.07 >a7.abc
 	yaps a7.abc -o a7.ps -k
 	csvmidi a7.csv a7.mid
-	fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a7.mid
+	fluidsynth ${FLUID_AUDIO} -i -n -q -g 0.5 -K 64 ${SOUNDFONT_GS} a7.mid
 #-----------------------------------------------------------------------------
 .PHONY: a8
 a8:
@@ -264,7 +273,7 @@ a8:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.08 >a8.abc
 	yaps a8.abc -o a8.ps -k
 	csvmidi a8.csv a8.mid
-	fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a8.mid
+	fluidsynth ${FLUID_AUDIO} -i -n -q -g 0.5 -K 64 ${SOUNDFONT_GS} a8.mid
 #-----------------------------------------------------------------------------
 .PHONY: a9
 a9:
@@ -272,7 +281,7 @@ a9:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.09 >a9.abc
 	yaps a9.abc -o a9.ps -k
 	csvmidi a9.csv a9.mid
-	fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a9.mid
+	fluidsynth ${FLUID_AUDIO} -i -n -q -g 0.5 -K 64 ${SOUNDFONT_GS} a9.mid
 #-----------------------------------------------------------------------------
 .PHONY: a10
 a10:
@@ -280,6 +289,6 @@ a10:
 	~/Desktop/plato-stuff/music/musicomp2abc/musicomp2abc A.10 >a10.abc
 	yaps a10.abc -o a10.ps -k
 	csvmidi a10.csv a10.mid
-	fluidsynth -a sdl2 -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 a10.mid
+	fluidsynth ${FLUID_AUDIO} -i -n -q -g 0.5 -K 64 ${SOUNDFONT_GS} a10.mid
 #-----------------------------------------------------------------------------
 # End of Makefile

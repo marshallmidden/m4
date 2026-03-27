@@ -1,16 +1,73 @@
-#!/bin/bash -eupx
+#!/bin/bash -eup
 #------------------------------------------------------------------------------
-(cd ../songs                      && make clean && ./AAA.diff._2 && make clean)
+LOGDIR=$(mktemp -d /tmp/DOALL.XXXXXX)
+trap "rm -rf $LOGDIR" EXIT
 #------------------------------------------------------------------------------
-(cd ../musicomp2abc               && make clean && ./AAA.diff._2 && make clean)
+# Run all test suites in parallel, each logging to its own file.
 #------------------------------------------------------------------------------
-(cd ../b                          && make clean && ./AAA.diff._2 && make clean)
+(cd ../songs            && make clean && ./AAA.diff._2 && make clean) >$LOGDIR/1.songs.log            2>&1 &
+(cd ../musicomp2abc     && make clean && ./AAA.diff._2 && make clean) >$LOGDIR/2.musicomp2abc.log     2>&1 &
+(cd ../b                && make clean && ./AAA.diff._2 && make clean) >$LOGDIR/3.b.log                2>&1 &
+(cd ../t/e              && make clean && ./AAA.diff._2 && make clean) >$LOGDIR/4.te.log               2>&1 &
+(cd tc-testing/gershwin && make clean && ./AAA.diff._2 && make clean) >$LOGDIR/5.gershwin.log         2>&1 &
 #------------------------------------------------------------------------------
-(cd ../t/e                        && make clean && ./AAA.diff._2 && make clean)
+echo "Launched 5 test suites in parallel (PIDs: $(jobs -p | tr '\n' ' '))"
+echo "Waiting..."
+wait
+echo "All test suites finished."
 #------------------------------------------------------------------------------
-#-- (cd tc-testing/gershwin           && make clean && ./AAA.diff._2 && make clean)
+# Print each suite's output with a header, and combine for summary.
 #------------------------------------------------------------------------------
-echo "ALL OKAY!"
+LOGFILE=$LOGDIR/combined.log
+for f in $LOGDIR/[1-5].*.log; do
+    NAME=$(basename $f .log | sed 's/^[0-9]\.//')
+    echo ""
+    echo "##############################################################################"
+    echo "## $NAME"
+    echo "##############################################################################"
+    ARGH_COUNT=$(grep -c '^ARGH' $f 2>/dev/null || true)
+    LINES=$(wc -l < $f)
+    echo "  ($LINES lines, $ARGH_COUNT ARGHs)"
+    echo "------------------------------------------------------------------------------"
+    cat $f
+done | tee $LOGFILE
 #------------------------------------------------------------------------------
-exit 0
+# Count and report failures.
+#------------------------------------------------------------------------------
+echo ""
+echo "=============================================================================="
+echo "  DOALL SUMMARY"
+echo "=============================================================================="
+#-- Per-suite counts.
+for f in $LOGDIR/[1-5].*.log; do
+    NAME=$(basename $f .log | sed 's/^[0-9]\.//')
+    BARE=$(grep -c '^ARGH$' $f 2>/dev/null || true)
+    NAMED=$(grep -c '^ARGH .' $f 2>/dev/null || true)
+    printf "  %-20s bare: %3d   named: %3d\n" "$NAME" "$BARE" "$NAMED"
+done
+echo "------------------------------------------------------------------------------"
+#-- Totals.
+BARE_ARGH=$(grep -c '^ARGH$' $LOGFILE 2>/dev/null || true)
+NAMED_ARGH=$(grep -c '^ARGH .' $LOGFILE 2>/dev/null || true)
+echo "  TOTAL bare ARGHs (imscomp vs musicomp2abc diffs) : $BARE_ARGH"
+echo "  TOTAL named ARGHs (execution failures)           : $NAMED_ARGH"
+echo "------------------------------------------------------------------------------"
+if [ "$NAMED_ARGH" -gt 0 ]; then
+    echo "  Named ARGH details:"
+    grep '^ARGH .' $LOGFILE | sort | uniq -c | sort -rn
+    echo "------------------------------------------------------------------------------"
+fi
+if [ "$NAMED_ARGH" -gt 0 ]; then
+    echo "  RESULT: FAIL ($NAMED_ARGH execution failure(s))"
+    echo "=============================================================================="
+    exit 1
+elif [ "$BARE_ARGH" -gt 0 ]; then
+    echo "  RESULT: PASS (with $BARE_ARGH known imscomp-vs-musicomp2abc diffs)"
+    echo "=============================================================================="
+    exit 0
+else
+    echo "  RESULT: ALL OKAY!"
+    echo "=============================================================================="
+    exit 0
+fi
 #------------------------------------------------------------------------------

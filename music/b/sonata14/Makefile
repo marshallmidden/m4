@@ -6,6 +6,17 @@ IMSCOMP      = ../../ims/imscomp
 MUSICOMP2ABC = ../../musicomp2abc/musicomp2abc
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
+FLUIDSYNTH   = ~/bin/fluidsynth
+#-----------------------------------------------------------------------------
+# OS-specific settings for fluidsynth
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+    SOUNDFONT  = /Users/m4/src/GeneralUser/GeneralUser.sf2
+    FLUID_AUDIO = -a coreaudio
+else
+    SOUNDFONT  = /home/m4/src/GeneralUser_GS/GeneralUser.sf2
+    FLUID_AUDIO =
+endif
 #-----------------------------------------------------------------------------
 CPP=gcc -E -x c -undef -Wundef -Werror -nostdinc -C -CC
 #-----------------------------------------------------------------------------
@@ -41,8 +52,8 @@ ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %_2.mid:        %_2.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
-%.wav:  %.mid Makefile
-	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser/GeneralUser.sf2 -K 128 $< \
+%.wav:  %.fs Makefile
+	${FLUIDSYNTH} -q -F $@ ${SOUNDFONT} < $< \
 		|| (rm -f $@ ; exit 1)
 %.abc:  %.E Makefile
 	${MUSICOMP2ABC} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)

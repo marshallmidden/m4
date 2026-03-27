@@ -17,8 +17,19 @@ SONGS_2_PDF= ${SONGS:=_2.pdf}
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ../../musicomp2abc/musicomp2abc
 IMSCOMP      = ../../ims/imscomp
+FLUIDSYNTH   = ~/bin/fluidsynth
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
+#-----------------------------------------------------------------------------
+# OS-specific settings for fluidsynth
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+    SOUNDFONT  = /Users/m4/src/GeneralUser/GeneralUser.sf2
+    FLUID_AUDIO = -a coreaudio
+else
+    SOUNDFONT  = /home/m4/src/GeneralUser_GS/GeneralUser.sf2
+    FLUID_AUDIO =
+endif
 #-----------------------------------------------------------------------------
 # -b nn = starting bar number
 # -i = put red circle around errors.
@@ -78,8 +89,8 @@ MC_ARGS ?=
 %_m.h:    %.E
 	${MUSICOMP} ${MC_ARGS} --hori $< $@
 #-----------------------------------------------------------------------------
-%.wav:  %.mid
-	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser/GeneralUser.sf2 -K 128 $< \
+%.wav:  %.fs
+	${FLUIDSYNTH} -q -F $@ ${SOUNDFONT} < $< \
 		|| (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help
@@ -122,7 +133,7 @@ clean:
 	rm -f *.stdout *.stderr
 	rm -f ${SONGS_E} ${SONGS_ABC} ${SONGS_2_ABC} ${SONGS_FS} ${SONGS_2_FS}
 	rm -f ${SONGS_PS} ${SONGS_2_PS} ${SONGS_PS} ${SONGS_2_PS} ${SONGS_PDF} ${SONGS_2_PDF}
-	rm -f *.wav *.csv *.h *.v
+	rm -f *.wav *.csv *.h *.v *.E
 #-----------------------------------------------------------------------------
 .PHONY: s1
 s1: ${SONGS_FS} ${SONGS_2_FS}    Makefile ${MUSICOMP2ABC}

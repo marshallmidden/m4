@@ -15,17 +15,29 @@ MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 YAPS	     = yaps
 ABCM2PS	     = abcm2ps
 #-----------------------------------------------------------------------------
+# OS-specific settings for fluidsynth
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+    SOUNDFONT_GS = /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2
+    FLUID_AUDIO  = -a coreaudio
+else
+    SOUNDFONT_GS = /home/m4/src/GeneralUser_GS/GeneralUser.sf2
+    FLUID_AUDIO  =
+endif
+#-----------------------------------------------------------------------------
 CPP=gcc -E -x c -undef -Wundef -Werror -nostdinc -C -CC
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.csv %.mid %.E
-.SUFFIXES: .mid .csv .ps .abc _m.ps .wav .E
+.SUFFIXES: .mid .csv .ps .abc _m.ps .wav .fs .E
 # output $@   -- input $<
 %.csv:  %.E
 	${MUSICOMP2ABC} --midi1csv $< $@ || rm -f $@
+%.fs:  %.E
+	${MUSICOMP2ABC} --fluidsynth $< $@ || (rm -f $@ ; exit 1)
 %.mid:  %.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
-%.wav:  %.mid
-	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 64 $<
+%.wav:  %.fs
+	fluidsynth -q -F $@ ${SOUNDFONT_GS} < $<
 %.abc:  %.E
 	${MUSICOMP2ABC} --abc $< $@ || (rm -f $@ ; exit 1)
 %.ps:   %.abc
@@ -53,7 +65,7 @@ all songs: ${SONGS_MID} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV}
 .PHONY: clean
 clean:
 	rm -f ${SONGS_CSV} ${SONGS_MID} ${SONGS_ABC} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_WAV} ${SONGS_E}
-	rm -f *.stderr tags ctags
+	rm -f *.fs *.stderr tags ctags
 #-----------------------------------------------------------------------------
 .PHONY: tags ctags
 tags ctags:

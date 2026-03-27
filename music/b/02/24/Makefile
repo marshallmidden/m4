@@ -2,8 +2,19 @@ V4           = v2-4
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ../../../musicomp2abc/musicomp2abc
 IMSCOMP      = ../../../ims/imscomp
+FLUIDSYNTH   = ~/bin/fluidsynth
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
+#-----------------------------------------------------------------------------
+# OS-specific settings for fluidsynth
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+    SOUNDFONT  = /Users/m4/src/GeneralUser/GeneralUser.sf2
+    FLUID_AUDIO = -a coreaudio
+else
+    SOUNDFONT  = /home/m4/src/GeneralUser_GS/GeneralUser.sf2
+    FLUID_AUDIO =
+endif
 #-----------------------------------------------------------------------------
 # -b nn = starting bar number
 # -i = put red circle around errors.
@@ -55,8 +66,8 @@ MC_ARGS ?=
 %.E: %.gcs ../../instruments.include ${M} Makefile
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
-%.wav:  %.mid
-	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser/GeneralUser.sf2 -K 128 $< \
+%.wav:  %.fs
+	${FLUIDSYNTH} -q -F $@ ${SOUNDFONT} < $< \
 		|| (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help

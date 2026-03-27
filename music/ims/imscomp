@@ -1485,6 +1485,16 @@ is_float_string = 1
 
 def is_float(strg, type_float, none_means_none) -> tuple[str | None, float | str | None]:
     """Parse and evaluate a string as a numeric expression via the calculate module."""
+    # Fast path: if strg is a plain number, skip the full calculator parse.
+    if type_float == is_float_number and isinstance(strg, str) and strg:
+        try:
+            sexpr = float(strg)
+            if sexpr.is_integer():
+                sexpr = int(sexpr)
+            return sexpr, None
+        except ValueError:
+            pass                                # Fall through to full parse.
+    # fi
     tree = calculate.parse(strg)            # parse the string
     if tree is None or len(tree) != 2:
         return None, None
@@ -2180,6 +2190,16 @@ legal_mc_notes = {
 global legal_floating_times
 legal_floating_times = sorted(legal_notes.values())
 
+# Cache for Fraction().limit_denominator(256) results — avoids repeated construction.
+_frac_cache = {}
+def _cached_frac256(v):
+    """Return str(Fraction(v).limit_denominator(256)), cached."""
+    r = _frac_cache.get(v)
+    if r is None:
+        r = str(Fraction(v).limit_denominator(256))
+        _frac_cache[v] = r
+    return r
+
 global DECORATIONS
 DECORATIONS = '+'
 # - DECORATIONS = '!'
@@ -2704,6 +2724,10 @@ goto_variables = { }                # first index is measure number. Value is nu
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global meas                         # measure names.
 meas = []
+global _fvmlth_done                 # fill_voice_mlth: set of measures fully processed.
+_fvmlth_done = set()
+global _fvmlth_nv                   # fill_voice_mlth: voice count at last run.
+_fvmlth_nv = 0
 global last_m                       # Previous measure.
 last_m = ''                         # Default to none.
 global measure_on                   # The measure/unit are we are working on.
@@ -3190,7 +3214,7 @@ def get_time_stak(timeofnote, voiceon, original_line) -> tuple:
                 if f in legal_mc_notes:
                     vv = legal_mc_notes[f]
                 else:
-                    vv = str(Fraction(v).limit_denominator(256))
+                    vv = _cached_frac256(v)
                     if '/' in vv or v > 1:
                         vv = '(' + str(f) + ')'
                     # fi
@@ -3200,7 +3224,7 @@ def get_time_stak(timeofnote, voiceon, original_line) -> tuple:
                 v = round((f * 4.0) * MIDICLICKSPERQUARTER)
             else:       # ABC
                 v = f * int(measure_meter_note[measure_on])
-                v = str(Fraction(v).limit_denominator(256))
+                v = _cached_frac256(v)
                 if v[0:2] == '1/':
                     v = v[1:]
                 # fi
@@ -3232,7 +3256,7 @@ def note_text_fraction(x) -> str:
     global tempo_note_length_now
     global legal_notes
 
-    l = str(Fraction(x).limit_denominator(256))
+    l = _cached_frac256(x)
     if l not in legal_notes:
         if not args.notrillwarnings:
             print_warning(f"#1 Time fraction '{x}' is not a printable note. ({l})", 'note_text_fraction')
@@ -8556,9 +8580,19 @@ def fill_voice_mlth(meter_check, original_line) -> None:
     global cis
     global MIDICLICKSPERQUARTER
     global last_voice_staff
+    global _fvmlth_done
+    global _fvmlth_nv
 
     maxvoice = len(volume)+1
+    # If new voices were added since last run, all measures need re-processing.
+    if maxvoice != _fvmlth_nv:
+        _fvmlth_done = set()
+        _fvmlth_nv = maxvoice
+    # fi
     for p_meas in meas:
+        if p_meas in _fvmlth_done:
+            continue
+        # fi
         m = 0
         for i in range(1, maxvoice):
             if p_meas not in mlth[i]:
@@ -8596,6 +8630,11 @@ def fill_voice_mlth(meter_check, original_line) -> None:
                 # fi
             # fi
         # rof
+        # Only mark a measure as done if it's not the currently-active measure
+        # (which may still receive notes).
+        if p_meas != measure_on:
+            _fvmlth_done.add(p_meas)
+        # fi
     # rof
     # Set total for voice to max of all.
     t = 0
@@ -9005,7 +9044,7 @@ def to_abc_note(note_number: int) -> str:
     octaves = { 0:',,,', 1:',,', 2:',', 3:'', 4:'', 5:"'", 6:"''", 7:"'''", 8:"''''" }
     notes = { 0:'a', 1:'^a', 2:'b', 3:'c', 4:'^c', 5:'d', 6:'^d', 7:'e', 8:'f', 9:'^f', 10:'g', 11:'^g' }
     if o not in octaves:
-        print_debug(f'to_abc_note({note_number}) bad octave ({a})')     #DEBUG
+        print_debug(f'to_abc_note({note_number}) bad octave ({o})')     #DEBUG
         return 'z'
     # fi
     if n not in notes:
@@ -13626,7 +13665,7 @@ def do_voice(t_args: str | None, original_line: str) -> None:
 
     # If there are more arguments, choose instruments for the voices.
     if len(vargs) > 1:
-        jkl = str(vargs[1:])
+        jkl = ','.join(vargs[1:])
         wargs = separate_args(jkl, False, True, original_line)
         if not wargs or len(wargs) < 1:
             print_error("no instrument selection arguments on voice line", original_line)
@@ -17148,7 +17187,7 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
             if args.horizontal or args.vertical or args.midi1csv or args.fluidsynth or args.staves or args.lilypond:
                 pass
             else:           # ABC
-                append_tie = ')' + append_tie
+                append_tie = append_tie + ')'
             # fi
         # fi
         legato_next = ''
@@ -19172,6 +19211,7 @@ def readthefile() -> None:
             continue
         # fi
         num_putd = 0
+        numcharvar = 0
         while True:                         # Macro and putd variable substitution loop, etc. (till no more).
             if macro_defining is not None:
                 # Replace any macro arguments - in macro definitions.

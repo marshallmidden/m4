@@ -131,9 +131,21 @@ BROKEN += slidall
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ../musicomp2abc/musicomp2abc
 IMSCOMP = ../ims/imscomp
+FLUIDSYNTH   = ~/bin/fluidsynth
 #-- YAPS         = yaps
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
+#-----------------------------------------------------------------------------
+# OS-specific settings for fluidsynth
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+    SOUNDFONT  = /Users/m4/src/GeneralUser/GeneralUser.sf2
+    FLUID_AUDIO = -a coreaudio
+else
+    SOUNDFONT  = /home/m4/src/GeneralUser_GS/GeneralUser.sf2
+    FLUID_AUDIO =
+endif
+#-----------------------------------------------------------------------------
 MC_ARGS ?= --nofillwarning --nooncewarning --norestswarning --noleftoverwarnings --notrillwarnings
 #-- MC_ARGS += --one
 #-- MC_ARGS += --two
@@ -211,11 +223,11 @@ BROKEN_2MID = ${BROKEN:=_2.mid}
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %_2.mid:  %_2.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
-%.wav:  %.mid
-	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser/GeneralUser.sf2 -K 128 $< \
+%.wav:  %.fs
+	${FLUIDSYNTH} -q -F $@ ${SOUNDFONT} < $< \
 		|| (rm -f $@ ; exit 1)
-%_2.wav:  %_2.mid
-	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser/GeneralUser.sf2 -K 128 $< \
+%_2.wav:  %_2.fs
+	${FLUIDSYNTH} -q -F $@ ${SOUNDFONT} < $< \
 		|| (rm -f $@ ; exit 1)
 %.abc:  %.E
 	${MUSICOMP2ABC} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
