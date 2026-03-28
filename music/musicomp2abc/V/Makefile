@@ -12,6 +12,7 @@ SONGS_PS = ${SONGS:=.ps}
 SONGS_WAV = ${SONGS:=.wav}
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
+FLUIDSYNTH   = ~/bin/fluidsynth
 YAPS	     = yaps
 ABCM2PS	     = abcm2ps
 #-----------------------------------------------------------------------------
@@ -37,7 +38,7 @@ CPP=gcc -E -x c -undef -Wundef -Werror -nostdinc -C -CC
 %.mid:  %.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.wav:  %.fs
-	fluidsynth -q -F $@ ${SOUNDFONT_GS} < $<
+	${FLUIDSYNTH} -q -F $@ ${SOUNDFONT_GS} < $<
 %.abc:  %.E
 	${MUSICOMP2ABC} --abc $< $@ || (rm -f $@ ; exit 1)
 %.ps:   %.abc

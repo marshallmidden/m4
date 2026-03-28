@@ -120,8 +120,8 @@ fs: ${V2}.fs ${V2}_2.fs
 clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
-	rm -f ${V2}.{csv,mid,fs,pdf,abc,wav,E,h,v}
-	rm -f ${V2}_2.{csv,mid,fs,pdf,abc,wav,E,h,v}
+	rm -f ${V2}.csv ${V2}.mid ${V2}.fs ${V2}.pdf ${V2}.abc ${V2}.wav ${V2}.E ${V2}.h ${V2}.v
+	rm -f ${V2}_2.csv ${V2}_2.mid ${V2}_2.fs ${V2}_2.pdf ${V2}_2.abc ${V2}_2.wav ${V2}_2.E ${V2}_2.h ${V2}_2.v
 
 	rm -f ZZZ.*
 #-----------------------------------------------------------------------------

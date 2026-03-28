@@ -13,6 +13,7 @@
 CSV = ${FILE}.csv
 MIDI = ${FILE}.mid
 WAV = ${FILE}.wav
+FLUIDSYNTH = ~/bin/fluidsynth
 # ----------------------------------------------------------------------------
 # OS-specific settings for fluidsynth
 UNAME_S := $(shell uname -s)
@@ -28,7 +29,7 @@ endif
 all:
 	./c11.pl > ${CSV}
 	csvmidi ${CSV} ${MIDI}
-	fluidsynth -F "${WAV}" ${FLUID_AUDIO} -i -n -q -g 0.5 -K 64 ${SOUNDFONT_GS} "${MIDI}"
+	${FLUIDSYNTH} -F "${WAV}" ${FLUID_AUDIO} -i -n -q -g 0.5 -K 64 ${SOUNDFONT_GS} "${MIDI}"
 	cp ${WAV} ~/Downloads/
 
 # ----------------------------------------------------------------------------

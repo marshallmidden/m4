@@ -106,14 +106,14 @@ fs2: ${V1}_2.fs ${V2}_2.fs ${V3}_2.fs ${V4}_2.fs
 clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
-	rm -f ${V1}.{csv,mid,fs,pdf,abc,wav,E,h,v}
-	rm -f ${V2}.{csv,mid,fs,pdf,abc,wav,E,h,v}
-	rm -f ${V3}.{csv,mid,fs,pdf,abc,wav,E,h,v}
-	rm -f ${V4}.{csv,mid,fs,pdf,abc,wav,E,h,v}
-	rm -f ${V1}_2.{csv,mid,fs,pdf,abc,wav,E,h,v}
-	rm -f ${V2}_2.{csv,mid,fs,pdf,abc,wav,E,h,v}
-	rm -f ${V3}_2.{csv,mid,fs,pdf,abc,wav,E,h,v}
-	rm -f ${V4}_2.{csv,mid,fs,pdf,abc,wav,E,h,v}
+	rm -f ${V1}.csv ${V1}.mid ${V1}.fs ${V1}.pdf ${V1}.abc ${V1}.wav ${V1}.E ${V1}.h ${V1}.v
+	rm -f ${V1}_2.csv ${V1}_2.mid ${V1}_2.fs ${V1}_2.pdf ${V1}_2.abc ${V1}_2.wav ${V1}_2.E ${V1}_2.h ${V1}_2.v
+	rm -f ${V2}.csv ${V2}.mid ${V2}.fs ${V2}.pdf ${V2}.abc ${V2}.wav ${V2}.E ${V2}.h ${V2}.v
+	rm -f ${V2}_2.csv ${V2}_2.mid ${V2}_2.fs ${V2}_2.pdf ${V2}_2.abc ${V2}_2.wav ${V2}_2.E ${V2}_2.h ${V2}_2.v
+	rm -f ${V3}.csv ${V3}.mid ${V3}.fs ${V3}.pdf ${V3}.abc ${V3}.wav ${V3}.E ${V3}.h ${V3}.v
+	rm -f ${V3}_2.csv ${V3}_2.mid ${V3}_2.fs ${V3}_2.pdf ${V3}_2.abc ${V3}_2.wav ${V3}_2.E ${V3}_2.h ${V3}_2.v
+	rm -f ${V4}.csv ${V4}.mid ${V4}.fs ${V4}.pdf ${V4}.abc ${V4}.wav ${V4}.E ${V4}.h ${V4}.v
+	rm -f ${V4}_2.csv ${V4}_2.mid ${V4}_2.fs ${V4}_2.pdf ${V4}_2.abc ${V4}_2.wav ${V4}_2.E ${V4}_2.h ${V4}_2.v
 	rm -f A.[012]* B.[012]*
 #-----------------------------------------------------------------------------
 .PHONY: s1

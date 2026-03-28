@@ -1446,7 +1446,7 @@ createglobalvar('lferm', 1, 0, type_is_number, True)                 # No fermat
 createglobalvar('stac', 0.50, 0, type_is_number, True)               # Staccato length multiplier - used to be 4, but IMS is 1/4 - but reality says it is supposed to be 50%.
 createglobalvar('marc', 0.70, 0, type_is_number, True)               # Marcato length multipliers.
 createglobalvar('tenuto', 0.90, 0, type_is_number, True)             # Tenuto length multipliers.
-createglobalvar('legato', 1.10, 0, type_is_number, True)             # legato length multiplier - more for overlap.
+createglobalvar('legato', 1.15, 0, type_is_number, True)             # legato length multiplier - more for overlap.
 createglobalvar('time', 0, 0, type_is_number, True)                  # The "time" in measure for current voice. (staff?)
 createglobalvar('in_chord', 0, 0, type_is_number, True)              # True (tutor style, -1) if inside a chord.
 
@@ -4664,6 +4664,20 @@ def print_out_staves() -> None:
                         j = working[voice]
                         if j < len(bufs[voice][m]):
                             n = bufs[voice][m][j]
+                            # Adjust octave +1 for staff format output (reverses the -1 done at input).
+                            if middle_c == (39 + 12):
+                                # Find octave digit, which may follow a vol(...) prefix.
+                                prefix = ''
+                                rest = n
+                                if rest.startswith('vol('):
+                                    ci = rest.index(')')
+                                    prefix = rest[:ci+1]
+                                    rest = rest[ci+1:]
+                                # fi
+                                if len(rest) >= 1 and rest[0].isdigit() and not rest.startswith('r'):
+                                    n = prefix + str(int(rest[0]) + 1) + rest[1:]
+                                # fi
+                            # fi
                             l = ba.length[voice][m][j]
                             sf = ba.suffixes[voice][m][j]
                             if l in legal_mc_notes:
@@ -5043,20 +5057,6 @@ def print_out_lilypond() -> None:
                     if voice in bufs and m in bufs[voice] and bufs[voice][m]:
                         for j in range(len(bufs[voice][m])):
                             n = bufs[voice][m][j]
-                            # Adjust octave +1 for staff format output (reverses the -1 done at input).
-                            if middle_c == (39 + 12):
-                                # Find octave digit, which may follow a vol(...) prefix.
-                                prefix = ''
-                                rest = n
-                                if rest.startswith('vol('):
-                                    ci = rest.index(')')
-                                    prefix = rest[:ci+1]
-                                    rest = rest[ci+1:]
-                                # fi
-                                if len(rest) >= 1 and rest[0].isdigit() and not rest.startswith('r'):
-                                    n = prefix + str(int(rest[0]) + 1) + rest[1:]
-                                # fi
-                            # fi
                             l = ba.length[voice][m][j]
                             sf = ba.suffixes[voice][m][j]
                             ly_n = _ly_note_name(n)
@@ -5791,8 +5791,8 @@ def do_midi_vpi(voice, m, chan, last_note_on, v_vl, v_pan, v_intens, last_cc11, 
             if last_cc11 != ivol:
                 if last_note_on != '':
                     insert_sorted_tail([voice+1, T, f'Control_c, {chan}, 11, {ivol}'])
+                    last_cc11 = ivol
                 # fi
-                last_cc11 = ivol
             # fi
         # fi
         fpan = fpan - dpinc
@@ -5806,8 +5806,8 @@ def do_midi_vpi(voice, m, chan, last_note_on, v_vl, v_pan, v_intens, last_cc11, 
             if last_cc10 != ipan:
                 if last_note_on != '':
                     insert_sorted_tail([voice+1, T, f'Control_c, {chan}, 10, {ipan}'])
+                    last_cc10 = ipan
                 # fi
-                last_cc10 = ipan
             # fi
         # fi
         fintens = fintens - diinc
@@ -5821,8 +5821,8 @@ def do_midi_vpi(voice, m, chan, last_note_on, v_vl, v_pan, v_intens, last_cc11, 
             if last_cc7 != iintens:
                 if last_note_on != '':
                     insert_sorted_tail([voice+1, T, f'Control_c, {chan}, 7, {iintens}'])
+                    last_cc7 = iintens
                 # fi
-                last_cc7 = iintens
             # fi
         # fi
     # rof
@@ -6010,6 +6010,11 @@ def print_out_midi1csv_notes() -> None:
                         lastlegatolth = 0
                     else:
                         lastlegatolth = note_playing - last_note_length # wishing length for legato.
+                        # Ensure a minimum legato overlap so it's audible.
+                        min_legato = max(MIDICLICKSPERQUARTER // 8, 2)
+                        if lastlegatolth > 0 and lastlegatolth < min_legato:
+                            lastlegatolth = min_legato
+                        # fi
                     # fi
                     lthworkingmeasures = lthworkingmeasures + last_note_length
                 else:
@@ -6074,6 +6079,45 @@ def print_out_midi1csv_notes() -> None:
                         print_error_no_line(f"v:{voice} m:{m} Not integer: n='{n}' pitch='{pitch[m]}'")
                         break
                     # yrt
+                # fi
+
+                # Compute volume/articulation and emit CC BEFORE Note_on for proper MIDI event ordering.
+                # CC events inserted first ensure synths see the new volume before the Note_on.
+                v_vl = ba.volume[voice][m][nn]
+                v_pan = ba.pan[voice][m][nn]
+                v_intens = ba.intensity[voice][m][nn]
+                note_playing = last_note_length
+                if 'm' in last_suffixes:                    # marcato - 70% + volume higher.
+                    v_vl = v_vl + 3
+                    v_vl = 127 if v_vl > 127 else v_vl
+                    v_intens = v_intens + 3
+                    v_intens = 127 if v_intens > 127 else v_intens
+                    note_playing = int(note_playing * last_marc)
+                # fi
+                if 'a' in last_suffixes:                    # accent, or aaccent (double).
+                    tmp = last_accent if last_suffixes.count('a') == 1 else last_aaccent
+                    v_vl = v_vl + tmp
+                    v_vl = 127 if v_vl > 127 else v_vl
+                    v_intens = v_intens + tmp
+                    v_intens = 127 if v_intens > 127 else v_intens
+                # fi
+                if 'u' in last_suffixes:                    # tenuto - 90%, no overlap, distinctive break.
+                    note_playing = int(note_playing * last_tenuto)
+                # fi
+                if 'l' in last_suffixes:                    # legato - extend playing time.
+                    note_playing = int(note_playing * last_legato)
+                # fi
+                if last_cc11 != v_vl:
+                    insert_sorted_tail([voice+1, lthworkingmeasures, f'Control_c, {chan}, 11, {round(float(v_vl))}'], 'HERE24')
+                    last_cc11 = v_vl
+                # fi
+                if last_cc10 != v_pan:
+                    insert_sorted_tail([voice+1, lthworkingmeasures, f'Control_c, {chan}, 10, {round(float(v_pan))}'], 'HERE25')
+                    last_cc10 = v_pan
+                # fi
+                if last_cc7 != v_intens:
+                    insert_sorted_tail([voice+1, lthworkingmeasures, f'Control_c, {chan}, 7, {round(float(v_intens))}'], 'HERE26')
+                    last_cc7 = v_intens
                 # fi
 
                 if 't' in last_suffixes:            # This note is tied to previous.
@@ -6179,66 +6223,17 @@ def print_out_midi1csv_notes() -> None:
 
                 # If legato, turn it on, if not already on.
                 if 'l' in last_suffixes:                    # New note has legato.
-                    tmp = (last_note_length+1) // 2         # Put previous legato off one before this, and this on one after.
-                    if legato_on:                           # Previous was legato, so turn off a touch before returning it on.
-                        tmp = tmp - 1 if tmp > 2 else tmp
-                        insert_sorted_tail([voice+1, lthworkingmeasures + tmp, f'Control_c, {chan}, 68, 0'], 'HERE21a') # OFF
-                        tmp = tmp + 2 if tmp != 0 else 0
+                    if legato_on:                           # Previous was legato, so turn off briefly before returning on.
+                        insert_sorted_tail([voice+1, lthworkingmeasures, f'Control_c, {chan}, 68, 0'], 'HERE21a') # OFF
                     # fi
-                    tmp = last_note_length if tmp >= last_note_length else tmp  # Make sure not a zero length thing.
-                    insert_sorted_tail([voice+1, lthworkingmeasures + tmp, f'Control_c, {chan}, 68, 127'], 'HERE22') # ON
+                    # Emit CC68 at note start so synths apply legato to this note.
+                    insert_sorted_tail([voice+1, lthworkingmeasures + 1, f'Control_c, {chan}, 68, 127'], 'HERE22') # ON
                     legato_on = True
                 else:
                     if legato_on:
                         insert_sorted_tail([voice+1, lthworkingmeasures + lastlegatolth, f'Control_c, {chan}, 68, 0'], 'HERE23') # OFF
                         legato_on = False
                     # fi
-                # fi
-
-                v_vl = ba.volume[voice][m][nn]
-                v_pan = ba.pan[voice][m][nn]
-                v_intens = ba.intensity[voice][m][nn]
-                note_playing = last_note_length
-                if 'm' in last_suffixes:                    # marcato - 70% + volume higher.
-                    # Move up about 1/3 of difference between volumes (currently 10).
-                    v_vl = v_vl + 3
-                    v_vl = 127 if v_vl > 127 else v_vl
-                    v_intens = v_intens + 3
-                    v_intens = 127 if v_intens > 127 else v_intens
-                    note_playing = int(note_playing * last_marc)
-                # fi
-                if 'a' in last_suffixes:                    # accent, or aaccent (double).
-                    # Move up about 1/2 of difference between volumes (currently 10).
-                    tmp = last_accent if last_suffixes.count('a') == 1 else last_aaccent
-                    v_vl = v_vl + tmp
-                    v_vl = 127 if v_vl > 127 else v_vl
-                    v_intens = v_intens + tmp
-                    v_intens = 127 if v_intens > 127 else v_intens
-                # fi
-                if 'u' in last_suffixes:                    # tenuto - 90%, no overlap, distinctive break.
-                    note_playing = int(note_playing * last_tenuto)
-                # fi
-                if 'l' in last_suffixes:                    # marcato - 70% + volume higher.
-                    # LEGATO - off a bit after this note_playing would normally turn off, extend playing time.
-                    note_playing = int(note_playing * last_legato)
-                # fi
-                if last_cc11 != v_vl:
-                    if last_note_on != '':
-                        insert_sorted_tail([voice+1, lthworkingmeasures, f'Control_c, {chan}, 11, {round(float(v_vl))}'], 'HERE24')
-                    # fi
-                    last_cc11 = v_vl
-                # fi
-                if last_cc10 != v_pan:
-                    if last_note_on != '':
-                        insert_sorted_tail([voice+1, lthworkingmeasures, f'Control_c, {chan}, 10, {round(float(v_pan))}'], 'HERE25')
-                    # fi
-                    last_cc10 = v_pan
-                # fi
-                if last_cc7 != v_intens:
-                    if last_note_on != '':
-                        insert_sorted_tail([voice+1, lthworkingmeasures, f'Control_c, {chan}, 7, {round(float(v_intens))}'], 'HERE26')
-                    # fi
-                    last_cc7 = v_intens
                 # fi
 
                 # note_playing will eventually be when to turn note off.

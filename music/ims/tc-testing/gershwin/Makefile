@@ -99,7 +99,6 @@ clean:
 	rm -f *.stderr
 	rm -f *.h *.v *.csv *.mid *.E *.fs *.pdf *.ps *.abc
 	rm -f AAA.[0-9][0-9] BBB.[0-9][0-9]
-	rm -f new-g3.E new-g3.abc new-g3.fs
 #-----------------------------------------------------------------------------
 .PHONY: check
 check:
