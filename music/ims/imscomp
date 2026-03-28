@@ -1414,7 +1414,6 @@ def getvar(arg: str) -> float | str | None:
     wary = chkvar(arg)
     if wary is None or (len(wary[numarry_indexes]) > 1 and wary[numarry_indexes][0] > 1):
         print_error_no_line(f'getvar - multidimensional array {arg} ... without dimensions - wary={wary}')
-        abc[1] = wary
         return None
     # fi
     return wary[numarry_values][0]
@@ -1477,6 +1476,7 @@ createglobalvar('default_duration', 0.90, 0, type_is_number, True)   # Default n
 createglobalvar('humanize', 5, 0, type_is_number, True)              # Max humanization jitter in MIDI ticks (0=off). Use --nohumanize.
 createglobalvar('sustain_pedal', 0, 0, type_is_number, True)         # Sustain pedal CC64: 0=off, -1=on. Set in .gcs for piano.
 createglobalvar('pedal_overlap', 60, 0, type_is_number, True)        # Ticks after note start for pedal down (legato pedaling).
+createglobalvar('velocity_min', 20, 0, type_is_number, True)         # Minimum MIDI velocity (0-127). Allows ppp/pp differentiation.
 createglobalvar('time', 0, 0, type_is_number, True)                  # The "time" in measure for current voice. (staff?)
 createglobalvar('in_chord', 0, 0, type_is_number, True)              # True (tutor style, -1) if inside a chord.
 
@@ -1985,26 +1985,26 @@ def parse_args() -> None:
             else:
                 f, type_error = is_float(l[1], is_float_number, False)
                 if type_error is not None:
-                    print_error(f"--intensity percetage error - {type_error}", original_line)
+                    print_error(f"--intensity percetage error - {type_error}", '')
                     intensity_percentage = 1.0          # Argument --intensity percentage.
                 elif f is None:
-                    print_error("--intensity percetage did not return a value", original_line)
+                    print_error("--intensity percetage did not return a value", '')
                     intensity_percentage = 1.0          # Argument --intensity percentage.
                 else:
                     try:
                         intensity_percentage = float(f) / 100.0
                     except (ValueError, TypeError):
-                        print_error("--intensity percetage is not a floating point number.", original_line)
+                        print_error("--intensity percetage is not a floating point number.", '')
                         intensity_percentage = 1.0          # Argument --intensity percentage.
                     # yrt
                 # fi
             # fi
             f, type_error = is_float(l[0], is_float_number, False)
             if type_error is not None:
-                print_error(f"--intensity error - {type_error}", original_line)
+                print_error(f"--intensity error - {type_error}", '')
                 args.intensity != ''
             elif f is None:
-                print_error("--intensity offset as a calculation did not return a value", original_line)
+                print_error("--intensity offset as a calculation did not return a value", '')
                 args.intensity != ''
             else:
                 if f < 0:
@@ -3279,7 +3279,7 @@ def get_time_stak(timeofnote, voiceon, original_line) -> tuple:
         # fi
         return lengthl, lengthf, 1      # Problems
     # fi
-    if not lengthl or not lengthl:
+    if not lengthl or not lengthf:
         print_error(f"measure={measure_on} voice={voiceon} timeofnote '{timeofnote}' not able to return a usable fraction - min of 1/64", original_line)
         return timeofnote, 0, -1    # False
     # fi
@@ -3443,10 +3443,10 @@ def new_voice_initialize(voiceon: int, m: str) -> None:
         rs.intensity[voiceon] = rs.volume[voiceon]
     elif args.intensity != '':
         rs.intensity[voiceon] = intensity_offset + rs.volume[voiceon] * intensity_percentage
-        if rs.intensity[1] < 1:
-            rs.intensity[1] = 0
-        elif rs.intensity[1] > 126.49:
-            rs.intensity[1] = 127
+        if rs.intensity[voiceon] < 1:
+            rs.intensity[voiceon] = 0
+        elif rs.intensity[voiceon] > 126.49:
+            rs.intensity[voiceon] = 127
         # fi
     else:
         rs.intensity[voiceon] = getvar('default_intensity')
@@ -3497,12 +3497,6 @@ def new_voice_initialize(voiceon: int, m: str) -> None:
             intensity[voiceon][m] = getvar('default_intensity')
         # fi
 
-        if args.intensitymatchesvolume:
-            intensity[voiceon][m] = volume[voiceon][m]
-        else:
-            intensity[voiceon][m] = getvar('default_intensity')
-        # fi
-
     # fi
     if not voiceon in vinstrument:
         set_all_staff_arr(voiceon, {}, vinstrument, 'vinstrument', 'new_voice_initialize')
@@ -3532,6 +3526,7 @@ def new_voice_initialize(voiceon: int, m: str) -> None:
             clef[j] = {}
         # fi
         if m not in clef[j]:
+            nc = 'treble'
             for k in reversed(range(0, len(meas)-1)):
                 mmm = meas[k]
                 if mmm in clef and j in clef[mmm]:
@@ -5940,6 +5935,7 @@ def print_out_midi1csv_notes() -> None:
     _default_duration = float(getvar('default_duration'))
     _sustain_pedal_on = (int(float(getvar('sustain_pedal'))) != 0)
     _pedal_overlap_ticks = int(float(getvar('pedal_overlap')))
+    _velocity_min = int(float(getvar('velocity_min')))
 
     channel = 0                                     # Next midi instrument channel to use.
     chan = 0                                        # The midi channel using now (allows for repeated use).
@@ -5952,7 +5948,7 @@ def print_out_midi1csv_notes() -> None:
         # fi
         if not voice in bufs:
             # "voice='1' staff='flute'"
-            print_error_no_line(f"bufs voice dictionary is hosed (m='{m}', '{get_staff_from_voice(voice)}', lthworkingmeasures='{lthworkingmeasures}')")
+            print_error_no_line(f"bufs voice dictionary is hosed (voice={voice}, '{get_staff_from_voice(voice)}', lthworkingmeasures='{lthworkingmeasures}')")
             sys.exit(1)
         # fi
 
@@ -6074,7 +6070,7 @@ def print_out_midi1csv_notes() -> None:
                         if last_note_on != '':      # There is a note playing from before.
                             if legato_on:           # Legato was turned on.
                                 tmp = int(max(min(note_playing*(1/16), 7), 1))
-                                insert_sorted_tail([voice+1, lthworkingmeasures + tmp, f'Control_c, {chan}, 68, 0"'], 'HERE5')  # OFF
+                                insert_sorted_tail([voice+1, lthworkingmeasures + tmp, f'Control_c, {chan}, 68, 0'], 'HERE5')  # OFF
                                 legato_on = False
                             # fi
                             insert_sorted_tail([voice+1, lthworkingmeasures + note_playing, f'Note_off_c, {chan}, {last_note_on}, {0}'], 'HERE6')
@@ -6137,6 +6133,10 @@ def print_out_midi1csv_notes() -> None:
                         insert_sorted_tail([voice+1, lthworkingmeasures + lastlegatolth, f'Control_c, {chan}, 68, 0'], 'HERE10')   # OFF
                         legato_on = False
                         lastlegatolth = 0
+                    # fi
+                    if _sustain_pedal_on and _pedal_is_down:  # Release sustain pedal on rest.
+                        insert_sorted_tail([voice+1, lthworkingmeasures, f'Control_c, {chan}, 64, 0'], 'HERE_PED_REST')
+                        _pedal_is_down = False
                     # fi
                     # To next note. While loop checks for end of measure.
                     v_vl = ba.volume[voice][m][nn]
@@ -6256,7 +6256,7 @@ def print_out_midi1csv_notes() -> None:
                             last_note_on = drum_sounds[l_instrument]
                         # fi
                         # Scale velocity with current dynamic level for timbral variation.
-                        note_velocity = max(40, min(127, int(note_velocity * float(v_vl) / 100.0)))
+                        note_velocity = max(_velocity_min, min(127, int(note_velocity * float(v_vl) / 100.0)))
                         insert_sorted_tail([voice+1, note_time, f'Note_on_c, {chan}, {last_note_on}, {note_velocity}'], 'HERE13')
                         if args.echoonoff:
                             insert_sorted_tail([voice+1, note_time, f'Text_t, "On:{chan:>4} {last_note_on:>3}"'], 'HERE15')
@@ -6276,7 +6276,7 @@ def print_out_midi1csv_notes() -> None:
                         note_velocity = 127 if note_velocity > 127 else note_velocity
                     # fi
                     # Scale velocity with current dynamic level for timbral variation.
-                    note_velocity = max(40, min(127, int(note_velocity * float(v_vl) / 100.0)))
+                    note_velocity = max(_velocity_min, min(127, int(note_velocity * float(v_vl) / 100.0)))
                     if legato_on:                           # If on from previous note.
                         if l_instrument in instruments:
                             pass
@@ -6331,7 +6331,7 @@ def print_out_midi1csv_notes() -> None:
                         # Really should be a fixed length from end of note? Might just work without?
                         print_warning(f"legato on a staccato voice={get_staff_from_voice(voice)} m='{m}' n#{nn+1}='{n}' last_suffixes='{last_suffixes}'", 'print_out_midi1csv_notes')
                         legato_on = False
-                        last_suffixes = last_suffixes.replace('s','')   # remove the legato.
+                        last_suffixes = last_suffixes.replace('l','')   # remove the legato.
                     # fi
                     note_playing = int(note_playing * last_stacc)
                 # fi
@@ -10438,6 +10438,7 @@ def do_copy(t_args: str | None, original_line: str) -> None:
             return
         # fi
         print_error("copy new name already exists as different command.", original_line)
+        return
     elif new in all_unique_macro_names:
         print_error("copy new name already exists as macro.", original_line)
         return
@@ -12536,7 +12537,7 @@ def do_middle_c(t_args: str | None, original_line: str) -> None:
         note_to_decode = round(thenote)
         note_to_decode = note_to_decode + 12 + 12 - 3     # 3c -> 39 must be 60 for midi.
         if note_to_decode <= 0 or note_to_decode >= 127:
-            print_error(f"middle_c - m:{measure_on} Note number '{theynote}' not in range", original_line)
+            print_error(f"middle_c - m:{measure_on} Note number '{thenote}' not in range", original_line)
             return
         # fi
         compute_middle_c(round(thenote))
@@ -14212,7 +14213,7 @@ def get_volume_number(name, command_name, original_line) -> int | None:
     # fi
     v = round(v)
     if v < 0:                       # If error or bad value
-        print_error(command_name + f" for voice {i} not good {v}, making it zero.", original_line)
+        print_error(command_name + f" for voice {name} not good {v}, making it zero.", original_line)
         v = 0
     # fi
     if command_name in ['volumes', 'keyword_volumename', 'keyword_volumenumber']:
@@ -15451,7 +15452,7 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
                 return '', None, normal_note
             # fi
             lkj = note_to_midi_value_39[jkl] + xv
-            if lkj not in midi_value_to_note_flat_39 or lkj not in midi_value_to_note_sharp_39:
+            if lkj not in midi_value_to_note_flat_39 and lkj not in midi_value_to_note_sharp_39:
                 if do_errors:
                     print_error(f"note jkl='{jkl}' lkj='{lkj}' for m:{measure_on} voiceon {get_staff_from_voice(voiceon)} not in midi_value_to_note_flat_39 array", original_line)
                 # fi
@@ -15466,7 +15467,7 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
                 return '', None, normal_note
             # fi
             lkj = note_to_midi_value[jkl] + xv
-            if lkj not in midi_value_to_note_flat or lkj not in midi_value_to_note_sharp:
+            if lkj not in midi_value_to_note_flat and lkj not in midi_value_to_note_sharp:
                 if do_errors:
                     print_error(f"note jkl='{jkl}' lkj='{lkj}' for m:{measure_on} voiceon {get_staff_from_voice(voiceon)} not in midi_value_to_note_flat array", original_line)
                 # fi
@@ -15491,7 +15492,7 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
         # fi
         lkj = note_to_midi_value[jkl] + xv
 #--         print_debug(f'lkj="{lkj}"   jkl="{jkl}"  xv={xv}')
-        if lkj not in midi_value_to_note_flat or lkj not in midi_value_to_note_sharp:
+        if lkj not in midi_value_to_note_flat and lkj not in midi_value_to_note_sharp:
             if do_errors:
                 print_error(f"note jkl='{jkl}' lkj='{lkj}' for m:{measure_on} voiceon {get_staff_from_voice(voiceon)} not in midi_value_to_note_flat array", original_line)
             # fi
@@ -18295,7 +18296,7 @@ def keyword_transcribe(token, delimiter, next_tokens, original_line):    # NOTDO
     direction = d[0]
     if direction not in [ 'up', 'down']:
         print_error(f'keyword_transcribe expects direction of up or down', original_line)
-        return next_a           # Guess - let do rest.
+        return next_tokens           # Guess - let do rest.
     # fi
     possible_to = d[1]
     if possible_to == 'to':
@@ -19255,6 +19256,7 @@ def do_line(original_line: str, cont: bool) -> bool:
         except (KeyError, IndexError, TypeError):
             print_error(f"m:{measure_on} not found handling routine for command '{command}'", command)
             print('   ', sys.exc_info()[0], sys.exc_info, file=sys.stderr, flush=True)
+            return False
         # yrt
         r(t_args, original_line)
         return False

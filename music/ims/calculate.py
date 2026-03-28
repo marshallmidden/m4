@@ -763,7 +763,7 @@ def quotes_eval(args: list) -> list:
 #--        value = [ 'COMMA', [ int(a0[1]) ] + a2[1] ]
         return [ 'ERROR - quotes_eval second argument is a COMMA, args={} going COMMA?'.format(args), None ]
     # fi
-    return [ value ]
+    return [ 'ERROR - quotes_eval unexpected args={}'.format(args), None ]
 # End of quotes_eval
 
 #-----------------------------------------------------------------------------
@@ -1413,10 +1413,10 @@ def f_m(arg: list) -> list:
         a = float(arg[1])
         a = int(a)
     except (ValueError, TypeError):
-        return [ "ERROR - argument to array m is not an integer '{}'".format(txt, arg), None ]
+        return [ "ERROR - argument to array m is not an integer '{}'".format(arg), None ]
     # yrt
-    if a < 1 or a > 50:
-        return [ "ERROR - argument to array m is out of range 1 to 50 '{}'".format(txt, a), None ]
+    if a < 1 or a > 100:
+        return [ "ERROR - argument to array m is out of range 1 to 100 '{}'".format(a), None ]
     # fi
     return [ 'ID', 'm' + str(a) ]
 # End of f_m
@@ -1489,7 +1489,7 @@ def f_exp(arg: list) -> list:
 def f_frac(arg: list) -> list:
     """Return the fractional part of a number (value minus its integer part)."""
     a = float(arg[1])
-    a = int(round(a)) - a
+    a = a - int(a)
     return [ 'NUMBER', a ]
 # End of f_frac
 
@@ -1596,12 +1596,12 @@ def f_sqrt(arg: list) -> list:
 #-----------------------------------------------------------------------------
 # Invert logical expression (-1 = true, 0 = false). Make anything non-zero be true.
 def f_not(arg: list) -> list:
-    """Logical negation: return 1 if value is 0, else return 0."""
+    """Logical negation: return -1 if value is 0, else return 0."""
     a = float(arg[1])
     if a < 0 or a > 0:
-        a = -1
-    else:
         a = 0
+    else:
+        a = -1
     # fi
     return [ 'NUMBER', a ]
 # End of f_not

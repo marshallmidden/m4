@@ -330,6 +330,56 @@ Default period-size=64 causes crackling on WSL2 (FluidSynth -> PipeWire-pulse ->
 
 ## Bug Fix History
 
+### Comprehensive Code Audit & Bug Fixes (2026-03-27) -- COMPLETE
+
+Full 9-subagent code audit of imscomp (~20,280 lines) and calculate.py (~2,109 lines).
+Fixed 21 verified bugs across 4 batches. DOALL baseline maintained: 214 bare, 2 named ARGHs.
+
+**Batch 1 — Crash/NameError bugs (13 fixes):**
+1. `args.intensity != ''` → `args.intensity = ''` (comparison→assignment, 3 locations)
+2. Added `original_line = ''` at top of `parse_args()` (5 NameError sites)
+3. `{i}` → `{name}` in `get_volume_number()` error message
+4. Added `, original_line` to `print_error()` calls in `handle_volume_both()` (3 locations)
+5. Added `f` prefix to f-string in `getvar_checkokay()`
+6. Added `f` prefix to f-string in `set_all_staff_arr()`
+7. `theynote` → `note_to_decode` in `do_middle_c()`
+8. `nc = None` → `nc = 'treble'` in `new_voice_initialize()` (prevents crash)
+9. `next_a` → `next_tokens` in `keyword_transcribe()`
+10. Added `return False` after exception in `do_line()` try/except
+11. calculate.py `f_m()`: removed extra `txt` in format string
+12. calculate.py `f_m()`: range check `> 50` → `> 100`
+13. calculate.py `quotes_eval()`: undefined `value` → error return
+
+**Batch 2 — Logic bugs (6 fixes):**
+14. `rs.intensity[1]` → `rs.intensity[voiceon]` (wrong voice for intensity clamping)
+15. `not lengthl or not lengthl` → `not lengthl or not lengthf` (duplicate condition)
+16. Removed duplicate intensity initialization block in `new_voice_initialize()`
+17. Malformed MIDI string `0"` → `0'` (mismatched quote in CC 68 control)
+18-19. xpose `or` → `and` validation (3 locations) — `or` always true for values in one dict but not the other
+
+**Batch 3 — Error handling bugs (2 fixes, 1 false alarm):**
+20. `do_copy()`: missing `return` after error (fell through to overwrite command)
+21. Staccato/legato conflict: `replace('s','')` → `replace('l','')` (comment said "remove legato" but code removed staccato)
+22. `do_delay()` inverted conditional — **false alarm**: `tempo_note_length_now['']` is a valid key
+
+**Batch 4 — calculate.py logic bugs (2 fixes):**
+23. `f_not()`: returned -1 for non-zero (should be 0) and 0 for zero (should be -1) — was normalizing, not inverting
+24. `f_frac()`: `int(round(a)) - a` → `a - int(a)` (wrong sign and rounding instead of truncation)
+
+**Session reference**: `history_a5733283be694314.md`
+
+### Sound Quality Refinements (2026-03-27) -- COMPLETE
+
+**Batch 5 — Two improvements, two false alarms:**
+25. Sustain pedal (CC 64) now releases on rest — previously pedal stayed down through rests,
+    causing notes to ring when they should be silent.
+26. Velocity minimum now configurable via `velocity_min` variable (default 20, was hardcoded 40).
+    Old value of 40 made ppp (vel 27) and pp (vel 36) sound identical. Now ppp=27, pp=36 are distinct.
+    New GCS variable: `velocity_min` (0-127).
+27. Arpeggio offset lost after first measure — **false alarm**: offset is applied to `lthworkingmeasures`
+    which accumulates across measures, not reset per-measure.
+28. Legato minimum overlap hardcoded — **not a bug**: computed from `MIDICLICKSPERQUARTER // 8`, not arbitrary.
+
 ### Sound Quality Features for MIDI Output (2026-03-27) -- COMPLETE
 
 **Six features** added to `print_out_midi1csv_notes()` in imscomp to improve MIDI/FluidSynth
@@ -337,7 +387,7 @@ playback realism: default duration gap, velocity dynamics, timing humanization, 
 chord staggering, sustain pedal (CC 64), and pedal overlap control.
 
 **Command-line flags**: `--nohumanize`, `--noarpeggio`
-**GCS variables**: `default_duration`, `humanize`, `sustain_pedal`, `pedal_overlap`, `arp`
+**GCS variables**: `default_duration`, `humanize`, `sustain_pedal`, `pedal_overlap`, `arp`, `velocity_min`
 
 **Key bug fixed during implementation**: Default duration initially broke cross-measure ties.
 The tie lookahead now checks both the next note within the current measure AND the first note
@@ -520,6 +570,7 @@ Detailed session transcripts are saved in `/home/m4/LEARNING/`:
 Devin CLI session summaries are saved in `/home/m4/.local/share/devin/cli/summaries/`:
 - `history_c0fe88301fb046f3.md` - Voice bug fix, Makefile, Bad tie analysis, minor fixes, profiling & optimization
 - `history_004649c9295f4037.md` - Sound quality features (default duration, velocity, humanization, arpeggio, sustain pedal)
+- `history_a5733283be694314.md` - Comprehensive code audit & 21 bug fixes (Batches 1-4)
 
 ---
 
