@@ -268,6 +268,32 @@ from __future__ import annotations
 #    Legato	105–120%	                Slight overlap (e.g., next note starts before current ends)
 # These are approximate, but super useful when writing playback engines like you're doing.
 # ----------------------------------------------------------------------------
+# Sound Quality Features (MIDI/FluidSynth output):
+#
+#   Default Duration: Unmarked notes play at 90% of written duration (configurable
+#     via 'default_duration' variable, e.g. default_duration 0.85). Creates a natural
+#     gap between notes. Does not apply to tied, legato, staccato, marcato, tenuto,
+#     or crescendo notes. Skips notes followed by a tie.
+#
+#   Velocity Dynamics: Note velocity scales with the current CC 11 expression level.
+#     At pp (vol ~35), velocity ~35; at f (vol ~100), velocity ~100.  This gives
+#     timbral variation, not just volume change (important for piano hammer speed).
+#
+#   Timing Humanization: Small random timing offsets (default +-5 ticks) on Note_on
+#     and CC events. Deterministic (seeded RNG) for reproducible output. Disable with
+#     --nohumanize flag or set 'humanize 0' in .gcs file.
+#
+#   Arpeggio: Chord notes across voices on the same staff are staggered by the 'arp'
+#     variable (default 1/32 note = 60 ticks). The first voice plays on time, the
+#     second is delayed by arp ticks, etc. Disable with --noarpeggio flag or set
+#     'arp 0' in .gcs file.
+#
+#   Sustain Pedal (CC 64): Legato pedaling for piano. Off by default. Enable with
+#     'sustain_pedal -1' in .gcs file. Pedal timing controlled by 'pedal_overlap'
+#     variable (default 60 ticks). Pedal up at note start + half overlap, pedal down
+#     at note start + full overlap. Not applied during staccato passages.
+#
+# ----------------------------------------------------------------------------
 # Sustain (CC64) Behavior Recap:
 #     When you send Control_c, ..., 64, 127, it holds all currently playing and subsequently triggered notes.
 #     When you send Control_c, ..., 64, 0, it releases any held notes that have already received Note_off_c events.
@@ -1447,6 +1473,10 @@ createglobalvar('stac', 0.50, 0, type_is_number, True)               # Staccato 
 createglobalvar('marc', 0.70, 0, type_is_number, True)               # Marcato length multipliers.
 createglobalvar('tenuto', 0.90, 0, type_is_number, True)             # Tenuto length multipliers.
 createglobalvar('legato', 1.15, 0, type_is_number, True)             # legato length multiplier - more for overlap.
+createglobalvar('default_duration', 0.90, 0, type_is_number, True)   # Default note duration for unmarked notes (0.90=90%, 1.0=full).
+createglobalvar('humanize', 5, 0, type_is_number, True)              # Max humanization jitter in MIDI ticks (0=off). Use --nohumanize.
+createglobalvar('sustain_pedal', 0, 0, type_is_number, True)         # Sustain pedal CC64: 0=off, -1=on. Set in .gcs for piano.
+createglobalvar('pedal_overlap', 60, 0, type_is_number, True)        # Ticks after note start for pedal down (legato pedaling).
 createglobalvar('time', 0, 0, type_is_number, True)                  # The "time" in measure for current voice. (staff?)
 createglobalvar('in_chord', 0, 0, type_is_number, True)              # True (tutor style, -1) if inside a chord.
 
@@ -1929,6 +1959,12 @@ def parse_args() -> None:
                         '--notr', action='store_true',
                         help='Disable WARNING for trill time warnings that will not work.')
 
+    parser.add_argument('--nohumanize', '--nohumaniz', '--nohumani', '--nohuman', '--nohuma', '--nohum',
+                        action='store_true',
+                        help='Disable timing humanization (small random timing offsets on notes).')
+    parser.add_argument('--noarpeggio', '--noarpegg', '--noarpeg', '--noarpe', '--noarp',
+                        action='store_true',
+                        help='Disable automatic arpeggio (chord note staggering across voices).')
 
     parser.add_argument('rest', nargs='*',
                         help='Optionals: input_file(stdin) output_file(stdout)')
@@ -5875,6 +5911,36 @@ def print_out_midi1csv_notes() -> None:
     global intensity_offset
     global intensity_percentage
 
+    global staff_name
+
+    # Seed random for deterministic humanization (reproducible output).
+    random.seed(42)
+
+    # Build voice position within staff for arpeggio offsets.
+    _voice_staff_pos = {}
+    _staff_voice_list = {}
+    for _v in range(1, len(volume)+1):
+        for _s in staff_name:
+            if _v in staff_name[_s]:
+                if _s not in _staff_voice_list:
+                    _staff_voice_list[_s] = []
+                # fi
+                _staff_voice_list[_s].append(_v)
+                _voice_staff_pos[_v] = len(_staff_voice_list[_s]) - 1
+                break
+            # fi
+        # rof
+        if _v not in _voice_staff_pos:
+            _voice_staff_pos[_v] = 0
+        # fi
+    # rof
+
+    # Cache sound quality variables (stable during MIDI output).
+    _humanize_max = int(float(getvar('humanize')))
+    _default_duration = float(getvar('default_duration'))
+    _sustain_pedal_on = (int(float(getvar('sustain_pedal'))) != 0)
+    _pedal_overlap_ticks = int(float(getvar('pedal_overlap')))
+
     channel = 0                                     # Next midi instrument channel to use.
     chan = 0                                        # The midi channel using now (allows for repeated use).
 
@@ -5918,6 +5984,18 @@ def print_out_midi1csv_notes() -> None:
         last_cc7 = -1                               # The last control 7 intensity put out for voice.
 
         lthworkingmeasures = 0                      # The time for event to occur.
+        # Arpeggio: offset this voice's note times based on position within staff.
+        _arp_offset = 0
+        if not args.noarpeggio:
+            _arp_val = float(getvar('arp'))
+            if _arp_val > 0:
+                _arp_ticks = int(_arp_val * MIDICLICKSPERQUARTER * 4)  # Convert fraction to ticks.
+                _arp_offset = _voice_staff_pos.get(voice, 0) * _arp_ticks
+            # fi
+        # fi
+        lthworkingmeasures = _arp_offset              # Start offset for arpeggio stagger.
+        # Sustain pedal state for this voice.
+        _pedal_is_down = False
         last_note_length = 0                        # The length of the last note (4c4).
         last_suffixes = ''                          # No ties/legato/cresc/dimin/etc. to start with.
 
@@ -6081,6 +6159,13 @@ def print_out_midi1csv_notes() -> None:
                     # yrt
                 # fi
 
+                # Compute per-note humanize offset for timing variation.
+                if not args.nohumanize and _humanize_max > 0:
+                    note_time = max(0, lthworkingmeasures + random.randint(-_humanize_max, _humanize_max))
+                else:
+                    note_time = lthworkingmeasures
+                # fi
+
                 # Compute volume/articulation and emit CC BEFORE Note_on for proper MIDI event ordering.
                 # CC events inserted first ensure synths see the new volume before the Note_on.
                 v_vl = ba.volume[voice][m][nn]
@@ -6108,15 +6193,15 @@ def print_out_midi1csv_notes() -> None:
                     note_playing = int(note_playing * last_legato)
                 # fi
                 if last_cc11 != v_vl:
-                    insert_sorted_tail([voice+1, lthworkingmeasures, f'Control_c, {chan}, 11, {round(float(v_vl))}'], 'HERE24')
+                    insert_sorted_tail([voice+1, note_time, f'Control_c, {chan}, 11, {round(float(v_vl))}'], 'HERE24')
                     last_cc11 = v_vl
                 # fi
                 if last_cc10 != v_pan:
-                    insert_sorted_tail([voice+1, lthworkingmeasures, f'Control_c, {chan}, 10, {round(float(v_pan))}'], 'HERE25')
+                    insert_sorted_tail([voice+1, note_time, f'Control_c, {chan}, 10, {round(float(v_pan))}'], 'HERE25')
                     last_cc10 = v_pan
                 # fi
                 if last_cc7 != v_intens:
-                    insert_sorted_tail([voice+1, lthworkingmeasures, f'Control_c, {chan}, 7, {round(float(v_intens))}'], 'HERE26')
+                    insert_sorted_tail([voice+1, note_time, f'Control_c, {chan}, 7, {round(float(v_intens))}'], 'HERE26')
                     last_cc7 = v_intens
                 # fi
 
@@ -6170,9 +6255,11 @@ def print_out_midi1csv_notes() -> None:
                         else:
                             last_note_on = drum_sounds[l_instrument]
                         # fi
-                        insert_sorted_tail([voice+1, lthworkingmeasures, f'Note_on_c, {chan}, {last_note_on}, {note_velocity}'], 'HERE13')
+                        # Scale velocity with current dynamic level for timbral variation.
+                        note_velocity = max(40, min(127, int(note_velocity * float(v_vl) / 100.0)))
+                        insert_sorted_tail([voice+1, note_time, f'Note_on_c, {chan}, {last_note_on}, {note_velocity}'], 'HERE13')
                         if args.echoonoff:
-                            insert_sorted_tail([voice+1, lthworkingmeasures, f'Text_t, "On:{chan:>4} {last_note_on:>3}"'], 'HERE15')
+                            insert_sorted_tail([voice+1, note_time, f'Text_t, "On:{chan:>4} {last_note_on:>3}"'], 'HERE15')
                         # fi
                     # fi
                     # Already on, good.
@@ -6188,15 +6275,17 @@ def print_out_midi1csv_notes() -> None:
                         note_velocity = note_velocity + 3   # Fixed value, marc variable is length.
                         note_velocity = 127 if note_velocity > 127 else note_velocity
                     # fi
+                    # Scale velocity with current dynamic level for timbral variation.
+                    note_velocity = max(40, min(127, int(note_velocity * float(v_vl) / 100.0)))
                     if legato_on:                           # If on from previous note.
                         if l_instrument in instruments:
                             pass
                         else:
                             n = drum_sounds[l_instrument]
                         # fi
-                        insert_sorted_tail([voice+1, lthworkingmeasures, f'Note_on_c, {chan}, {n}, {note_velocity}'], 'HERE16')
+                        insert_sorted_tail([voice+1, note_time, f'Note_on_c, {chan}, {n}, {note_velocity}'], 'HERE16')
                         if args.echoonoff:
-                            insert_sorted_tail([voice+1, lthworkingmeasures, f'Text_t, "On:{chan:>4} {n:>3}"'], 'HERE17')
+                            insert_sorted_tail([voice+1, note_time, f'Text_t, "On:{chan:>4} {n:>3}"'], 'HERE17')
                         # fi
                     # fi
                     if last_note_on != '':          # If not coming from a rest, or last note is already off.
@@ -6212,9 +6301,9 @@ def print_out_midi1csv_notes() -> None:
                         else:
                             last_note_on = drum_sounds[l_instrument]
                         # fi
-                        insert_sorted_tail([voice+1, lthworkingmeasures, f'Note_on_c, {chan}, {last_note_on}, {note_velocity}'], 'HERE20')
+                        insert_sorted_tail([voice+1, note_time, f'Note_on_c, {chan}, {last_note_on}, {note_velocity}'], 'HERE20')
                         if args.echoonoff:
-                            insert_sorted_tail([voice+1, lthworkingmeasures, f'Text_t, "On:{chan:>4} {last_note_on:>3}"'], 'HERE21')
+                            insert_sorted_tail([voice+1, note_time, f'Text_t, "On:{chan:>4} {last_note_on:>3}"'], 'HERE21')
                         # fi
                     # fi
                     last_note_on = n
@@ -6224,14 +6313,14 @@ def print_out_midi1csv_notes() -> None:
                 # If legato, turn it on, if not already on.
                 if 'l' in last_suffixes:                    # New note has legato.
                     if legato_on:                           # Previous was legato, so turn off briefly before returning on.
-                        insert_sorted_tail([voice+1, lthworkingmeasures, f'Control_c, {chan}, 68, 0'], 'HERE21a') # OFF
+                        insert_sorted_tail([voice+1, note_time, f'Control_c, {chan}, 68, 0'], 'HERE21a') # OFF
                     # fi
                     # Emit CC68 at note start so synths apply legato to this note.
-                    insert_sorted_tail([voice+1, lthworkingmeasures + 1, f'Control_c, {chan}, 68, 127'], 'HERE22') # ON
+                    insert_sorted_tail([voice+1, note_time + 1, f'Control_c, {chan}, 68, 127'], 'HERE22') # ON
                     legato_on = True
                 else:
                     if legato_on:
-                        insert_sorted_tail([voice+1, lthworkingmeasures + lastlegatolth, f'Control_c, {chan}, 68, 0'], 'HERE23') # OFF
+                        insert_sorted_tail([voice+1, note_time + lastlegatolth, f'Control_c, {chan}, 68, 0'], 'HERE23') # OFF
                         legato_on = False
                     # fi
                 # fi
@@ -6245,6 +6334,46 @@ def print_out_midi1csv_notes() -> None:
                         last_suffixes = last_suffixes.replace('s','')   # remove the legato.
                     # fi
                     note_playing = int(note_playing * last_stacc)
+                # fi
+                # Apply default duration gap for unmarked notes (no articulation suffix).
+                if note_playing == last_note_length and _default_duration < 1.0:
+                    if not any(c in last_suffixes for c in 'clsmut'):
+                        # Don't shorten if next note is tied from this one.
+                        _next_tied = False
+                        if nn + 1 < len(bufs[voice][m]):
+                            if 't' in ba.suffixes[voice][m][nn + 1]:
+                                _next_tied = True
+                            # fi
+                        else:
+                            # Last note of measure — check first note of next measure.
+                            _nm_idx = m_number + 1
+                            if m not in goto_table and _nm_idx < len(meas):
+                                _nm = meas[_nm_idx]
+                                if _nm not in ['EOF-INTERNAL', 'EOF'] and _nm in bufs.get(voice, {}):
+                                    if len(bufs[voice][_nm]) > 0 and 't' in ba.suffixes[voice][_nm][0]:
+                                        _next_tied = True
+                                    # fi
+                                # fi
+                            # fi
+                        # fi
+                        if not _next_tied:
+                            note_playing = max(1, int(note_playing * _default_duration))
+                        # fi
+                    # fi
+                # fi
+                # Sustain pedal (CC 64) for legato pedaling.
+                if _sustain_pedal_on and last_note_on != '':
+                    if _pedal_is_down:
+                        # Pedal up shortly after this note starts — releases previous notes.
+                        insert_sorted_tail([voice+1, note_time + _pedal_overlap_ticks // 2, f'Control_c, {chan}, 64, 0'], 'HERE_PED_UP')
+                    # fi
+                    if 's' not in last_suffixes:    # Don't pedal through staccato.
+                        # Pedal down after note starts — sustains this note.
+                        insert_sorted_tail([voice+1, note_time + _pedal_overlap_ticks, f'Control_c, {chan}, 64, 127'], 'HERE_PED_DN')
+                        _pedal_is_down = True
+                    else:
+                        _pedal_is_down = False
+                    # fi
                 # fi
                 nn = nn + 1                         # To next note in measure.
             # elihw
@@ -6330,6 +6459,11 @@ def print_out_midi1csv_notes() -> None:
                 insert_sorted_tail([voice+1, lthworkingmeasures, f'Text_t, "Off:{chan:>3} {last_note_on:>3}"'], 'HERE35')
             # fi
             last_note_on = ''
+        # fi
+        # Release sustain pedal at end of voice.
+        if _pedal_is_down:
+            insert_sorted_tail([voice+1, lthworkingmeasures, f'Control_c, {chan}, 64, 0'], 'HERE_PED_END')
+            _pedal_is_down = False
         # fi
         print_out_midi1csv_end(voice, lthworkingmeasures, chan)
 #--        print(f'voice={voice} tm={tm}', file=sys.stderr, flush=True)
