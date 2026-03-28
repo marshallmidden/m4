@@ -22,7 +22,7 @@ Files with `_2` suffix (e.g. `s14_2.fs`) are imscomp output; without suffix are 
 
 | Directory | Contents |
 |-----------|----------|
-| `ims/imscomp` | The compiler (single ~20,112-line Python file) |
+| `ims/imscomp` | The compiler (single ~20,280-line Python file) |
 | `ims/DOALL` | Full regression test script |
 | `ims/calculate.py` | Expression parser module used by imscomp |
 | `ims/tc-testing/theme.gcs` | Simple 2-staff test file |
@@ -80,10 +80,18 @@ composition's directory first.
 ```bash
 cd /home/m4/LEARNING/music/ims && bash DOALL
 ```
-Expected result: `ALL OKAY!` at the end. CSV and FS diffs (ARGH markers) showing
-Control_c ordering differences are pre-existing and acceptable.
 
-DOALL runs test suites in: `songs/`, `musicomp2abc/`, `b/`, `t/e/`, `tc-testing/gershwin/`.
+DOALL runs 5 test suites in parallel: `songs/`, `musicomp2abc/`, `b/`, `t/e/`, `tc-testing/gershwin/`.
+Each suite runs `AAA.diff._2` which compiles `.gcs` files with both imscomp and musicomp2abc,
+then diffs the outputs across all format flags (abc, h, v, csv, fs).
+
+**Expected baseline (as of 2026-03-27)**: 214 bare ARGHs, 2 named ARGHs.
+- Bare ARGHs = imscomp-vs-musicomp2abc diffs (expected, pre-existing).
+- Named ARGHs = execution failures. Only `new-g3` fails (known issue in gershwin suite).
+- Exit code 0 if named ARGHs <= 2 (PASS with known diffs). Exit code 1 if more (FAIL).
+
+**When verifying changes**: Always run full DOALL and confirm 214 bare / 2 named.
+Changes that increase named ARGHs are regressions.
 
 ### Output Format Flags
 
@@ -96,30 +104,69 @@ DOALL runs test suites in: `songs/`, `musicomp2abc/`, `b/`, `t/e/`, `tc-testing/
 | `--lilypond` | LilyPond notation |
 | `--horizontal` | Horizontal display |
 | `--vertical` | Vertical display |
+| `--nohumanize` (or `--nohum`..`--nohumaniz`) | Disable timing humanization |
+| `--noarpeggio` (or `--noarp`..`--noarpegg`) | Disable arpeggio chord staggering |
 
-### Key Function Locations (line numbers approximate, as of 2026-03-23)
+### Sound Quality Features (MIDI/FluidSynth output, 2026-03-27)
+
+Six features that improve realism of MIDI playback. All implemented in
+`print_out_midi1csv_notes()` (line ~5889). On by default; controllable via
+GCS variables and command-line flags.
+
+| Feature | Default | GCS Variable | CLI Flag | Description |
+|---------|---------|-------------|----------|-------------|
+| Default duration | 0.90 (90%) | `default_duration` | — | Unmarked notes shortened to create natural gap. Skips tied/legato/staccato/marcato/tenuto/cresc notes. Looks ahead for ties to avoid breaking them. |
+| Velocity dynamics | on | — | — | Note velocity scales with CC 11 expression: `vel = max(40, min(127, int(vel * cc11 / 100)))`. Gives timbral variation. |
+| Timing humanization | ±5 ticks | `humanize` | `--nohumanize` | Random jitter on Note_on and CC emissions. Deterministic via `random.seed(42)`. Note_off and measure boundaries stay exact. |
+| Arpeggio | 1/32 note (60 ticks) | `arp` | `--noarpeggio` | Chord notes staggered across voices on same staff. Voice position within staff determines delay: `arp_ticks * position`. |
+| Sustain pedal | off (0) | `sustain_pedal` | — | CC 64 legato pedaling. Set `sustain_pedal -1` in .gcs to enable. Pedal up at note_time + overlap/2, down at note_time + overlap. Not applied during staccato. |
+| Pedal overlap | 60 ticks | `pedal_overlap` | — | Controls sustain pedal timing (ticks after note start). |
+
+**Key implementation details**:
+- `note_time` variable holds humanized time offset; used for Note_on and CC emissions
+- `_voice_staff_pos` dict (line ~5920) maps voices to their position within a staff for arpeggio
+- Tie lookahead (default duration): checks both next note in same measure AND first note of next measure
+- `random.seed(42)` at line ~5917 ensures reproducible humanization across runs
+
+### Key Function Locations (line numbers approximate, as of 2026-03-27)
 
 | Line  | Function / Section |
 |-------|-------------------|
-| 3917  | `def print_measure_vh_header(` - per-measure metadata for vertical/horizontal |
-| 4295  | `def print_measure_staves_header(` - per-measure metadata for staves |
-| 4472  | `def print_out_staves(` - staves output |
-| 4745  | `def _ly_note_name(` - convert internal note format to LilyPond notation |
-| 4804  | `def _ly_duration(` - convert internal duration to LilyPond duration |
-| 4852  | `def print_out_lilypond(` - LilyPond output function |
-| 5404  | `def print_header(` - header output for all formats |
-| 5743  | `def do_midi_vpi(` - CC 11/10/7 emission during crescendo/diminuendo |
-| 5891  | `last_cc11 = -1` - CC tracker initialization per voice |
-| 6086  | CC emission before Note_on (bug fix area -- see below) |
-| 6280  | Second `do_midi_vpi()` call site (staccato handling) |
-| 6462  | `change_name` dict - maps internal MIDI CSV names to FluidSynth commands |
-| 6480  | `def print_out_fluidsynth()` - FluidSynth output generator |
-| 14778 | `middle_c = None` - middle_c default initialization |
-| 14863 | `def getnote(` - main note-processing function (~600 lines) |
-| 15203 | Key conversion section ("Convert for key") |
-| 15317 | Xpose condition |
-| 15412 | Note format conversion to `o+n+a` format |
-| 19252 | `def main(` |
+| 1476  | `createglobalvar('default_duration', ...)` - default note duration (0.90) |
+| 1477  | `createglobalvar('humanize', ...)` - max humanization jitter (5 ticks) |
+| 1478  | `createglobalvar('sustain_pedal', ...)` - CC 64 control (0=off, -1=on) |
+| 1479  | `createglobalvar('pedal_overlap', ...)` - pedal timing (60 ticks) |
+| 1516  | `def is_float(` - parse/evaluate string as numeric expression (has fast-path for plain numbers) |
+| 1962  | `--nohumanize` argument definition |
+| 1965  | `--noarpeggio` argument definition |
+| 2231  | `_frac_cache` / `_cached_frac256()` - Fraction cache for limit_denominator(256) |
+| 3221  | `def get_time_stak(` - convert note duration to ABC/MIDI time values |
+| 3404  | `def new_voice_initialize(` - init per-voice data structures |
+| 3977  | `def print_measure_vh_header(` - per-measure metadata for vertical/horizontal |
+| 4355  | `def print_measure_staves_header(` - per-measure metadata for staves |
+| 4532  | `def print_out_staves(` - staves output |
+| 4805  | `def _ly_note_name(` - convert internal note format to LilyPond notation |
+| 4864  | `def _ly_duration(` - convert internal duration to LilyPond duration |
+| 4912  | `def print_out_lilypond(` - LilyPond output function |
+| 5464  | `def print_header(` - header output for all formats |
+| 5803  | `def do_midi_vpi(` - CC 11/10/7 emission during crescendo/diminuendo |
+| 5889  | `def print_out_midi1csv_notes(` - **main MIDI CSV note output** (sound quality features live here) |
+| 5917  | `random.seed(42)` - deterministic humanization seed |
+| 5920  | `_voice_staff_pos` - arpeggio voice position mapping |
+| 5982  | `last_cc11 = -1` - CC tracker initialization per voice |
+| 6620  | `change_name` dict - maps internal MIDI CSV names to FluidSynth commands |
+| 6638  | `def print_out_fluidsynth()` - FluidSynth output generator |
+| 8398  | `def put_on_bufs(` - add note to output buffers; updates mlth |
+| 8615  | `def instak(` - insert note into time-sorted stack |
+| 8700  | `def fill_voice_mlth(` - pad all voices with rests to match longest (has skip-set optimization) |
+| 13930 | `def do_xpose(` - transposition command |
+| 14836 | `voice` command parsing (vargs handling) |
+| 14945 | `middle_c = None` - middle_c default initialization |
+| 15030 | `def getnote(` - main note-processing function (~600 lines) |
+| 15369 | Key conversion section ("Convert for key") |
+| 15444 | Xpose condition |
+| 15397 | Note format conversion to `o+n+a` format |
+| 19420 | `def main(` |
 
 ### FluidSynth Output Format (.fs files)
 
@@ -170,10 +217,12 @@ bufs[voice][measure]        - list of note strings
 ba.length[voice][measure]   - list of note durations
 ba.suffixes[voice][measure] - list of suffix strings ('t' for tie, 'c' for cresc, etc.)
 ba.volume[voice][measure]   - list of volumes
-volume[voice][measure]      - volume value (0-127)
+volume[voice][measure]      - volume value (0-127) (dict of dicts)
 pan[voice][measure]         - pan value (0-126)
 intensity[voice][measure]   - expression/intensity value
 reverb[voice][measure]      - reverb value
+mlth[voice][measure]        - accumulated note duration in each measure per voice
+tlth[voice]                 - total duration per voice
 xpose[voice]                - semitone transposition (via staff array)
 key_voice[voice]            - current key for each voice
 staff_name[label]           - maps staff label to list of voice numbers
@@ -181,6 +230,11 @@ clef[voice]                 - clef for each voice
 vinstrument[voice]          - instrument for each voice
 middle_c                    - None default, set to 39+12=51 for staff format
 meas[]                      - ordered list of measure identifiers
+_fvmlth_done                - set of measures already padded by fill_voice_mlth
+_fvmlth_nv                  - voice count at last fill_voice_mlth run (resets _fvmlth_done on change)
+_frac_cache                 - dict caching str(Fraction(v).limit_denominator(256)) results
+_voice_staff_pos            - dict mapping voice to its position (0-based) within its staff (for arpeggio)
+note_time                   - per-note humanized time offset (lthworkingmeasures + random jitter)
 ```
 
 ### MIDI CC Tracking Variables (per voice, in FluidSynth/CSV output)
@@ -276,6 +330,81 @@ Default period-size=64 causes crackling on WSL2 (FluidSynth -> PipeWire-pulse ->
 
 ## Bug Fix History
 
+### Sound Quality Features for MIDI Output (2026-03-27) -- COMPLETE
+
+**Six features** added to `print_out_midi1csv_notes()` in imscomp to improve MIDI/FluidSynth
+playback realism: default duration gap, velocity dynamics, timing humanization, arpeggio
+chord staggering, sustain pedal (CC 64), and pedal overlap control.
+
+**Command-line flags**: `--nohumanize`, `--noarpeggio`
+**GCS variables**: `default_duration`, `humanize`, `sustain_pedal`, `pedal_overlap`, `arp`
+
+**Key bug fixed during implementation**: Default duration initially broke cross-measure ties.
+The tie lookahead now checks both the next note within the current measure AND the first note
+of the next measure (if not going through a goto). This eliminated "tied note is not same"
+errors in 5-dollar-fuga and similar tests.
+
+**Verification**: DOALL passes with baseline counts (214 bare, 2 named ARGHs).
+See "Sound Quality Features" section above for full details.
+
+### Voice Command Parsing Bug Fix (2026-03-27) -- COMPLETE
+
+**Symptom**: `voice 4 19,40,56,0` caused "ERROR - voice error - bad input to calculator#3"
+
+**Root cause**: `jkl = str(vargs[1:])` converts a Python list to its repr (e.g., `"['19,40,56,0']"`),
+injecting brackets and quotes that corrupt downstream parsing.
+
+**Fix**: Changed to `jkl = ','.join(vargs[1:])` in both compilers:
+- `ims/imscomp` line ~13640 (now ~13650)
+- `musicomp2abc/musicomp2abc` line 12434
+
+### Two Minor Bug Fixes in imscomp (2026-03-27) -- COMPLETE
+
+1. **Line ~9003**: `{a}` -> `{o}` in debug message for `to_abc_note()` bad octave (NameError crash fix)
+2. **Line ~19170**: Added `numcharvar = 0` before while loop in `readthefile()` (UnboundLocalError crash fix during macro argument substitution)
+
+### Performance Optimizations in imscomp (2026-03-27) -- COMPLETE
+
+Three optimizations applied, together providing ~2x speedup on large files:
+
+**1. `fill_voice_mlth` skip-set** (line ~8562):
+- Tracks processed measures in `_fvmlth_done` set; skips them on subsequent calls.
+- Clears the set when voice count (`len(volume)+1`) changes (new voices need all measures re-processed).
+- Never marks the current `measure_on` as done (it may still receive notes).
+- Eliminated O(n^2) rescan: was 0.43s, now negligible.
+- **CAUTION**: This optimization is sensitive. The first attempt (tracking by index) caused 43 regressions because it didn't handle new voices appearing mid-song. The current set-based approach with voice-count reset is correct.
+
+**2. `_cached_frac256()` cache** (line ~2183):
+- Memoizes `str(Fraction(v).limit_denominator(256))` results.
+- Used in `get_time_stak` (lines ~3205, ~3215) and `note_text_fraction` (line ~3247).
+- Avoids ~39K redundant Fraction constructions.
+
+**3. `is_float` fast path** (line ~1488):
+- When `type_float == is_float_number`, tries `float(strg)` first.
+- If it succeeds (plain numeric string), returns immediately without calling `calculate.parse()`.
+- Falls through to full parse on `ValueError` (expressions, variables, etc.).
+- Cut parse calls roughly in half (70K -> 33K).
+
+**Performance results** (b-6.gcs, largest test file, 21 voices):
+| Metric | Before | After |
+|--------|--------|-------|
+| Wall-clock | ~1.3s | ~0.66s |
+| Profile total | 2.8s | 1.3s |
+| Function calls | 6.8M | 3.2M |
+
+### ABC "Bad tie" Issue (2026-03-27) -- ANALYZED, NOT FIXED
+
+**Symptom**: abcm2ps reports "Bad tie" errors on chord-to-single-note ties.
+
+**Pattern**: When a chord like `(c1 G1)` is tied and only one note continues in the next
+measure (e.g., just `G2`), the tie `-` is appended to the entire chord notation, not per-note.
+
+**Code location**: `bufs[voiceon][m] = bufs[voiceon][m] + '-'` at line ~15652 in imscomp.
+This blindly appends tie to the whole chord without per-pitch validation.
+
+**Status**: Analysis complete; no fix applied yet. Would require matching individual chord
+pitches between measures to determine which notes are truly tied.
+
 ### CC (Expression/Volume) Bug Fix in imscomp (2026-03-22) -- COMPLETE
 
 **Symptoms**: Instruments disappeared or went very quiet during playback.
@@ -314,6 +443,20 @@ even when the CC was suppressed, causing it to think the value was already sent.
 - LilyPond: `v,,,` artifacts may appear in output
 - b9m2.gcs: staff-label variables not recognized in lilypond/horizontal modes (~13,421 errors)
 - LilyPond multi-voice: only assigns `\voiceOne` and `\voiceTwo` direction; voices 3+ get no direction
+- ABC "Bad tie" on chord-to-single-note ties (see Bug Fix History above)
+- `make all` in top-level Makefile hits pre-existing `abcm2ps` segfault on `b/09/b9m1.abc` (unrelated to imscomp)
+
+### Top-Level Makefile (`/home/m4/LEARNING/music/Makefile`)
+The top-level Makefile has `all` and `clean` targets that recurse into all 5 DIRS:
+`musicomp2abc songs ims t b`. Uses `@for d in ${DIRS}; do $(MAKE) -C $$d <target>; done`.
+
+### Key Test Files
+| Path | Description |
+|------|-------------|
+| `b/06/b-6.gcs` | Beethoven 6th (largest test file, 21 voices, 12698 lines, good for profiling) |
+| `b/02/21/v2-1.gcs` | Voice command test (uses `voice` directive) |
+| `b/02/21/v3-4.gcs`, `v4-1.gcs`, `v4-2.gcs`, `v4-3.gcs` | Additional voice tests |
+| `b/15/inv15-example.gcs` | Inversion example test |
 
 ---
 
@@ -373,3 +516,53 @@ $$ inline comment                   $$ inline comment
 
 Detailed session transcripts are saved in `/home/m4/LEARNING/`:
 - `DEVIN-2026-03-23.md` - FluidSynth WAV rendering from stdin implementation
+
+Devin CLI session summaries are saved in `/home/m4/.local/share/devin/cli/summaries/`:
+- `history_c0fe88301fb046f3.md` - Voice bug fix, Makefile, Bad tie analysis, minor fixes, profiling & optimization
+- `history_004649c9295f4037.md` - Sound quality features (default duration, velocity, humanization, arpeggio, sustain pedal)
+
+---
+
+## Profiling imscomp
+
+### How to Profile
+```bash
+# Best approach: use subprocess wrapper to separate profile from program output
+cat > /tmp/profile_b6.py << 'PYEOF'
+import cProfile, pstats, io, sys, os, subprocess
+os.chdir('/home/m4/LEARNING/music/b/06')
+result = subprocess.run(
+    ['python3', '-m', 'cProfile', '-s', 'tottime',
+     '/home/m4/LEARNING/music/ims/imscomp', '--abc', 'b-6.gcs'],
+    capture_output=True, text=True, timeout=120)
+for line in result.stdout.split('\n'):
+    if 'function calls' in line:
+        # Print from this line onward (the profile table)
+        idx = result.stdout.index(line)
+        print(result.stdout[idx:idx+3000])
+        break
+PYEOF
+python3 /tmp/profile_b6.py
+```
+
+### Wall-clock Timing
+```bash
+cd /home/m4/LEARNING/music/b/06
+time python3 /home/m4/LEARNING/music/ims/imscomp --abc b-6.gcs > /dev/null 2>&1
+```
+Note: exit code 11 is normal for `--abc` (it's the warning count).
+
+### Current Profile Hotspots (after optimization, 2026-03-27)
+Top functions by tottime on b-6.gcs (1.3s total, 3.2M calls):
+1. `do_notes_oldway` 0.09s (10763 calls)
+2. `do_measure` 0.09s (514 calls)
+3. `re.Pattern.sub` 0.08s (147K calls)
+4. `getnote` 0.07s (21K calls)
+5. `put_on_bufs` 0.06s (18K calls)
+
+### Future Optimization Opportunities
+- `do_notes_oldway` / `do_measure` are the main parsing loops; hard to optimize without restructuring
+- 147K regex `sub` calls — could pre-compile or batch string replacements
+- `find_terminator_in_string` (18K calls, 0.05s) — string scanning; potential for optimization
+- `separate_args` (11K calls, 0.03s) — argument parsing
+- `len()` still called 575K times — some could be cached in hot loops
