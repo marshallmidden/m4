@@ -641,6 +641,53 @@ Devin CLI session summaries are saved in `/home/m4/.local/share/devin/cli/summar
 - `history_c0fe88301fb046f3.md` - Voice bug fix, Makefile, Bad tie analysis, minor fixes, profiling & optimization
 - `history_004649c9295f4037.md` - Sound quality features (default duration, velocity, humanization, arpeggio, sustain pedal)
 - `history_a5733283be694314.md` - Comprehensive code audit & 21 bug fixes (Batches 1-4)
+- `history_6c6ac476eb4b4356.md` - Subagent bug hunts, velocity/volume humanization, 20+ bug fixes, calculate.py fixes
+
+### Session 5 Changes (history_6c6ac476eb4b4356, first part)
+
+#### Subagent Bug Hunt Round 1 (4 real fixes, 2 false alarms)
+1. **Line 18116** (CRITICAL): `for ls in last_voice_staff:` → `for ls in save_last_voice_staff:` — loop iterated over empty list (just reset at line 18115), so `set_process_begin()` quit logic was dead
+2. **Line 3531** (HIGH): `mmm in clef and j in clef[mmm]` → `j in clef and mmm in clef[j]` — operands swapped; `clef` keyed by voice not measure, so condition never matched
+3. **Line 3675** (MEDIUM): Added `len(staff_name[st]) > 0` check in `firstvoiceinstaff()` — empty lists possible from `staff_name[sn] = []` at line 13341
+4. **Line 3720** (cosmetic): `clef [voiceon]` → `clef[voiceon]` — extraneous space
+
+#### Velocity & Volume Humanization (NEW FEATURE)
+- `humanize_velocity` GCS variable (default 3, range 0-127): max random velocity variation per note
+- `humanize_dynamics` GCS variable (default 2, range 0-127): max random CC11/CC7 variation per note
+- Cached at line ~5938: `_humanize_vel_max` and `_humanize_dyn_max`
+- Applied in MIDI output (line ~6163+): velocity gets `random.randint(-max, max)` (clamped velocity_min..127); CC11/CC7 similar
+- Controlled by existing `--nohumanize` flag (disables all: timing, velocity, dynamics)
+
+#### Additional imscomp Bug Fixes
+- **Lines ~16401, ~16475**: `crd` undefined in pan/intensity cresc/dimin error messages → replaced with `'cresc'`/`'dimin'`
+- **print_die()**: Called 23 times but never defined → added `def print_die(msg)` at ~line 1265
+- **Line 14621**: Bare `return` in `handle_vars_parens()` → `return wary, None` for tuple consistency
+
+#### calculate.py Fixes & Refactoring
+- **Line 1226**: `return [[ "ERROR..." ]]` → `return [ "ERROR..." ]` — double-nested list
+- **Line 1514**: Error said "two arguments" but `f_in()` requires three → fixed
+- **Line 981**: `parse_to()` bare string error return → wrapped in `[ ..., None ]` list
+- **m1-m100**: Replaced ~210 lines of repetitive `arrays.append(['mN'...])` with 4-line loop
+
+### Session 6 Changes (history_6c6ac476eb4b4356, second part)
+
+#### Subagent Bug Hunt Round 2 (9 imscomp fixes, 6 calculate.py fixes)
+
+**imscomp fixes:**
+1. **Line 6901** (CRITICAL): `pre_move_note_before(prev_m, m, voice, s, vel, n, a, v, p)` missing `intens` param — 9 args but function expects 10, would TypeError at runtime
+2. **Line 6630** (CRITICAL): `error_now = error_now + 1` — variable never defined anywhere, would UnboundLocalError
+3. **Line 9433** (HIGH): `{wnote}` → `{w_note}` — wrong variable name in error message, would NameError
+4. **Line 9442** (MEDIUM): `therest and therest` → `therest` — redundant duplicate condition
+5. **Lines 16423/16426** (HIGH): Pan time calculation had vertical/midi assignments SWAPPED vs crescendo/intensity pattern — vertical should use `new_second + 0.0`, midi should use `round(new_second * MIDICLICKSPERQUARTER * 4)`
+6. **Lines 16604/16638** (HIGH): `therest[0]` accessed after `therest = therest[1:]` without checking empty — would IndexError in trill parsing
+7. **Line 13141** (HIGH): `wargs[1]` accessed after only checking `len(wargs) < 1` — should check `< 2`, would IndexError with single argument
+8. **Line 14392** (MEDIUM): `vn = get_volume_number(...)` could return None, then used in `set_volume_now` without check — added `if vn is None: return`
+9. **Lines 4095/4453/4614/5579** (LOW): `val in instruments.values()` compared string to list-of-lists (always False); simplified to `val in instruments` (key lookup)
+
+**calculate.py fixes:**
+- **Lines 1138/1140/1148/1152/1158/1166**: Added missing `, None` to 6 error returns in `result_functions()` — single-element error lists weren't caught by `len(args) > 1` check in `parse_to()`
+
+**IMPORTANT: calculate.py return convention** — The Pratt parser uses `args = evaluate_handle(args)` where eval functions must return `[[type, value]]` (single-element list wrapping `[type, value]`). Error returns are `['ERROR...', None]` (two-element list). Do NOT remove the double-nesting — it is intentional.
 
 ---
 

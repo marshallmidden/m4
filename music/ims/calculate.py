@@ -978,7 +978,7 @@ def parse_to(prio: int) -> list | None | str:
     elif not args:
         return None
     # fi
-    return "ERROR - parse_to runs off the end of routine '{}'".format(args)
+    return [ "ERROR - parse_to runs off the end of routine '{}'".format(args), None ]
 # End of parse_to
 
 #-----------------------------------------------------------------------------
@@ -1135,9 +1135,9 @@ def result_functions(arg1: list, arg2: list) -> list:
             elif l == 1:
                 d = int(arg2[1])
                 if arg2[0] != 'NUMBER':
-                    return [ "ERROR - result_functions - variable needs 1 dimension to array '{}' not {}".format(arg1, l) ]
+                    return [ "ERROR - result_functions - variable needs 1 dimension to array '{}' not {}".format(arg1, l), None ]
                 elif d < 1 or d > maxwary[numarry_indexes][0]:
-                    return [ 'ERROR - result_functions - variable {} 1st dimension {} not in range 1 thru {}'.format(arg1, d, maxwary[numarry_indexes][0]) ]
+                    return [ 'ERROR - result_functions - variable {} 1st dimension {} not in range 1 thru {}'.format(arg1, d, maxwary[numarry_indexes][0]), None ]
 #--                elif maxwary[numarry_value_type][d-1] is None:
 #--                    return [ 'ERROR - result_functions - variable {}({}) is not set'.format(arg1, d) ]
                 # fi
@@ -1145,17 +1145,17 @@ def result_functions(arg1: list, arg2: list) -> list:
                 return arg
             else:
                 if arg2[0] != 'COMMA':
-                    return [ 'ERROR - result_functions - variable {} needs {} dimensions for array'.format(arg1, l) ]
+                    return [ 'ERROR - result_functions - variable {} needs {} dimensions for array'.format(arg1, l), None ]
                 # fi
                 d = len(arg2[1])
                 if l != d:
-                    return [ "ERROR - result_functions - variable {} needs {} dimensions to array '{}' not {}".format(arg1, l, d) ]
+                    return [ "ERROR - result_functions - variable {} needs {} dimensions to array '{}' not {}".format(arg1, l, d), None ]
                 # fi
 
                 d = int(round(float(arg2[1][0])))
                 x = maxwary[numarry_indexes][0]     # Max dimension of this..
                 if d < 1 or d > x:
-                    return [ 'ERROR - result_functions - variable {} dimension#1 {} not in range 1 thru {}'.format(arg1, d, x) ]
+                    return [ 'ERROR - result_functions - variable {} dimension#1 {} not in range 1 thru {}'.format(arg1, d, x), None ]
                 # fi
                 h = d - 1                           # array index into numarry_values & numarry_value_type
                 mult = x
@@ -1163,7 +1163,7 @@ def result_functions(arg1: list, arg2: list) -> list:
                     d = int(round(float(arg2[1][a])))
                     x = maxwary[numarry_indexes][a]
                     if d < 1 or d > x:
-                        return [ 'ERROR - result_functions - variable {} dimension#{} {} not in range 1 thru {}'.format(arg1, a+1, d, x) ]
+                        return [ 'ERROR - result_functions - variable {} dimension#{} {} not in range 1 thru {}'.format(arg1, a+1, d, x), None ]
                     # fi
                     h = h + (d-1) * mult
                     mult = mult * x
@@ -1223,7 +1223,7 @@ def result_functions(arg1: list, arg2: list) -> list:
         a = [ 'NUMBER', a1[1] * a2[1] ]
         return a
     # fi
-    return [[ "ERROR - Fetching from unknown function '{}' '{}'".format(arg1, arg2) , None ]]
+    return [ "ERROR - Fetching from unknown function '{}' '{}'".format(arg1, arg2) , None ]
 # End of result_functions
 
 #-----------------------------------------------------------------------------
@@ -1511,7 +1511,7 @@ def f_in(arg: list) -> list:
 #PRINT    print("f_in - arg='{}'".format(arg), file=sys.stderr, flush=True)   # PRINT
     val = arg[1]
     if len(val) != 3:
-        return [ "ERROR - in() needs two arguments, not: {}'".format(val), None ]
+        return [ "ERROR - in() needs three arguments, not: {}'".format(val), None ]
     # fi
     # check if types of 3 arguments are float/int. 
     n = 1
@@ -1766,216 +1766,11 @@ _var_index_add(arrays[-1])
 arrays.append( [ 'tau', 0, [ ], [ math.tau ], [ 0 ] , False ] )
 _var_index_add(arrays[-1])
 
-arrays.append( [ 'm1',  0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm2',  0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm3',  0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm4',  0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm5',  0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm6',  0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm7',  0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm8',  0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm9',  0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-
-arrays.append( [ 'm10', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm11', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm12', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm13', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm14', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm15', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm16', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm17', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm18', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm19', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-
-arrays.append( [ 'm20', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm21', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm22', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm23', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm24', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm25', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm26', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm27', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm28', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm29', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-
-arrays.append( [ 'm30', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm31', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm32', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm33', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm34', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm35', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm36', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm37', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm38', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm39', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-
-arrays.append( [ 'm40', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm41', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm42', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm43', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm44', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm45', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm46', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm47', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm48', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm49', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-
-arrays.append( [ 'm50', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm51', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm52', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm53', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm54', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm55', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm56', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm57', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm58', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm59', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-
-arrays.append( [ 'm60', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm61', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm62', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm63', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm64', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm65', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm66', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm67', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm68', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm69', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-
-arrays.append( [ 'm70', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm71', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm72', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm73', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm74', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm75', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm76', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm77', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm78', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm79', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-
-arrays.append( [ 'm80', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm81', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm82', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm83', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm84', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm85', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm86', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm87', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm88', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm89', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-
-arrays.append( [ 'm90', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm91', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm92', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm93', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm94', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm95', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm96', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm97', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm98', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-arrays.append( [ 'm99', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
-
-arrays.append( [ 'm100', 0, [ ], [ 0 ],        [ 0 ] , False ] )
-_var_index_add(arrays[-1])
+# m1 through m100: general-purpose macro variables.
+for _mi in range(1, 101):
+    arrays.append( [ f'm{_mi}', 0, [ ], [ 0 ], [ 0 ] , False ] )
+    _var_index_add(arrays[-1])
+# rof
 #-----------------------------------------------------------------------------
 def cexp_parser() -> None:
     """Initialize the expression parser: register all operators and functions with their precedence levels."""
