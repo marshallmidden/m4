@@ -636,7 +636,6 @@ def compute_value(op: str, arg1: list, arg2: list) -> list:
         if a2 == 0:
             return [ "ERROR - Second argument is zero a1='{}' a2='{}'".format(a1,a2), None ]
         # fi
-        f = a1 / a2
         return [ t1,  a1 / a2 ]
     elif op == '**':
         t1,a1,t2,a2 = fix_to_numbers(t1,a1,t2,a2)
@@ -868,7 +867,7 @@ def evaluate_handle(args: list) -> list:
             return a
         # fi
     # rof
-    raise RuntimeError('Internal error: no eval found in {}'.format(args), file=sys.stderr, flush=True)
+    raise RuntimeError('Internal error: no eval found in {}'.format(args))
 # End of evaluate_handle
 
 #-----------------------------------------------------------------------------
@@ -1122,12 +1121,10 @@ def result_functions(arg1: list, arg2: list) -> list:
     if arg2[0] in ['NUMBER', 'COMMA', 'CHAR']:
         maxmaclev = -1
         maxwary = None
-        for wary in arrays + local_arrays:
-            if arg1[1] == wary[numarry_name]:
-                if wary[numarry_maclevel] > maxmaclev:
-                    maxmaclev = wary[numarry_maclevel]
-                    maxwary = wary
-                # fi
+        for wary in variable_index.get(arg1[1], []):
+            if wary[numarry_maclevel] > maxmaclev:
+                maxmaclev = wary[numarry_maclevel]
+                maxwary = wary
             # fi
         # rof
         if maxwary is not None:

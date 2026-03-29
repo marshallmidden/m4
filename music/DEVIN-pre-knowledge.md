@@ -85,12 +85,12 @@ DOALL runs 5 test suites in parallel: `songs/`, `musicomp2abc/`, `b/`, `t/e/`, `
 Each suite runs `AAA.diff._2` which compiles `.gcs` files with both imscomp and musicomp2abc,
 then diffs the outputs across all format flags (abc, h, v, csv, fs).
 
-**Expected baseline (as of 2026-03-27)**: 214 bare ARGHs, 2 named ARGHs.
-- Bare ARGHs = imscomp-vs-musicomp2abc diffs (expected, pre-existing).
+**Expected baseline (as of 2026-03-28)**: 0 bare ARGHs, 2 named ARGHs.
+- Bare ARGHs = imscomp-vs-musicomp2abc diffs. Currently 0 (files are synced).
 - Named ARGHs = execution failures. Only `new-g3` fails (known issue in gershwin suite).
 - Exit code 0 if named ARGHs <= 2 (PASS with known diffs). Exit code 1 if more (FAIL).
 
-**When verifying changes**: Always run full DOALL and confirm 214 bare / 2 named.
+**When verifying changes**: Always run full DOALL and confirm 0 bare / 2 named.
 Changes that increase named ARGHs are regressions.
 
 ### Output Format Flags
@@ -329,6 +329,76 @@ Default period-size=64 causes crackling on WSL2 (FluidSynth -> PipeWire-pulse ->
 ---
 
 ## Bug Fix History
+
+### Subagent-Discovered Bugs and Improvement Passes (2026-03-28) -- COMPLETE
+
+**Subagent bug hunt (4 real fixes, 2 false alarms):**
+1. Line 18116: `for ls in last_voice_staff:` → `for ls in save_last_voice_staff:` in `set_process_begin()` (CRITICAL: loop iterated over empty list, never executing — process quit logic was dead)
+2. Line 3531: `mmm in clef and j in clef[mmm]` → `j in clef and mmm in clef[j]` in `new_voice_initialize()` (swapped operands: `clef` is keyed by voice, not measure — condition never matched, defaulted to treble)
+3. Line 3675: Added `len(staff_name[st]) > 0` check in `firstvoiceinstaff()` (crash prevention: `staff_name[sn] = []` at line 13341 can create empty lists)
+4. Line 3720: `clef [voiceon]` → `clef[voiceon]` (cosmetic: extraneous space before bracket)
+- Lines 3529, 12340 off-by-one: **false alarm** — `-1` correctly skips current measure (just appended to `meas`)
+- Line 5179 bounds check: **false alarm** — voices are 1-indexed, `voiceon == len(volume)` correctly identifies last voice
+
+**Improvement passes 1-4 (completed earlier in session):**
+- Crash bugs: Line 11403 `me3asure_on` → `measure_on` typo + removed undefined `{command}`; Line 14446 added missing `f` prefix
+- Error messages: Line 12548 `"legal note"` → `"not a legal note"`; Line 12545 fixed 5→4 space indent; Line 14432 fixed return type `-> None` → `-> tuple`
+- Redundant conditions: Lines 16552, 16852, 17421 removed duplicate leading conditions
+- Dead code: Line 2326 removed unreachable `break` after `return`
+- Semicolons: Lines 5150, 8073, 8800, 11311 removed trailing semicolons
+- calculate.py: Line 1124 `arrays + local_arrays` → `variable_index.get(arg1[1], [])` (O(n)→O(1) lookup)
+
+**.gcs tempo conversions (completed earlier in session):**
+- `musicomp2abc/Aflatmajor.gcs`: Removed 10 intermediate tempos, added `tempo 116,4,rit` at m41
+- `songs/promenade2.gcs`: Removed 9 intermediate tempos, added `tempo 90,4,rit` at unit 12.5
+- `ims/tc-testing/gershwin/g3.gcs`: Converted 4 sections to use rit/acc syntax
+
+**DOALL after all fixes**: 0 bare ARGHs, 2 named ARGHs (new-g3 only, pre-existing).
+
+**Session reference**: `history_9e6ba5d844d34ba0.md`
+
+### Volume Table Change, Batch 6 Bug Fixes, and calculate.py Audit (2026-03-28) -- COMPLETE
+
+**Volume table change**: Shifted all dynamics in `vlprint` table up by 10 (pp:40→50, p:50→60,
+mp:60→70, mf:70→80, f:80→90, ff:90→100, fff:100→110, ffff:110→120, pppp:20→30, ppp:30→40).
+Updated stale comments in volume number lookup to match. Only modified ims/imscomp.
+
+**Musicomp2abc baseline reset**: Copied `ims/imscomp` → `musicomp2abc/musicomp2abc` and
+`ims/calculate.py` → `musicomp2abc/calculate.py` so DOALL shows 0 bare ARGHs.
+Originals saved as `musicomp2abc/musicomp2abc.SAVE` and `musicomp2abc/calculate.py.SAVE`.
+
+**Pitchbend audit**: Verified pitchbend implementation is correct for fluidsynth output
+(single 14-bit value, not split LSB/MSB). Autopitchbend range 7292-9092 is safe within 0-16383.
+
+**Xpose investigation**: Verified note-on/note-off balance (0 unmatched). Horn sustain in b9m2_2.fs
+is from legitimately long tied notes (6-17 seconds), not a bug.
+
+**Batch 6 — Bug fixes in imscomp (16 fixes):**
+1. Line ~1979: Dead code comment fix (`len(l) < 0` impossible)
+2. Line ~2008: `args.intensity != ''` → `args.intensity = ''` (comparison→assignment)
+3. Line 3315: Added `f` prefix to f-string in `set_all_staff_arr`
+4. Line 3316: `print_die(here)` → `print_die("here")` (undefined variable)
+5. Line 3339: `.` → `, ` separator AND `print_die("here")`
+6. Line 3340: `print_die(here)` → `print_die("here")`
+7. Line 3362: `.` → `, ` separator AND `print_die("here")`
+8. Lines 3386-3387: `.` → `, ` separator AND `print_die("here")`
+9. Line 3712: Missing `f` prefix on f-string in `print_measure_abc`
+10. Line 9396: Missing `f` prefix on f-string for default note error
+11. Line 13190: Typo `"0to 127"` → `"0 to 127"` in reverb error
+12. Line 15989: `{strpvi}` → `{str_pvi}` (undefined variable typo)
+13. Lines 16447-16454: `which_intensity_now` → `which_intensity` (undefined variable)
+14. Lines 16609-16610: Added `return None` after trill error (was falling through)
+15. Line 17472: `w + 1 > len(wargs)` → `w + 1 >= len(wargs)` (off-by-one)
+16. Line 18172: Removed dead `, False` from `pop_process()` call (unused tuple)
+
+**calculate.py audit (2 fixes):**
+17. Line 871: `raise RuntimeError(msg, file=sys.stderr, flush=True)` — removed invalid kwargs
+    (RuntimeError doesn't accept `file=`/`flush=`; would TypeError instead of raising properly)
+18. Line 639: Removed dead variable `f = a1 / a2` (return on next line recalculated it)
+
+**DOALL after all fixes**: 0 bare ARGHs, 2 named ARGHs (new-g3 only, pre-existing).
+
+**Session reference**: `history_585210cdd61843d8.md`
 
 ### Comprehensive Code Audit & Bug Fixes (2026-03-27) -- COMPLETE
 
