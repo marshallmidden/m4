@@ -1093,16 +1093,21 @@ def result_functions(arg1: list, arg2: list) -> list:
     if arg1[1] in functions:
         fu = functions[arg1[1]]
         wh = fu[0]
-        ar = fu[1]
+        ar = _func_arg_patterns[arg1[1]]
 #PRINT        print(f'result_functions - #2 ar={ar} arg2={arg2}', file=sys.stderr, flush=True)  # PRINT
         flagit = False
         for aaa in ar:
 #PRINT            print(f'result_functions - #3 aaa={aaa}', file=sys.stderr, flush=True)  # PRINT
-            my_regex = aaa + r'$'
-            if re.match(my_regex, arg2[0]):
-#PRINT                print(f'result_functions - #10 my_regex={my_regex} aaa={aaa}', file=sys.stderr, flush=True)  # PRINT
-                flagit = True
-                break
+            if isinstance(aaa, str):
+                if arg2[0] == aaa:
+                    flagit = True
+                    break
+                # fi
+            else:
+                if aaa.match(arg2[0]):
+                    flagit = True
+                    break
+                # fi
             # fi
         # rof
         if not flagit:
@@ -1188,7 +1193,7 @@ def result_functions(arg1: list, arg2: list) -> list:
         a2 = get_value(arg2)
         if a2[0] == 'NUMBER':               # Go from token number a2[1] to end of string.
             if not isinstance(a2[1], int) and not isinstance(a2[1], float): 
-                return [ "ERROR - character token fetching needs first argument as integer, but this has {}".format(type(a2[1][0])), None ]
+                return [ "ERROR - character token fetching needs first argument as integer, but this has {}".format(type(a2[1])), None ]
             # fi
 #PRINT            print('result_functions #1- calling get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
             x = get_tokens_from_char(a1[1],a2[1],None)
@@ -1200,7 +1205,7 @@ def result_functions(arg1: list, arg2: list) -> list:
             if not isinstance(a2[1][0], int) and not isinstance(a2[1][0], float): 
                 return [ "ERROR - character token fetching needs first argument as integer, but this has {}".format(type(a2[1][0])), None ]
             elif not isinstance(a2[1][1], int) and not isinstance(a2[1][1], float): 
-                return [ "ERROR - character token fetching needs second argument as integer, but this has {}".format(type(a2[1][0])), None ]
+                return [ "ERROR - character token fetching needs second argument as integer, but this has {}".format(type(a2[1][1])), None ]
             # fi
 #PRINT            print('result_functions #3- calling get_tokens_from_char', file=sys.stderr, flush=True)  # PRINT
             x = get_tokens_from_char(a1[1], a2[1][0], a2[1][1])
@@ -1550,7 +1555,11 @@ def f_log(arg: list) -> list:
 def f_ln(arg: list) -> list:
     """Compute the natural (base-e) logarithm of a number."""
     a = float(arg[1])
-    a = math.log(a)
+    try:
+        a = math.log(a)
+    except (ValueError, TypeError):
+        a = 0
+    # yrt
     return [ 'NUMBER', a ]
 # End of f_ln
 
@@ -1613,7 +1622,7 @@ def f_defined(arg: list) -> list:
     elif len(which) > 8 and which[0:8] == 'ERROR - ':
         return ['NUMBER', 0.0]                  # False
     else:
-        print(f'f_defined - UNKNOWN TYPE={which} len(which)={len(which)} which[0:9]={which[0:9]}', file=sys.stderr, flush=True)
+        print(f'f_defined - UNKNOWN TYPE={which} len(which)={len(which)} which[0:8]={which[0:8]}', file=sys.stderr, flush=True)
         return ['NUMBER', 0.0]                  # False
     # fi
 # End of f_defined
@@ -1753,6 +1762,22 @@ functions = {
     'print':    [ f_print,      ['NUMBER','CHAR','COMMA']],
     }
 
+# Pre-compile argument-type regex patterns for result_functions() matching.
+# Exact type strings (no regex metacharacters) use direct equality; only
+# patterns with metacharacters get compiled as regex.
+_func_arg_patterns = {}
+for _fn, _fv in functions.items():
+    _pats = []
+    for _a in _fv[1]:
+        if any(c in _a for c in '.*+?[](){}|\\^$'):
+            _pats.append(re.compile(_a + r'$'))
+        else:
+            _pats.append(_a)       # plain string — use == comparison
+        # fi
+    # rof
+    _func_arg_patterns[_fn] = _pats
+# rof
+
 #-----------------------------------------------------------------------------
 #               Name of variable
 #                       Macro-level
@@ -1845,7 +1870,7 @@ def get_line() -> str:
             print('Read got keyboard interrupt', file=sys.stderr)
         except Exception:
             print('Read got a processing error', file=sys.stderr)
-            print('   ', sys.exc_info()[0], sys.exc_info, file=sys.stderr, flush=True)
+            print('   ', sys.exc_info()[0], sys.exc_info(), file=sys.stderr, flush=True)
         # yrt
         break
     # elihw

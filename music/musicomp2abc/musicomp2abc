@@ -908,7 +908,6 @@ _RE_STAR_LINE = re.compile(r'^\s*[*]')
 _RE_8SPACES = re.compile(r'^        ')
 _RE_CPP_LINE = re.compile(r'^# ([0-9]+) "([^"]+)".*$')
 _RE_WORD_BOUNDARY = re.compile(r'^\w+')
-_RE_WS_EMPTY = re.compile(r'\s+')
 
 import readline
 import shlex
@@ -2780,6 +2779,8 @@ goto_variables = { }                # first index is measure number. Value is nu
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global meas                         # measure names.
 meas = []
+global _meas_index                  # dict mapping measure name to index in meas list (O(1) lookup).
+_meas_index = {}
 global _fvmlth_done                 # fill_voice_mlth: set of measures fully processed.
 _fvmlth_done = set()
 global _fvmlth_nv                   # fill_voice_mlth: voice count at last run.
@@ -2842,7 +2843,7 @@ cresc_volume_direction = [ ]
 #   If cresc_volume_direction is [measure,note#] - then vp< and upon new volume, do cresc.
 #   When hit volume/volumes/vol() - then go back and fix notes crom cresc_volume_direction to current note.
 #   Current note gets volume of cresc_volume[voice].
-global future_volume_cresc_dimin    # [voice] = [ meas.index(measure_on), len(ba.volume[voiceon][measure_on]) ]
+global future_volume_cresc_dimin    # [voice] = [ _meas_index[measure_on], len(ba.volume[voiceon][measure_on]) ]
 future_volume_cresc_dimin = [ ]
 global future_volume_cresc_time     # Length of time for future cresc_dimin ... updated as notes put on voice.
 future_volume_cresc_time = [ ]
@@ -2864,7 +2865,7 @@ global cresc_pan_time               # Time for crescendo.  (0.25 = 1/4 note)
 cresc_pan_time = [ ]
 global cresc_pan_direction          # True if upwards crescendo, False if downwards..
 cresc_pan_direction = [ ]
-global future_pan_cresc_dimin       # [voice] = [ meas.index(measure_on), len(ba.pan[voiceon][measure_on]) ]
+global future_pan_cresc_dimin       # [voice] = [ _meas_index[measure_on], len(ba.pan[voiceon][measure_on]) ]
 future_pan_cresc_dimin = [ ]
 global future_pan_cresc_time        # Length of time for future cresc_dimin ... updated as notes put on voice.
 future_pan_cresc_time = [ ]
@@ -2893,7 +2894,7 @@ global cresc_intensity_time         # Time for crescendo.  (0.25 = 1/4 note)
 cresc_intensity_time = [ ]
 global cresc_intensity_direction    # True if upwards crescendo, False if downwards..
 cresc_intensity_direction = [ ]
-global future_intensity_cresc_dimin # [voice] = [ meas.index(measure_on), len(ba.intensity[voiceon][measure_on]) ]
+global future_intensity_cresc_dimin # [voice] = [ _meas_index[measure_on], len(ba.intensity[voiceon][measure_on]) ]
 future_intensity_cresc_dimin = [ ]
 global future_intensity_cresc_time  # Length of time for future cresc_dimin ... updated as notes put on voice.
 future_intensity_cresc_time = [ ]
@@ -3926,7 +3927,7 @@ def print_out_abc() -> None:
 
             if m in goto_table and goto_table[m] != '':
                 print_warning_no_line(f'goto in measure {m} not handled.')
-                if print_line != '' and print_line[-1] != '\n' and print_line[-1] == '|' and first_goto:
+                if print_line != '' and print_line[-1] == '|' and first_goto:
                     print_line = print_line[:-1] + ':|'
                     first_goto = False
                 # fi
@@ -5665,7 +5666,7 @@ def print_header() -> None:
                 if g == 'x':
                     m_number = m_number + 1
                 else:
-                    m_number = meas.index(g)
+                    m_number = _meas_index[g]
                 # fi
             else:
                 m_number = m_number + 1
@@ -6388,7 +6389,7 @@ def print_out_midi1csv_notes() -> None:
                 if g == 'x':
                     m_number = m_number + 1
                 else:
-                    m_number = meas.index(g)
+                    m_number = _meas_index[g]
                 # fi
                 if m_number < len(meas):
                     m = meas[m_number]
@@ -7276,7 +7277,7 @@ def pass2_put_prenote_on_bufs() -> None:
     global bufs
 
     m = measure_on
-    e_m = meas.index(m)
+    e_m = _meas_index[m]
     for v in range(1,voices+1):
         if voice_prenote[v] is not None and voice_prenote[v] != '':
             if m not in bufs[v]:
@@ -8060,7 +8061,7 @@ def fill_future_pvi(endingv, voiceon, bufs_pvi,
     # fi
 
     [start_m, start_n] = future_pvi_cresc_dimin[voiceon]
-    e_m = meas.index(measure_on)
+    e_m = _meas_index[measure_on]
     m = start_m
     n = start_n
     ms = meas[m]
@@ -8247,7 +8248,7 @@ def put_cresc_vpi(voiceon, timey, it, running, running_next,
             # rof
         # fi
         if cresc_it_direction[voiceon] is not None:
-            i = meas.index(measure_on)
+            i = _meas_index[measure_on]
             if measure_on in bufs_it[voiceon]:
                 bp = len(bufs_it[voiceon][measure_on])
             else:
@@ -12319,6 +12320,7 @@ def do_measure(t_args: str | None, original_line: str) -> None:
 
     measure_on = str(f1)
     meas.append(measure_on)
+    _meas_index[measure_on] = len(meas) - 1
     for i in range(1, len(volume)+1):
         if not i in vinstrument:
             set_all_staff_arr(i, {}, vinstrument, 'vinstrument', original_line)
@@ -12589,7 +12591,7 @@ def do_outloop(t_args: str | None, original_line: str) -> None:
             return
         # fi
         if f1 is None:
-            print_error(f"m:{measure_on} outloop expression error - {type_error}", original_line)
+            print_error(f"m:{measure_on} outloop expression error - expression returned None", original_line)
             return
         # fi
     # fi
@@ -13141,7 +13143,7 @@ def do_reloop(t_args: str | None, original_line: str) -> None:
             return
         # fi
         if f1 is None:
-            print_error(f"m:{measure_on} reloop expression error - {type_error}", original_line)
+            print_error(f"m:{measure_on} reloop expression error - expression returned None", original_line)
             return
         # fi
     # fi
@@ -13580,10 +13582,10 @@ def fill_tempo_ramp(end_speed, original_line) -> None:
         if start_m == '':
             si = 0                          # header (before first measure)
         else:
-            si = meas.index(start_m)
+            si = _meas_index[start_m]
         # fi
-        ei = meas.index(end_m)
-    except ValueError:
+        ei = _meas_index[end_m]
+    except (ValueError, KeyError):
         print_error(f"fill_tempo_ramp: cannot find measure range '{start_m}'..'{end_m}' in meas[].", original_line)
         return
     # yrt
@@ -15056,8 +15058,8 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
     global trill_note
 
     leading_space = False
-    if note_to_decode and note_to_decode:
-        while note_to_decode and note_to_decode and (note_to_decode[0] == '\t' or note_to_decode[0] == ' '):
+    if note_to_decode:
+        while note_to_decode and (note_to_decode[0] == '\t' or note_to_decode[0] == ' '):
             note_to_decode = note_to_decode[1:]
             leading_space = True
         # fi
@@ -15977,7 +15979,7 @@ def get_pvi_note(temp1, voiceon, str_pvi, original_line):
         temp1 = temp1.strip()
     # fi
     therest = temp1[len(str_pvi)+1:-1]         # get rid of pvi()
-    if therest[0] == '(' and therest[-1] ==')':
+    if therest and therest[0] == '(' and therest[-1] ==')':
         therest = therest[1:-1]
     # fi
     f1, type_error = is_float(therest, is_float_number, False)
@@ -16023,7 +16025,7 @@ def get_vol_note(temp1, voiceon, rv, original_line):
     global measure_on
 
     temp1 = temp1.strip()
-    if temp1 == []:
+    if not temp1:
         return None, None, None
     # fi
     if temp1[0] == '(' and temp1[-1] == ')':
@@ -16716,7 +16718,6 @@ def get_trill_note(therest, voiceon, prenote, thenote, postnote, tie_next, legat
         # lthtrill = int(round((lengthf[0] / int(np)) * MIDICLICKSPERQUARTER * 4.0))
         # Need to have left-over fractions work.
         numerator = lengthf[0] * MIDICLICKSPERQUARTER * 4.0
-        lth_so_far = 0
         np_to_do = int(np)
         last_legato = False
         if (r_suffixes & suffix_legato) != 0:
@@ -16984,7 +16985,6 @@ def get_sequence_note(temp1, voiceon, number_in_sequence, prenote, postnote, tie
         # then the rounding goes up and down by 1 nicely. *sigh* computers.
 
         numerator = timeofnote * MIDICLICKSPERQUARTER * 4.0
-        lth_so_far = 0
         seq_num_so_far = number_in_sequence
         for i in range(0, len(notes)):
             if i == 0 and vols_prenote[i] == '':
@@ -19328,11 +19328,11 @@ def readthefile() -> None:
         # fi
         if line is None and commentonline is None:  # If end of file.
             return
-        elif not line or not line or line == '':
+        elif not line:
             continue
         # fi
         line = line.rstrip()
-        if not line or not line or line == '':
+        if not line:
             continue
         # fi
         # If command == '*' ignore.

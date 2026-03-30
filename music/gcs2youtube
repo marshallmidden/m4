@@ -1,0 +1,214 @@
+#!/bin/bash
+# gcs2youtube -- Convert a .gcs music composition file to a YouTube-uploadable .mp4
+#
+# Usage:  gcs2youtube <file.gcs>
+#
+# Pipeline:
+#   .gcs -> .E   (gcc -E, C preprocessor expands #include directives)
+#   .E   -> .fs  (musicomp2abc --fluidsynth, generates FluidSynth commands)
+#   .fs  -> .wav (fluidsynth renders audio via SoundFont)
+#   .wav -> .mp4 (ffmpeg wraps audio in a video container for YouTube)
+#
+# The .gcs file must be specified with its full (or relative) path.
+# All intermediate files are created in a temporary directory and cleaned up.
+# The final .mp4 is placed next to the input .gcs file (same directory, same basename).
+#
+# Requirements: gcc, musicomp2abc (or imscomp), fluidsynth, ffmpeg
+# -----------------------------------------------------------------------------
+
+set -euo pipefail
+
+#-- Configurable paths --------------------------------------------------------
+MUSICOMP2ABC="${MUSICOMP2ABC:-$HOME/LEARNING/music/musicomp2abc/musicomp2abc}"
+IMSCOMP="${IMSCOMP:-$HOME/LEARNING/music/ims/imscomp}"
+FLUIDSYNTH="${FLUIDSYNTH:-$HOME/bin/fluidsynth}"
+CPP="gcc -E -x c -undef -Wundef -Werror -nostdinc -C -CC"
+MC_ARGS="${MC_ARGS:-}"
+
+if [ "${OS}" = 'Darwin' ]; then
+FLUIDSYNTHARGS='-a coreaudio -n -q -K 128 -r96000'
+else
+FLUIDSYNTHARGS='-a pulseaudio -n -q -K 128 -r96000'
+fi
+# OS-specific SoundFont path
+case "$(uname -s)" in
+    Darwin) SOUNDFONT="${SOUNDFONT:-$HOME/src/GeneralUser/GeneralUser.sf2}" ;;
+    *)      SOUNDFONT="${SOUNDFONT:-$HOME/src/GeneralUser_GS/GeneralUser.sf2}" ;;
+esac
+
+# Video settings for YouTube
+VIDEO_RES="1920x1080"
+VIDEO_FPS="1"
+BG_COLOR="black"
+FONT_COLOR="white"
+FONT_SIZE="48"
+# -----------------------------------------------------------------------------
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS] <file.gcs>
+
+Convert a .gcs music composition file to a YouTube-uploadable .mp4 video.
+
+Options:
+  -c, --compiler {musicomp2abc|imscomp}
+                    Choose which compiler to use (default: musicomp2abc)
+  -o, --output FILE
+                    Output .mp4 path (default: same dir/basename as input)
+  -s, --soundfont FILE
+                    Path to .sf2 SoundFont file
+  -k, --keep        Keep intermediate files (.E, .fs, .wav) in output directory
+  -h, --help        Show this help message
+
+Environment variables (override defaults):
+  MUSICOMP2ABC      Path to musicomp2abc   (default: ~/LEARNING/music/musicomp2abc/musicomp2abc)
+  IMSCOMP           Path to imscomp        (default: ~/LEARNING/music/ims/imscomp)
+  FLUIDSYNTH        Path to fluidsynth     (default: ~/bin/fluidsynth)
+  SOUNDFONT         Path to .sf2 file      (default: ~/src/GeneralUser_GS/GeneralUser.sf2)
+  MC_ARGS           Extra args for musicomp2abc/imscomp
+
+Examples:
+  $(basename "$0") /home/m4/LEARNING/music/b/09/b9m2.gcs
+  $(basename "$0") -c imscomp -o ~/Videos/b9m2.mp4 b9m2.gcs
+  $(basename "$0") --keep /home/m4/LEARNING/music/b/09/b9m2.gcs
+EOF
+    exit 0
+}
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+info() { echo "-- $*"; }
+
+# -----------------------------------------------------------------------------
+# Parse arguments
+# -----------------------------------------------------------------------------
+COMPILER="musicomp2abc"
+OUTPUT=""
+KEEP_INTERMEDIATES=0
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -c|--compiler)   COMPILER="$2"; shift 2 ;;
+        -o|--output)     OUTPUT="$2";   shift 2 ;;
+        -s|--soundfont)  SOUNDFONT="$2"; shift 2 ;;
+        -k|--keep)       KEEP_INTERMEDIATES=1; shift ;;
+        -h|--help)       usage ;;
+        -*)              die "Unknown option: $1" ;;
+        *)               break ;;
+    esac
+done
+
+[[ $# -ge 1 ]] || die "No .gcs file specified. Use --help for usage."
+GCS_INPUT="$1"
+
+# -----------------------------------------------------------------------------
+# Resolve paths
+# -----------------------------------------------------------------------------
+[[ -f "$GCS_INPUT" ]] || die "File not found: $GCS_INPUT"
+
+GCS_FULL="$(cd "$(dirname "$GCS_INPUT")" && pwd)/$(basename "$GCS_INPUT")"
+GCS_DIR="$(dirname "$GCS_FULL")"
+BASENAME="$(basename "$GCS_FULL" .gcs)"
+
+if [[ -z "$OUTPUT" ]]; then
+    OUTPUT="${GCS_DIR}/${BASENAME}.mp4"
+fi
+
+# -----------------------------------------------------------------------------
+# Check prerequisites
+# -----------------------------------------------------------------------------
+check_tool() {
+    local name="$1" path="$2"
+    if [[ ! -x "$path" ]] && ! command -v "$path" &>/dev/null; then
+        die "$name not found at '$path'. Set $3 or install it."
+    fi
+}
+
+check_tool "gcc"        "gcc"            "PATH"
+check_tool "ffmpeg"     "ffmpeg"         "PATH"
+check_tool "fluidsynth" "$FLUIDSYNTH"    "FLUIDSYNTH"
+[[ -f "$SOUNDFONT" ]] || die "SoundFont not found: $SOUNDFONT"
+
+case "$COMPILER" in
+    musicomp2abc) COMP_BIN="$MUSICOMP2ABC"; check_tool "musicomp2abc" "$COMP_BIN" "MUSICOMP2ABC" ;;
+    imscomp)      COMP_BIN="$IMSCOMP";      check_tool "imscomp"      "$COMP_BIN" "IMSCOMP" ;;
+    *)            die "Unknown compiler '$COMPILER'. Use 'musicomp2abc' or 'imscomp'." ;;
+esac
+
+# -----------------------------------------------------------------------------
+# Create temp working directory (clean up on exit unless --keep)
+# -----------------------------------------------------------------------------
+TMPDIR="$(mktemp -d)"
+cleanup() {
+    if [[ "$KEEP_INTERMEDIATES" -eq 1 ]]; then
+        local dest_dir
+        dest_dir="$(dirname "$OUTPUT")"
+        info "Keeping intermediate files in: $dest_dir"
+        cp -f "$TMPDIR/${BASENAME}.E"   "$dest_dir/" 2>/dev/null || true
+        cp -f "$TMPDIR/${BASENAME}.fs"  "$dest_dir/" 2>/dev/null || true
+        cp -f "$TMPDIR/${BASENAME}.wav" "$dest_dir/" 2>/dev/null || true
+    fi
+    rm -rf "$TMPDIR"
+}
+trap cleanup EXIT
+
+# -----------------------------------------------------------------------------
+# STEP 1: .gcs -> .E  (C preprocessor -- must run in the .gcs directory
+#                       so that #include "file.starting" etc. resolve)
+# -----------------------------------------------------------------------------
+info "Step 1/4: Preprocessing $BASENAME.gcs -> $BASENAME.E"
+(cd "$GCS_DIR" && $CPP "$GCS_FULL" -o "$TMPDIR/${BASENAME}.E") \
+    || die "Preprocessing failed."
+
+# -----------------------------------------------------------------------------
+# STEP 2: .E -> .fs   (music compiler -> FluidSynth commands)
+# -----------------------------------------------------------------------------
+info "Step 2/4: Compiling $BASENAME.E -> $BASENAME.fs  (using $COMPILER)"
+"$COMP_BIN" $MC_ARGS --fluidsynth "$TMPDIR/${BASENAME}.E" "$TMPDIR/${BASENAME}.fs" \
+    || die "Compilation to .fs failed."
+
+# -----------------------------------------------------------------------------
+# STEP 3: .fs -> .wav  (FluidSynth renders audio)
+# -----------------------------------------------------------------------------
+info "Step 3/4: Rendering $BASENAME.fs -> $BASENAME.wav  (fluidsynth)"
+#++ FLUIDSYNTHARGS='-a pulseaudio -n -q -K 128 -r96000'
+#++ cat ${FS} | /home/m4/bin/fluidsynth ${FLUIDSYNTHARGS}
+"$FLUIDSYNTH" -q -n -K 128 -r96000 -F "$TMPDIR/${BASENAME}.wav" "$SOUNDFONT" < "$TMPDIR/${BASENAME}.fs" \
+    || die "FluidSynth rendering failed."
+
+# Verify we got a non-empty WAV
+[[ -s "$TMPDIR/${BASENAME}.wav" ]] || die "FluidSynth produced an empty .wav file."
+
+# -----------------------------------------------------------------------------
+# STEP 4: .wav -> .mp4  (ffmpeg creates YouTube-uploadable video)
+#
+# YouTube requires a video stream. We create a static title card with the
+# composition name on a black background, paired with the audio.
+# Settings: H.264 video + AAC audio, standard 1080p -- widely accepted by YouTube.
+# -----------------------------------------------------------------------------
+info "Step 4/4: Creating $BASENAME.mp4 for YouTube  (ffmpeg)"
+
+# Extract a title from the .gcs file (first 'title' line), fallback to basename
+TITLE="$(grep -m1 '^title ' "$GCS_FULL" | sed 's/^title[[:space:]]*//' || echo "$BASENAME")"
+# Grab additional title lines for subtitle text
+SUBTITLE="$(grep '^title ' "$GCS_FULL" | sed 's/^title[[:space:]]*//' | sed -n '2,4p' | tr '\n' ' ' || true)"
+
+# Get audio duration for the video length
+DURATION="$(ffprobe -v error -show_entries format=duration \
+    -of default=noprint_wrappers=1:nokey=1 "$TMPDIR/${BASENAME}.wav")"
+
+ffmpeg -y \
+    -f lavfi -i "color=c=${BG_COLOR}:s=${VIDEO_RES}:r=${VIDEO_FPS}:d=${DURATION}" \
+    -i "$TMPDIR/${BASENAME}.wav" \
+    -vf "drawtext=text='${TITLE}':fontcolor=${FONT_COLOR}:fontsize=${FONT_SIZE}:x=(w-text_w)/2:y=(h-text_h)/2-40, \
+         drawtext=text='${SUBTITLE}':fontcolor=gray:fontsize=28:x=(w-text_w)/2:y=(h/2)+30" \
+    -c:v libx264 -tune stillimage -pix_fmt yuv420p \
+    -c:a aac -b:a 192k \
+    -shortest \
+    -movflags +faststart \
+    "$OUTPUT" \
+    || die "ffmpeg video creation failed."
+
+info "Done! YouTube-ready file: $OUTPUT"
+info "  Title: $TITLE"
+info "  Duration: ${DURATION}s"
+ls -lh "$OUTPUT"
