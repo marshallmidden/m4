@@ -1,0 +1,305 @@
+#!/usr/bin/env python3
+"""fs2ass -- Generate an ASS subtitle file with scrolling echo events.
+
+Reads a .fs (FluidSynth) file, extracts timed echo lines, and produces
+an ASS (Advanced SubStation Alpha) subtitle file.  The echo text scrolls
+vertically on the LEFT side of a 1920x1080 frame:
+
+  - Current echo is at vertical centre, bright orange, full opacity.
+  - Future echoes slowly fade in from below as they approach.
+  - Past echoes scroll upward and slowly fade out.
+
+All echoes that share the same timestamp are grouped into a single block
+so they appear at the same brightness on separate lines.
+
+A persistent white title can be placed near the top of the frame with
+--title "line".  The scrolling orange text is rendered on a higher
+layer so it overwrites the title while passing over it; the title
+refreshes once the orange moves past.
+
+Usage:
+    fs2ass  input.fs  output.ass  [--title "line"] ...  [--filter REGEX]
+
+Options:
+    --title LINE     Display LINE as persistent white title near the top.
+                     May be repeated for multiple title lines.
+    --filter REGEX   Only display echoes whose text matches REGEX
+                     (default: show ALL echoes)
+"""
+
+import re
+import sys
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+VIDEO_W      = 1920
+VIDEO_H      = 1080
+FONT_NAME    = "DejaVu Sans"
+FONT_SIZE    = 24           # base font size for scrolling echo text
+LINE_HEIGHT  = FONT_SIZE    # ASS rendered line height (baseline-to-baseline)
+TITLE_SIZE   = 48           # font size for the persistent title
+TEXT_X       = 50           # left margin for scrolling text
+CENTER_Y     = VIDEO_H // 2 # vertical centre where the active group sits
+
+# Colour: bright orange  (ASS uses &HAABBGGRR — note BGR order)
+#   Orange  RGB = FF, A5, 00  ->  ASS BGR = 00A5FF
+CLR_ORANGE   = "&H0000A5FF"
+CLR_WHITE    = "&H00FFFFFF"
+
+# Each event group is visible for this many seconds before and after its
+# timestamp.  It scrolls from bottom to centre during LEAD_TIME, and from
+# centre to top during TRAIL_TIME, fading in/out accordingly.
+LEAD_TIME    = 8.0   # seconds visible before becoming active
+TRAIL_TIME   = 8.0   # seconds visible after becoming active
+
+# How far (pixels) from centre the group starts / ends its scroll
+SCROLL_RANGE = 480
+
+# ---------------------------------------------------------------------------
+# Parse .fs file
+# ---------------------------------------------------------------------------
+def parse_fs_echoes(fs_path):
+    """Yield (time_sec, text) for every echo line."""
+    time_ms = 0.0
+    re_sleep = re.compile(r'^sleep\s+([\d.]+)')
+    re_echo  = re.compile(r'^echo\s+"(.*)"')
+    with open(fs_path) as fh:
+        for raw in fh:
+            line = raw.rstrip('\n')
+            m = re_sleep.match(line)
+            if m:
+                time_ms += float(m.group(1))
+                continue
+            m = re_echo.match(line)
+            if m:
+                yield (time_ms / 1000.0, m.group(1).rstrip())
+            # fi
+        # rof
+    # htiw
+
+
+def filter_echoes(echoes, user_filter=None):
+    """Apply display filter.  Returns list of (time, text).
+
+    By default ALL non-empty echoes are kept.  If user_filter is given,
+    only lines matching the regex are kept.
+    """
+    result = []
+    for t, txt in echoes:
+        if not txt:
+            continue
+        if user_filter is not None:
+            if user_filter.search(txt):
+                result.append((t, txt))
+            continue
+        # fi
+        result.append((t, txt))
+    # rof
+    return result
+
+
+def _group_by_time(events, epsilon=None):
+    """Group events that are too close to display separately.
+
+    Uses chain grouping: consecutive events closer than epsilon seconds
+    apart are merged into a single multi-line group.  Default epsilon is
+    computed from scroll parameters to prevent visual overlap.
+
+    Returns a list of (time, [text, text, ...]) tuples.
+    """
+    if epsilon is None:
+        scroll_rate = 2.0 * SCROLL_RANGE / (LEAD_TIME + TRAIL_TIME)
+        epsilon = LINE_HEIGHT / scroll_rate
+    # fi
+    groups = []
+    n = len(events)
+    i = 0
+    while i < n:
+        j = i + 1
+        while j < n and (events[j][0] - events[j - 1][0]) < epsilon:
+            j += 1
+        group_time = events[i][0]
+        group_texts = [events[k][1] for k in range(i, j)]
+        groups.append((group_time, group_texts))
+        i = j
+    # elihw
+    return groups
+
+
+# ---------------------------------------------------------------------------
+# ASS generation
+# ---------------------------------------------------------------------------
+def _ass_time(seconds):
+    """Format seconds as  H:MM:SS.cc  (centiseconds)."""
+    if seconds < 0:
+        seconds = 0
+    h  = int(seconds // 3600)
+    m  = int((seconds % 3600) // 60)
+    s  = seconds % 60
+    cs = int(round((s - int(s)) * 100))
+    if cs >= 100:
+        cs = 99
+    return f'{h}:{m:02d}:{int(s):02d}.{cs:02d}'
+
+
+def _escape(text):
+    """Escape ASS special characters in display text."""
+    return text.replace('\\', '\\\\').replace('{', '\\{').replace('}', '\\}')
+
+
+def generate_ass(events, total_duration, title_lines=None):
+    r"""Build the full ASS file content.
+
+    Events that share the same timestamp are grouped into a single
+    Dialogue line with \N between each echo.  The whole block scrolls
+    from below to above centre, fading in slowly from below and fading
+    out above.  All lines in a group share the same brightness.
+
+    If title_lines are given, they are rendered as persistent white text
+    near the top of the frame (Layer 0).  The scrolling events are on
+    Layer 1 so they overwrite the title while passing, then the title
+    refreshes when the orange moves past.
+    """
+    dialogues = []
+
+    # --- Persistent title near the top (Layer 0, Title style) ---
+    if title_lines:
+        title_text = '\\N'.join(_escape(l) for l in title_lines)
+        dialogues.append(
+            f'Dialogue: 0,0:00:00.00,{_ass_time(total_duration)},'
+            f'Title,,0,0,0,,{title_text}'
+        )
+    # fi
+
+    # --- Scrolling echo groups (Layer 1, Default style) ---
+    groups = _group_by_time(events)
+
+    for grp_time, texts in groups:
+        # Join all lines in the group with ASS hard line break
+        disp = '\\N'.join(_escape(t) for t in texts)
+
+        # Compute visibility window
+        t_appear = max(0.0, grp_time - LEAD_TIME)
+        t_gone   = min(total_duration, grp_time + TRAIL_TIME)
+        if t_gone <= t_appear:
+            t_gone = t_appear + 0.1
+
+        actual_lead  = grp_time - t_appear
+        actual_trail = t_gone - grp_time
+        total_vis    = t_gone - t_appear
+
+        if total_vis <= 0:
+            continue
+
+        # y positions: below centre at t_appear, above centre at t_gone
+        y_start = CENTER_Y + int(SCROLL_RANGE * actual_lead / max(LEAD_TIME, 0.01))
+        y_end   = CENTER_Y - int(SCROLL_RANGE * actual_trail / max(TRAIL_TIME, 0.01))
+
+        # Fade: slowly in over lead time, out over trail time
+        fade_in_ms  = int(actual_lead  * 1000)
+        fade_out_ms = int(actual_trail * 1000)
+
+        override = (
+            f'{{\\an4'                          # align middle-left
+            f'\\move({TEXT_X},{y_start},{TEXT_X},{y_end})'
+            f'\\fad({fade_in_ms},{fade_out_ms})'
+            f'}}'
+        )
+
+        dialogues.append(
+            f'Dialogue: 1,{_ass_time(t_appear)},{_ass_time(t_gone)},'
+            f'Default,,0,0,0,,{override}{disp}'
+        )
+    # rof
+
+    return _ass_header() + '\n'.join(dialogues) + '\n'
+
+
+def _ass_header():
+    # Title style: alignment 8 = top-centre; MarginL=150 shifts it
+    # slightly right of dead centre.  Bold (-1), with shadow.
+    return f"""[Script Info]
+Title: Music Echo Overlay
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+YCbCr Matrix: TV.709
+PlayResX: {VIDEO_W}
+PlayResY: {VIDEO_H}
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,{FONT_NAME},{FONT_SIZE},{CLR_ORANGE},&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,2,0,7,{TEXT_X},0,0,1
+Style: Title,{FONT_NAME},{TITLE_SIZE},{CLR_WHITE},&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,8,150,0,30,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
+def main():
+    if len(sys.argv) < 3 or sys.argv[1] in ('-h', '--help'):
+        print(__doc__.strip(), file=sys.stderr)
+        sys.exit(0 if '--help' in sys.argv else 1)
+    # fi
+
+    fs_path  = sys.argv[1]
+    ass_path = sys.argv[2]
+
+    user_filter = None
+    title_lines = []
+
+    # Parse optional arguments
+    i = 3
+    while i < len(sys.argv):
+        if sys.argv[i] == '--filter' and i + 1 < len(sys.argv):
+            user_filter = re.compile(sys.argv[i + 1])
+            i += 2
+        elif sys.argv[i] == '--title' and i + 1 < len(sys.argv):
+            title_lines.append(sys.argv[i + 1])
+            i += 2
+        else:
+            i += 1
+        # fi
+    # elihw
+
+    raw_events = list(parse_fs_echoes(fs_path))
+    if not raw_events:
+        print('fs2ass: no echo events found in', fs_path, file=sys.stderr)
+        sys.exit(1)
+    # fi
+
+    events = filter_echoes(raw_events, user_filter)
+    if not events:
+        print('fs2ass: all echo events filtered out; using unfiltered',
+              file=sys.stderr)
+        events = [(t, txt) for t, txt in raw_events if txt.strip()]
+    # fi
+
+    # Total duration: re-scan the .fs for total accumulated sleep.
+    total_sleep_ms = 0.0
+    re_sleep = re.compile(r'^sleep\s+([\d.]+)')
+    with open(fs_path) as fh:
+        for raw in fh:
+            m = re_sleep.match(raw.rstrip('\n'))
+            if m:
+                total_sleep_ms += float(m.group(1))
+    total_dur = total_sleep_ms / 1000.0 + 2.0   # small buffer
+
+    ass_content = generate_ass(events, total_dur, title_lines or None)
+
+    with open(ass_path, 'w') as fh:
+        fh.write(ass_content)
+    # htiw
+
+    groups = _group_by_time(events)
+    print(f'fs2ass: wrote {ass_path}  ({len(events)} events in {len(groups)} groups, {total_dur:.1f}s)',
+          file=sys.stderr)
+
+
+if __name__ == '__main__':
+    main()
