@@ -2,20 +2,18 @@
 """fs2ass -- Generate an ASS subtitle file with scrolling echo events.
 
 Reads a .fs (FluidSynth) file, extracts timed echo lines, and produces
-an ASS (Advanced SubStation Alpha) subtitle file.  The echo text scrolls
-vertically on the LEFT side of a 1920x1080 frame:
+an ASS (Advanced SubStation Alpha) subtitle file.
 
-  - Current echo is at vertical centre, bright orange, full opacity.
-  - Future echoes slowly fade in from below as they approach.
-  - Past echoes scroll upward and slowly fade out.
-
-All echoes that share the same timestamp are grouped into a single block
-so they appear at the same brightness on separate lines.
+All echo lines form a virtual document.  A "camera" pans through this
+document at variable speed: the scroll rate adapts so that lines at a
+given timestamp reach screen centre at exactly that time.  When two
+measures are close together the scroll is slow; when many lines
+separate them the scroll is fast.  Lines sit right next to each other.
 
 A persistent white title can be placed near the top of the frame with
---title "line".  The scrolling orange text is rendered on a higher
-layer so it overwrites the title while passing over it; the title
-refreshes once the orange moves past.
+--title "line".  The scrolling orange text (Layer 1) overwrites the
+white title (Layer 0) while passing; the title reappears once the
+orange moves past.
 
 Usage:
     fs2ass  input.fs  output.ass  [--title "line"] ...  [--filter REGEX]
@@ -36,25 +34,19 @@ import sys
 VIDEO_W      = 1920
 VIDEO_H      = 1080
 FONT_NAME    = "DejaVu Sans"
-FONT_SIZE    = 24           # base font size for scrolling echo text
-LINE_HEIGHT  = FONT_SIZE    # ASS rendered line height (baseline-to-baseline)
-TITLE_SIZE   = 48           # font size for the persistent title
+FONT_SIZE    = 24           # scrolling echo text
+TITLE_SIZE   = 48           # persistent title
+LINE_HEIGHT  = 30           # tight vertical spacing — lines next to each other
 TEXT_X       = 50           # left margin for scrolling text
-CENTER_Y     = VIDEO_H // 2 # vertical centre where the active group sits
+CENTER_Y     = VIDEO_H // 2 # vertical centre where the active line sits
 
-# Colour: bright orange  (ASS uses &HAABBGGRR — note BGR order)
-#   Orange  RGB = FF, A5, 00  ->  ASS BGR = 00A5FF
+# Fade: text becomes transparent as it approaches the screen edges.
+# FADE_RANGE = distance (px) from centre at which text is fully transparent.
+FADE_RANGE   = CENTER_Y     # fade over the full half-screen
+
+# Colour  (ASS &HAABBGGRR — note BGR order)
 CLR_ORANGE   = "&H0000A5FF"
 CLR_WHITE    = "&H00FFFFFF"
-
-# Each event group is visible for this many seconds before and after its
-# timestamp.  It scrolls from bottom to centre during LEAD_TIME, and from
-# centre to top during TRAIL_TIME, fading in/out accordingly.
-LEAD_TIME    = 8.0   # seconds visible before becoming active
-TRAIL_TIME   = 8.0   # seconds visible after becoming active
-
-# How far (pixels) from centre the group starts / ends its scroll
-SCROLL_RANGE = 480
 
 # ---------------------------------------------------------------------------
 # Parse .fs file
@@ -99,36 +91,80 @@ def filter_echoes(echoes, user_filter=None):
     return result
 
 
-def _group_by_time(events, epsilon=None):
-    """Group events that are too close to display separately.
-
-    Uses chain grouping: consecutive events closer than epsilon seconds
-    apart are merged into a single multi-line group.  Default epsilon is
-    computed from scroll parameters to prevent visual overlap.
+# ---------------------------------------------------------------------------
+# Group by timestamp
+# ---------------------------------------------------------------------------
+def _group_by_time(events, epsilon=0.01):
+    """Group events that share the same timestamp (within epsilon seconds).
 
     Returns a list of (time, [text, text, ...]) tuples.
     """
-    if epsilon is None:
-        scroll_rate = 2.0 * SCROLL_RANGE / (LEAD_TIME + TRAIL_TIME)
-        epsilon = LINE_HEIGHT / scroll_rate
-    # fi
     groups = []
     n = len(events)
     i = 0
     while i < n:
         j = i + 1
-        while j < n and (events[j][0] - events[j - 1][0]) < epsilon:
+        while j < n and abs(events[j][0] - events[i][0]) < epsilon:
             j += 1
-        group_time = events[i][0]
-        group_texts = [events[k][1] for k in range(i, j)]
-        groups.append((group_time, group_texts))
+        groups.append((events[i][0], [events[k][1] for k in range(i, j)]))
         i = j
     # elihw
     return groups
 
 
 # ---------------------------------------------------------------------------
-# ASS generation
+# Camera model
+# ---------------------------------------------------------------------------
+def _build_camera(events):
+    """Build a piecewise-linear camera from echo events.
+
+    Returns
+    -------
+    doc_y : list[float]
+        Virtual document y-position for every echo line.
+        doc_y[i] = i * LINE_HEIGHT.
+    keyframes : list[tuple[float, float]]
+        (time, camera_y) pairs sorted by time.  At each timestamp the
+        camera centres on the midpoint of the lines at that time.
+    """
+    n = len(events)
+    doc_y = [i * LINE_HEIGHT for i in range(n)]
+
+    groups = _group_by_time(events)
+    keyframes = []
+    idx = 0
+    for grp_time, texts in groups:
+        grp_size = len(texts)
+        mid_y = (doc_y[idx] + doc_y[idx + grp_size - 1]) / 2.0
+        keyframes.append((grp_time, mid_y))
+        idx += grp_size
+    # rof
+
+    return doc_y, keyframes
+
+
+def _cam_y_at(t, kf):
+    """Piecewise-linear camera position at time *t*."""
+    if not kf:
+        return 0.0
+    if t <= kf[0][0]:
+        return kf[0][1]
+    if t >= kf[-1][0]:
+        return kf[-1][1]
+    for i in range(len(kf) - 1):
+        t0, y0 = kf[i]
+        t1, y1 = kf[i + 1]
+        if t <= t1:
+            if t1 <= t0:
+                return y0
+            return y0 + (y1 - y0) * (t - t0) / (t1 - t0)
+        # fi
+    # rof
+    return kf[-1][1]
+
+
+# ---------------------------------------------------------------------------
+# ASS helpers
 # ---------------------------------------------------------------------------
 def _ass_time(seconds):
     """Format seconds as  H:MM:SS.cc  (centiseconds)."""
@@ -144,26 +180,44 @@ def _ass_time(seconds):
 
 
 def _escape(text):
-    """Escape ASS special characters in display text."""
+    """Escape ASS special characters."""
     return text.replace('\\', '\\\\').replace('{', '\\{').replace('}', '\\}')
 
 
+def _alpha_for_y(y):
+    """ASS alpha (0 = opaque, 255 = transparent) from screen-y position."""
+    dist = abs(y - CENTER_Y)
+    if dist >= FADE_RANGE:
+        return 255
+    return int(255 * dist / FADE_RANGE)
+
+
+# ---------------------------------------------------------------------------
+# ASS generation
+# ---------------------------------------------------------------------------
 def generate_ass(events, total_duration, title_lines=None):
     r"""Build the full ASS file content.
 
-    Events that share the same timestamp are grouped into a single
-    Dialogue line with \N between each echo.  The whole block scrolls
-    from below to above centre, fading in slowly from below and fading
-    out above.  All lines in a group share the same brightness.
+    For each echo line, one ASS Dialogue is emitted per camera-speed
+    segment in which the line is visible on screen.  Within each segment
+    the camera speed (and therefore the line's scroll speed) is constant,
+    so a single \move accurately describes the motion.
 
-    If title_lines are given, they are rendered as persistent white text
-    near the top of the frame (Layer 0).  The scrolling events are on
-    Layer 1 so they overwrite the title while passing, then the title
-    refreshes when the orange moves past.
+    Fading is position-based: lines are brightest at screen centre and
+    fully transparent at the top/bottom edges.
     """
+    doc_y, keyframes = _build_camera(events)
+
+    # Segment boundaries: camera speed changes at each keyframe time.
+    seg_times = sorted(set(
+        [0.0] + [t for t, _ in keyframes] + [total_duration]
+    ))
+    # Pre-compute camera y at every segment boundary
+    seg_cam = [_cam_y_at(t, keyframes) for t in seg_times]
+
     dialogues = []
 
-    # --- Persistent title near the top (Layer 0, Title style) ---
+    # --- Persistent title (Layer 0, Title style) ---
     if title_lines:
         title_text = '\\N'.join(_escape(l) for l in title_lines)
         dialogues.append(
@@ -172,53 +226,65 @@ def generate_ass(events, total_duration, title_lines=None):
         )
     # fi
 
-    # --- Scrolling echo groups (Layer 1, Default style) ---
-    groups = _group_by_time(events)
+    # --- Scrolling echo lines (Layer 1, Default style) ---
+    n_segs = len(seg_times) - 1
 
-    for grp_time, texts in groups:
-        # Join all lines in the group with ASS hard line break
-        disp = '\\N'.join(_escape(t) for t in texts)
+    for i in range(len(events)):
+        dy = doc_y[i]
+        text = _escape(events[i][1])
 
-        # Compute visibility window
-        t_appear = max(0.0, grp_time - LEAD_TIME)
-        t_gone   = min(total_duration, grp_time + TRAIL_TIME)
-        if t_gone <= t_appear:
-            t_gone = t_appear + 0.1
+        for s in range(n_segs):
+            ta = seg_times[s]
+            tb = seg_times[s + 1]
+            if tb - ta < 0.001:
+                continue
 
-        actual_lead  = grp_time - t_appear
-        actual_trail = t_gone - grp_time
-        total_vis    = t_gone - t_appear
+            # Screen-y at segment start / end
+            sya = dy - seg_cam[s]     + CENTER_Y
+            syb = dy - seg_cam[s + 1] + CENTER_Y
 
-        if total_vis <= 0:
-            continue
+            # Off the top already?  Line only moves upward over time.
+            margin = LINE_HEIGHT * 2
+            if max(sya, syb) < -margin:
+                break                   # gone above — won't come back
+            # Not yet on screen from the bottom?
+            if min(sya, syb) > VIDEO_H + margin:
+                continue                # hasn't entered yet
 
-        # y positions: below centre at t_appear, above centre at t_gone
-        y_start = CENTER_Y + int(SCROLL_RANGE * actual_lead / max(LEAD_TIME, 0.01))
-        y_end   = CENTER_Y - int(SCROLL_RANGE * actual_trail / max(TRAIL_TIME, 0.01))
+            # Alpha at endpoints
+            aa = _alpha_for_y(sya)
+            ab = _alpha_for_y(syb)
+            dt_ms = max(1, int((tb - ta) * 1000))
 
-        # Fade: slowly in over lead time, out over trail time
-        fade_in_ms  = int(actual_lead  * 1000)
-        fade_out_ms = int(actual_trail * 1000)
+            # Build \fade tag  (position-based transparency)
+            crosses_centre = (sya - CENTER_Y) * (syb - CENTER_Y) < 0
+            if crosses_centre and abs(sya - syb) > 0.5:
+                frac = abs(sya - CENTER_Y) / abs(sya - syb)
+                tc_ms = max(0, min(dt_ms, int(frac * dt_ms)))
+                fade = f'\\fade({aa},0,{ab},0,{tc_ms},{tc_ms},{dt_ms})'
+            else:
+                # Linear alpha transition over the segment
+                fade = f'\\fade({aa},{ab},{ab},0,{dt_ms},{dt_ms},{dt_ms})'
+            # fi
 
-        override = (
-            f'{{\\an4'                          # align middle-left
-            f'\\move({TEXT_X},{y_start},{TEXT_X},{y_end})'
-            f'\\fad({fade_in_ms},{fade_out_ms})'
-            f'}}'
-        )
+            override = (
+                f'{{\\an4'
+                f'\\move({TEXT_X},{int(sya)},{TEXT_X},{int(syb)})'
+                f'{fade}'
+                f'}}'
+            )
 
-        dialogues.append(
-            f'Dialogue: 1,{_ass_time(t_appear)},{_ass_time(t_gone)},'
-            f'Default,,0,0,0,,{override}{disp}'
-        )
-    # rof
+            dialogues.append(
+                f'Dialogue: 1,{_ass_time(ta)},{_ass_time(tb)},'
+                f'Default,,0,0,0,,{override}{text}'
+            )
+        # rof  (segments)
+    # rof  (lines)
 
     return _ass_header() + '\n'.join(dialogues) + '\n'
 
 
 def _ass_header():
-    # Title style: alignment 8 = top-centre; MarginL=150 shifts it
-    # slightly right of dead centre.  Bold (-1), with shadow.
     return f"""[Script Info]
 Title: Music Echo Overlay
 ScriptType: v4.00+
@@ -280,7 +346,7 @@ def main():
         events = [(t, txt) for t, txt in raw_events if txt.strip()]
     # fi
 
-    # Total duration: re-scan the .fs for total accumulated sleep.
+    # Total duration from accumulated sleep in the .fs file
     total_sleep_ms = 0.0
     re_sleep = re.compile(r'^sleep\s+([\d.]+)')
     with open(fs_path) as fh:
@@ -296,8 +362,9 @@ def main():
         fh.write(ass_content)
     # htiw
 
-    groups = _group_by_time(events)
-    print(f'fs2ass: wrote {ass_path}  ({len(events)} events in {len(groups)} groups, {total_dur:.1f}s)',
+    n_dialogues = ass_content.count('\nDialogue:')
+    print(f'fs2ass: wrote {ass_path}  ({len(events)} lines, '
+          f'{n_dialogues} dialogue events, {total_dur:.1f}s)',
           file=sys.stderr)
 
 

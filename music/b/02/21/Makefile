@@ -2,6 +2,7 @@ V1 = v2-1
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ../../../musicomp2abc/musicomp2abc
 IMSCOMP      = ../../../ims/imscomp
+GCS2YOUTUBE  = ../../../gcs2youtube
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------
@@ -84,6 +85,8 @@ MC_ARGS ?= ${PAGES} ${MEASURES} ${VOICES}
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E: %.gcs ../../instruments.include Makefile
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
+%.mp4:	%.gcs
+	${GCS2YOUTUBE} $< || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help
 help::
@@ -120,11 +123,14 @@ all: s1
 #-----------------------------------------------------------------------------
 fs: ${V1}.fs ${V1}_2.fs
 #-----------------------------------------------------------------------------
+.PHONY: mp4
+mp4: ${V1}.mp4
+#-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
-	rm -f ${V1}.csv ${V1}.mid ${V1}.fs ${V1}.pdf ${V1}.abc ${V1}.wav ${V1}.E ${V1}.h ${V1}.v
+	rm -f ${V1}.csv ${V1}.mid ${V1}.fs ${V1}.pdf ${V1}.abc ${V1}.wav ${V1}.E ${V1}.h ${V1}.v ${V1}.mp4
 	rm -f ${V1}_2.csv ${V1}_2.mid ${V1}_2.fs ${V1}_2.pdf ${V1}_2.abc ${V1}_2.wav ${V1}_2.E ${V1}_2.h ${V1}_2.v
 	rm -f A.[012]* B.[012]*
 	rm -f ZZZ.*

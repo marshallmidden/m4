@@ -4,6 +4,7 @@ MCOMP        = ~/src/abc/mcomp/mcomp
 #++ MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
 IMSCOMP      = ../../ims/imscomp
 MUSICOMP2ABC = ../../musicomp2abc/musicomp2abc
+GCS2YOUTUBE  = ../../gcs2youtube
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
 FLUIDSYNTH   = ~/bin/fluidsynth
@@ -65,6 +66,8 @@ ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E: %.gcs Makefile
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
+%.mp4:	%.gcs
+	${GCS2YOUTUBE} $< || (rm -f $@ ; exit 1)
 %.v:    %.E
 	${IMSCOMP} ${MC_ARGS} --vert $< $@
 %_m.v:    %.E
@@ -96,6 +99,9 @@ all:	${V}.fs ${V}.mid ${V}.pdf ${V}.wav
 #-----------------------------------------------------------------------------
 fs: ${V}.fs
 pdf: ${V}.pdf
+#-----------------------------------------------------------------------------
+.PHONY: mp4
+mp4: ${V}.mp4
 #=============================================================================
 S14 = s14-orig.mid
 #=============================================================================
@@ -109,6 +115,7 @@ clean:
 	rm -f ${V}.csv ${V}.mid ${V}.wav
 	rm -f ${V}.v ${V}.h
 	rm -f ${V}.fs
+	rm -f ${V}.mp4
 	rm -f ${V}.E
 	rm -f ${V}_2.abc ${V}_2.pdf
 	rm -f ${V}_2.csv ${V}_2.mid ${V}.wav

@@ -85,12 +85,12 @@ DOALL runs 5 test suites in parallel: `songs/`, `musicomp2abc/`, `b/`, `t/e/`, `
 Each suite runs `AAA.diff._2` which compiles `.gcs` files with both imscomp and musicomp2abc,
 then diffs the outputs across all format flags (abc, h, v, csv, fs).
 
-**Expected baseline (as of 2026-03-28)**: 0 bare ARGHs, 2 named ARGHs.
+**Expected baseline (as of 2026-03-29)**: 0 bare ARGHs, 0 named ARGHs.
 - Bare ARGHs = imscomp-vs-musicomp2abc diffs. Currently 0 (files are synced).
-- Named ARGHs = execution failures. Only `new-g3` fails (known issue in gershwin suite).
+- Named ARGHs = execution failures. Currently 0.
 - Exit code 0 if named ARGHs <= 2 (PASS with known diffs). Exit code 1 if more (FAIL).
 
-**When verifying changes**: Always run full DOALL and confirm 0 bare / 2 named.
+**When verifying changes**: Always run full DOALL and confirm 0 bare / 0 named.
 Changes that increase named ARGHs are regressions.
 
 ### Output Format Flags
@@ -688,6 +688,44 @@ Devin CLI session summaries are saved in `/home/m4/.local/share/devin/cli/summar
 - **Lines 1138/1140/1148/1152/1158/1166**: Added missing `, None` to 6 error returns in `result_functions()` — single-element error lists weren't caught by `len(args) > 1` check in `parse_to()`
 
 **IMPORTANT: calculate.py return convention** — The Pratt parser uses `args = evaluate_handle(args)` where eval functions must return `[[type, value]]` (single-element list wrapping `[type, value]`). Error returns are `['ERROR...', None]` (two-element list). Do NOT remove the double-nesting — it is intentional.
+
+### Session 7 Changes (history_20479ec4b5ae44d1, 2026-03-29)
+
+#### imscomp Bug Fixes (8 fixes)
+1. **Line 15980** (CRITICAL): `therest[0]` without empty check in `get_pvi_note()` — added `therest and` guard
+2. **Line 16026** (CRITICAL): `temp1 == []` comparing string to list (always False) in `get_vol_note()` — changed to `not temp1`
+3. **Line 12592** (HIGH): Error message used `{type_error}` which is None when `f1 is None` in `do_outloop()` — fixed message
+4. **Line 13144** (HIGH): Same issue in `do_reloop()` — fixed message
+5. **Line 3929** (LOW): Redundant `print_line[-1] != '\n'` when also checking `== '|'` — simplified
+6. **Lines 15059/15060** (LOW): Duplicate `note_to_decode and note_to_decode` in `getnote()` — simplified
+7. **Lines 19331/19335** (LOW): `not line or not line or line == ''` — simplified to `not line`
+8. **Lines 16719/16986** (LOW): Dead variable `lth_so_far = 0` (set but never read) — removed
+
+#### imscomp Code Cleanup
+9. **Line 911**: Removed unused pre-compiled regex `_RE_WS_EMPTY`
+
+#### calculate.py Bug Fixes (4 fixes)
+10. **Line 1191** (CRITICAL): `type(a2[1][0])` — `a2[1]` is a scalar when `a2[0] == 'NUMBER'`, not a list; would crash. Fixed to `type(a2[1])`
+11. **Line 1203** (MEDIUM): Error about second argument showed type of first argument — fixed to `type(a2[1][1])`
+12. **Line 1848** (LOW): `sys.exc_info` printed function object instead of result — fixed to `sys.exc_info()`
+13. **Line 1553** (MEDIUM): `f_ln()` had no error handling for negative/zero input — added try/except matching `f_log()`
+14. **Line 1616** (LOW): Debug output `which[0:9]` inconsistent with `which[0:8]` check — fixed to `which[0:8]`
+
+#### Performance Improvements
+15. **`_meas_index` dict** (lines 2783, 12323): Pre-computed measure-name-to-index mapping maintained alongside `meas` list. Replaces 7 `meas.index()` O(n) calls with O(1) dict lookups.
+16. **`_func_arg_patterns` dict** (calculate.py lines 1760-1774): Pre-compiles argument-type patterns for `result_functions()`. Plain strings matched with `==`; only regex patterns compiled as regex. Eliminates per-call `re.match(aaa + r'$', ...)` in hot loop.
+
+#### Subagent Findings NOT Applied (evaluated but rejected)
+- **Line 13506 header.append()**: NOT A BUG — `header` is a list for midi/fluidsynth (by design)
+- **Line 9046 wargs[i] IndexError**: NOT A BUG — line 9034 checks `w != l` and returns first
+- **Line 13006 wargs[2] IndexError**: NOT A BUG — line 12997 checks `len(wargs) < 3` first
+- **Lines 16727/16995 division by zero**: NOT A BUG — guarded by earlier checks
+- **Line 6039 bufs[voice][m] unguarded**: DEFERRED — `fill_voice_mlth()` ensures existence
+- **calculate.py line 1057 undefined w**: NOT A BUG — commented-out debug print
+
+**DOALL after all fixes**: 0 bare ARGHs, 0 named ARGHs (ALL OKAY — improved from 2 named).
+
+**Session reference**: `history_20479ec4b5ae44d1.md`
 
 ---
 

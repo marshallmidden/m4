@@ -3,6 +3,7 @@ V            = b-6
 SEPARATE     = ./A.separate
 MUSICOMP2ABC = ../../musicomp2abc/musicomp2abc
 IMSCOMP      = ../../ims/imscomp
+GCS2YOUTUBE  = ../../gcs2youtube
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
 #-----------------------------------------------------------------------------
@@ -59,6 +60,8 @@ MC_ARGS ?= ${PAGES} ${MEASURES} ${VOICES}
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E:	%.gcs ../instruments.include
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
+%.mp4:	%.gcs
+	${GCS2YOUTUBE} $< || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help
 help::
@@ -89,6 +92,9 @@ all: ${V}_m2.ps ${V}_2.fs ${V}_2.mid ${V}_2.pdf
 #-----------------------------------------------------------------------------
 fs: ${V}.fs
 fs2: ${V}_2.fs
+#-----------------------------------------------------------------------------
+.PHONY: mp4
+mp4: ${V}.mp4
 #=============================================================================
 .PHONY: clean
 clean::
@@ -97,6 +103,7 @@ clean::
 	rm -f *.csv *.mid *.fs
 	rm -f *.abc *.A_abc
 	rm -f *.wav
+	rm -f *.mp4
 	rm -f *.E
 	rm -f *.v *.h
 	rm -f A.[012]* B.[012]*

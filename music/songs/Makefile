@@ -131,6 +131,7 @@ BROKEN += slidall
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ../musicomp2abc/musicomp2abc
 IMSCOMP = ../ims/imscomp
+GCS2YOUTUBE  = ../gcs2youtube
 FLUIDSYNTH   = ~/bin/fluidsynth
 #-- YAPS         = yaps
 ABCM2PS      = abcm2ps
@@ -185,6 +186,7 @@ SONGS_M_PS = ${SONGS:=_m.ps}
 #-- SONGS_PS = ${SONGS:=.ps}
 SONGS_PDF= ${SONGS:=.pdf}
 SONGS_WAV = ${SONGS:=.wav} ${SONGS_NO_PS:=.wav}
+SONGS_MP4 = ${SONGS:=.mp4} ${SONGS_NO_PS:=.mp4}
 SONGS_V= ${SONGS:=.v}
 SONGS_H= ${SONGS:=.h}
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
@@ -245,6 +247,8 @@ BROKEN_2MID = ${BROKEN:=_2.mid}
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E: %.gcs
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
+%.mp4:	%.gcs
+	${GCS2YOUTUBE} $< || (rm -f $@ ; exit 1)
 %.v:    %.E ${MUSICOMP2ABC}
 	${MUSICOMP2ABC} ${MC_ARGS} --vert $< $@ || (rm -f $@ ; exit 1)
 %_2.v:    %.E ${IMSCOMP}
@@ -289,6 +293,9 @@ all_wav: ${SONGS_WAV} ${SONGS_2WAV}
 .PHONY: fs all_fs
 fs all_fs: ${SONGS_FS} ${SONGS_2FS}
 #-----------------------------------------------------------------------------
+.PHONY: mp4
+mp4: ${SONGS_MP4}
+#-----------------------------------------------------------------------------
 .PHONY: fs2 all_fs2
 fs2 all_fs2: ${SONGS_2FS}
 #-----------------------------------------------------------------------------
@@ -327,7 +334,7 @@ clean:
 #--	rm -f ${SONGS_2V} ${SONGS_2H}
 
 	rm -f ${SONGS_2PDF} ${SONGS_PDF}
-	rm -f *.v *.h *.abc *.ps *.mid *.wav *.fs *.E *.csv
+	rm -f *.v *.h *.abc *.ps *.mid *.wav *.fs *.E *.csv *.mp4
 	rm -f *.stderr
 #-----------------------------------------------------------------------------
 # End of Makefile

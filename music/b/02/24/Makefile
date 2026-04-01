@@ -2,6 +2,7 @@ V4           = v2-4
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ../../../musicomp2abc/musicomp2abc
 IMSCOMP      = ../../../ims/imscomp
+GCS2YOUTUBE  = ../../../gcs2youtube
 FLUIDSYNTH   = ~/bin/fluidsynth
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
@@ -65,6 +66,8 @@ MC_ARGS ?=
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E: %.gcs ../../instruments.include ${M} Makefile
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
+%.mp4:	%.gcs
+	${GCS2YOUTUBE} $< || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 %.wav:  %.fs
 	${FLUIDSYNTH} -q -F $@ ${SOUNDFONT} < $< \
@@ -104,11 +107,14 @@ all: s1
 #-----------------------------------------------------------------------------
 fs: ${V4}.fs ${V4}_2.fs
 #-----------------------------------------------------------------------------
+.PHONY: mp4
+mp4: ${V4}.mp4
+#-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
-	rm -f ${V4}.csv ${V4}.mid ${V4}.fs ${V4}.pdf ${V4}.abc ${V4}.wav ${V4}.E ${V4}.h ${V4}.v
+	rm -f ${V4}.csv ${V4}.mid ${V4}.fs ${V4}.pdf ${V4}.abc ${V4}.wav ${V4}.E ${V4}.h ${V4}.v ${V4}.mp4
 	rm -f ${V4}_2.csv ${V4}_2.mid ${V4}_2.fs ${V4}_2.pdf ${V4}_2.abc ${V4}_2.wav ${V4}_2.E ${V4}_2.h ${V4}_2.v
 #-----------------------------------------------------------------------------
 .PHONY: s1
