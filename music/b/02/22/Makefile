@@ -82,7 +82,9 @@ MC_ARGS ?= ${PAGES} ${MEASURES} ${VOICES}
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E: %.gcs ../../instruments.include ${M} Makefile
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
-%.mp4:	%.gcs
+%.mp4:	%.fs
+	${GCS2YOUTUBE} $< || (rm -f $@ ; exit 1)
+%_2.mp4:	%_2.fs
 	${GCS2YOUTUBE} $< || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help
@@ -122,11 +124,14 @@ fs: ${V2}.fs ${V2}_2.fs
 .PHONY: mp4
 mp4: ${V2}.mp4
 #-----------------------------------------------------------------------------
+.PHONY: mp4_2
+mp4_2: ${V2}_2.mp4
+#-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
-	rm -f ${V2}.csv ${V2}.mid ${V2}.fs ${V2}.pdf ${V2}.abc ${V2}.wav ${V2}.E ${V2}.h ${V2}.v ${V2}.mp4
+	rm -f ${V2}.csv ${V2}.mid ${V2}.fs ${V2}.pdf ${V2}.abc ${V2}.wav ${V2}.E ${V2}.h ${V2}.v ${V2}.mp4 ${V2}_2.mp4
 	rm -f ${V2}_2.csv ${V2}_2.mid ${V2}_2.fs ${V2}_2.pdf ${V2}_2.abc ${V2}_2.wav ${V2}_2.E ${V2}_2.h ${V2}_2.v
 
 	rm -f ZZZ.*

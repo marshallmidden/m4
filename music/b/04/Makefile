@@ -19,6 +19,7 @@ SONGS_2_PS = ${SONGS:=_2.ps}
 SONGS_PDF= ${SONGS:=.pdf}
 SONGS_2_PDF= ${SONGS:=_2.pdf}
 SONGS_MP4= ${SONGS:=.mp4}
+SONGS_2_MP4= ${SONGS:=_2.mp4}
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ../../musicomp2abc/musicomp2abc
 IMSCOMP      = ../../ims/imscomp
@@ -86,7 +87,9 @@ MC_ARGS ?=
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E: %.gcs ${M} ${INCLUDES} ${%_INCLUDES} Makefile
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
-%.mp4:	%.gcs
+%.mp4:	%.fs
+	${GCS2YOUTUBE} $< || (rm -f $@ ; exit 1)
+%_2.mp4:	%_2.fs
 	${GCS2YOUTUBE} $< || (rm -f $@ ; exit 1)
 %.v:    %.E
 	${IMSCOMP} ${MC_ARGS} --vert $< $@
@@ -138,11 +141,14 @@ fs: ${SONGS_FS} ${SONGS_2_FS}
 .PHONY: mp4
 mp4: ${SONGS_MP4}
 #-----------------------------------------------------------------------------
+.PHONY: mp4_2
+mp4_2: ${SONGS_2_MP4}
+#-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
-	rm -f ${SONGS_E} ${SONGS_ABC} ${SONGS_2_ABC} ${SONGS_FS} ${SONGS_2_FS} ${SONGS_MP4}
+	rm -f ${SONGS_E} ${SONGS_ABC} ${SONGS_2_ABC} ${SONGS_FS} ${SONGS_2_FS} ${SONGS_MP4} ${SONGS_2_MP4}
 	rm -f ${SONGS_PS} ${SONGS_2_PS} ${SONGS_PS} ${SONGS_2_PS} ${SONGS_PDF} ${SONGS_2_PDF}
 	rm -f *.wav *.csv *.h *.v *.E
 #-----------------------------------------------------------------------------

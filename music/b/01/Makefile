@@ -63,7 +63,9 @@ MC_ARGS ?= ${PAGES} ${MEASURES} ${VOICES}
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E:	%.gcs ../instruments.include
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
-%.mp4:	%.gcs
+%.mp4:	%.fs
+	${GCS2YOUTUBE} $< || (rm -f $@ ; exit 1)
+%_2.mp4:	%_2.fs
 	${GCS2YOUTUBE} $< || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help
@@ -108,17 +110,20 @@ fs2: ${V1}_2.fs ${V2}_2.fs ${V3}_2.fs ${V4}_2.fs
 .PHONY: mp4
 mp4: ${V1}.mp4 ${V2}.mp4 ${V3}.mp4 ${V4}.mp4
 #-----------------------------------------------------------------------------
+.PHONY: mp4_2
+mp4_2: ${V1}_2.mp4 ${V2}_2.mp4 ${V3}_2.mp4 ${V4}_2.mp4
+#-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
-	rm -f ${V1}.csv ${V1}.mid ${V1}.fs ${V1}.pdf ${V1}.abc ${V1}.wav ${V1}.E ${V1}.h ${V1}.v ${V1}.mp4
+	rm -f ${V1}.csv ${V1}.mid ${V1}.fs ${V1}.pdf ${V1}.abc ${V1}.wav ${V1}.E ${V1}.h ${V1}.v ${V1}.mp4 ${V1}_2.mp4
 	rm -f ${V1}_2.csv ${V1}_2.mid ${V1}_2.fs ${V1}_2.pdf ${V1}_2.abc ${V1}_2.wav ${V1}_2.E ${V1}_2.h ${V1}_2.v
-	rm -f ${V2}.csv ${V2}.mid ${V2}.fs ${V2}.pdf ${V2}.abc ${V2}.wav ${V2}.E ${V2}.h ${V2}.v ${V2}.mp4
+	rm -f ${V2}.csv ${V2}.mid ${V2}.fs ${V2}.pdf ${V2}.abc ${V2}.wav ${V2}.E ${V2}.h ${V2}.v ${V2}.mp4 ${V2}_2.mp4
 	rm -f ${V2}_2.csv ${V2}_2.mid ${V2}_2.fs ${V2}_2.pdf ${V2}_2.abc ${V2}_2.wav ${V2}_2.E ${V2}_2.h ${V2}_2.v
-	rm -f ${V3}.csv ${V3}.mid ${V3}.fs ${V3}.pdf ${V3}.abc ${V3}.wav ${V3}.E ${V3}.h ${V3}.v ${V3}.mp4
+	rm -f ${V3}.csv ${V3}.mid ${V3}.fs ${V3}.pdf ${V3}.abc ${V3}.wav ${V3}.E ${V3}.h ${V3}.v ${V3}.mp4 ${V3}_2.mp4
 	rm -f ${V3}_2.csv ${V3}_2.mid ${V3}_2.fs ${V3}_2.pdf ${V3}_2.abc ${V3}_2.wav ${V3}_2.E ${V3}_2.h ${V3}_2.v
-	rm -f ${V4}.csv ${V4}.mid ${V4}.fs ${V4}.pdf ${V4}.abc ${V4}.wav ${V4}.E ${V4}.h ${V4}.v ${V4}.mp4
+	rm -f ${V4}.csv ${V4}.mid ${V4}.fs ${V4}.pdf ${V4}.abc ${V4}.wav ${V4}.E ${V4}.h ${V4}.v ${V4}.mp4 ${V4}_2.mp4
 	rm -f ${V4}_2.csv ${V4}_2.mid ${V4}_2.fs ${V4}_2.pdf ${V4}_2.abc ${V4}_2.wav ${V4}_2.E ${V4}_2.h ${V4}_2.v
 	rm -f A.[012]* B.[012]*
 #-----------------------------------------------------------------------------

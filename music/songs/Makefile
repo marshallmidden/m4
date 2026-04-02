@@ -187,6 +187,7 @@ SONGS_M_PS = ${SONGS:=_m.ps}
 SONGS_PDF= ${SONGS:=.pdf}
 SONGS_WAV = ${SONGS:=.wav} ${SONGS_NO_PS:=.wav}
 SONGS_MP4 = ${SONGS:=.mp4} ${SONGS_NO_PS:=.mp4}
+SONGS_2_MP4 = ${SONGS:=_2.mp4} ${SONGS_NO_PS:=_2.mp4}
 SONGS_V= ${SONGS:=.v}
 SONGS_H= ${SONGS:=.h}
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
@@ -247,7 +248,9 @@ BROKEN_2MID = ${BROKEN:=_2.mid}
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
 %.E: %.gcs
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
-%.mp4:	%.gcs
+%.mp4:	%.fs
+	${GCS2YOUTUBE} $< || (rm -f $@ ; exit 1)
+%_2.mp4:	%_2.fs
 	${GCS2YOUTUBE} $< || (rm -f $@ ; exit 1)
 %.v:    %.E ${MUSICOMP2ABC}
 	${MUSICOMP2ABC} ${MC_ARGS} --vert $< $@ || (rm -f $@ ; exit 1)
@@ -295,6 +298,9 @@ fs all_fs: ${SONGS_FS} ${SONGS_2FS}
 #-----------------------------------------------------------------------------
 .PHONY: mp4
 mp4: ${SONGS_MP4}
+#-----------------------------------------------------------------------------
+.PHONY: mp4_2
+mp4_2: ${SONGS_2_MP4}
 #-----------------------------------------------------------------------------
 .PHONY: fs2 all_fs2
 fs2 all_fs2: ${SONGS_2FS}
