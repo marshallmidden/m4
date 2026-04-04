@@ -1,0 +1,503 @@
+#!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = [
+#   "google-api-python-client>=2.100.0",
+#   "google-auth-oauthlib>=1.1.0",
+#   "google-auth-httplib2>=0.1.1",
+# ]
+# ///
+"""youtube-upload -- Upload .mp4 files to YouTube using *-Text metadata.
+
+Usage:
+    youtube-upload [options] <file.mp4> [<file.mp4> ...]
+    youtube-upload --all [options]
+
+Options:
+    --all               Upload all .mp4 files found under the music directory.
+    --dry-run           Parse metadata and print what would be uploaded, but don't upload.
+    --replace           Delete existing video (by title match) before uploading.
+    --secrets FILE      Path to OAuth2 client_secrets.json
+                        (default: ~/.config/youtube/client_secrets.json)
+    --token FILE        Path to cached OAuth2 token
+                        (default: ~/.config/youtube/token.json)
+    --notify            Send subscriber notifications (default: no notification).
+    -h, --help          Show this help message and exit.
+
+Each .mp4 file must have a corresponding *-Text metadata file in the same
+directory (e.g. v1-1.mp4 -> v1-1-Text).
+
+Setup:
+    1. Go to https://console.cloud.google.com/
+    2. Create a project (or use an existing one).
+    3. Enable the "YouTube Data API v3".
+    4. Create OAuth 2.0 credentials (Desktop application type).
+    5. Download the JSON and save it as ~/.config/youtube/client_secrets.json
+    6. First run will open a browser for authentication.
+"""
+
+import argparse
+import json
+import os
+import re
+import sys
+import time
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Lazy imports -- only loaded when we actually upload (not in --dry-run).
+# ---------------------------------------------------------------------------
+
+def _get_youtube_service(secrets_file: str, token_file: str):
+    """Build an authenticated YouTube Data API v3 service object."""
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from google.auth.transport.requests import Request
+    from googleapiclient.discovery import build
+
+    SCOPES = ["https://www.googleapis.com/auth/youtube"]
+
+    creds = None
+    if os.path.exists(token_file):
+        creds = Credentials.from_authorized_user_file(token_file, SCOPES)
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            if not os.path.exists(secrets_file):
+                print(f"ERROR: OAuth2 client secrets file not found: {secrets_file}",
+                      file=sys.stderr)
+                print("See --help for setup instructions.", file=sys.stderr)
+                sys.exit(1)
+            flow = InstalledAppFlow.from_client_secrets_file(secrets_file, SCOPES)
+            creds = flow.run_local_server(port=0)
+
+        os.makedirs(os.path.dirname(token_file), exist_ok=True)
+        with open(token_file, "w") as f:
+            f.write(creds.to_json())
+
+    return build("youtube", "v3", credentials=creds)
+
+
+# ---------------------------------------------------------------------------
+# Parse *-Text metadata files.
+# ---------------------------------------------------------------------------
+
+def parse_text_file(text_path: str) -> dict:
+    """Parse a *-Text metadata file into a dict with title, description, etc."""
+    with open(text_path, "r") as f:
+        content = f.read()
+
+    # Split on separator lines.
+    sections = re.split(r'-{10,}', content)
+
+    result = {
+        "title": "",
+        "description": "",
+        "playlist": "",
+        "madeForKids": True,
+        "privacyStatus": "public",
+        "license": "creativeCommon",
+        "categoryId": "10",   # Music
+        "tags": [],
+    }
+
+    # Section 0: everything before the first separator (usually "Title:\n...")
+    if len(sections) >= 1:
+        title_section = sections[0].strip()
+        # Remove noise lines and the "Title:" label wherever it appears.
+        lines = []
+        for l in title_section.splitlines():
+            s = l.strip()
+            if not s:
+                continue
+            if s.lower().startswith("try ") or s.startswith("NOTDONEYET"):
+                continue
+            if re.match(r'^title:\s*$', s, re.IGNORECASE):
+                continue
+            lines.append(s)
+        result["title"] = " ".join(lines).strip() if lines else ""
+
+    # Section 1: Description.
+    if len(sections) >= 2:
+        desc_section = sections[1].strip()
+        desc_section = re.sub(r'^Description:\s*\n?', '', desc_section, flags=re.IGNORECASE)
+        result["description"] = desc_section.strip()
+
+    # Section 2+: Metadata fields.
+    for section in sections[2:]:
+        for line in section.splitlines():
+            line = line.strip()
+            if line.startswith("Playlists:"):
+                result["playlist"] = line.split(":", 1)[1].strip()
+            elif line.startswith("Audience:"):
+                val = line.split(":", 1)[1].strip().lower()
+                result["madeForKids"] = "kids" in val
+            elif line.startswith("Visibility:"):
+                val = line.split(":", 1)[1].strip().lower()
+                if val in ("public", "private", "unlisted"):
+                    result["privacyStatus"] = val
+            elif line.startswith("License:"):
+                val = line.split(":", 1)[1].strip().lower()
+                if "creative commons" in val:
+                    result["license"] = "creativeCommon"
+                else:
+                    result["license"] = "youtube"
+            elif line.startswith("Category:"):
+                val = line.split(":", 1)[1].strip().lower()
+                # YouTube category IDs: 10=Music, 27=Education, 22=People&Blogs
+                if val == "music":
+                    result["categoryId"] = "10"
+                elif val == "education":
+                    result["categoryId"] = "27"
+
+    # Auto-generate tags from the title.
+    title_lower = result["title"].lower()
+    tags = ["computer generated music", "gcs format", "fluidsynth"]
+    if "beethoven" in title_lower:
+        tags.extend(["beethoven", "classical music", "symphony"])
+    if "tchaikovsky" in title_lower:
+        tags.extend(["tchaikovsky", "classical music"])
+    if "gershwin" in title_lower:
+        tags.extend(["gershwin", "classical music", "concerto"])
+    if "promenade" in title_lower or "mussorgsky" in title_lower:
+        tags.extend(["mussorgsky", "classical music", "pictures at an exhibition"])
+    if "sonata" in title_lower:
+        tags.extend(["beethoven", "classical music", "sonata", "moonlight sonata"])
+    result["tags"] = tags
+
+    return result
+
+
+def find_text_file(mp4_path: str) -> str | None:
+    """Given an .mp4 path, find the corresponding *-Text file.
+
+    Handles naming mismatches like v3-1.mp4 -> b3m1-Text, v4-2.mp4 -> b4m2-Text.
+    """
+    base = os.path.splitext(mp4_path)[0]
+    text_path = base + "-Text"
+    if os.path.exists(text_path):
+        return text_path
+
+    # Try alternate naming: vN-M -> bNmM
+    basename = os.path.basename(base)
+    dirname = os.path.dirname(mp4_path)
+    m = re.match(r'^v(\d+)-(\d+)$', basename)
+    if m:
+        alt = f"b{m.group(1)}m{m.group(2)}"
+        alt_path = os.path.join(dirname, alt + "-Text")
+        if os.path.exists(alt_path):
+            return alt_path
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# YouTube upload.
+# ---------------------------------------------------------------------------
+
+def upload_video(youtube, mp4_path: str, metadata: dict, notify: bool = False):
+    """Upload a single .mp4 to YouTube and return the video ID."""
+    from googleapiclient.http import MediaFileUpload
+
+    body = {
+        "snippet": {
+            "title": metadata["title"][:100],  # YouTube max 100 chars.
+            "description": metadata["description"][:5000],  # YouTube max 5000 chars.
+            "tags": metadata["tags"],
+            "categoryId": metadata["categoryId"],
+        },
+        "status": {
+            "privacyStatus": metadata["privacyStatus"],
+            "license": metadata["license"],
+            "selfDeclaredMadeForKids": metadata["madeForKids"],
+        },
+    }
+
+    media = MediaFileUpload(mp4_path, mimetype="video/mp4", resumable=True,
+                            chunksize=10 * 1024 * 1024)  # 10 MB chunks.
+
+    request = youtube.videos().insert(
+        part="snippet,status",
+        body=body,
+        media_body=media,
+        notifySubscribers=notify,
+    )
+
+    print(f"  Uploading {mp4_path} ...")
+    response = None
+    while response is None:
+        status, response = request.next_chunk()
+        if status:
+            pct = int(status.progress() * 100)
+            print(f"    {pct}% uploaded", end="\r")
+
+    video_id = response["id"]
+    print(f"  Uploaded: https://www.youtube.com/watch?v={video_id}")
+    return video_id
+
+
+def add_to_playlist(youtube, video_id: str, playlist_name: str):
+    """Add a video to a playlist (creates the playlist if it doesn't exist)."""
+    # List existing playlists.
+    playlists = {}
+    request = youtube.playlists().list(part="snippet", mine=True, maxResults=50)
+    while request:
+        response = request.execute()
+        for item in response.get("items", []):
+            playlists[item["snippet"]["title"]] = item["id"]
+        request = youtube.playlists().list_next(request, response)
+
+    # The playlist field may contain multiple playlist names (space separated).
+    for pname in playlist_name.split():
+        pname = pname.strip()
+        if not pname:
+            continue
+
+        if pname not in playlists:
+            # Create the playlist.
+            body = {
+                "snippet": {
+                    "title": pname,
+                    "description": f"Auto-created playlist: {pname}",
+                },
+                "status": {"privacyStatus": "public"},
+            }
+            resp = youtube.playlists().insert(part="snippet,status", body=body).execute()
+            playlists[pname] = resp["id"]
+            print(f"  Created playlist: {pname}")
+
+        # Add video to playlist.
+        body = {
+            "snippet": {
+                "playlistId": playlists[pname],
+                "resourceId": {
+                    "kind": "youtube#video",
+                    "videoId": video_id,
+                },
+            },
+        }
+        youtube.playlistItems().insert(part="snippet", body=body).execute()
+        print(f"  Added to playlist: {pname}")
+
+
+def find_existing_video(youtube, title: str) -> str | None:
+    """Search the authenticated user's channel for a video with the given title.
+
+    Uses the channel's uploads playlist for reliable listing, then matches
+    by case-insensitive substring to handle minor title differences.
+    """
+    # Get the channel's uploads playlist ID.
+    ch_resp = youtube.channels().list(part="contentDetails", mine=True).execute()
+    if not ch_resp.get("items"):
+        print("  WARNING: Could not retrieve channel info.")
+        return None
+    uploads_playlist = ch_resp["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
+
+    # Walk through all uploads looking for a title match.
+    title_lower = title.strip().lower()
+    # Extract key words for fuzzy matching (first ~40 chars, lowered).
+    title_key = title_lower[:40]
+
+    next_page = None
+    while True:
+        pl_resp = youtube.playlistItems().list(
+            part="snippet",
+            playlistId=uploads_playlist,
+            maxResults=50,
+            pageToken=next_page,
+        ).execute()
+
+        for item in pl_resp.get("items", []):
+            vid_title = item["snippet"]["title"].strip()
+            vid_id = item["snippet"]["resourceId"]["videoId"]
+            vid_lower = vid_title.lower()
+
+            # Exact match.
+            if vid_lower == title_lower:
+                print(f"  Found exact match: '{vid_title}' ({vid_id})")
+                return vid_id
+
+            # Substring match: existing title contained in new, or vice versa.
+            if title_key in vid_lower or vid_lower[:40] in title_lower:
+                print(f"  Found fuzzy match: '{vid_title}' ({vid_id})")
+                return vid_id
+
+        next_page = pl_resp.get("nextPageToken")
+        if not next_page:
+            break
+
+    return None
+
+
+def delete_video(youtube, video_id: str):
+    """Delete a video by ID."""
+    youtube.videos().delete(id=video_id).execute()
+    print(f"  Deleted existing video: {video_id}")
+
+
+# ---------------------------------------------------------------------------
+# Find all .mp4 files.
+# ---------------------------------------------------------------------------
+
+def find_all_mp4s(base_dir: str) -> list[str]:
+    """Recursively find all .mp4 files under base_dir."""
+    mp4s = []
+    for root, dirs, files in os.walk(base_dir):
+        for f in sorted(files):
+            if f.endswith(".mp4"):
+                mp4s.append(os.path.join(root, f))
+    return mp4s
+
+
+# ---------------------------------------------------------------------------
+# Main.
+# ---------------------------------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Upload .mp4 files to YouTube using *-Text metadata.",
+        epilog="See the script header for full setup instructions.",
+    )
+    parser.add_argument("mp4_files", nargs="*", help=".mp4 files to upload")
+    parser.add_argument("--all", action="store_true",
+                        help="Upload all .mp4 files found under the music directory")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Print what would be uploaded without uploading")
+    parser.add_argument("--replace", action="store_true",
+                        help="Delete existing video (by title match) before uploading")
+    parser.add_argument("--secrets",
+                        default=os.path.expanduser("~/.config/youtube/client_secrets.json"),
+                        help="Path to OAuth2 client_secrets.json")
+    parser.add_argument("--token",
+                        default=os.path.expanduser("~/.config/youtube/token.json"),
+                        help="Path to cached OAuth2 token")
+    parser.add_argument("--notify", action="store_true",
+                        help="Send subscriber notifications")
+    parser.add_argument("--list", action="store_true",
+                        help="List all existing videos on the channel and exit")
+    args = parser.parse_args()
+
+    # Determine the base directory (where this script lives).
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # --list: just show all existing videos on the channel.
+    if args.list:
+        youtube = _get_youtube_service(args.secrets, args.token)
+        ch_resp = youtube.channels().list(part="contentDetails", mine=True).execute()
+        if not ch_resp.get("items"):
+            print("No channel found.", file=sys.stderr)
+            sys.exit(1)
+        uploads_playlist = ch_resp["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
+        next_page = None
+        count = 0
+        while True:
+            pl_resp = youtube.playlistItems().list(
+                part="snippet",
+                playlistId=uploads_playlist,
+                maxResults=50,
+                pageToken=next_page,
+            ).execute()
+            for item in pl_resp.get("items", []):
+                vid_title = item["snippet"]["title"]
+                vid_id = item["snippet"]["resourceId"]["videoId"]
+                count += 1
+                print(f"  {count:3d}. {vid_title}")
+                print(f"       https://www.youtube.com/watch?v={vid_id}")
+            next_page = pl_resp.get("nextPageToken")
+            if not next_page:
+                break
+        print(f"\nTotal: {count} videos")
+        return
+
+    # Collect .mp4 files.
+    if args.all:
+        mp4_files = find_all_mp4s(script_dir)
+    elif args.mp4_files:
+        mp4_files = [os.path.abspath(f) for f in args.mp4_files]
+    else:
+        parser.print_help()
+        sys.exit(1)
+
+    if not mp4_files:
+        print("No .mp4 files found.", file=sys.stderr)
+        sys.exit(1)
+
+    # Parse metadata for each .mp4.
+    uploads = []
+    errors = 0
+    for mp4 in mp4_files:
+        text_file = find_text_file(mp4)
+        if not text_file:
+            print(f"WARNING: No *-Text file for {mp4}, skipping.", file=sys.stderr)
+            errors += 1
+            continue
+        metadata = parse_text_file(text_file)
+        if not metadata["title"]:
+            print(f"WARNING: Empty title in {text_file}, skipping.", file=sys.stderr)
+            errors += 1
+            continue
+        uploads.append((mp4, text_file, metadata))
+
+    print(f"\nFound {len(uploads)} videos to upload ({errors} skipped):\n")
+    for mp4, text_file, metadata in uploads:
+        rel = os.path.relpath(mp4, script_dir)
+        print(f"  {rel}")
+        print(f"    Title:    {metadata['title']}")
+        print(f"    Privacy:  {metadata['privacyStatus']}")
+        print(f"    License:  {metadata['license']}")
+        print(f"    Kids:     {metadata['madeForKids']}")
+        print(f"    Playlist: {metadata['playlist']}")
+        print(f"    Tags:     {', '.join(metadata['tags'])}")
+        print()
+
+    if args.dry_run:
+        print("--dry-run: No uploads performed.")
+        return
+
+    # Authenticate and build YouTube service.
+    youtube = _get_youtube_service(args.secrets, args.token)
+
+    # Upload each video.
+    uploaded = 0
+    for mp4, text_file, metadata in uploads:
+        rel = os.path.relpath(mp4, script_dir)
+        print(f"\n{'='*60}")
+        print(f"Processing: {rel}")
+        print(f"  Title: {metadata['title']}")
+
+        # Handle --replace: search for existing video with same title and delete it.
+        if args.replace:
+            existing_id = find_existing_video(youtube, metadata["title"])
+            if existing_id:
+                delete_video(youtube, existing_id)
+                # YouTube deletion is asynchronous; wait for propagation.
+                print("  Waiting 5 seconds for YouTube to process deletion...")
+                time.sleep(5)
+            else:
+                print("  No existing video found with this title.")
+
+        try:
+            video_id = upload_video(youtube, mp4, metadata, notify=args.notify)
+
+            # Add to playlist(s) if specified.
+            if metadata["playlist"]:
+                add_to_playlist(youtube, video_id, metadata["playlist"])
+
+            uploaded += 1
+        except Exception as e:
+            print(f"  ERROR uploading {rel}: {e}", file=sys.stderr)
+            continue
+
+        # YouTube API quota-friendly pause between uploads.
+        if uploaded < len(uploads):
+            print("  Waiting 5 seconds before next upload...")
+            time.sleep(5)
+
+    print(f"\n{'='*60}")
+    print(f"Done. Uploaded {uploaded}/{len(uploads)} videos.")
+
+
+if __name__ == "__main__":
+    main()

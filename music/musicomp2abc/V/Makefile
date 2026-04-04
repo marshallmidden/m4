@@ -26,7 +26,7 @@ else
     FLUID_AUDIO  =
 endif
 #-----------------------------------------------------------------------------
-CPP=gcc -E -x c -undef -Wundef -Werror -nostdinc -C -CC
+CPP=gcc -E -x c -undef -Wundef -Werror -nostdinc -C -CC -traditional-cpp
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.abc %.csv %.mid %.E
 .SUFFIXES: .mid .csv .ps .abc _m.ps .wav .fs .E

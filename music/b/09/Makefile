@@ -2,7 +2,6 @@ SONGS        = b9m1
 SONGS       += b9m2
 SONGS       += b9m3
 
-SONGS       += A93
 #++ SONGS       += b9m4
 INCLUDES     = instruments.include
 INCLUDES    += macros.include
@@ -45,7 +44,7 @@ endif
 # -s nn = page scale to (default 0.75) = %%scale.
 ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 #-----------------------------------------------------------------------------
-CPP=gcc -E -x c -undef -Wundef -Werror -nostdinc -C -CC
+CPP=gcc -E -x c -undef -Wundef -Werror -nostdinc -C -CC -traditional-cpp
 MC_ARGS ?=
 #-- MC_ARGS ?= --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
 #-- MC_ARGS += --one

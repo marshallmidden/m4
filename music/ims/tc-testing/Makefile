@@ -140,17 +140,31 @@ help:
 	@echo "songs: ${SONGS}"
 	@echo "broken: ${BROKEN}"
 #-----------------------------------------------------------------------------
+SUBDIRS = gershwin
+#-----------------------------------------------------------------------------
 .PHONY: all songs SONGS ${SONGS}
 all songs SONGS ${SONGS}: ${SONGS_PS} ${SONGS_FS} ${SONGS_PDF}
+	@for d in ${SUBDIRS}; do $(MAKE) -C $$d all ; done
 #-----------------------------------------------------------------------------
 broken BROKEN ${BROKEN}: ${BROKEN_PS} ${BROKEN_FS} ${BROKEN_PDF}
 #-----------------------------------------------------------------------------
 .PHONY: fs
 fs: ${SONGS_FS}
+	@for d in ${SUBDIRS}; do $(MAKE) -C $$d fs ; done
 .PHONY: ps
 ps: ${SONGS_PS}
+	@for d in ${SUBDIRS}; do $(MAKE) -C $$d ps ; done
 .PHONY: pdf
 pdf: ${SONGS_PDF}
+	@for d in ${SUBDIRS}; do $(MAKE) -C $$d pdf ; done
+#-----------------------------------------------------------------------------
+.PHONY: mp4
+mp4:
+	@for d in ${SUBDIRS}; do $(MAKE) -C $$d mp4 ; done
+#-----------------------------------------------------------------------------
+.PHONY: mp4_2
+mp4_2:
+	@for d in ${SUBDIRS}; do $(MAKE) -C $$d mp4_2 ; done
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
@@ -162,6 +176,7 @@ clean:
 	rm -f *.stderr
 	rm -f *.h *.v *.csv *.mid *.E *.fs *.pdf *.ps *.abc
 	rm -f AAA.[0-9][0-9] BBB.[0-9][0-9]
+	@for d in ${SUBDIRS}; do $(MAKE) -C $$d clean ; done
 #-----------------------------------------------------------------------------
 .PHONY: check
 check:

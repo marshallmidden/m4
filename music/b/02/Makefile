@@ -1,21 +1,25 @@
-V4           = v2-4
+SONGS        = b2m1
+SONGS       += b2m2
+SONGS       += b2m3
+SONGS       += b2m4
 #-----------------------------------------------------------------------------
-MUSICOMP2ABC = ../../../musicomp2abc/musicomp2abc
-IMSCOMP      = ../../../ims/imscomp
-GCS2YOUTUBE  = ../../../gcs2youtube
-FLUIDSYNTH   = ~/bin/fluidsynth
+SONGS_E = ${SONGS:=.E}
+SONGS_ABC = ${SONGS:=.abc}
+SONGS_2_ABC = ${SONGS:=_2.abc}
+SONGS_FS = ${SONGS:=.fs}
+SONGS_2_FS = ${SONGS:=_2.fs}
+SONGS_PS = ${SONGS:=.ps}
+SONGS_2_PS = ${SONGS:=_2.ps}
+SONGS_PDF= ${SONGS:=.pdf}
+SONGS_2_PDF= ${SONGS:=_2.pdf}
+SONGS_MP4= ${SONGS:=.mp4}
+SONGS_2_MP4= ${SONGS:=_2.mp4}
+#-----------------------------------------------------------------------------
+MUSICOMP2ABC = ../../musicomp2abc/musicomp2abc
+IMSCOMP      = ../../ims/imscomp
+GCS2YOUTUBE  = ../../gcs2youtube
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
-#-----------------------------------------------------------------------------
-# OS-specific settings for fluidsynth
-UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Darwin)
-    SOUNDFONT  = /Users/m4/src/GeneralUser/GeneralUser.sf2
-    FLUID_AUDIO = -a coreaudio
-else
-    SOUNDFONT  = /home/m4/src/GeneralUser_GS/GeneralUser.sf2
-    FLUID_AUDIO =
-endif
 #-----------------------------------------------------------------------------
 # -b nn = starting bar number
 # -i = put red circle around errors.
@@ -26,9 +30,9 @@ endif
 # -s nn = page scale to (default 0.75) = %%scale.
 ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 #-----------------------------------------------------------------------------
-CPP=gcc -E -x c -undef -Wundef -Werror -nostdinc -C -CC
+CPP=gcc -E -x c -undef -Wundef -Werror -nostdinc -C -CC -traditional-cpp
 MC_ARGS ?=
-#-- MC_ARGS ?= --warn_octave_accidental ${PAGES} ${MEASURES} ${VOICES} ${WHICH}
+#-- MC_ARGS ?= --warn_octave_accidental
 #-- MC_ARGS += --one
 #-- MC_ARGS += --two
 #-- MC_ARGS += --sf2=/Users/m4/thisisthesoundfont.sf2
@@ -40,58 +44,52 @@ MC_ARGS ?=
 .SUFFIXES: .abc _m.ps .fs .csv .mid .pdf
 .SUFFIXES: _2.abc _m2.ps _2.fs _2.csv _2.mid _2.pdf
 # output $@   -- input $<
-%.fs:   %.E
+%.fs:	%.E
 	${MUSICOMP2ABC} ${MC_ARGS} --fluidsynth $< $@ || (rm -f $@ ; exit 1)
-%_2.fs: %.E
+%_2.fs:	%.E
 	${IMSCOMP} ${MC_ARGS} --fluidsynth $< $@ || (rm -f $@ ; exit 1)
-%.csv:  %.E
+%.csv:	%.E
 	${MUSICOMP2ABC} ${MC_ARGS} --midi1csv $< $@ || (rm -f $@ ; exit 1)
-%_2.csv:        %.E
+%_2.csv:	%.E
 	${IMSCOMP} ${MC_ARGS} --midi1csv $< $@ || (rm -f $@ ; exit 1)
-%.mid:  %.csv
+%.mid:	%.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
-%_2.mid:        %_2.csv
+%_2.mid:	%_2.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
-%.abc:  %.E
+%.abc:	%.E
 	${MUSICOMP2ABC} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
-%_2.abc:        %.E
+%_2.abc:	%.E
 	${IMSCOMP} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)
-%_m.ps: %.abc
+%_m.ps:	%.abc
 	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) || (rm -f $@ ; exit 1)
-%_m2.ps:        %_2.abc
+%_m2.ps:	%_2.abc
 	(${ABCM2PS} ${ABCM2PS_ARGS} ; mv Out.ps $@) || (rm -f $@ ; exit 1)
-%.pdf:  %_m.ps
+%.pdf:	%_m.ps
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
-%_2.pdf:        %_m2.ps
+%_2.pdf:	%_m2.ps
 	${PS2PDF} $< $@ || (rm -f $@ ; exit 1)
-%.E: %.gcs ../../instruments.include ${M} Makefile
+%.E: %.gcs ../instruments.include instruments.include Makefile
 	${CPP} $< -o $@ || (rm -f $@ ; exit 1)
 %.mp4:	%.fs
 	${GCS2YOUTUBE} $< || (rm -f $@ ; exit 1)
 %_2.mp4:	%_2.fs
 	${GCS2YOUTUBE} $< || (rm -f $@ ; exit 1)
-#-----------------------------------------------------------------------------
-%.wav:  %.fs
-	${FLUIDSYNTH} -q -F $@ ${SOUNDFONT} < $< \
-		|| (rm -f $@ ; exit 1)
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# Extra #include dependencies for specific movements.
+b2m2.E: music-2-2.gcs
+b2m3.E: music-2-3.gcs
 #-----------------------------------------------------------------------------
 .PHONY: help
 help::
-	@echo "Example:"
-	@echo "  Use '${MUSICOMP2ABC} ${MC_ARGS} --midi1csv ${V4} to get ${V4}.abc."
-	@echo "  Use '${ABCM2PS} ${V4}.abc > ${V4}_m.ps'."
-	@echo "  Use '${PS2PDF} ${V4}_m.ps > ${V4}.pdf'."
-	@echo "  Use '${MUSICOMP2ABC} ${MC_ARGS} --fluidsynth ${V4} to get ${V4}.fs."
-	@echo ""
 	@echo "Targets:"
-	@echo "  all    - create music files for ${V4}."
+	@echo "  all    - create music files for ${SONGS}."
 	@echo "  clean  - Remove postscript (ps), pdf, csv, and fs files."
 	@echo ""
-	@echo "  s1     - create ${V4}.abc, ${V4}_m.ps, and ${V4}.fs from ${V4}."
+	@echo "  s1     - create .fs, _2.fs, .pdf, _2.pdf for ${SONGS}."
 #-----------------------------------------------------------------------------
 .PHONY: check
 check:
-	@echo "V4=${V4}"
+	@echo "SONGS=${SONGS}"
 	@echo "CPP=${CPP}"
 	@echo "MUSICOMP2ABC=${MUSICOMP2ABC}"
 	@echo "IMSCOMP=${IMSCOMP}"
@@ -99,32 +97,32 @@ check:
 	@echo "ABCM2PS=${ABCM2PS}"
 	@echo "ABCM2PS_ARGS=${ABCM2PS_ARGS}"
 	@echo "PS2PDF=${PS2PDF}"
-#--	@echo "PAGES=${PAGES}"
-#--	@echo "MEASURES=${MEASURES}"
-#--	@echo "VOICES=${VOICES}"
-#--     @echo "WHICH=${WHICH}"
 #=============================================================================
 #-- .PHONY: all         #-- There is a bug in gmake. I don't understand.
 all: s1
 #-----------------------------------------------------------------------------
-fs: ${V4}.fs ${V4}_2.fs
+fs: ${SONGS_FS} ${SONGS_2_FS}
 #-----------------------------------------------------------------------------
 .PHONY: mp4
-mp4: ${V4}.mp4
+mp4: ${SONGS_MP4}
 #-----------------------------------------------------------------------------
 .PHONY: mp4_2
-mp4_2: ${V4}_2.mp4
+mp4_2: ${SONGS_2_MP4}
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
 	rm -f *.ps
 	rm -f *.stdout *.stderr
-	rm -f ${V4}.csv ${V4}.mid ${V4}.fs ${V4}.pdf ${V4}.abc ${V4}.wav ${V4}.E ${V4}.h ${V4}.v ${V4}.mp4 ${V4}_2.mp4
-	rm -f ${V4}_2.csv ${V4}_2.mid ${V4}_2.fs ${V4}_2.pdf ${V4}_2.abc ${V4}_2.wav ${V4}_2.E ${V4}_2.h ${V4}_2.v
+	rm -f ${SONGS_E} ${SONGS_ABC} ${SONGS_2_ABC} ${SONGS_FS} ${SONGS_2_FS} ${SONGS_MP4} ${SONGS_2_MP4}
+	rm -f ${SONGS_PS} ${SONGS_2_PS} ${SONGS_PDF} ${SONGS_2_PDF}
+	rm -f *.wav *.csv *.h *.v *.mid
+	rm -f *.E
+	rm -f A.[012]* B.[012]*
+	rm -f ZZZ.*
 #-----------------------------------------------------------------------------
 .PHONY: s1
-s1: ${V4}.fs ${V4}.pdf      Makefile ${MUSICOMP2ABC}
-s1: ${V4}_2.fs ${V4}_2.pdf  Makefile ${IMSCOMP}
+s1: ${SONGS_FS} ${SONGS_2_FS}    Makefile ${MUSICOMP2ABC}
+s1: ${SONGS_PDF} ${SONGS_2_PDF}  Makefile ${IMSCOMP}
 #-----------------------------------------------------------------------------
 # End of Makefile
 #-----------------------------------------------------------------------------

@@ -19,7 +19,7 @@ else
     FLUID_AUDIO =
 endif
 #-----------------------------------------------------------------------------
-CPP=gcc -E -x c -undef -Wundef -Werror -nostdinc -C -CC
+CPP=gcc -E -x c -undef -Wundef -Werror -nostdinc -C -CC -traditional-cpp
 #-----------------------------------------------------------------------------
 # -b nn = starting bar number
 # -i = put red circle around errors.

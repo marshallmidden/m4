@@ -92,6 +92,7 @@ SONGS_PS = ${SONGS:=.ps}
 SONGS_M_PS = ${SONGS:=_m.ps}
 SONGS_PDF= ${SONGS:=.pdf}
 SONGS_M_PDF= ${SONGS:=.pdf}
+SONGS_MP4= ${SONGS:=.mp4}
 #-----------------------------------------------------------------------------
 TESTS_E = ${TESTS:=.E}
 TESTS_ABC = ${TESTS:=.abc}
@@ -105,6 +106,7 @@ TESTS_M_PDF= ${TESTS:=_m.pdf}
 #-----------------------------------------------------------------------------
 IMSCOMP = ./imscomp
 MUSICOMP = ../musicomp2abc/musicomp2abc
+GCS2YOUTUBE  = ../gcs2youtube
 MC_ARGS ?=
 #-- MC_ARGS += --one
 #-- MC_ARGS += --two
@@ -154,6 +156,8 @@ CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp
 	${PS2PDF} $< $@
 %_m.pdf:	%_m.ps
 	${PS2PDF} $< $@
+%.mp4:	%.fs
+	${GCS2YOUTUBE} $< || (rm -f $@ ; exit 1)
 %.E: %.gcs
 	${CPP} $< -o $@
 %.staves: %.E ${IMSCOMP}
@@ -183,12 +187,16 @@ all songs ${SONGS}: ${SONGS_PS} ${SONGS_M_PS} ${SONGS_FS} ${SONGS_M_FS} ${SONGS_
 .PHONY: tests ${TESTS}
 tests ${TESTS}: ${TESTS_PS} ${TESTS_FS} ${TESTS_PDF}
 #-----------------------------------------------------------------------------
+.PHONY: mp4
+mp4: ${SONGS_MP4}
+#-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
 	rm -f ${SONGS_FS} ${TESTS_FS} ${SONGS_M_FS} ${TESTS_M_FS}
 	rm -f ${SONGS_ABC} ${TESTS_ABC} ${SONGS_M_ABC} ${TESTS_M_ABC}
 	rm -f ${SONGS_PS} ${TESTS_PS} ${SONGS_M_PS} ${TESTS_M_PS}
 	rm -f ${SONGS_PDF} ${TESTS_PDF} ${SONGS_M_PDF} ${TESTS_M_PDF}
+	rm -f ${SONGS_MP4}
 	rm -f ${SONGS_E} ${TESTS_E}
 	rm -f *.stderr
 	rm -f *.h *.v *.csv *.mid *.E *.fs *.pdf *.ps *.abc *.staves
