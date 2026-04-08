@@ -4,8 +4,9 @@
 # Usage:  gcs2youtube <file.fs>
 #
 # Pipeline:
-#   .fs  -> .wav (fluidsynth renders audio via SoundFont)
-#   .wav -> .mp4 (ffmpeg wraps audio in a video container for YouTube)
+#   .fs  -> .wav          (fluidsynth renders audio via SoundFont)
+#   .wav -> waveform.mp4  (wav2waveform, optional visualisation)
+#   .wav -> .mp4           (ffmpeg wraps audio + overlays in video container)
 #
 # The Makefile is responsible for building .fs from .gcs/.E using the
 # appropriate compiler (musicomp2abc or imscomp).  This script only
@@ -14,7 +15,8 @@
 # Title lines are extracted from the .E file in the same directory
 # (which the Makefile builds as a dependency of the .fs file).
 #
-# Requirements: fluidsynth, ffmpeg, python3 (for fs2ass overlay)
+# Requirements: fluidsynth, ffmpeg, python3
+# Optional:     fs2ass (scrolling echo text), wav2waveform + numpy (waveform)
 # -----------------------------------------------------------------------------
 
 set -euo pipefail
@@ -23,6 +25,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FLUIDSYNTH="${FLUIDSYNTH:-$HOME/bin/fluidsynth}"
 FS2ASS="${FS2ASS:-${SCRIPT_DIR}/fs2ass}"
+WAV2WAVEFORM="${WAV2WAVEFORM:-${SCRIPT_DIR}/wav2waveform}"
 
 # OS-specific SoundFont path
 case "$(uname -s)" in
@@ -33,10 +36,11 @@ esac
 # Video settings for YouTube
 VIDEO_RES="1920x1080"
 VIDEO_FPS_STATIC="1"     # 1 fps for static title card (smaller file)
-VIDEO_FPS_SCROLL="15"    # 15 fps when scrolling ASS overlay is used
+VIDEO_FPS_SCROLL="15"    # 15 fps when motion overlay is used
 BG_COLOR="black"
 FONT_COLOR="white"
 FONT_SIZE="48"
+WAVEFORM_WINDOW="10.0"  # seconds of audio visible in waveform display
 # -----------------------------------------------------------------------------
 
 usage() {
@@ -54,15 +58,18 @@ Options:
   -s, --soundfont FILE
                     Path to .sf2 SoundFont file
   -k, --keep        Keep intermediate files (.wav) in output directory
+  --no-waveform     Skip waveform visualisation overlay
   -h, --help        Show this help message
 
 Environment variables (override defaults):
   FLUIDSYNTH        Path to fluidsynth     (default: ~/bin/fluidsynth)
   SOUNDFONT         Path to .sf2 file      (default: ~/src/GeneralUser_GS/GeneralUser.sf2)
+  WAV2WAVEFORM      Path to wav2waveform   (default: ./wav2waveform)
 
 Examples:
   $(basename "$0") songs/promenade.fs
   $(basename "$0") songs/promenade_2.fs
+  $(basename "$0") --no-waveform b/02/b2m1.fs
   $(basename "$0") -o ~/Videos/b9m2.mp4 b/09/b9m2.fs
 EOF
     exit 0
@@ -77,12 +84,14 @@ warn() { echo "WARNING: $*" >&2; }
 # -----------------------------------------------------------------------------
 OUTPUT=""
 KEEP_INTERMEDIATES=0
+NO_WAVEFORM=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -o|--output)     OUTPUT="$2";   shift 2 ;;
         -s|--soundfont)  SOUNDFONT="$2"; shift 2 ;;
         -k|--keep)       KEEP_INTERMEDIATES=1; shift ;;
+        --no-waveform)   NO_WAVEFORM=1; shift ;;
         -h|--help)       usage ;;
         -*)              die "Unknown option: $1" ;;
         *)               break ;;
@@ -139,15 +148,25 @@ cleanup() {
         info "Keeping intermediate files in: $dest_dir"
         cp -f "$TMPDIR/${FULLBASE}.wav" "$dest_dir/" 2>/dev/null || true
         cp -f "$TMPDIR/${FULLBASE}.ass" "$dest_dir/" 2>/dev/null || true
+        cp -f "$TMPDIR/${FULLBASE}_waveform.mp4" "$dest_dir/" 2>/dev/null || true
     fi
     rm -rf "$TMPDIR"
 }
 trap cleanup EXIT
 
+# Extract title early (needed for drawtext fallback and info message)
+if [[ -f "$E_FILE" ]]; then
+    TITLE="$(grep -m1 '^title ' "$E_FILE" | sed 's/^title[[:space:]]*//' || echo "$FULLBASE")"
+    SUBTITLE="$(grep '^title ' "$E_FILE" | sed 's/^title[[:space:]]*//' | sed -n '2,4p' | tr '\n' ' ' || true)"
+else
+    TITLE="$FULLBASE"
+    SUBTITLE=""
+fi
+
 # -----------------------------------------------------------------------------
-# STEP 1: .fs -> .wav  (FluidSynth renders audio)
+# STEP 1/3: .fs -> .wav  (FluidSynth renders audio)
 # -----------------------------------------------------------------------------
-info "Step 1/2: Rendering $FULLBASE.fs -> $FULLBASE.wav  (fluidsynth)"
+info "Step 1/3: Rendering $FULLBASE.fs -> $FULLBASE.wav  (fluidsynth)"
 "$FLUIDSYNTH" -q -n -K 128 -r96000 -F "$TMPDIR/${FULLBASE}.wav" "$SOUNDFONT" < "$INPUT_FULL" \
     || die "FluidSynth rendering failed."
 
@@ -155,14 +174,53 @@ info "Step 1/2: Rendering $FULLBASE.fs -> $FULLBASE.wav  (fluidsynth)"
 [[ -s "$TMPDIR/${FULLBASE}.wav" ]] || die "FluidSynth produced an empty .wav file."
 
 # -----------------------------------------------------------------------------
-# STEP 2: .wav -> .mp4  (ffmpeg creates YouTube-uploadable video)
+# STEP 2/3: waveform visualisation (optional)
 #
-# If fs2ass is available, generate an ASS subtitle file from the .fs and
-# overlay scrolling echo text on the video.  Otherwise, fall back to a
-# static title card (drawtext).
-# Settings: H.264 video + AAC audio, standard 1080p -- widely accepted by YouTube.
+# wav2waveform generates a 960x540 H.264 video of the audio waveform
+# (centred playhead, green with horizontal fade).  It is overlaid on the
+# lower-right quarter of the final 1920x1080 output.
 # -----------------------------------------------------------------------------
-info "Step 2/2: Creating $FULLBASE.mp4 for YouTube  (ffmpeg)"
+WAVEFORM_FILE="$TMPDIR/${FULLBASE}_waveform.mp4"
+USE_WAVEFORM=0
+
+run_waveform() {
+    local wav="$1" out="$2"
+    shift 2
+    if command -v uv &>/dev/null; then
+        uv run --script "$WAV2WAVEFORM" "$wav" "$out" "$@"
+    else
+        python3 "$WAV2WAVEFORM" "$wav" "$out" "$@"
+    fi
+}
+
+if [[ "$NO_WAVEFORM" -eq 0 ]] && [[ -f "$WAV2WAVEFORM" ]]; then
+    info "Step 2/3: Generating waveform visualisation  (wav2waveform)"
+    if run_waveform "$TMPDIR/${FULLBASE}.wav" "$WAVEFORM_FILE" \
+           --fps "$VIDEO_FPS_SCROLL" --window "$WAVEFORM_WINDOW"; then
+        USE_WAVEFORM=1
+        info "  Waveform video ready"
+    else
+        warn "wav2waveform failed; proceeding without waveform."
+    fi
+else
+    if [[ "$NO_WAVEFORM" -eq 1 ]]; then
+        info "Step 2/3: Waveform disabled (--no-waveform)."
+    else
+        info "Step 2/3: wav2waveform not found; skipping waveform."
+    fi
+fi
+
+# -----------------------------------------------------------------------------
+# STEP 3/3: .wav -> .mp4  (ffmpeg creates YouTube-uploadable video)
+#
+# Overlays are layered bottom-up:
+#   1. Black 1920x1080 background
+#   2. Scrolling echo text (ASS subtitle from fs2ass)   -- or static drawtext
+#   3. Waveform visualisation (lower-right 960x540)     -- if available
+#
+# Settings: H.264 video + AAC audio, standard 1080p.
+# -----------------------------------------------------------------------------
+info "Step 3/3: Creating $FULLBASE.mp4 for YouTube  (ffmpeg)"
 
 # Get audio duration for the video length
 DURATION="$(ffprobe -v error -show_entries format=duration \
@@ -182,7 +240,7 @@ if [[ -x "$FS2ASS" ]] || command -v "$FS2ASS" &>/dev/null; then
 
     if python3 "$FS2ASS" "$INPUT_FULL" "$ASS_FILE" "${TITLE_ARGS[@]}" 2>/dev/null; then
         USE_ASS=1
-        info "  Generated scrolling echo overlay ($ASS_FILE)"
+        info "  Scrolling echo overlay ready"
     else
         warn "fs2ass failed; falling back to static title card."
     fi
@@ -190,9 +248,34 @@ else
     info "  fs2ass not found; using static title card."
 fi
 
-if [[ "$USE_ASS" -eq 1 ]]; then
+# Choose frame rate: 15 fps if any motion overlay, 1 fps for pure static
+if [[ "$USE_ASS" -eq 1 || "$USE_WAVEFORM" -eq 1 ]]; then
+    FPS="$VIDEO_FPS_SCROLL"
+else
+    FPS="$VIDEO_FPS_STATIC"
+fi
+
+# Build and run the ffmpeg command based on which overlays are available
+if [[ "$USE_ASS" -eq 1 && "$USE_WAVEFORM" -eq 1 ]]; then
+    # -- ASS scrolling text + waveform visualisation --
     ffmpeg -y \
-        -f lavfi -i "color=c=${BG_COLOR}:s=${VIDEO_RES}:r=${VIDEO_FPS_SCROLL}:d=${DURATION}" \
+        -f lavfi -i "color=c=${BG_COLOR}:s=${VIDEO_RES}:r=${FPS}:d=${DURATION}" \
+        -i "$TMPDIR/${FULLBASE}.wav" \
+        -i "$WAVEFORM_FILE" \
+        -filter_complex \
+            "[0:v]ass=${ASS_FILE}[bg]; [bg][2:v]overlay=960:540[out]" \
+        -map "[out]" -map "1:a" \
+        -c:v libx264 -pix_fmt yuv420p \
+        -c:a aac -b:a 192k \
+        -shortest \
+        -movflags +faststart \
+        "$OUTPUT" \
+        || die "ffmpeg video creation failed."
+
+elif [[ "$USE_ASS" -eq 1 ]]; then
+    # -- ASS scrolling text only --
+    ffmpeg -y \
+        -f lavfi -i "color=c=${BG_COLOR}:s=${VIDEO_RES}:r=${FPS}:d=${DURATION}" \
         -i "$TMPDIR/${FULLBASE}.wav" \
         -vf "ass=${ASS_FILE}" \
         -c:v libx264 -tune stillimage -pix_fmt yuv420p \
@@ -201,19 +284,27 @@ if [[ "$USE_ASS" -eq 1 ]]; then
         -movflags +faststart \
         "$OUTPUT" \
         || die "ffmpeg video creation failed."
-else
-    # Fallback: static title card with composition name
-    # Extract title from the .E file
-    if [[ -f "$E_FILE" ]]; then
-        TITLE="$(grep -m1 '^title ' "$E_FILE" | sed 's/^title[[:space:]]*//' || echo "$FULLBASE")"
-        SUBTITLE="$(grep '^title ' "$E_FILE" | sed 's/^title[[:space:]]*//' | sed -n '2,4p' | tr '\n' ' ' || true)"
-    else
-        TITLE="$FULLBASE"
-        SUBTITLE=""
-    fi
 
+elif [[ "$USE_WAVEFORM" -eq 1 ]]; then
+    # -- Waveform visualisation + static title card --
     ffmpeg -y \
-        -f lavfi -i "color=c=${BG_COLOR}:s=${VIDEO_RES}:r=${VIDEO_FPS_STATIC}:d=${DURATION}" \
+        -f lavfi -i "color=c=${BG_COLOR}:s=${VIDEO_RES}:r=${FPS}:d=${DURATION}" \
+        -i "$TMPDIR/${FULLBASE}.wav" \
+        -i "$WAVEFORM_FILE" \
+        -filter_complex \
+            "[0:v]drawtext=text='${TITLE}':fontcolor=${FONT_COLOR}:fontsize=${FONT_SIZE}:x=(w-text_w)/2:y=(h-text_h)/2-40,drawtext=text='${SUBTITLE}':fontcolor=gray:fontsize=28:x=(w-text_w)/2:y=(h/2)+30[bg]; [bg][2:v]overlay=960:540[out]" \
+        -map "[out]" -map "1:a" \
+        -c:v libx264 -pix_fmt yuv420p \
+        -c:a aac -b:a 192k \
+        -shortest \
+        -movflags +faststart \
+        "$OUTPUT" \
+        || die "ffmpeg video creation failed."
+
+else
+    # -- Static title card only --
+    ffmpeg -y \
+        -f lavfi -i "color=c=${BG_COLOR}:s=${VIDEO_RES}:r=${FPS}:d=${DURATION}" \
         -i "$TMPDIR/${FULLBASE}.wav" \
         -vf "drawtext=text='${TITLE}':fontcolor=${FONT_COLOR}:fontsize=${FONT_SIZE}:x=(w-text_w)/2:y=(h-text_h)/2-40, \
              drawtext=text='${SUBTITLE}':fontcolor=gray:fontsize=28:x=(w-text_w)/2:y=(h/2)+30" \
@@ -225,12 +316,6 @@ else
         || die "ffmpeg video creation failed."
 fi
 
-# Extract a title for the info message
-if [[ -f "$E_FILE" ]]; then
-    TITLE="$(grep -m1 '^title ' "$E_FILE" | sed 's/^title[[:space:]]*//' || echo "$FULLBASE")"
-else
-    TITLE="$FULLBASE"
-fi
 info "Done! YouTube-ready file: $OUTPUT"
 info "  Title: $TITLE"
 info "  Duration: ${DURATION}s"

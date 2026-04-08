@@ -1,5 +1,5 @@
 #-----------------------------------------------------------------------------
-DIRS  = musicomp2abc songs ims t b
+DIRS  = musicomp2abc songs ims ims/tc-testing/gershwin t b
 #-----------------------------------------------------------------------------
 .PHONY: help
 help:

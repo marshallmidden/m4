@@ -1985,6 +1985,9 @@ def parse_args() -> None:
     parser.add_argument('--noarpeggio', '--noarpegg', '--noarpeg', '--noarpe', '--noarp',
                         action='store_true',
                         help='Disable automatic arpeggio (chord note staggering across voices).')
+    parser.add_argument('--novolumeramp', '--novolumeram', '--novolumera', '--novolumer',
+                        action='store_true',
+                        help='Disable automatic volume smoothing (CC11/CC7 ramp between notes).')
 
     parser.add_argument('rest', nargs='*',
                         help='Optionals: input_file(stdin) output_file(stdout)')
@@ -6183,17 +6186,69 @@ def print_out_midi1csv_notes() -> None:
                 if 'l' in last_suffixes:                    # legato - extend playing time.
                     note_playing = int(note_playing * last_legato)
                 # fi
+                # Volume ramp: smooth CC11/CC7 transitions when a note is
+                # still sounding (no rest before this note).  If the previous
+                # element was a rest, snap instantly (the listener cannot hear
+                # the jump).  Disable with --novolumeramp.
+                _do_vol_ramp = (not args.novolumeramp and last_note_on != ''
+                                and last_note_length > 0)
                 if last_cc11 != v_vl:
-                    insert_sorted_tail([voice+1, note_time, f'Control_c, {chan}, 11, {round(float(v_vl))}'], 'HERE24')
-                    last_cc11 = v_vl
+                    if _do_vol_ramp:
+                        _ramp_ticks = min(int(MIDICLICKSPERQUARTER / 4),
+                                          last_note_length // 2)
+                        _ramp_start = max(0, note_time - _ramp_ticks)
+                        _ramp_dur = note_time - _ramp_start
+                        if _ramp_dur > 1:
+                            _steps = min(16, _ramp_dur)
+                            _old_v = float(last_cc11)
+                            _new_v = float(v_vl)
+                            for _s in range(1, _steps + 1):
+                                _t = _ramp_start + (_ramp_dur * _s) // _steps
+                                _cv = max(0, min(127, round(_old_v + (_new_v - _old_v) * _s / _steps)))
+                                if _cv != last_cc11:
+                                    insert_sorted_tail([voice+1, _t, f'Control_c, {chan}, 11, {_cv}'])
+                                    last_cc11 = _cv
+                                # fi
+                            # rof
+                        else:
+                            insert_sorted_tail([voice+1, note_time, f'Control_c, {chan}, 11, {round(float(v_vl))}'], 'HERE24')
+                            last_cc11 = v_vl
+                        # fi
+                    else:
+                        insert_sorted_tail([voice+1, note_time, f'Control_c, {chan}, 11, {round(float(v_vl))}'], 'HERE24')
+                        last_cc11 = v_vl
+                    # fi
                 # fi
                 if last_cc10 != v_pan:
                     insert_sorted_tail([voice+1, note_time, f'Control_c, {chan}, 10, {round(float(v_pan))}'], 'HERE25')
                     last_cc10 = v_pan
                 # fi
                 if last_cc7 != v_intens:
-                    insert_sorted_tail([voice+1, note_time, f'Control_c, {chan}, 7, {round(float(v_intens))}'], 'HERE26')
-                    last_cc7 = v_intens
+                    if _do_vol_ramp:
+                        _ramp_ticks = min(int(MIDICLICKSPERQUARTER / 4),
+                                          last_note_length // 2)
+                        _ramp_start = max(0, note_time - _ramp_ticks)
+                        _ramp_dur = note_time - _ramp_start
+                        if _ramp_dur > 1:
+                            _steps = min(16, _ramp_dur)
+                            _old_v = float(last_cc7)
+                            _new_v = float(v_intens)
+                            for _s in range(1, _steps + 1):
+                                _t = _ramp_start + (_ramp_dur * _s) // _steps
+                                _cv = max(0, min(127, round(_old_v + (_new_v - _old_v) * _s / _steps)))
+                                if _cv != last_cc7:
+                                    insert_sorted_tail([voice+1, _t, f'Control_c, {chan}, 7, {_cv}'])
+                                    last_cc7 = _cv
+                                # fi
+                            # rof
+                        else:
+                            insert_sorted_tail([voice+1, note_time, f'Control_c, {chan}, 7, {round(float(v_intens))}'], 'HERE26')
+                            last_cc7 = v_intens
+                        # fi
+                    else:
+                        insert_sorted_tail([voice+1, note_time, f'Control_c, {chan}, 7, {round(float(v_intens))}'], 'HERE26')
+                        last_cc7 = v_intens
+                    # fi
                 # fi
 
                 if 't' in last_suffixes:            # This note is tied to previous.
