@@ -29,7 +29,7 @@ endif
 all:
 	./c11.pl > ${CSV}
 	csvmidi ${CSV} ${MIDI}
-	${FLUIDSYNTH} -F "${WAV}" ${FLUID_AUDIO} -i -n -q -g 0.5 -K 64 ${SOUNDFONT_GS} "${MIDI}"
+	${FLUIDSYNTH} -F "${WAV}" ${FLUID_AUDIO} -i -n -q -g 0.5 -K 256 ${SOUNDFONT_GS} "${MIDI}" > /dev/null
 	cp ${WAV} ~/Downloads/
 
 # ----------------------------------------------------------------------------

@@ -227,10 +227,10 @@ BROKEN_2MID = ${BROKEN:=_2.mid}
 %_2.mid:  %_2.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.wav:  %.fs
-	${FLUIDSYNTH} -q -F $@ ${SOUNDFONT} < $< \
+	${FLUIDSYNTH} -q -K 256 -F $@ ${SOUNDFONT} < $< > /dev/null \
 		|| (rm -f $@ ; exit 1)
 %_2.wav:  %_2.fs
-	${FLUIDSYNTH} -q -F $@ ${SOUNDFONT} < $< \
+	${FLUIDSYNTH} -q -K 256 -F $@ ${SOUNDFONT} < $< > /dev/null \
 		|| (rm -f $@ ; exit 1)
 %.abc:  %.E
 	${MUSICOMP2ABC} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)

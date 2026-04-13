@@ -38,7 +38,7 @@ CPP=gcc -E -x c -undef -Wundef -Werror -nostdinc -C -CC -traditional-cpp
 %.mid:  %.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.wav:  %.fs
-	${FLUIDSYNTH} -q -F $@ ${SOUNDFONT_GS} < $<
+	${FLUIDSYNTH} -q -K 256 -F $@ ${SOUNDFONT_GS} < $< > /dev/null
 %.abc:  %.E
 	${MUSICOMP2ABC} --abc $< $@ || (rm -f $@ ; exit 1)
 %.ps:   %.abc

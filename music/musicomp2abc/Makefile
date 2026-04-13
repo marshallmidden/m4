@@ -138,7 +138,7 @@ CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp
 #+ %.ps:   %.abc
 #+ 	${YAPS} $< -o $@ -k || (rm -f $@ ; exit 1)
 #+ %.wav:  %.mid
-#+ 	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 128 $<
+#+ 	fluidsynth -F $@ -a coreaudio -i -n -q /Users/m4/src/GeneralUser_GS/GeneralUser_GS.sf2 -g 0.5 -K 256 $<
 #-----------------------------------------------------------------------------
 .PHONY: help
 help:

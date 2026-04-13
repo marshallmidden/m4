@@ -1827,6 +1827,10 @@ global voices_to_do
 voices_to_do = []                   # argument line limiting which voices to do.
 global intensity_offset
 intensity_offset = ''               # Argument --intensity offset.
+global auto_staves                  # Auto-convert putd/= to staff format
+auto_staves = False
+global keep_voices_groups           # Voice groups to keep together
+keep_voices_groups = []             # List of lists of voice numbers
 global intensity_percentage
 intensity_percentage = 1.0          # Argument --intensity percentage.
 global args
@@ -1882,6 +1886,12 @@ def parse_args() -> None:
                         '--staffs', '--staff', '--staf',
                         action='store_true',
                         help='staff (staves) musicomp format output.')
+    parser.add_argument('--auto-staves', action='store_true',
+                        help='Automatically convert putd/= format to staff format with chord notation.')
+    parser.add_argument('--keep-voices', '--keep-voice', '--keepvoic', '--keepvoi',
+                        '--keepvo', '--keepv', '--keep',
+                        default='', action='store',
+                        help='Keep specified voice groups together (e.g., "v10,v11;v12,v13,v14").')
     parser.add_argument('--lilypond', '--lilypon', '--lilypo', '--lilyp', '--lily', '--lil', '--li',
                         action='store_true',
                         help='LilyPond notation output for engraving/printing.')
@@ -2038,6 +2048,38 @@ def parse_args() -> None:
                 intensity_offset = f
             # fi
         # fi
+    # fi
+
+    # Parse --auto-staves option
+    global auto_staves
+    if args.auto_staves:
+        auto_staves = True
+    # fi
+
+    # Parse --keep-voices option
+    global keep_voices_groups
+    if args.keep_voices is not None and args.keep_voices != '':
+        keep_voices_groups = []
+        groups = args.keep_voices.split(';')
+        for group in groups:
+            voices_in_group = []
+            voice_strs = group.split(',')
+            for voice_str in voice_strs:
+                voice_str = voice_str.strip()
+                if voice_str.startswith('v'):
+                    voice_str = voice_str[1:]
+                # fi
+                try:
+                    voice_num = int(voice_str)
+                    voices_in_group.append(voice_num)
+                except ValueError:
+                    print_error(f"Invalid voice number in --keep-voices: '{voice_str}'", '')
+                # yrt
+            # rof
+            if voices_in_group:
+                keep_voices_groups.append(voices_in_group)
+            # fi
+        # rof
     # fi
 
     if args.pages is not None and args.pages != '':
@@ -2350,6 +2392,32 @@ def vol_to_vlprint_round(j: int) -> int:
     # rof
     return getvar('default_volume')
 # End of vol_to_vlprint_round
+
+def vol_to_name(j: int | str) -> str:
+    """Convert a volume value to its name (e.g., 90 -> 'f'). Only returns standard volume names."""
+    global vlprint
+
+    if isinstance(j, str):
+        j = float(j)
+        if j.is_integer():
+            j = int(j)
+        # fi
+    # fi
+    # Only handle standard volume levels (positive values)
+    # Ignore special decorations (negative values)
+    if j < 0:
+        # For special decorations, return 'mf' as a safe default
+        return 'mf'
+    # fi
+    # Check if it's a standard volume level
+    for i in vlprint:
+        if i >= j:
+            return vlprint[i]
+        # fi
+    # rof
+    # Default to 'mf' if not found
+    return 'mf'
+# End of vol_to_name
 
 # ------------------------------------------------------------------------------
 global instruments
@@ -2802,7 +2870,7 @@ global bars                         # Number of bars per staff
 bars = {}
 bars[''] = NUMBER_BARS_PER_STAFF    # For abc notation, put new line in output, which ends staff.
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-global voices                       # Number of voices
+global voices
 voices = 1
 global cis                          # If cis active, non-zero. (CIS measure one voice #XX only.)
 cis = 0
@@ -2855,6 +2923,8 @@ global autopitchbend                # For staff mode, voices in staff are auto-p
 autopitchbend = False
 global pitchbend                    # Pitch_bend levels for voices.
 pitchbend = [ ]                     # Pitch bend pitchbend level by voice.
+global ensemble_map                 # For ensemble command: staff_name -> count of players.
+ensemble_map = { }                  # e.g. {'ViolinIV24': 14} means 14 violins playing that staff.
 global pan                          # pan levels at measures.
 pan = { }                           # Pan (balance 0=left, 126=right, 64=center) for voice, measure
 pan[1] = { }
@@ -4369,6 +4439,7 @@ def print_measure_staves_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l
     global pan
     global intensity
     global reverb
+    global auto_staves
 
     pr = ''
 
@@ -4399,7 +4470,11 @@ def print_measure_staves_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l
     # rof
     for label in n_clef:
         if label not in l_clef or l_clef[label] != n_clef[label]:
-            pr = pr + f'clef    {label} {n_clef[label]}\n'
+            if auto_staves:
+                # When auto_staves, output clef using staff name
+                pr = pr + f'clef    {label} {n_clef[label]}\n'
+            else:
+                pr = pr + f'clef    {label} {n_clef[label]}\n'
         # fi
     # rof
 
@@ -4410,18 +4485,16 @@ def print_measure_staves_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l
         v0 = vlist[0]
         new_voice_initialize(v0, m)
         vl = get_volume_level(m, v0)
-        t = str(vl)
-        for j in vlprint:
-            if t == str(j):
-                t = vlprint[j]
-                break
-            # fi
-        # rof
+        t = vol_to_name(vl)
         n_vl[label] = t
     # rof
     for label in n_vl:
         if label not in l_vl or l_vl[label] != n_vl[label]:
-            pr = pr + f'volumes {label} {n_vl[label]}\n'
+            if auto_staves:
+                # When auto_staves, output volume using staff name
+                pr = pr + f'volumes {label} {n_vl[label]}\n'
+            else:
+                pr = pr + f'volumes {label} {n_vl[label]}\n'
             pv = True
         # fi
     # rof
@@ -4444,7 +4517,11 @@ def print_measure_staves_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l
     # rof
     for label in n_instrument:
         if label not in l_instrument or l_instrument[label] != n_instrument[label] or pv:
-            pr = pr + f'instrument {label} {n_instrument[label]}\n'
+            if auto_staves:
+                # When auto_staves, output instrument using staff name
+                pr = pr + f'instrument {label} {n_instrument[label]}\n'
+            else:
+                pr = pr + f'instrument {label} {n_instrument[label]}\n'
         # fi
     # rof
 
@@ -4454,7 +4531,11 @@ def print_measure_staves_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l
         if v0 in key_voice and m in key_voice[v0]:
             if label not in l_ky or l_ky[label] != key_voice[v0][m]:
                 l_ky[label] = key_voice[v0][m]
-                pr = pr + f'key     {label}  {l_ky[label]}\n'
+                if auto_staves:
+                    # When auto_staves, output key using staff name
+                    pr = pr + f'key     {label}  {l_ky[label]}\n'
+                else:
+                    pr = pr + f'key     {label}  {l_ky[label]}\n'
             # fi
         # fi
     # rof
@@ -4486,7 +4567,11 @@ def print_measure_staves_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l
         if v0 in pan and m in pan[v0]:
             val = str(pan[v0][m])
             if label not in l_pan or l_pan[label] != val:
-                pr = pr + f'pan     {label} {val}\n'
+                if auto_staves:
+                    # When auto_staves, output pan using staff name
+                    pr = pr + f'pan     {label} {val}\n'
+                else:
+                    pr = pr + f'pan     {label} {val}\n'
                 l_pan[label] = val
             # fi
         # fi
@@ -4498,7 +4583,11 @@ def print_measure_staves_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l
         if v0 in intensity and m in intensity[v0]:
             val = str(intensity[v0][m])
             if label not in l_intensity or l_intensity[label] != val:
-                pr = pr + f'intensity {label} {val}\n'
+                if auto_staves:
+                    # When auto_staves, output intensity using staff name
+                    pr = pr + f'intensity {label} {val}\n'
+                else:
+                    pr = pr + f'intensity {label} {val}\n'
                 l_intensity[label] = val
             # fi
         # fi
@@ -4510,7 +4599,11 @@ def print_measure_staves_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l
         if v0 in reverb and m in reverb[v0]:
             val = str(reverb[v0][m])
             if label not in l_reverb or l_reverb[label] != val:
-                pr = pr + f'reverb  {label} {val}\n'
+                if auto_staves:
+                    # When auto_staves, output reverb using staff name
+                    pr = pr + f'reverb  {label} {val}\n'
+                else:
+                    pr = pr + f'reverb  {label} {val}\n'
                 l_reverb[label] = val
             # fi
         # fi
@@ -4541,26 +4634,153 @@ def print_out_staves() -> None:
     global intensity
     global reverb
     global middle_c
+    global keep_voices_groups
+    global auto_staves
+    global vinstrument
 
     # Build ordered list of (staff_label, [voice_numbers]) pairs.
     # Voices not in any staff get their own "vN" pseudo-staff.
     voiced = set()
     staff_order = []            # list of (label, [voices])
-    for s in staff_name:
-        if staff_name[s] is not None:
-            vlist = staff_name[s]
-            staff_order.append((s, vlist))
+
+    # Helper: get instrument name for a voice (first non-default assignment).
+    def _voice_instrument(voice):
+        instr = 'Acoustic Grand Piano'.lower()  # default
+        if voice in vinstrument:
+            for mk in sorted(vinstrument[voice].keys()):
+                if vinstrument[voice][mk] and vinstrument[voice][mk] != 'Acoustic Grand Piano'.lower():
+                    instr = vinstrument[voice][mk]
+                    break
+                # fi
+            # rof
+        # fi
+        return instr
+    # fed
+
+    # Helper: sanitize instrument name for use as a staff label.
+    def _instrument_label(instr):
+        return instr.replace(' ', '_').replace('-', '_').lower()
+    # fed
+
+    # keep_voices_groups takes priority when specified.
+    if keep_voices_groups:
+        # Determine the label for each group from the instrument of
+        # the first voice in the group (auto_staves), or use "vN".
+        raw_labels = []
+        for group in keep_voices_groups:
+            if auto_staves:
+                instr = _voice_instrument(group[0])
+                raw_labels.append(_instrument_label(instr))
+            else:
+                raw_labels.append(f'v{group[0]}')
+            # fi
+        # rof
+
+        # Disambiguate duplicate labels by appending _1, _2, ...
+        label_count = {}
+        for lb in raw_labels:
+            label_count[lb] = label_count.get(lb, 0) + 1
+        # rof
+        label_seen = {}
+        final_labels = []
+        for lb in raw_labels:
+            if label_count[lb] > 1:
+                n = label_seen.get(lb, 0) + 1
+                label_seen[lb] = n
+                final_labels.append(f'{lb}_{n}')
+            else:
+                final_labels.append(lb)
+            # fi
+        # rof
+
+        for i, group in enumerate(keep_voices_groups):
+            staff_order.append((final_labels[i], group))
+            for v in group:
+                voiced.add(v)
+            # rof
+        # rof
+
+        # Add remaining voices not in any keep group.
+        if auto_staves:
+            # Group remaining voices by instrument.
+            rem_groups = {}
+            for voice in range(1, len(volume)+1):
+                if voice not in voiced:
+                    instr = _voice_instrument(voice)
+                    lbl = _instrument_label(instr)
+                    if lbl not in rem_groups:
+                        rem_groups[lbl] = []
+                    # fi
+                    rem_groups[lbl].append(voice)
+                # fi
+            # rof
+            for lbl, vlist in rem_groups.items():
+                # Disambiguate against already-used labels.
+                final_lbl = lbl
+                if lbl in label_count:
+                    n = label_seen.get(lbl, 0) + 1
+                    label_seen[lbl] = n
+                    final_lbl = f'{lbl}_{n}'
+                # fi
+                staff_order.append((final_lbl, vlist))
+                for v in vlist:
+                    voiced.add(v)
+                # rof
+            # rof
+        else:
+            for voice in range(1, len(volume)+1):
+                if voice not in voiced:
+                    staff_order.append((f'v{voice}', [voice]))
+                # fi
+            # rof
+        # fi
+    elif auto_staves:
+        # Group voices by instrument name using vinstrument
+        instrument_groups = {}
+        for voice in range(1, len(volume)+1):
+            instr = _voice_instrument(voice)
+            if instr not in instrument_groups:
+                instrument_groups[instr] = []
+            # fi
+            instrument_groups[instr].append(voice)
+        # rof
+        
+        # Convert instrument groups to staff_order
+        for instr, vlist in instrument_groups.items():
+            label = _instrument_label(instr)
+            staff_order.append((label, vlist))
             for v in vlist:
                 voiced.add(v)
             # rof
-        # fi
-    # rof
-    # Add any remaining voices not assigned to a staff.
-    for voice in range(1, len(volume)+1):
-        if voice not in voiced:
-            staff_order.append((f'v{voice}', [voice]))
-        # fi
-    # rof
+        # rof
+    else:
+        # Use existing staff_name logic
+        for s in staff_name:
+            if staff_name[s] is not None:
+                vlist = staff_name[s]
+                staff_order.append((s, vlist))
+                for v in vlist:
+                    voiced.add(v)
+                # rof
+            # fi
+        # rof
+        # Add any remaining voices not assigned to a staff.
+        for voice in range(1, len(volume)+1):
+            if voice not in voiced:
+                staff_order.append((f'v{voice}', [voice]))
+            # fi
+        # rof
+
+    # Output staff command definitions when auto_staves or keep_voices_groups
+    # is in effect (keep_voices_groups suppresses do_staff/do_staves parsing).
+    if auto_staves or keep_voices_groups:
+        for label, vlist in staff_order:
+            # Sort voice numbers
+            vlist_sorted = sorted(vlist)
+            voice_str = ','.join(map(str, vlist_sorted))
+            print_output(f'staff {label}: {voice_str}\n')
+        # rof
+    # fi
 
     l_meter = ''
     l_clef = {}
@@ -4688,8 +4908,9 @@ def print_out_staves() -> None:
                         j = working[voice]
                         if j < len(bufs[voice][m]):
                             n = bufs[voice][m][j]
-                            # Adjust octave +1 for staff format output (reverses the -1 done at input).
-                            if middle_c == (39 + 12):
+                            # Adjust octave +1 for horizontal/vertical/lilypond output (reverses the -1 done at input).
+                            # Staff format does NOT need this adjustment.
+                            if (args.horizontal or args.vertical or args.lilypond) and middle_c == (39 + 12):
                                 # Find octave digit, which may follow a vol(...) prefix.
                                 prefix = ''
                                 rest = n
@@ -4721,13 +4942,23 @@ def print_out_staves() -> None:
                 # rof
 
                 if group:
-                    # Filter out rest-only entries when mixed with real notes.
+                    # Filter out rests only when ALL entries are rests (keep just one).
+                    # When rests are mixed with real notes, keep them -- they carry
+                    # voice/duration information needed to reconstruct the staff.
                     real = [g for g in group if not g.startswith('r')]
-                    if real:
-                        show = real
+                    if not real:
+                        show = [group[0]]         # All rests -- keep one.
                     else:
-                        show = group              # All rests -- keep one.
-                        show = [show[0]]
+                        show = group              # Keep all, including rests.
+                    # fi
+                    # Strip legato suffix from multi-element chords at end of measure.
+                    # Voice positions in chords can shift across measure boundaries,
+                    # causing "legato into a rest" when recompiling.
+                    if len(show) > 1:
+                        all_done = all(working[v] >= len(bufs[v][m]) for v in active)
+                        if all_done:
+                            show = [g[:-1] if g.endswith('l') else g for g in show]
+                        # fi
                     # fi
                     if txt != '':
                         txt = txt + ' '
@@ -4754,6 +4985,13 @@ def print_out_staves() -> None:
 
             if txt != '':
                 print_line = print_line + f'{label}: {txt}\n'
+                # Update l_vl to track volume changes from cresc/dimin in notes.
+                # Without this, a subsequent volumes command that resets the volume
+                # back to l_vl's value would be skipped (seen as no change).
+                cresc_matches = re.findall(r'(?:cresc|dimin)\((\w+),', txt)
+                if cresc_matches:
+                    l_vl[label] = cresc_matches[-1]
+                # fi
             # fi
         # rof
 
@@ -6688,6 +6926,217 @@ change_name = {
 #--        'MIDI_port': 'echo MIDI_port',
 }
 
+# ----------------------------------------------------------------------------
+# Ensemble duplication: post-process array_of_lines to create duplicate MIDI
+# events for ensemble staves. Each copy gets a unique channel with slight pitch
+# bend and velocity variation for a realistic section sound.
+
+def apply_ensemble_duplication() -> None:
+    """Duplicate MIDI CSV events in array_of_lines for ensemble staves."""
+    global array_of_lines
+    global ensemble_map
+    global staff_name
+    global inst
+
+    if not ensemble_map:
+        return
+    # fi
+
+    # Build voice -> set of channels mapping from inst dictionary.
+    voice_channels = {}
+    for voice_num in inst:
+        for instr_name in inst[voice_num]:
+            _, chan = inst[voice_num][instr_name]
+            if voice_num not in voice_channels:
+                voice_channels[voice_num] = set()
+            # fi
+            voice_channels[voice_num].add(chan)
+        # rof
+    # rof
+
+    # Find the highest channel in use (excluding 9/drums).
+    max_chan = -1
+    for voice_num in voice_channels:
+        for ch in voice_channels[voice_num]:
+            if ch != 9 and ch > max_chan:
+                max_chan = ch
+            # fi
+        # rof
+    # rof
+
+    # Build ensemble_copies: original_channel -> [(copy_channel, pitch_bend_value), ...]
+    ensemble_copies = {}
+    next_chan = max_chan + 1
+    if next_chan == 9:
+        next_chan = 10
+    # fi
+    total_copies = 0
+    ens_rng = random.Random(7)       # Deterministic seed for reproducibility.
+
+    for sn, count in ensemble_map.items():
+        if sn not in staff_name or count <= 1:
+            continue
+        # fi
+        voices = staff_name[sn]
+        for voice_num in voices:
+            if voice_num not in voice_channels:
+                continue
+            # fi
+            for orig_chan in sorted(voice_channels[voice_num]):
+                if orig_chan == 9:
+                    continue                   # Don't duplicate drum channel.
+                # fi
+                copies = []
+                for i in range(1, count):      # count-1 additional copies.
+                    copy_chan = next_chan
+                    next_chan += 1
+                    if next_chan == 9:
+                        next_chan = 10          # Skip drum channel.
+                    # fi
+                    # Pitch variation: ±3 to ±8 cents, alternating +/-.
+                    cents = ens_rng.uniform(3.0, 8.0)
+                    if i % 2 == 0:
+                        cents = -cents
+                    # fi
+                    # Scale by copy number for spread: copy 1 = ±(3-8), copy 2 = ±(3-8), etc.
+                    # Each copy gets its own random offset for natural variation.
+                    pitch = round(8192.0 + cents * 8192.0 / 200.0)
+                    copies.append((copy_chan, pitch))
+                # rof
+                ensemble_copies[orig_chan] = copies
+                total_copies += len(copies)
+            # rof
+        # rof
+    # rof
+
+    if not ensemble_copies:
+        return
+    # fi
+
+    print_eoln(f"Ensemble: duplicating {len(ensemble_copies)} channels, {total_copies} copies total, channels up to {next_chan - 1}.")
+
+    # Update synth.midi-channels in the header to accommodate ensemble channels.
+    needed_channels = next_chan                           # next_chan is 1 past the last used.
+    # Round up to next multiple of 16.
+    needed_channels = ((needed_channels + 15) // 16) * 16
+    if needed_channels > 128:
+        for i, line in enumerate(array_of_lines):
+            if 'FS, set synth.midi-channels' in line:
+                array_of_lines[i] = line.replace('synth.midi-channels 128', f'synth.midi-channels {needed_channels}')
+                break
+            # fi
+        # rof
+    # fi
+
+    # Process array_of_lines: duplicate events for ensemble channels.
+    # Scale CC7 (intensity) by 1/sqrt(N) so N copies together match original level.
+    import math
+    ensemble_scale = {}                  # channel -> 1/sqrt(N) factor.
+    for orig_chan, copies in ensemble_copies.items():
+        N = len(copies) + 1             # original + copies = total players.
+        ensemble_scale[orig_chan] = 1.0 / math.sqrt(N)
+    # rof
+
+    new_lines = []
+    ens_vel_rng = random.Random(42)  # Separate seed for velocity jitter.
+    for line in array_of_lines:
+
+        # Parse: "voice, time, Command, rest..."
+        parts = line.split(', ', 3)
+        if len(parts) < 4:
+            new_lines.append(line)
+            continue
+        # fi
+        cmd = parts[2].strip()
+        rest = parts[3].strip()
+
+        if cmd not in ('Note_on_c', 'Note_off_c', 'Control_c', 'Pitch_bend_c', 'Program_c'):
+            new_lines.append(line)
+            continue
+        # fi
+        # rest starts with channel number: "chan, ..."
+        comma_pos = rest.find(',')
+        if comma_pos < 0:
+            new_lines.append(line)
+            continue
+        # fi
+        chan_str = rest[:comma_pos].strip()
+        remainder = rest[comma_pos+1:].strip()
+        try:
+            chan = int(chan_str)
+        except ValueError:
+            new_lines.append(line)
+            continue
+        # yrt
+        if chan not in ensemble_copies:
+            new_lines.append(line)
+            continue
+        # fi
+        # Skip duplicating Pitch_bend_c - ensemble copies have their own pitch
+        # bend set when Program_c is duplicated.
+        if cmd == 'Pitch_bend_c':
+            new_lines.append(line)
+            continue
+        # fi
+
+        scale = ensemble_scale[chan]
+
+        # For CC7 (intensity), scale the value for the original channel too.
+        if cmd == 'Control_c':
+            cc_parts = remainder.split(',', 1)
+            if len(cc_parts) >= 2:
+                try:
+                    cc_num = int(cc_parts[0].strip())
+                except ValueError:
+                    cc_num = -1
+                # yrt
+                if cc_num == 7:
+                    cc_val = int(cc_parts[1].strip())
+                    scaled_val = max(1, round(cc_val * scale))
+                    remainder = f'{cc_parts[0].strip()}, {scaled_val}'
+                    # Replace original line with scaled version.
+                    new_lines.append(f"{parts[0]}, {parts[1]}, {cmd}, {chan}, {remainder}")
+                else:
+                    new_lines.append(line)
+                # fi
+            else:
+                new_lines.append(line)
+            # fi
+        else:
+            new_lines.append(line)       # Original line (unmodified for non-CC7).
+        # fi
+
+        for copy_chan, pitch in ensemble_copies[chan]:
+            if cmd == 'Note_on_c':
+                # Apply velocity jitter: ±5.
+                rem_parts = remainder.rsplit(',', 1)
+                if len(rem_parts) == 2:
+                    try:
+                        vel = int(rem_parts[1].strip())
+                        vel = max(1, min(127, vel + ens_vel_rng.randint(-5, 5)))
+                        new_remainder = f'{rem_parts[0].strip()}, {vel}'
+                    except ValueError:
+                        new_remainder = remainder
+                    # yrt
+                else:
+                    new_remainder = remainder
+                # fi
+                new_lines.append(f"{parts[0]}, {parts[1]}, {cmd}, {copy_chan}, {new_remainder}")
+            elif cmd == 'Program_c':
+                # Duplicate the instrument assignment.
+                new_lines.append(f"{parts[0]}, {parts[1]}, {cmd}, {copy_chan}, {remainder}")
+                # Add pitch bend for this ensemble copy.
+                new_lines.append(f"{parts[0]}, {parts[1]}, Pitch_bend_c, {copy_chan}, {pitch}")
+            else:
+                # Note_off_c, Control_c (already scaled for CC7): duplicate.
+                new_lines.append(f"{parts[0]}, {parts[1]}, {cmd}, {copy_chan}, {remainder}")
+            # fi
+        # rof
+    # rof
+    array_of_lines = new_lines
+    return
+# End of apply_ensemble_duplication
+
 def print_out_fluidsynth() -> None:
     """Generate output in FluidSynth command format."""
     global array_of_lines
@@ -7534,9 +7983,9 @@ def pass2() -> None:
         pre_shift()
     # fi
 
-    if args.staves or args.lilypond:
-        print_debug_bufs('pass2 before print_header')
-    # fi
+#--     if args.staves or args.lilypond:
+#--         print_debug_bufs('pass2 before print_header')
+#--     # fi
 
     # Now print out the header (then the file).
     tm = []                                     # Put the midi notes/times, etc. here.
@@ -7576,6 +8025,7 @@ def pass2() -> None:
         print_output("0, 0, End_of_file")
     elif args.fluidsynth:
         print_output("quit")
+        apply_ensemble_duplication()
         print_out_fluidsynth()
     # else:     # ABC
     # fi
@@ -12979,6 +13429,12 @@ def do_pitchbend(t_args: str | None, original_line: str) -> None:
     global staff_name
     global autopitchbend
     global pitchbend
+    global auto_staves
+
+    # Skip pitchbend processing in auto-staves mode (automatic pitchbend)
+    if auto_staves:
+        return
+    # fi
 
     if t_args == '':
         autopitchbend = True
@@ -13031,6 +13487,48 @@ def do_pitchbend(t_args: str | None, original_line: str) -> None:
     # rof
     return
 # End of do_pitchbend
+
+# ----------------------------------------------------------------------------
+# Ensemble command: duplicate a staff's MIDI output to simulate multiple players.
+#   ensemble ViolinIV24 14      $$ 14 violins playing the Violin I part.
+#   ensemble VioloncellosV30 8  $$ 8 cellos playing the cello part.
+# The original voice(s) remain. N-1 additional copies are created at FluidSynth
+# output time, each with slight pitch bend variation (±3-8 cents) and velocity
+# jitter to simulate a real section. Requires FluidSynth -K for extra channels.
+
+def do_ensemble(t_args: str | None, original_line: str) -> None:
+    """Handle the 'ensemble' command: register a staff for multi-player duplication."""
+    global ensemble_map
+    global staff_name
+
+    if t_args is None or t_args.strip() == '':
+        print_error("ensemble command requires staff_name and player_count.", original_line)
+        return
+    # fi
+    parts = t_args.split()
+    if len(parts) < 2:
+        print_error("ensemble command requires staff_name and player_count.", original_line)
+        return
+    # fi
+    sn = parts[0]
+    if sn not in staff_name:
+        print_error(f"ensemble: staff '{sn}' not defined.", original_line)
+        return
+    # fi
+    cnt_str = parts[1]
+    f1, type_error = is_float(cnt_str, is_float_number, False)
+    if type_error is not None or f1 is None:
+        print_error(f"ensemble: player count '{cnt_str}' is not a number.", original_line)
+        return
+    # fi
+    count = round(f1)
+    if count < 1 or count > 200:
+        print_error(f"ensemble: player count {count} not in range 1 to 200.", original_line)
+        return
+    # fi
+    ensemble_map[sn] = count
+    return
+# End of do_ensemble
 
 # ----------------------------------------------------------------------------
 # For a voice or staff, all notes are sent through the process for handling.
@@ -13357,13 +13855,23 @@ def do_staff(t_args: str | None, original_line: str) -> None:
     global autopitchbend
     global pitchbend
     global in_chord
+    global keep_voices_groups
+
+    # Skip staff command processing when keep_voices_groups is specified
+    # keep_voices_groups will override staff definitions
+    if keep_voices_groups:
+        return
+    # fi
 
     if not staff_name and isinstance(last_voice_staff, int):
         print_error("staff command after notes in different format.", original_line)
         return
     # fi
     if middle_c is None:                                  # Default to 72 for 4c for IMS format input.
-        compute_middle_c(39 + 12)
+        # Staff format should use middle_c=39 (3c) to match vNN format, not 51 (4c)
+        # The historical middle_c=51 was for IMS staff format, but causes octave offset
+        # when converting from vNN format.
+        compute_middle_c(39)
     # fi
 
     if t_args is None or t_args == '':
@@ -13441,15 +13949,28 @@ def do_staff(t_args: str | None, original_line: str) -> None:
             initialize_set_voices(f1, original_line)     # If voices not set up yet, set them up.
             fill_voice_mlth(False, original_line)        # Need to make measure for other voices up to here "mlth".
             v.append(f1)
+#M4 ?? note_time = max(0, lthworkingmeasures + random.randint(-_humanize_max, _humanize_max))
             if autopitchbend:
-                l = len(v) % 20                         # Wrap at +10 and -10.
-                if l == 1:
+                if len(v) == 1:                          # First is perfectly on-pitch.
                     pitchbend[f1] = 8192
-                elif (l % 2) == 0:
-                    pitchbend[f1] = 8192 - (100 * (l // 2))
                 else:
-                    pitchbend[f1] = 8192 + (100 * (l // 2))
+                    pitchbend[f1] = 8192 + random.randint(-82, +82)    # 82 cents is slightly sharp/flat, but not out of tune.
                 # fi
+#                 if l == 1:
+#                     pitchbend[f1] = 8192                # First is perfectly on-pitch.
+#                 elif (l % 2) == 0:
+#                     pitchbend[f1] = 8192 - (100 * (l // 2))
+#                 else:
+#                     pitchbend[f1] = 8192 + (100 * (l // 2))
+#                 # fi
+#                 l = len(v) % 20                         # Wrap at +10 and -10.
+#                 if l == 1:
+#                     pitchbend[f1] = 8192                # First is perfectly on-pitch.
+#                 elif (l % 2) == 0:
+#                     pitchbend[f1] = 8192 - (100 * (l // 2))
+#                 else:
+#                     pitchbend[f1] = 8192 + (100 * (l // 2))
+#                 # fi
             # fi
         # rof
     # fi
@@ -13521,6 +14042,16 @@ def remove_lmp(l):
 def do_staves(original_line):
     """Handle the 'staves' command: define how staves are grouped in output."""
     global staves
+    global keep_voices_groups
+    global staff_name
+
+    # Skip %%staves processing when keep_voices_groups is specified
+    # keep_voices_groups will override the %%staves command
+    if keep_voices_groups:
+        # Clear staff_name to prevent it from interfering with keep_voices_groups
+        staff_name = {}
+        return
+    # fi
 
     line = original_line.strip()
     line = ' '.join(line.split())
@@ -14866,6 +15397,7 @@ commands = {
              'endloop'    : (do_endloop,     False),
              'endm'       : (do_endm,        False),
              'endmacro'   : (do_endm,        False),         # endm alternative
+             'ensemble'   : (do_ensemble,    False),
              'exit'       : (do_cstopnow,    True),          # cstop* alternative
              'fi'         : (do_endif,       False),
              'for'        : (do_loop,        False),         # do/for/loop are the same thing.
@@ -15517,20 +16049,39 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
     if (args.midi1csv or args.fluidsynth) and (xv != 0 or xnk != ''):       # So can print.
         jkl = str(o) + str(n) + a
         if sub_mid_c:
-            if jkl not in note_to_midi_value_39:
-                if do_errors:
-                    print_error(f"m:{measure_on} v{voiceon} note {jkl} for xpose is not in note_to_midi_value", original_line)
+            # For staves format with middle_c=51, use note_to_midi_value (not _39)
+            # to avoid octave offset. _39 is only for historical compatibility.
+            if args.staves and middle_c == (39 + 12):
+                if jkl not in note_to_midi_value:
+                    if do_errors:
+                        print_error(f"m:{measure_on} v{voiceon} note {jkl} for xpose is not in note_to_midi_value", original_line)
+                    # fi
+                    return '', None, normal_note
                 # fi
-                return '', None, normal_note
-            # fi
-            lkj = note_to_midi_value_39[jkl] + xv
-            if lkj not in midi_value_to_note_flat_39 and lkj not in midi_value_to_note_sharp_39:
-                if do_errors:
-                    print_error(f"note jkl='{jkl}' lkj='{lkj}' for m:{measure_on} voiceon {get_staff_from_voice(voiceon)} not in midi_value_to_note_flat_39 array", original_line)
+                lkj = note_to_midi_value[jkl] + xv
+                if lkj not in midi_value_to_note_flat and lkj not in midi_value_to_note_sharp:
+                    if do_errors:
+                        print_error(f"note jkl='{jkl}' lkj='{lkj}' for m:{measure_on} voiceon {get_staff_from_voice(voiceon)} not in midi_value_to_note_flat array", original_line)
+                    # fi
+                    return '', None, normal_note
                 # fi
-                return '', None, normal_note
+                lkj = midi_value_to_note_flat[lkj]
+            else:
+                if jkl not in note_to_midi_value_39:
+                    if do_errors:
+                        print_error(f"m:{measure_on} v{voiceon} note {jkl} for xpose is not in note_to_midi_value", original_line)
+                    # fi
+                    return '', None, normal_note
+                # fi
+                lkj = note_to_midi_value_39[jkl] + xv
+                if lkj not in midi_value_to_note_flat_39 and lkj not in midi_value_to_note_sharp_39:
+                    if do_errors:
+                        print_error(f"note jkl='{jkl}' lkj='{lkj}' for m:{measure_on} voiceon {get_staff_from_voice(voiceon)} not in midi_value_to_note_flat_39 array", original_line)
+                    # fi
+                    return '', None, normal_note
+                # fi
+                lkj = midi_value_to_note_flat_39[lkj]
             # fi
-            lkj = midi_value_to_note_flat_39[lkj]
         else:
             if jkl not in note_to_midi_value:
                 if do_errors:
@@ -15649,7 +16200,7 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
     # fi
     # .............................................................................
     # Convert to right format.
-    if args.horizontal or args.vertical or args.staves or args.lilypond:
+    if args.horizontal or args.vertical or args.lilypond:
         if middle_c == (39 + 12) and sub_mid_c:
             o = int(o)
             if o < 0:
@@ -15661,6 +16212,15 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
         # else:
         # Complicated, need to use KEY and acc_m and middle_c subtraction ... COMPLICATED!
         # fi
+        n = n.lower()
+        thenote = f'{o}' + n + a
+        if leading_space:
+            thenote = ' ' + thenote
+        # fi
+    elif args.staves:
+        # Staff format uses middle_c = 51 (4c) for historical reasons,
+        # but should be interpreted the same as vNN format (39 = 3c).
+        # No octave adjustment needed.
         n = n.lower()
         thenote = f'{o}' + n + a
         if leading_space:
@@ -16316,7 +16876,7 @@ def find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, original_lin
                     print_error(f"find_vol_cresc_pan_intensity - cannot have two arguments and a trailing '{trailing[0]}'", original_line)
                     return temp1, prenote, postnote
                 # fi
-                if not decode_it and (args.midi1csv or args.fluidsynth):
+                if not decode_it and (args.midi1csv or args.fluidsynth) and not args.staves:
                     which_vol_now = int(rs.volume[voiceon])
                     if crd is None:
                         pass
@@ -16332,7 +16892,9 @@ def find_vol_cresc_pan_intensity(temp1, voiceon, prenote, postnote, original_lin
                 # fi
                 c_v = new_first                     # cresc volume
                 if args.vertical or args.horizontal or args.staves or args.lilypond:
-                    prenote = prenote + whichone + '(' + str(new_first) + ',' + str(new_second) + ')'
+                    # Use volume name instead of numeric value for --staves output
+                    vol_name = vol_to_name(new_first)
+                    prenote = prenote + whichone + '(' + vol_name + ',' + str(new_second) + ')'
                     c_t = new_second + 0.0          # cresc time
                 elif args.midi1csv or args.fluidsynth:
                     prenote = prenote + whichone + '(' + str(new_first) + ',' + str(new_second) + ')'
@@ -18833,14 +19395,10 @@ def do_notes_for_staff(token, delimiter, next_tokens, original_line):
         for v in staff_name[st]:
             set_all_staff_arr(v, t_2_set, time, 'time', 'do_notes_for_staff ' + original_line)
             set_all_staff_arr(v, o_2_set, oct, 'oct', 'do_notes_for_staff ' + original_line)
-            for n in acc_m[v]:
-                a_2_set = get_staff_arr_double(voiceon, n, acc_m, None, original_line)
-                set_staff_arr_double(v, a_2_set, n, acc_m, None, original_line)
-            # rof
-            for n in acc_m_xpose[v]:
-                ax_2_set = get_staff_arr_double(voiceon, n, acc_m_xpose, None, original_line)
-                set_staff_arr_double(v, ax_2_set, n, acc_m_xpose, None, original_line)
-            # rof
+            # Note: acc_m/acc_m_xpose are NOT propagated across voices.
+            # Each voice maintains its own accidental state; cross-voice
+            # propagation caused false "previous note was 'n'" warnings
+            # when recompiling --auto-staves output.
         # rof
         staff_chord[st] = staff_chord[st] + 1
     # rof
@@ -19490,6 +20048,7 @@ def readthefile() -> None:
 # Main program follows.
 def main() -> None:
     """Program entry point. Initialize global state, open files, and run the two-pass processing."""
+    import sys
     global header
     global meter
     global meter_value
@@ -19505,6 +20064,9 @@ def main() -> None:
     global key_default
     global key_voice
     global which_file_in
+    global auto_staves
+    global converted_lines
+    global converted_line_index
 
     measure_meter_value = {'' : 1}          # Computed value for measure.
     measure_meter_note = {'' : 4}           # The notes for the beat. (1/4)

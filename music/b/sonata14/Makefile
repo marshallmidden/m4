@@ -54,7 +54,7 @@ ABCM2PS_ARGS = -M -b 1 $< -i -N 2 -j 1
 %_2.mid:        %_2.csv
 	csvmidi $< $@ || (rm -f $@ ; exit 1)
 %.wav:  %.fs Makefile
-	${FLUIDSYNTH} -q -F $@ ${SOUNDFONT} < $< \
+	${FLUIDSYNTH} -q -K 256 -F $@ ${SOUNDFONT} < $< > /dev/null \
 		|| (rm -f $@ ; exit 1)
 %.abc:  %.E Makefile
 	${MUSICOMP2ABC} ${MC_ARGS} --abc $< $@ || (rm -f $@ ; exit 1)

@@ -2855,6 +2855,8 @@ global autopitchbend                # For staff mode, voices in staff are auto-p
 autopitchbend = False
 global pitchbend                    # Pitch_bend levels for voices.
 pitchbend = [ ]                     # Pitch bend pitchbend level by voice.
+global ensemble_map                 # For ensemble command: staff_name -> count of players.
+ensemble_map = { }                  # e.g. {'ViolinIV24': 14} means 14 violins playing that staff.
 global pan                          # pan levels at measures.
 pan = { }                           # Pan (balance 0=left, 126=right, 64=center) for voice, measure
 pan[1] = { }
@@ -6688,6 +6690,217 @@ change_name = {
 #--        'MIDI_port': 'echo MIDI_port',
 }
 
+# ----------------------------------------------------------------------------
+# Ensemble duplication: post-process array_of_lines to create duplicate MIDI
+# events for ensemble staves. Each copy gets a unique channel with slight pitch
+# bend and velocity variation for a realistic section sound.
+
+def apply_ensemble_duplication() -> None:
+    """Duplicate MIDI CSV events in array_of_lines for ensemble staves."""
+    global array_of_lines
+    global ensemble_map
+    global staff_name
+    global inst
+
+    if not ensemble_map:
+        return
+    # fi
+
+    # Build voice -> set of channels mapping from inst dictionary.
+    voice_channels = {}
+    for voice_num in inst:
+        for instr_name in inst[voice_num]:
+            _, chan = inst[voice_num][instr_name]
+            if voice_num not in voice_channels:
+                voice_channels[voice_num] = set()
+            # fi
+            voice_channels[voice_num].add(chan)
+        # rof
+    # rof
+
+    # Find the highest channel in use (excluding 9/drums).
+    max_chan = -1
+    for voice_num in voice_channels:
+        for ch in voice_channels[voice_num]:
+            if ch != 9 and ch > max_chan:
+                max_chan = ch
+            # fi
+        # rof
+    # rof
+
+    # Build ensemble_copies: original_channel -> [(copy_channel, pitch_bend_value), ...]
+    ensemble_copies = {}
+    next_chan = max_chan + 1
+    if next_chan == 9:
+        next_chan = 10
+    # fi
+    total_copies = 0
+    ens_rng = random.Random(7)       # Deterministic seed for reproducibility.
+
+    for sn, count in ensemble_map.items():
+        if sn not in staff_name or count <= 1:
+            continue
+        # fi
+        voices = staff_name[sn]
+        for voice_num in voices:
+            if voice_num not in voice_channels:
+                continue
+            # fi
+            for orig_chan in sorted(voice_channels[voice_num]):
+                if orig_chan == 9:
+                    continue                   # Don't duplicate drum channel.
+                # fi
+                copies = []
+                for i in range(1, count):      # count-1 additional copies.
+                    copy_chan = next_chan
+                    next_chan += 1
+                    if next_chan == 9:
+                        next_chan = 10          # Skip drum channel.
+                    # fi
+                    # Pitch variation: ±3 to ±8 cents, alternating +/-.
+                    cents = ens_rng.uniform(3.0, 8.0)
+                    if i % 2 == 0:
+                        cents = -cents
+                    # fi
+                    # Scale by copy number for spread: copy 1 = ±(3-8), copy 2 = ±(3-8), etc.
+                    # Each copy gets its own random offset for natural variation.
+                    pitch = round(8192.0 + cents * 8192.0 / 200.0)
+                    copies.append((copy_chan, pitch))
+                # rof
+                ensemble_copies[orig_chan] = copies
+                total_copies += len(copies)
+            # rof
+        # rof
+    # rof
+
+    if not ensemble_copies:
+        return
+    # fi
+
+    print_eoln(f"Ensemble: duplicating {len(ensemble_copies)} channels, {total_copies} copies total, channels up to {next_chan - 1}.")
+
+    # Update synth.midi-channels in the header to accommodate ensemble channels.
+    needed_channels = next_chan                           # next_chan is 1 past the last used.
+    # Round up to next multiple of 16.
+    needed_channels = ((needed_channels + 15) // 16) * 16
+    if needed_channels > 128:
+        for i, line in enumerate(array_of_lines):
+            if 'FS, set synth.midi-channels' in line:
+                array_of_lines[i] = line.replace('synth.midi-channels 128', f'synth.midi-channels {needed_channels}')
+                break
+            # fi
+        # rof
+    # fi
+
+    # Process array_of_lines: duplicate events for ensemble channels.
+    # Scale CC7 (intensity) by 1/sqrt(N) so N copies together match original level.
+    import math
+    ensemble_scale = {}                  # channel -> 1/sqrt(N) factor.
+    for orig_chan, copies in ensemble_copies.items():
+        N = len(copies) + 1             # original + copies = total players.
+        ensemble_scale[orig_chan] = 1.0 / math.sqrt(N)
+    # rof
+
+    new_lines = []
+    ens_vel_rng = random.Random(42)  # Separate seed for velocity jitter.
+    for line in array_of_lines:
+
+        # Parse: "voice, time, Command, rest..."
+        parts = line.split(', ', 3)
+        if len(parts) < 4:
+            new_lines.append(line)
+            continue
+        # fi
+        cmd = parts[2].strip()
+        rest = parts[3].strip()
+
+        if cmd not in ('Note_on_c', 'Note_off_c', 'Control_c', 'Pitch_bend_c', 'Program_c'):
+            new_lines.append(line)
+            continue
+        # fi
+        # rest starts with channel number: "chan, ..."
+        comma_pos = rest.find(',')
+        if comma_pos < 0:
+            new_lines.append(line)
+            continue
+        # fi
+        chan_str = rest[:comma_pos].strip()
+        remainder = rest[comma_pos+1:].strip()
+        try:
+            chan = int(chan_str)
+        except ValueError:
+            new_lines.append(line)
+            continue
+        # yrt
+        if chan not in ensemble_copies:
+            new_lines.append(line)
+            continue
+        # fi
+        # Skip duplicating Pitch_bend_c - ensemble copies have their own pitch
+        # bend set when Program_c is duplicated.
+        if cmd == 'Pitch_bend_c':
+            new_lines.append(line)
+            continue
+        # fi
+
+        scale = ensemble_scale[chan]
+
+        # For CC7 (intensity), scale the value for the original channel too.
+        if cmd == 'Control_c':
+            cc_parts = remainder.split(',', 1)
+            if len(cc_parts) >= 2:
+                try:
+                    cc_num = int(cc_parts[0].strip())
+                except ValueError:
+                    cc_num = -1
+                # yrt
+                if cc_num == 7:
+                    cc_val = int(cc_parts[1].strip())
+                    scaled_val = max(1, round(cc_val * scale))
+                    remainder = f'{cc_parts[0].strip()}, {scaled_val}'
+                    # Replace original line with scaled version.
+                    new_lines.append(f"{parts[0]}, {parts[1]}, {cmd}, {chan}, {remainder}")
+                else:
+                    new_lines.append(line)
+                # fi
+            else:
+                new_lines.append(line)
+            # fi
+        else:
+            new_lines.append(line)       # Original line (unmodified for non-CC7).
+        # fi
+
+        for copy_chan, pitch in ensemble_copies[chan]:
+            if cmd == 'Note_on_c':
+                # Apply velocity jitter: ±5.
+                rem_parts = remainder.rsplit(',', 1)
+                if len(rem_parts) == 2:
+                    try:
+                        vel = int(rem_parts[1].strip())
+                        vel = max(1, min(127, vel + ens_vel_rng.randint(-5, 5)))
+                        new_remainder = f'{rem_parts[0].strip()}, {vel}'
+                    except ValueError:
+                        new_remainder = remainder
+                    # yrt
+                else:
+                    new_remainder = remainder
+                # fi
+                new_lines.append(f"{parts[0]}, {parts[1]}, {cmd}, {copy_chan}, {new_remainder}")
+            elif cmd == 'Program_c':
+                # Duplicate the instrument assignment.
+                new_lines.append(f"{parts[0]}, {parts[1]}, {cmd}, {copy_chan}, {remainder}")
+                # Add pitch bend for this ensemble copy.
+                new_lines.append(f"{parts[0]}, {parts[1]}, Pitch_bend_c, {copy_chan}, {pitch}")
+            else:
+                # Note_off_c, Control_c (already scaled for CC7): duplicate.
+                new_lines.append(f"{parts[0]}, {parts[1]}, {cmd}, {copy_chan}, {remainder}")
+            # fi
+        # rof
+    # rof
+    array_of_lines = new_lines
+    return
+# End of apply_ensemble_duplication
+
 def print_out_fluidsynth() -> None:
     """Generate output in FluidSynth command format."""
     global array_of_lines
@@ -7576,6 +7789,7 @@ def pass2() -> None:
         print_output("0, 0, End_of_file")
     elif args.fluidsynth:
         print_output("quit")
+        apply_ensemble_duplication()
         print_out_fluidsynth()
     # else:     # ABC
     # fi
@@ -13033,6 +13247,48 @@ def do_pitchbend(t_args: str | None, original_line: str) -> None:
 # End of do_pitchbend
 
 # ----------------------------------------------------------------------------
+# Ensemble command: duplicate a staff's MIDI output to simulate multiple players.
+#   ensemble ViolinIV24 14      $$ 14 violins playing the Violin I part.
+#   ensemble VioloncellosV30 8  $$ 8 cellos playing the cello part.
+# The original voice(s) remain. N-1 additional copies are created at FluidSynth
+# output time, each with slight pitch bend variation (±3-8 cents) and velocity
+# jitter to simulate a real section. Requires FluidSynth -K for extra channels.
+
+def do_ensemble(t_args: str | None, original_line: str) -> None:
+    """Handle the 'ensemble' command: register a staff for multi-player duplication."""
+    global ensemble_map
+    global staff_name
+
+    if t_args is None or t_args.strip() == '':
+        print_error("ensemble command requires staff_name and player_count.", original_line)
+        return
+    # fi
+    parts = t_args.split()
+    if len(parts) < 2:
+        print_error("ensemble command requires staff_name and player_count.", original_line)
+        return
+    # fi
+    sn = parts[0]
+    if sn not in staff_name:
+        print_error(f"ensemble: staff '{sn}' not defined.", original_line)
+        return
+    # fi
+    cnt_str = parts[1]
+    f1, type_error = is_float(cnt_str, is_float_number, False)
+    if type_error is not None or f1 is None:
+        print_error(f"ensemble: player count '{cnt_str}' is not a number.", original_line)
+        return
+    # fi
+    count = round(f1)
+    if count < 1 or count > 200:
+        print_error(f"ensemble: player count {count} not in range 1 to 200.", original_line)
+        return
+    # fi
+    ensemble_map[sn] = count
+    return
+# End of do_ensemble
+
+# ----------------------------------------------------------------------------
 # For a voice or staff, all notes are sent through the process for handling.
 #   process modify,STRING
 #   .       vars    secs,dur,num
@@ -13441,15 +13697,28 @@ def do_staff(t_args: str | None, original_line: str) -> None:
             initialize_set_voices(f1, original_line)     # If voices not set up yet, set them up.
             fill_voice_mlth(False, original_line)        # Need to make measure for other voices up to here "mlth".
             v.append(f1)
+#M4 ?? note_time = max(0, lthworkingmeasures + random.randint(-_humanize_max, _humanize_max))
             if autopitchbend:
-                l = len(v) % 20                         # Wrap at +10 and -10.
-                if l == 1:
+                if len(v) == 1:                          # First is perfectly on-pitch.
                     pitchbend[f1] = 8192
-                elif (l % 2) == 0:
-                    pitchbend[f1] = 8192 - (100 * (l // 2))
                 else:
-                    pitchbend[f1] = 8192 + (100 * (l // 2))
+                    pitchbend[f1] = 8192 + random.randint(-82, +82)    # 82 cents is slightly sharp/flat, but not out of tune.
                 # fi
+#                 if l == 1:
+#                     pitchbend[f1] = 8192                # First is perfectly on-pitch.
+#                 elif (l % 2) == 0:
+#                     pitchbend[f1] = 8192 - (100 * (l // 2))
+#                 else:
+#                     pitchbend[f1] = 8192 + (100 * (l // 2))
+#                 # fi
+#                 l = len(v) % 20                         # Wrap at +10 and -10.
+#                 if l == 1:
+#                     pitchbend[f1] = 8192                # First is perfectly on-pitch.
+#                 elif (l % 2) == 0:
+#                     pitchbend[f1] = 8192 - (100 * (l // 2))
+#                 else:
+#                     pitchbend[f1] = 8192 + (100 * (l // 2))
+#                 # fi
             # fi
         # rof
     # fi
@@ -14866,6 +15135,7 @@ commands = {
              'endloop'    : (do_endloop,     False),
              'endm'       : (do_endm,        False),
              'endmacro'   : (do_endm,        False),         # endm alternative
+             'ensemble'   : (do_ensemble,    False),
              'exit'       : (do_cstopnow,    True),          # cstop* alternative
              'fi'         : (do_endif,       False),
              'for'        : (do_loop,        False),         # do/for/loop are the same thing.
