@@ -877,6 +877,26 @@ _RE_FLAT_BB = re.compile(r'^([a-g])bb')
 _RE_FLAT_B = re.compile(r'^([a-g])b')
 _RE_VPI = re.compile(r'^(volume|vol|v|pan|p|intensity|i|cresc|dimin)[ \t]*(.*)')
 _RE_VPI_SEARCH = re.compile(r'^(volume|vol|v|pan|p|intensity|i|cresc|dimin).*$')
+_RE_VPI_TOKEN = re.compile(r'^(?:volume|vol|v|pan|p|intensity|i|cresc|dimin)\s*\([^)]*\)\s*')
+
+
+def _split_vpi_prefix(n: str):
+    """Return (leading volume/cresc/dimin prefix, note body) for a buffered note.
+
+    The buffered note text can carry a chain of volume-prefixed commands (e.g.
+    'vol(60)cresc(ff,0.875)3c8l').  Strip that chain off so the merge can re-
+    emit a single aligned prefix per chord instead of one per voice."""
+    rest = n.lstrip()
+    prefix = ''
+    while True:
+        m = _RE_VPI_TOKEN.match(rest)
+        if not m:
+            break
+        # fi
+        prefix = prefix + m.group(0)
+        rest = rest[m.end():]
+    # elihw
+    return prefix, rest
 _RE_SINGLE_QUOTE = re.compile(r"^'[^']*'")
 _RE_DOUBLE_QUOTE = re.compile(r'^"[^"]*"')
 _RE_EQUALS_AFTER = re.compile(r'=.*')
@@ -4484,7 +4504,18 @@ def print_measure_staves_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l
     for label, vlist in staff_order:
         v0 = vlist[0]
         new_voice_initialize(v0, m)
-        vl = get_volume_level(m, v0)
+        # Entering volume for this measure: the per-note volume carried by the
+        # first note of the measure (== the running volume before any cresc/dimin
+        # ramps start).  volume[voice][m] itself records the LAST volume event's
+        # ramp-start value (e.g. the mid-ramp peak of a cresc-then-dimin), which
+        # would emit a spurious 'volumes' line that sets the staff ABOVE where it
+        # actually enters -- and then the inline cresc/dimin errors out with
+        # "already at" that volume on recompile.
+        if v0 in ba.volume and m in ba.volume[v0] and ba.volume[v0][m]:
+            vl = ba.volume[v0][m][0]
+        else:
+            vl = get_volume_level(m, v0)
+        # fi
         t = vol_to_name(vl)
         n_vl[label] = t
     # rof
@@ -4637,6 +4668,7 @@ def print_out_staves() -> None:
     global keep_voices_groups
     global auto_staves
     global vinstrument
+    global key_voice
 
     # Build ordered list of (staff_label, [voice_numbers]) pairs.
     # Voices not in any staff get their own "vN" pseudo-staff.
@@ -4780,6 +4812,70 @@ def print_out_staves() -> None:
             voice_str = ','.join(map(str, vlist_sorted))
             print_output(f'staff {label}: {voice_str}\n')
         # rof
+        # Emit each staff's initial key signature (inherited from its first
+        # voice).  Without this, staffs in a non-C-major piece default to 'c'
+        # and every note that relied on the key signature's accidentals comes
+        # out a semitone flat when the converted file is recompiled.
+        if auto_staves:
+            for label, vlist in staff_order:
+                v0 = vlist[0]
+                if v0 in key_voice and '' in key_voice[v0] and key_voice[v0][''] != key_default:
+                    print_output(f'key     {label}  {key_voice[v0][""]}\n')
+                # fi
+            # rof
+            # Emit xpose commands for voices with non-zero transposition.
+            # Group voices by (xpose_value, xpose_new_key) so each unique
+            # transposition gets one command.  Written pitches are preserved
+            # in the note buffers; the xpose command ensures recompilation
+            # applies the transposition correctly.
+            xpose_groups = {}
+            for voice in range(1, len(volume)+1):
+                xv_val = xpose.get(voice, 0)
+                xnk_val = xpose_new_key.get(voice, '')
+                if xv_val != 0 or xnk_val != '':
+                    # Normalize xnk_val to a string key name.
+                    if isinstance(xnk_val, int):
+                        xnk_str = key_sig_int.get(xnk_val, '')
+                    elif xnk_val is None:
+                        xnk_str = ''
+                    else:
+                        xnk_str = str(xnk_val)
+                    # fi
+                    grp_key = (xv_val, xnk_str)
+                    if grp_key not in xpose_groups:
+                        xpose_groups[grp_key] = []
+                    # fi
+                    xpose_groups[grp_key].append(voice)
+                # fi
+            # rof
+            for (xv_val, xnk_str), voices in xpose_groups.items():
+                voice_str = ','.join(map(str, sorted(voices)))
+                if xnk_str:
+                    print_output(f'xpose  {voice_str}  {xv_val}  {xnk_str}\n')
+                else:
+                    print_output(f'xpose  {voice_str}  {xv_val}\n')
+                # fi
+            # rof
+            # Emit each staff's initial volume level.  The original piece sets a
+            # baseline (e.g. '=volumes fluteA..contrabassA p') before measure 1;
+            # without an equivalent 'volumes' line here, the recompiled file
+            # starts every staff at the default volume and later cresc/dimin
+            # commands that drop below that default (e.g. 'cresc(f,1.0)' from 100
+            # to 90) error out as "going down or already at" the starting volume.
+            for label, vlist in staff_order:
+                v0 = vlist[0]
+                new_voice_initialize(v0, '')
+                vl = get_volume_level('', v0)
+                t = str(vl)
+                for j in vlprint:
+                    if t == str(j):
+                        t = vlprint[j]
+                        break
+                    # fi
+                # rof
+                print_output(f'volumes {label} {t}\n')
+            # rof
+        # fi
     # fi
 
     l_meter = ''
@@ -4903,6 +4999,8 @@ def print_out_staves() -> None:
             while now < ml:
                 # Collect all voices that have a note starting at 'now'.
                 group = []
+                group_rests = []            # (is_rest, length, note) for collapse decision.
+                group_vpi = []              # leading vol/cresc/dimin prefix per member.
                 for voice in active:
                     if workingtime[voice] <= now:
                         j = working[voice]
@@ -4933,13 +5031,31 @@ def print_out_staves() -> None:
                                     lth = '(' + str(l) + ')'
                                 # fi
                             # fi
-                            note_txt = n + lth + sf.replace('c', '')
+                            vpi_pre, n_body = _split_vpi_prefix(n)
+                            note_txt = n_body + lth + sf.replace('c', '')
                             group.append(note_txt)
+                            group_vpi.append(vpi_pre)
+                            group_rests.append((isinstance(n_body, str) and n_body.startswith('r'), l, note_txt))
                             workingtime[voice] = workingtime[voice] + l
                             working[voice] = working[voice] + 1
                         # fi
                     # fi
                 # rof
+                # Dedup volume-change prefixes across the voices in this chord.
+                # The staff recompile tracks ONE volume state for the whole staff,
+                # so emitting the same cresc/dimin once per voice makes the 2nd+
+                # see "already at" the target volume -> error.  Like ties, these
+                # must be aligned for the staff: emit only the first occurrence.
+                first_vpi = -1
+                for k in range(len(group)):
+                    if group_vpi[k] != '':
+                        first_vpi = k
+                        break
+                    # fi
+                # rof
+                if first_vpi >= 0:
+                    group[first_vpi] = group_vpi[first_vpi] + group[first_vpi]
+                # fi
 
                 if group:
                     # Filter out rests only when ALL entries are rests (keep just one).
@@ -4947,7 +5063,18 @@ def print_out_staves() -> None:
                     # voice/duration information needed to reconstruct the staff.
                     real = [g for g in group if not g.startswith('r')]
                     if not real:
-                        show = [group[0]]         # All rests -- keep one.
+                        # All rests: only safe to collapse when every rest has the
+                        # same length. Unequal rests (e.g. [r2, r8] = one voice half-
+                        # resting while another plays an 8th rest then notes) must
+                        # stay as chords, else recompiling treats them as sequential
+                        # on one voice, overfills the measure, and inserts pad rests
+                        # that clear the tie/last-note state before the next measure.
+                        rlths = set(l for (isr, l, nt) in group_rests if isr)
+                        if len(rlths) <= 1:
+                            show = [group[0]]         # All rests -- keep one.
+                        else:
+                            show = group              # Unequal rests -- keep full chord.
+                        # fi
                     else:
                         show = group              # Keep all, including rests.
                     # fi
@@ -4985,12 +5112,27 @@ def print_out_staves() -> None:
 
             if txt != '':
                 print_line = print_line + f'{label}: {txt}\n'
-                # Update l_vl to track volume changes from cresc/dimin in notes.
-                # Without this, a subsequent volumes command that resets the volume
-                # back to l_vl's value would be skipped (seen as no change).
-                cresc_matches = re.findall(r'(?:cresc|dimin)\((\w+),', txt)
-                if cresc_matches:
-                    l_vl[label] = cresc_matches[-1]
+                # Update l_vl to track the volume the recompiled file will end this
+                # measure with, using the LAST volume-touching prefix in the line
+                # (vol/cresc/dimin).  For a ramp we take its target; for a
+                # mid-measure vol() we take that level, which the old cresc/dimin
+                # only tracking missed -- leaving l_vl stale so a needed 'volumes'
+                # reset in the next measure was skipped and the staff kept a
+                # drifted level, escalating into "already at X" recompile errors
+                # (Beethoven 6 m143, b2m1 m4/m12/m23, v1-1 m23).
+                last_pfx = None
+                for _pfx in re.finditer(r'(?:cresc|dimin)\((\w+),|vol\((\w+)\)', txt):
+                    if _pfx.group(1) is not None:
+                        last_pfx = _pfx.group(1)
+                    else:
+                        last_pfx = _pfx.group(2)
+                    # fi
+                # rof
+                if last_pfx is not None:
+                    if last_pfx.isdigit():
+                        last_pfx = vol_to_name(int(last_pfx))
+                    # fi
+                    l_vl[label] = last_pfx
                 # fi
             # fi
         # rof
@@ -14672,7 +14814,14 @@ def do_xpose(t_args: str | None, original_line: str) -> None:
         if key_default is None or key_default == 'atonal':
             kprint_lc = key_sig_int[0]          # Key name extracted.
         else:
-            kprint_lc = key_sig_int[key_default]    # Key name extracted.
+            kd = key_default
+            if not isinstance(kd, int):
+                # key_default may be a key-name string (e.g. 'C', 'c', 'd')
+                # rather than an integer; convert to the integer form used by
+                # key_sig_int so the lookup below does not raise KeyError.
+                kd = key_sig.get(str(kd).lower(), 0)
+            # fi
+            kprint_lc = key_sig_int[kd]    # Key name extracted.
     # fi
     for w in wargs:
         f1, type_error = is_float(w, is_float_number, False)
@@ -16105,7 +16254,7 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
         else:
             A = a = ''
         # fi
-    elif (args.horizontal or args.vertical or args.staves) and (xv != 0 or xnk != ''):
+    elif (args.horizontal or args.vertical or args.staves) and (xv != 0 or xnk != '') and not auto_staves:
         jkl = str(o) + str(n) + a
         if jkl not in note_to_midi_value:
             if do_errors:
@@ -16167,7 +16316,7 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
 
         # Here with playing:o/n/a set for note after midi up/down semi-tone change.
         playing_on = str(playing_o) + playing_n
-        # See if this note in measure already has +/-/n.
+        # See if this note in measure already has +/-/n+.
         xposed_key_acc_note = get_staff_arr_double(voiceon, playing_on, acc_m_xpose, None, original_line)
         if xposed_key_acc_note != '':               # This note already has sharp/flat/nature
             if playing_a == '':                     # Set to n.
@@ -16195,6 +16344,11 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
             set_staff_arr_double(voiceon, xposed_key_acc_note, playing_on, acc_m_xpose, None, original_line)
         # fi
         A = a = xposed_key_acc_note
+    elif auto_staves and (xv != 0 or xnk != ''):
+        # auto_staves: preserve written pitches (do not bake transposition into
+        # output notes).  The xpose command is emitted in the output header so
+        # that recompilation applies the transposition correctly.
+        pass
     else:             # ABC format - do nothing.
         pass
     # fi
