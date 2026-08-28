@@ -225,3 +225,41 @@ Probes (imscomp-PROBE/VOLDUMP on b2m2.E, dump before print_out_staves):
 - goto/repeat reordering in the merge time-walk (issue #3) still potential.
 - Regenerate remaining old pieces (b/02 b2m2, t/e e.gcs) and v1-2 m141; re-run
   note-faithful compare for each.
+## 08-28 end-of-day: EV2/EV4 entry-model landed -- b2m2 24->0, e.gcs 24->0
+The 08-28-evening conclusion ("needs a voice->note-slot map in the merge")
+was implemented as a merge-loop RECORDER + pre-pass (all inside imscomp):
+- `first_note_entry[m][label]`: during the pre-pass (before the merge loop),
+  for each (measure, voice) scan the voice's buf slot-by-slot and keep the
+  FIRST volume-relevant element's stored level (first non-rest note, OR first
+  rest carrying vol/cresc/dimin -- rest-led lines like `cresc(p,0.375)r16`
+  set the entry from the ramp-start level).  Per-label entry = max over the
+  staff's voices.  Header n_vl[..] is overridden by this (falls back to old
+  v0 logic when a measure has no volume-relevant element at all).
+- BUG found mid-way: the pre-pass anchor matched in BOTH print_out_v_or_h AND
+  print_out_staves (Python str.replace replaces all occurrences) -> insertions
+  referencing `staff_order` in print_out_v_or_h made every --vert/--hori run
+  NameError.  Removed the stray copy + restored `bar_print = bars['']`.
+  Lesson: never bulk-patch a shared exact-string anchor; verify with a grep
+  count of the anchor first.
+- EV4 refinement (fixes viola/cello m280 in t/e): a PLAIN note that precedes a
+  later cresc/dimin in the same measure inherits that ramp's start level
+  (ramp-start is stored at the vpi slot, e.g. `[60,60,60,80]` for
+  `3c4,3c+,3d4,dimin(p,1)3a` where 80 = the entering mf running).  Only
+  cresc/dimin ramp-starts participate (a later vol() must NOT -- vol stores
+  its TARGET; m40 `[60,...,100]` sf-late stays entry 60).
+- EOF fix: the trailing `volumes/instrument` reset block now skips the 'EOF'
+  measure (was landing "instrument in the middle of measure 276").
+- Final matrix (recompile errors): b2m2 0, e.gcs 0, b2m1 0, b-6 0, v1-1 0,
+  v1-3 0, v1-4 0; v1-2 still 1 (pre-existing clarinet m141).  DOALL 0 bare /
+  22 named (all pre-existing symmetric b2m3/b2m4 + new-g3).  Mirrored to
+  musicomp2abc.  Commits: 67579a83 (EV2), a0cef396 (EV4+EOF), 625e33d3
+  (untrack artifacts, add .gitignore -- an over-eager `git add -A` had swept
+  in .pyc/.err shreds).
+
+## Still open (unchanged)
+- v1-2 m141: `clarinet: [cresc(mf,0.75)3f8l,3f8l] [4c8l,4c8t] [4e-8,4c8]` with
+  arr [60,60,60] / scalar 60; entry correct p->no header diff vs l_vl; yet the
+  recompile reads rs.volume 80 at that cresc (m139 emitted `volumes clarinet p`
+  from a previous mf state -- need to chase why the reparse still sees 80).
+- contrabass xpose/key inconsistency (m90-95/265-282 legato) -- not revisited.
+- goto/repeat reordering in the merge time-walk (issue #3) still potential.
