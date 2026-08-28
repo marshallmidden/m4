@@ -4527,16 +4527,18 @@ def print_measure_staves_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l
         for _lb, _vl in first_note_entry.get(m, {}).items():
             n_vl[_lb] = vol_to_name(_vl)
     # fi
-    for label in n_vl:
-        if label not in l_vl or l_vl[label] != n_vl[label]:
-            if auto_staves:
-                # When auto_staves, output volume using staff name
-                pr = pr + f'volumes {label} {n_vl[label]}\n'
-            else:
-                pr = pr + f'volumes {label} {n_vl[label]}\n'
-            pv = True
-        # fi
-    # rof
+    if m != 'EOF':
+        for label in n_vl:
+            if label not in l_vl or l_vl[label] != n_vl[label]:
+                if auto_staves:
+                    # When auto_staves, output volume using staff name
+                    pr = pr + f'volumes {label} {n_vl[label]}\n'
+                else:
+                    pr = pr + f'volumes {label} {n_vl[label]}\n'
+                pv = True
+            # fi
+        # rof
+    # fi
 
     # Instrument changes per staff.
     n_instrument = {}
@@ -4554,15 +4556,17 @@ def print_measure_staves_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l
             n_instrument[label] = iname
         # fi
     # rof
-    for label in n_instrument:
-        if label not in l_instrument or l_instrument[label] != n_instrument[label] or pv:
-            if auto_staves:
-                # When auto_staves, output instrument using staff name
-                pr = pr + f'instrument {label} {n_instrument[label]}\n'
-            else:
-                pr = pr + f'instrument {label} {n_instrument[label]}\n'
-        # fi
-    # rof
+    if m != 'EOF':
+        for label in n_instrument:
+            if label not in l_instrument or l_instrument[label] != n_instrument[label] or pv:
+                if auto_staves:
+                    # When auto_staves, output instrument using staff name
+                    pr = pr + f'instrument {label} {n_instrument[label]}\n'
+                else:
+                    pr = pr + f'instrument {label} {n_instrument[label]}\n'
+            # fi
+        # rof
+    # fi
 
     # Key changes per staff.
     for label, vlist in staff_order:
@@ -4975,17 +4979,48 @@ def print_out_staves() -> None:
             for _v in _act:
                 if bufs[_v][_m] and ba.volume.get(_v, {}).get(_m):
                     _arr = ba.volume[_v][_m]
-                    _n0 = bufs[_v][_m][0]
-                    _vp, _nb = _split_vpi_prefix(_n0)
-                    if isinstance(_nb, str) and _nb.startswith('r'):
-                        continue
-                    # fi
+                    # Entry level candidate = the volume of the first
+                    # volume-relevant element of the voice's measure group: the
+                    # first non-rest note, or the first rest that carries its own
+                    # vol/cresc/dimin (a prefixed rest is usually the leading
+                    # member of a rest-led line whose dynamics start at that
+                    # level, e.g. "cresc(p,0.375)r16").
                     _e = None
-                    for _z in _arr:
-                        if isinstance(_z, int) and _z >= 0:
-                            _e = _z
-                            break
+                    for _i, _nb2 in enumerate(bufs[_v][_m]):
+                        _vp2, _nbs2 = _split_vpi_prefix(_nb2)
+                        _is_rest = isinstance(_nbs2, str) and _nbs2.startswith('r')
+                        _has_vpi = isinstance(_vp2, str) and ('vol(' in _vp2 or 'cresc(' in _vp2 or 'dimin(' in _vp2)
+                        if _is_rest and not _has_vpi:
+                            continue
                         # fi
+                        for _z in _arr[_i:]:
+                            if isinstance(_z, int) and _z >= 0:
+                                _e = _z
+                                break
+                            # fi
+                        # rof
+                        if not _has_vpi:
+                            # A plain note's stored level can lag the real
+                            # running when a cresc/dimin later in the same
+                            # measure ramps FROM a higher level (the note then
+                            # inherits that running level too, and the staff
+                            # header must agree with the ramped entry).
+                            for _j2 in range(_i + 1, min(len(bufs[_v][_m]), len(_arr))):
+                                _vpj, _nbj = _split_vpi_prefix(bufs[_v][_m][_j2])
+                                if isinstance(_vpj, str) and ('cresc(' in _vpj or 'dimin(' in _vpj):
+                                    for _z in _arr[_j2:]:
+                                        if isinstance(_z, int) and _z >= 0:
+                                            if _e is None or _z > _e:
+                                                _e = _z
+                                            # fi
+                                            break
+                                        # fi
+                                    # rof
+                                    break
+                                # fi
+                            # rof
+                        # fi
+                        break
                     # rof
                     if _e is None:
                         continue
@@ -4996,7 +5031,6 @@ def print_out_staves() -> None:
                     _cur = first_note_entry[_m].get(_label, '')
                     if _cur == '' or _e > _cur:
                         first_note_entry[_m][_label] = _e
-
                     # fi
                 # fi
             # rof
