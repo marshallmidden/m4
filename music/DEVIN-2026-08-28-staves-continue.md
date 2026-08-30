@@ -263,3 +263,131 @@ was implemented as a merge-loop RECORDER + pre-pass (all inside imscomp):
   from a previous mf state -- need to chase why the reparse still sees 80).
 - contrabass xpose/key inconsistency (m90-95/265-282 legato) -- not revisited.
 - goto/repeat reordering in the merge time-walk (issue #3) still potential.
+
+## 08-28 LATE: NOTE-FIDELITY VERIFIED -- two ROOT CAUSES for the brass/wind drift
+Verified with the per-pitch compare (`$P/compare_fs.py` + `$P/alignnotes.py`,
+REF = --fluidsynth of the original .E, CONV = --fluidsynth of the new .staff):
+METHOD validates on the accepted v1-1 (exact 17147/17147).  b2m2 and e.gcs
+were NOT note-faithful.  Both root causes are conversion bugs, NOT entry-model
+anythings, and are FIXED in `ims/imscomp` (working tree, NOT yet mirrored /
+committed / DOALL-verified):
+
+### Root cause A: merged staffs mixing DIFFERENT written keys -> -1 semitone
+- e.gcs brass_section staff merges the concert Banda (voices 1-12, current
+  written key g-) with the B-flat CORNETS (voices 27/28, written key f, set by
+  `=key cornet1A..cornet1B f` and NEVER re-keyed even when the piece modulates
+  to g-).  One staff = one key; the conversion printed `key brass_section g-`
+  (from voice 1).  Cornet tokens (`3g16`, bare of accidentals because g IS
+  natural in written F) then rode the g- key -> rendered g-flat = sounding
+  SEMITONE LOW.  Same handful: `key brass_section e-/c/g-` transitions all
+  conflicted.  ~346 of the ~686 e.gcs note-deltas; b2m2 also mildly affected.
+- FIX (implemented): `print_measure_staves_header` now also emits per-voice
+  `key <v> <key>` lines for any staff member whose key_voice diverges from the
+  staff's (tracked via new l_ky_pv dict, threaded like l_ky); the initial
+  key block in print_out_staves emits the same for measure-'' keys.  Verified
+  by hand-patching the emitted staff: `key 27 f` / `key 28 f` restore EXACT
+  REF for the cornet.  After the automated fix e.gcs pitch deltas dropped from
+  34 pitches (up to -60) to just 4 pitches, +/-2-3 notes each (tie-suffix
+  residue).
+
+### Root cause B: MID-PIECE xpose changes collapsed to ONE value -> +5 horns
+- b2m2 horns: `=french_horn_in_E french_hornA..french_hornB` (-8) for
+  measures 1-149, then `=french_horn_in_A ...` (-3) from measure 150.  The
+  conversion's initial xpose grouping emitted one constant `xpose 9,10 -3 c`
+  (using the FINAL xpose value), so the horn-in-E opening sounded +5 too high
+  (woodwinds clarinet-in-A -3 grouped fine).  468 note-deltas across 15
+  pitches with the +5 e<->a signature.
+- FIX (implemented): do_xpose now records an `xpose_hist[voice]` =
+  [[measure, xpose, xpose_new_key], ...] (measure '' -> 0) alongside the
+  global.  The initial emission uses hist[0] (first value, not final); a new
+  per-measure block in print_measure_staves_header emits `xpose <v> <x> [key]`
+  at the measure where the composer switched (tracked via l_xp seeded from
+  hist[0], threaded like l_ky).  Verified by hand-editing the staff
+  (`xpose 9,10 -8 c` at top + `xpose 9,10 -3 c` before m150):
+  b2m2 pitch deltas 468 -> **0 (0/0)**, recompile 0 ERRORs.
+  post-verify on the AUTOMATED run still had the m150 change line missing --
+  measure-type mismatch (`xm` normalized to int, real `m` is a str like '150';
+  fix the guard to compare str(xm)==str(m)).
+
+### Verify / follow-up steps (NEXT SESSION)
+1. Finish Root-cause B emission guard (str/int measure compare), regenerate
+   b2m2 + e.gcs with the automated fix, confirm: e.gcs 4-pitch/10-sum and
+   b2m2 0/0 with 0 recompile ERRORs; re-run per-pitch compare + matrix.
+2. Contrabass (b2m2 v20) drift was actually the SAME Root-cause-A family --
+   re-check after fix; also re-run the whole 8-piece matrix (v1-1..4, b-6,
+   b2m1) to prove no regression (keys/xpose data only affects mixed-key/mid-
+   transpose pieces, so expected unchanged).
+3. `musicomp2abc/` mirror (byte-identical), then DOALL (expect 0 bare; watch
+   name-worthy named ARGH stays 22 pre-existing).
+4. Commit: the two-converter mirror + DEVIN updates.
+
+### Methods/tools worth keeping
+- `$P/compare_fs.py` + `$P/fsparse.py` + `$P/alignnotes.py` under
+  `$P=/var/folders/.../stavetest/l8`... the per-pitch count compare is the
+  truthful oracle (start-times lie: humanize timing differs massively across
+  renders even for the accepted v1-1).
+- The staff/vert per-voice compare isolates which VOICE drifted before any fs
+  work (vert lines are `vN:` per staff-inner voice, same numbering both sides).
+- Getting the exact written source: putd `=` macros expand INSIDE imscomp (not
+  cpp) -- `=french_horn_in_E` etc. carry the real per-section transpositions;
+  grep the .E for `=name` CALLS (the `$$ xpose -N` trailing comments are the
+  doc of the macro).
+
+# Session 2026-08-30 — xpose history: first-entry base-state fix; b2m1 goes clean
+
+Completed the last three open items from the 08-28 LATE section. Working tree
+now has BOTH root-cause fixes (per-voice keys + xpose history) fully wired.
+
+## Fix steps (both in `ims/imscomp`, then mirrored)
+1. **str/int guard** (was the "m150 change line missing" bug): in
+   `print_measure_staves_header` the per-measure xpose re-emission compared
+   `xm != m` where `xm` is int (normalized in `do_xpose`) and `m` is a str
+   (`meas.append(str(f1))`, ~13175) -> the guard NEVER matched, so mid-piece
+   xpose changes were never emitted on the automated path.  Now
+   `str(xm) != str(m)`.
+2. **NEW BUG found while validating b2m1**: `xpose_hist`'s first entry is the
+   first *call*, not the base state.  b2m1 piccolos (voices 1,2 = fluteA/B;
+   `set_flute` sets NO xpose) only get an xpose command at m258
+   (`=xpose fluteA,fluteB +12`, the "8 over the top staff" octave passage) and
+   back to 0 at m261.  So hist[0] = (258, +12) and the header emitted
+   `xpose 1,2 12 d`, applying +12 to ALL flute notes whole-piece -> 2054
+   note-deltas (~+12 octave smear, ref pitches 64-92 vs conv up to 105).
+   FIX in `do_xpose`: when a voice's first recorded command is `xm != 0`,
+   prepend a synthetic `[0, <xpose before this call>, <its key>]` entry
+   (captured `old_xp_v = xpose.get(f1,0)`, `old_xp_k`) so the header emits the
+   true initial state (0 -> no header line) and the m258/m261 switches come
+   from the per-measure block.
+
+## Final matrix (8 pieces, ref = `--fluidsynth` of `.E`, conv = `.staff`)
+All conversions + recompiles: exit 0, 0 ARGH.  Per-pitch note-on multiset:
+- v1-1, v1-3, v1-4, b-6, b2m1, b2m2: 0/0 (b2m1 23390/23390, b2m2 8263/8263,
+  v1-1 17277/17277, v1-3 8926/8926, v1-4 10652/10652, b-6 16677/16677).
+- e.gcs: 4 pitches / sum 10 (57<->58 x2, 64<->65 x3), 39432/39432 total --
+  exactly the documented "tie-suffix residue" end-state; NO root-cause-A/B
+  residue left.  Scattered +/-1 swaps (ref t~140s-657s, many channels, both
+  directions) -- see "Still open".
+- v1-2: exit 1, pre-existing m141 `cresc(mf,0.75)` (reparse reads rs.volume
+  80), note multiset still 0/0 (6963/6963).
+- contrabass (b2m2 v20): clean in the matrix; was indeed Root-cause-A family.
+
+## DOALL + mirror
+- DOALL run UNMIRRORED first (divergent compilers -> would catch any
+  non-staves diff): 0 bare ARGH, 22 named (b2m3/b2m4 x5 + new-g3 x1,
+  symmetric in BOTH compilers -- all pre-existing).  `cp ims/imscomp
+  musicomp2abc/musicomp2abc`; do_xpose/xpose_hist changes do not alter
+  vert/hori/csv/fs/abc output (the 22 named are unchanged baseline).
+
+## Still open
+- e.gcs tie-suffix residue (4 pitches/10 notes): tied notes whose written
+  accidental resolves +/-1 semitone across scattered measures; region mapping
+  is confounded by repeats (measure echoes recur per pass).  Not chased this
+  session (matches documented end-state).
+- v1-2 m141 pre-existing (reparse sees volume 80 at the m139-emitted
+  `volumes clarinet p`).
+- goto/repeat reordering in the merge time-walk (issue #3) still potential;
+  per-pitch multiset oracle avoids it.
+
+## Tools
+compare_fs.py (per-pitch multiset oracle, ~10ms dur secondary) recreated in
+`$P=/var/folders/.../T/opencode/stavetest`.  matrix.sh runs the full 8-piece
+CPP->convert->recompile->compare loop.

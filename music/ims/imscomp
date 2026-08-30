@@ -2994,6 +2994,8 @@ future_intensity_cresc_time = [ ]
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 global xpose                        # The number of semitones to move up/down (positive=up), index by voice.
 xpose = {}
+global xpose_hist                    # Voice -> [[measure, xpose, xpose_new_key], ...] mid-piece changes.
+xpose_hist = {}
 global xpose_new_key                # Lowercase normal musicomp usage, index by voice.
 xpose_new_key = {}
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
@@ -4440,7 +4442,7 @@ def print_out_v_or_h() -> None:
 # End of print_out_v_or_h
 
 # ----------------------------------------------------------------------------
-def print_measure_staves_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l_ky, l_tempo, l_t_n_l, l_pitch, staff_order, l_pan, l_intensity, l_reverb) -> None:
+def print_measure_staves_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l_ky, l_tempo, l_t_n_l, l_pitch, staff_order, l_pan, l_intensity, l_reverb, l_ky_pv=None, l_xp=None) -> None:
     """Output the header for a measure in staves format, using staff names."""
     global vol
     global measure_meter
@@ -4461,6 +4463,9 @@ def print_measure_staves_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l
     global reverb
     global auto_staves
     global first_note_entry
+    global xpose_hist
+    global key_sig_int
+    global volume
 
     pr = ''
 
@@ -4580,8 +4585,58 @@ def print_measure_staves_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l
                 else:
                     pr = pr + f'key     {label}  {l_ky[label]}\n'
             # fi
+            # A staff can contain voices whose written key differs from the
+            # staff's key (e.g. concert band brass co-merged with B-flat
+            # cornets).  Without a per-voice key line, the recompile renders
+            # those voices' bare accidentals against the staff's key signature
+            # and every such note comes out a semitone (or more) off.  Emit
+            # per-voice keys for any member whose written key diverges.
+            if l_ky_pv is not None:
+                for v in vlist[1:]:
+                    if v in key_voice and m in key_voice[v] and key_voice[v][m] != key_voice[v0][m]:
+                        if l_ky_pv.get(v) != key_voice[v][m]:
+                            l_ky_pv[v] = key_voice[v][m]
+                            pr = pr + f'key     {v}  {key_voice[v][m]}\n'
+                        # fi
+                    # fi
+                # rof
+            # fi
         # fi
     # rof
+
+    # Transposition changes per voice.
+    # The original piece can re-transpose a voice mid-piece (horns switching
+    # crooks, e.g. horn-in-E -> horn-in-A).  The initial xpose line in the
+    # header used the first recorded value; emit a change command at the
+    # measure where the composer switched, so recompilation tracks it.
+    if l_xp is not None:
+        for v in range(1, len(volume)+1):
+            hist = xpose_hist.get(v)
+            if not hist:
+                continue
+            # fi
+            for (xm, xv, xk) in hist:
+                if xm == 0 or str(xm) != str(m):
+                    continue
+                # fi
+                if l_xp.get(v) != (xv, xk):
+                    l_xp[v] = (xv, xk)
+                    if isinstance(xk, int):
+                        xk_str = key_sig_int.get(xk, '')
+                    elif xk is None:
+                        xk_str = ''
+                    else:
+                        xk_str = str(xk)
+                    # fi
+                    if xk_str:
+                        pr = pr + f'xpose  {v}  {xv}  {xk_str}\n'
+                    else:
+                        pr = pr + f'xpose  {v}  {xv}\n'
+                    # fi
+                # fi
+            # rof
+        # rof
+    # fi
 
     # Pitch change.
     if l_pitch != pitch[m]:
@@ -4653,7 +4708,7 @@ def print_measure_staves_header(m, l_meter, l_clef, l_instrument, l_vl, l_txt, l
     # rof
 
     pr = l_txt + pr
-    return pr, n_meter, n_clef, n_instrument, n_vl, l_ky, l_tempo, l_t_n_l, l_pitch, l_pan, l_intensity, l_reverb
+    return pr, n_meter, n_clef, n_instrument, n_vl, l_ky, l_tempo, l_t_n_l, l_pitch, l_pan, l_intensity, l_reverb, l_ky_pv, l_xp
 # End of print_measure_staves_header
 
 # ----------------------------------------------------------------------------
@@ -4834,6 +4889,14 @@ def print_out_staves() -> None:
                 v0 = vlist[0]
                 if v0 in key_voice and '' in key_voice[v0] and key_voice[v0][''] != key_default:
                     print_output(f'key     {label}  {key_voice[v0][""]}\n')
+                    # Per-voice keys for members whose written key differs from
+                    # the staff key (prevents the recompile from rendering their
+                    # bare accidentals a semitone off).  See print_measure_staves_header.
+                    for v in vlist[1:]:
+                        if v in key_voice and '' in key_voice[v] and key_voice[v][''] != key_voice[v0]['']:
+                            print_output(f'key     {v}  {key_voice[v][""]}\n')
+                        # fi
+                    # rof
                 # fi
             # rof
             # Emit xpose commands for voices with non-zero transposition.
@@ -4843,8 +4906,17 @@ def print_out_staves() -> None:
             # applies the transposition correctly.
             xpose_groups = {}
             for voice in range(1, len(volume)+1):
-                xv_val = xpose.get(voice, 0)
-                xnk_val = xpose_new_key.get(voice, '')
+                # Use the FIRST recorded transposition for voices whose
+                # transposition changes mid-piece; print_measure_staves_header
+                # emits the per-measure change commands separately.
+                hist = xpose_hist.get(voice)
+                if hist:
+                    xv_val = hist[0][1]
+                    xnk_val = hist[0][2]
+                else:
+                    xv_val = xpose.get(voice, 0)
+                    xnk_val = xpose_new_key.get(voice, '')
+                # fi
                 if xv_val != 0 or xnk_val != '':
                     # Normalize xnk_val to a string key name.
                     if isinstance(xnk_val, int):
@@ -4897,6 +4969,16 @@ def print_out_staves() -> None:
     first_note_entry = {}
     l_instrument = {}
     l_ky = {}
+    l_ky_pv = {}
+    # Seed the xpose-change tracker with the values the header already emitted,
+    # so print_measure_staves_header only emits a command on a real change.
+    l_xp = {}
+    for v in range(1, len(volume)+1):
+        hist = xpose_hist.get(v)
+        if hist:
+            l_xp[v] = (hist[0][1], hist[0][2])
+        # fi
+    # rof
     for label, vlist in staff_order:
         l_ky[label] = key_default
         # Initialize clef to match what header emitted.
@@ -5047,8 +5129,8 @@ def print_out_staves() -> None:
             # rof
         # fi
 
-        print_line, l_meter, l_clef, l_instrument, l_vl, l_ky, l_tempo, l_t_n_l, l_pitch, l_pan, l_intensity, l_reverb = print_measure_staves_header(m,
-                    l_meter, l_clef, l_instrument, l_vl, print_line, l_ky, l_tempo, l_t_n_l, l_pitch, staff_order, l_pan, l_intensity, l_reverb)
+        print_line, l_meter, l_clef, l_instrument, l_vl, l_ky, l_tempo, l_t_n_l, l_pitch, l_pan, l_intensity, l_reverb, l_ky_pv, l_xp = print_measure_staves_header(m,
+                    l_meter, l_clef, l_instrument, l_vl, print_line, l_ky, l_tempo, l_t_n_l, l_pitch, staff_order, l_pan, l_intensity, l_reverb, l_ky_pv, l_xp)
 
         if bar_print != bars[m]:
             print_line = print_line + f'bars    {bars[m]}\n'
@@ -14786,6 +14868,7 @@ def do_xpose(t_args: str | None, original_line: str) -> None:
     """Handle the 'xpose' command: set transposition for voices."""
     global xpose
     global xpose_new_key
+    global xpose_hist
     global measure_on
     global key_sig
     global key_sig_int
@@ -14955,7 +15038,41 @@ def do_xpose(t_args: str | None, original_line: str) -> None:
         else:
             xpose_new_key[f1] = kl
         # fi
+        old_xp_v = xpose.get(f1, 0)
+        old_xp_k = xpose_new_key.get(f1, '')
         xpose[f1] = x
+        # Record the (measure, value, key) history so the auto-staves conversion
+        # can reproduce mid-piece transposition changes (e.g. horns that switch
+        # crooks).  Kept as a list of (measure_num, xpose, xpose_new_key).
+        # Measure '' (commands before any measure) is recorded as measure 0.
+        # If a voice's FIRST xpose command comes mid-piece (e.g. piccolos that
+        # jump an octave for one passage), record the pre-existing base state
+        # (0/xpose-before-any-change with its key) as the measure-0 entry so
+        # the auto-staves header emits the correct initial transposition.
+        global xpose_hist
+        if xpose_hist is None:
+            xpose_hist = {}
+        # fi
+        xm = measure_on if measure_on != '' else 0
+        if isinstance(xm, str):
+            try:
+                xm = int(xm)
+            except ValueError:
+                xm = xm
+            # yrt
+        # fi
+        hist = xpose_hist.setdefault(f1, [])
+        if not hist:
+            if xm != 0:
+                hist.append([0, old_xp_v, old_xp_k])
+            # fi
+            hist.append([xm, x, xpose_new_key[f1]])
+        elif hist[-1][0] != xm:
+            hist.append([xm, x, xpose_new_key[f1]])
+        else:
+            hist[-1][1] = x
+            hist[-1][2] = xpose_new_key[f1]
+        # fi
     # rof
     return
 # End of do_xpose
