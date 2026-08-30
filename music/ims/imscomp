@@ -2943,6 +2943,8 @@ global autopitchbend                # For staff mode, voices in staff are auto-p
 autopitchbend = False
 global pitchbend                    # Pitch_bend levels for voices.
 pitchbend = [ ]                     # Pitch bend pitchbend level by voice.
+global slide_next                   # slide commands: voice (1-based) -> list of (from_midi, to_midi, glide_ticks).
+slide_next = { }                    # Glide to be realized at the next note equal to to_midi.
 global ensemble_map                 # For ensemble command: staff_name -> count of players.
 ensemble_map = { }                  # e.g. {'ViolinIV24': 14} means 14 violins playing that staff.
 global pan                          # pan levels at measures.
@@ -6492,6 +6494,8 @@ def print_out_midi1csv_notes() -> None:
 
     global pitch                                    # Offset note by this amount.
 
+    global slide_next                               # slide commands pending per voice.
+
     global args
     global voices_to_do
     global voices_having_notes
@@ -6923,6 +6927,24 @@ def print_out_midi1csv_notes() -> None:
                     # Already on, good.
                 else:                                       # This is not a tied note from previous - i.e. a normal note.
                     # We want a note-on here.
+                    # slide command: if this voice has a pending glide and this note is its
+                    # target pitch, realize the pitch-bend ramp over that note (FIFO).
+                    slide_here = slide_next.get(voice)
+                    if slide_here and l_instrument in instruments:
+                        try:
+                            n_midi = int(n)
+                        except (ValueError, TypeError):
+                            n_midi = None
+                        # yrt
+                        if slide_here and n_midi == slide_here[0][1]:
+                            from_midi, to_midi, slide_ticks = slide_here[0]
+                            insert_slide_ramp(voice, chan, note_time, from_midi, to_midi, slide_ticks)
+                            slide_here.pop(0)
+                            if not slide_here:
+                                slide_next.pop(voice, None)
+                            # fi
+                        # fi
+                    # fi
                     voices_having_notes[voice] = True
                     if 'a' in last_suffixes:                # Accent or Emphasis
                         tmp = last_accent if last_suffixes.count('a') == 1 else last_aaccent
@@ -15758,12 +15780,114 @@ def do_sharp(t_args: str | None, original_line: str) -> None:                   
 # End of do_sharp
 
 # ----------------------------------------------------------------------------
-# Not likely to ever do.
 #   slide  from,to,length     $$ Glissando - only can be used after voice 1 or cis n command.
+#   e.g. 'slide 3c,4e,2' glides from 3c to 4e over a half note (2) of the target note.
 
-def do_slide(t_args: str | None, original_line: str) -> None:                             # NOTDONEYET - COMMAND
-    """Handle the 'slide' command. (Not yet implemented.)"""
-    print_error("slide command makes no sense for python or MIDI.", original_line)
+def insert_slide_ramp(voice, chan, note_time, from_midi, to_midi, ticks) -> None:
+    """Insert the MIDI pitch-bend events realizing a 'slide from,to,length'.
+
+    Widens the RPN pitch-bend sensitivity to cover the glide interval, ramps the
+    bend from the 'from' pitch to the voice's base tuning over 'ticks', then
+    restores the normal 2-semitone sensitivity and the base tuning.
+    """
+    global pitchbend
+
+    d = to_midi - from_midi                  # Semitones to glide (signed).
+    if d == 0 or ticks <= 0:
+        return
+    # fi
+    semi_range = max(2, min(24, int(abs(d))))
+    if voice < len(pitchbend) and pitchbend[voice] is not None:
+        base = pitchbend[voice]          # Voice's normal tuning (from pitchbend command/staff).
+    else:
+        base = 8192                      # Un-tuned voice.
+    # fi
+    units = 8192.0 / float(semi_range)   # Bend units per semitone at this RPN range.
+    start = int(base - d * units)        # Bend for the 'from' pitch.
+    start = max(0, min(16383, start))
+    # Select pitch-bend sensitivity to cover the glide interval.
+    for cc, vv in ((101, 0), (100, 0), (6, semi_range), (38, 0)):
+        insert_sorted_tail([voice+1, note_time, f'Control_c, {chan}, {cc}, {vv}'], 'SLIDE')
+    # fi
+    insert_sorted_tail([voice+1, note_time, f'Pitch_bend_c, {chan}, {start}'], 'SLIDE')
+    # Ramp in ~1/8 -semitone steps; at least 2 ticks apart, at most 400 events.
+    steps = max(1, min(int(abs(d) * 8.0), int(ticks / 2.0), 400))
+    for i in range(1, steps + 1):
+        tick = note_time + int(round(ticks * i / steps))
+        val = start + int(round((base - start) * i / steps))
+        insert_sorted_tail([voice+1, tick, f'Pitch_bend_c, {chan}, {max(0, min(16383, val))}'], 'SLIDE')
+    # rof
+    # Restore the normal 2-semitone sensitivity (RPN null) and the base tuning.
+    for cc, vv in ((101, 127), (100, 127)):
+        insert_sorted_tail([voice+1, note_time + ticks, f'Control_c, {chan}, {cc}, {vv}'], 'SLIDE')
+    # fi
+    insert_sorted_tail([voice+1, note_time + ticks, f'Pitch_bend_c, {chan}, {base}'], 'SLIDE')
+    return
+# End of insert_slide_ramp
+
+def do_slide(t_args: str | None, original_line: str) -> None:
+    """Handle the 'slide' command: glide from one pitch to another over a length.
+
+    Format: slide from,to,length     e.g. 'slide 3c,4e,2'
+      from,to  - IMS note text ('3c', '4e', '3g+', ...).
+      length   - note-length value (like the length of '4c2' which is 2 = 1/2 note).
+    """
+    global slide_next
+    global cis
+
+    if t_args is None or t_args.strip() == '':
+        print_error("slide command requires: from,to,length  e.g. 'slide 3c,4e,2'", original_line)
+        return
+    # fi
+    t_args = t_args.strip()
+    parts = t_args.split(',')
+    if len(parts) != 3:
+        parts = t_args.split()
+    # fi
+    if len(parts) != 3:
+        print_error(f"slide command needs: from,to,length  e.g. 'slide 3c,4e,2' - got '{t_args}'", original_line)
+        return
+    # fi
+    from_s = parts[0].strip()
+    to_s = parts[1].strip()
+    lth_s = parts[2].strip()
+    if from_s not in note_to_midi_value:
+        print_error(f"slide cannot understand from note '{from_s}'", original_line)
+        return
+    # fi
+    if to_s not in note_to_midi_value:
+        print_error(f"slide cannot understand to note '{to_s}'", original_line)
+        return
+    # fi
+    from_midi = note_to_midi_value[from_s]
+    to_midi = note_to_midi_value[to_s]
+    if lth_s[0] == '(' and lth_s[-1] == ')':
+        lth_s = lth_s[1:-1]
+        vwork, type_error = is_float(lth_s, is_float_number, False)
+        if type_error is not None:
+            print_error(type_error, original_line)
+            return
+        # fi
+        timeofnote = vwork
+    else:
+        vwork, type_error = is_float(lth_s, is_float_number, False)
+        if type_error is not None:
+            print_error(type_error, original_line)
+            return
+        # fi
+        if vwork is None or vwork == 0:
+            timeofnote = 0
+        else:
+            timeofnote = 1.0 / vwork
+        # fi
+    # fi
+    slide_ticks = round(timeofnote * 4.0 * MIDICLICKSPERQUARTER)
+    # Which voice will the target note play on? The current cis voice, else voice 1.
+    v = cis if isinstance(cis, int) and cis != 0 else 1
+    if v not in slide_next:
+        slide_next[v] = []
+    # fi
+    slide_next[v].append((from_midi, to_midi, slide_ticks))
     return
 # End of do_slide
 

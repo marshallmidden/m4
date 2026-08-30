@@ -124,9 +124,8 @@ SONGS_NO_PS += vinci
 SONGS_NO_PS += sonata
 SONGS_NO_PS += macros-complicated
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-# Cannot do this in python or MIDI.
-# MAYBE could do this with PTE and portamento.
-BROKEN += slidall
+# "slide" command fixed 2026-08-30
+SONGS += slidall
 
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ../musicomp2abc/musicomp2abc
@@ -151,6 +150,7 @@ MC_ARGS ?= --nofillwarning --nooncewarning --norestswarning --noleftoverwarnings
 #-- MC_ARGS += --one
 #-- MC_ARGS += --two
 #-- MC_ARGS += --sf2=/Users/m4/thisisthesoundfont.sf2
+MC_ARGS += --multiplemeasures
 #-----------------------------------------------------------------------------
 # -b nn = starting bar number
 # -i = put red circle around errors.
@@ -191,7 +191,7 @@ SONGS_2_MP4 = ${SONGS:=_2.mp4} ${SONGS_NO_PS:=_2.mp4}
 SONGS_V= ${SONGS:=.v}
 SONGS_H= ${SONGS:=.h}
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-BROKEN_MID = ${BROKEN:=.mid}
+#-- BROKEN_MID = ${BROKEN:=.mid}
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
 SONGS_2ABC = ${SONGS:=_2.abc}
 SONGS_2CSV = ${SONGS:=_2.csv} ${SONGS_NO_PS:=_2.csv}
@@ -204,7 +204,7 @@ SONGS_2WAV = ${SONGS:=_2.wav} ${SONGS_NO_PS:=_2.wav}
 SONGS_2V= ${SONGS:=_2.v}
 SONGS_2H= ${SONGS:=_2.h}
 # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-BROKEN_2MID = ${BROKEN:=_2.mid}
+#-- BROKEN_2MID = ${BROKEN:=_2.mid}
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 .PRECIOUS: %.E
@@ -275,8 +275,8 @@ help:
 .PHONY: all all_mid
 all all_mid: ${SONGS_MID} all_fs all_pdf ${SONGS_2MID}
 #-----------------------------------------------------------------------------
-.PHONY: broken
-broken: ${BROKEN_MID} ${BROKEN_2MID}
+#-- .PHONY: broken
+#-- broken: ${BROKEN_MID} ${BROKEN_2MID}
 #-----------------------------------------------------------------------------
 #-- .PHONY: all_ps
 #-- all_ps: ${SONGS_PS} ${SONGS_2PS}
@@ -315,8 +315,8 @@ h all_h: ${SONGS_H} ${SONGS_2H}
 test:
 	@echo SONGS_MID=${SONGS_MID}
 	@echo SONGS_2MID=${SONGS_2MID}
-	@echo BROKEN_MID=${BROKEN_MID}
-	@echo BROKEN_2MID=${BROKEN_2MID}
+#-- 	@echo BROKEN_MID=${BROKEN_MID}
+#-- 	@echo BROKEN_2MID=${BROKEN_2MID}
 	@echo SONGS_PS=${SONGS_PS}
 	@echo SONGS_2PS=${SONGS_2PS}
 	@echo SONGS_M_PS=${SONGS_M_PS}
