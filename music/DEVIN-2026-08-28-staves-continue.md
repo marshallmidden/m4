@@ -362,10 +362,10 @@ now has BOTH root-cause fixes (per-voice keys + xpose history) fully wired.
 All conversions + recompiles: exit 0, 0 ARGH.  Per-pitch note-on multiset:
 - v1-1, v1-3, v1-4, b-6, b2m1, b2m2: 0/0 (b2m1 23390/23390, b2m2 8263/8263,
   v1-1 17277/17277, v1-3 8926/8926, v1-4 10652/10652, b-6 16677/16677).
-- e.gcs: 4 pitches / sum 10 (57<->58 x2, 64<->65 x3), 39432/39432 total --
-  exactly the documented "tie-suffix residue" end-state; NO root-cause-A/B
-  residue left.  Scattered +/-1 swaps (ref t~140s-657s, many channels, both
-  directions) -- see "Still open".
+- e.gcs: **now 0/0 -- FIXED** (see "RESOLVED" below).  Before the fix: 4
+  pitches / sum 10 (57<->58 x2, 64<->65 x3), 39432/39432 total, then
+  mislabeled "tie-suffix residue";
+  NO root-cause-A/B residue left.
 - v1-2: exit 1, pre-existing m141 `cresc(mf,0.75)` (reparse reads rs.volume
   80), note multiset still 0/0 (6963/6963).
 - contrabass (b2m2 v20): clean in the matrix; was indeed Root-cause-A family.
@@ -377,11 +377,34 @@ All conversions + recompiles: exit 0, 0 ARGH.  Per-pitch note-on multiset:
   musicomp2abc/musicomp2abc`; do_xpose/xpose_hist changes do not alter
   vert/hori/csv/fs/abc output (the 22 named are unchanged baseline).
 
+## RESOLVED: the last e.gcs residue was NOT tie-suffix -- it was per-voice key
+## vs staff key accidental mis-resolution in the staves recompile.
+Root cause (proven by instrumenting the recompile): recompilation resolves
+EVERY note of a staff-chord line under the STAFF key only -- per-voice
+`key N <name>` lines are NOT consulted for chord members.  The converter
+therefore emits bare letters for notes that were natural in the source voice's
+own key; when the staff key signature has MORE accidentals on that letter, the
+recompile flattens/sharps it and the note sounds a semitone (or more) off.
+e.gcs case: Bb cornets written in a-flat (4 flats) merged onto the `g-` staff
+-- which is G-FLAT major (6 flats: Bb Eb Ab Db Gb Cb).  The three written
+`3g8` Tokens became G-flat and the two `3c8` tokens became C-flat: exactly
+5 notes, ch27 p58->57, ch28 p58->57, p65->64 (3).  Verified surgically:
+spelling `g->gn8` fixed the 3, `c->cn8` fixed the 2.
+FIX (mirrored to musicomp2abc): in `print_out_staves`'s merge loop, when a
+note's body is a bare octave+letter, pin an explicit `n`/`+` iff the STAFF key
+alters that letter (`_FLAT_ORDER`/`_SHARP_ORDER`, circle of fifths) but the
+VOICE's own key (via `get_staff_arr_double`, same fallback the parse used)
+does not.  Only the changed letters get pinned; staff-key==voice-key pieces
+(Beethoven 3 mvt1, strings of e.gcs, etc.) produce byte-identical conversions.
+Result: recompile of the converted e.gcs staff is now note-for-note exact vs
+`--fluidsynth` of e.E -- 0/0 per-channel-pitch diffs across all 63 channels
+(was 5-note residue).  The `--vert` of the recompiled file matches the source
+piece's vert in the affected measures (m258 v28 `3f8`, m259 v27 `2b8`/v28
+`3f8,2b-8` all back to reference values).
+Caveat: the conv vert still differs in its global header (clef/volumes/bars
+reflect the merged staff grouping) -- sound-equivalent, expected.
+
 ## Still open
-- e.gcs tie-suffix residue (4 pitches/10 notes): tied notes whose written
-  accidental resolves +/-1 semitone across scattered measures; region mapping
-  is confounded by repeats (measure echoes recur per pass).  Not chased this
-  session (matches documented end-state).
 - v1-2 m141 pre-existing (reparse sees volume 80 at the m139-emitted
   `volumes clarinet p`).
 - goto/repeat reordering in the merge time-walk (issue #3) still potential;

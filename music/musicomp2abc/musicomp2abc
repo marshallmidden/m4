@@ -5211,6 +5211,40 @@ def print_out_staves() -> None:
                                 # fi
                             # fi
                             vpi_pre, n_body = _split_vpi_prefix(n)
+                            # Recompilation resolves every note in a staff-chord
+                            # line under the STAFF key (per-voice 'key N' lines are
+                            # not consulted for chord members).  A bare letter that
+                            # the source voice wrote under its own (lighter) key
+                            # would therefore be flattened/sharped by a staff key
+                            # signature with more accidentals on that letter --
+                            # e.g. cornets in written a- merged onto a g- staff
+                            # sounded G-natural and C-natural a semitone low.
+                            # Pin an explicit natural/sharp so the written pitch
+                            # survives the recompile.  Only letters that the staff
+                            # key alters but the voice's own key does not need it.
+                            if args.staves and isinstance(n_body, str) and len(n_body) == 2 \
+                                    and n_body[0].isdigit() and not n_body.startswith('r'):
+                                L = n_body[1]
+                                # Staff's and voice's key alter-lists (negative =
+                                # flats, positive = sharps).  The voice key reuses
+                                # the same get_staff_arr_double fallback the parse
+                                # itself applied, so it mirrors written intentions.
+                                _sn = key_sig.get(l_ky[label], None) if label in l_ky else None
+                                _vk = None
+                                try:
+                                    _vk = get_staff_arr_double(voice, m, key_voice, None, 'staff-pin')
+                                except Exception:
+                                    _vk = None
+                                _vn = key_sig[_vk] if isinstance(_vk, str) and _vk in key_sig else None
+                                if _sn is not None and _vn is not None:
+                                    if _sn < 0 and L in _FLAT_ORDER[0:-_sn] \
+                                            and not (_vn < 0 and L in _FLAT_ORDER[0:-_vn]):
+                                        n_body = n_body + 'n'
+                                    elif _sn > 0 and L in _SHARP_ORDER[0:_sn] \
+                                            and not (_vn > 0 and L in _SHARP_ORDER[0:_vn]):
+                                        n_body = n_body + '+'
+                                # fi
+                            # fi
                             if now == 0 and not (isinstance(n_body, str) and n_body.startswith('r')):
                                 _arr = ba.volume[voice][m] if (voice in ba.volume and m in ba.volume[voice]) else None
                                 if _arr:
@@ -15083,6 +15117,12 @@ global key_sig
 key_sig = { 'c+':7, 'f+':6, 'b':5, 'bn':5, 'e':4, 'en':4, 'a':3, 'an':3, 'd':2,
             'dn':2, 'g':1, 'gn':1, 'c':0, 'cn':0, 'f':-1, 'b-':-2, 'e-':-3,
             'a-':-4, 'd-':-5, 'g-':-6, 'c-':-7 }
+
+# Circle-of-fifths accidentals order, for staves recompile natural/sharps
+# pinning (see print_out_staves).  First N letters = letters altered by a key
+# with N sharps (SHARP_ORDER) or N flats (FLAT_ORDER).
+_FLAT_ORDER = 'beadgcf'
+_SHARP_ORDER = 'fcgdaeb'
 
 global key_sig_int
 key_sig_int = {}
