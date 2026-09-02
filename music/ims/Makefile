@@ -74,6 +74,7 @@ TESTS += test-cresc-chord
 TESTS += test-cresc-staff
 TESTS += test-cresc
 TESTS += test-stacc
+TESTS += test-256-voices
 TESTS += test-vol-sf
 TESTS += test
 TESTS += testinline

@@ -3075,7 +3075,7 @@ pitch[''] = 0                       # Before first measure is no pitch.
 global voices_having_notes
 voices_having_notes = {}
 
-for i in range(1, MAXVOICES+1):     # This is used as [1] .. [MAXVOICES]
+for i in range(0, MAXVOICES+1):     # This is used as [0] .. [MAXVOICES] (indices 0..256 for per-voice lists).
     voice_prenote[i] = ''
     vinstrument[i] = {}
     vinstrument[i][''] = 'Acoustic Grand Piano'.lower()
@@ -7431,6 +7431,15 @@ def apply_ensemble_duplication() -> None:
 
     new_lines = []
     ens_vel_rng = random.Random(42)  # Separate seed for velocity jitter.
+    # Per-copy time offset: (copy_chan) -> time offset in ticks.
+    # Each copy gets a deterministic offset so note-on and note-off stay in sync.
+    copy_time_offsets = {}
+    for orig_chan, copies in ensemble_copies.items():
+        for idx, (copy_chan, _pitch) in enumerate(copies):
+            copy_rng = random.Random(100 + idx)
+            copy_time_offsets[copy_chan] = copy_rng.randint(-2, 2)
+        # rof
+    # rof
     for line in array_of_lines:
 
         # Parse: "voice, time, Command, rest..."
@@ -7513,15 +7522,42 @@ def apply_ensemble_duplication() -> None:
                 else:
                     new_remainder = remainder
                 # fi
-                new_lines.append(f"{parts[0]}, {parts[1]}, {cmd}, {copy_chan}, {new_remainder}")
+                time_offset = copy_time_offsets[copy_chan]
+                new_lines.append(f"{parts[0]}, {float(parts[1]) + time_offset}, {cmd}, {copy_chan}, {new_remainder}")
             elif cmd == 'Program_c':
                 # Duplicate the instrument assignment.
                 new_lines.append(f"{parts[0]}, {parts[1]}, {cmd}, {copy_chan}, {remainder}")
                 # Add pitch bend for this ensemble copy.
                 new_lines.append(f"{parts[0]}, {parts[1]}, Pitch_bend_c, {copy_chan}, {pitch}")
+            elif cmd == 'Control_c':
+                # Check for CC11 (expression) and apply jitter.
+                cc_parts2 = remainder.split(',', 1)
+                if len(cc_parts2) >= 2:
+                    try:
+                        cc_num2 = int(cc_parts2[0].strip())
+                    except ValueError:
+                        cc_num2 = -1
+                    # yrt
+                    if cc_num2 == 11:
+                        cc_val2 = int(cc_parts2[1].strip())
+                        cc_val2 = max(0, min(127, cc_val2 + ens_vel_rng.randint(-5, 5)))
+                        new_rem = f'{cc_parts2[0].strip()}, {cc_val2}'
+                    else:
+                        new_rem = remainder
+                    # fi
+                else:
+                    new_rem = remainder
+                # fi
+                time_offset = copy_time_offsets[copy_chan]
+                new_lines.append(f"{parts[0]}, {float(parts[1]) + time_offset}, {cmd}, {copy_chan}, {new_rem}")
+            elif cmd == 'Note_off_c':
+                time_offset = copy_time_offsets[copy_chan]
+                new_lines.append(f"{parts[0]}, {float(parts[1]) + time_offset}, {cmd}, {copy_chan}, {remainder}")
             else:
-                # Note_off_c, Control_c (already scaled for CC7): duplicate.
+                # Program_c: duplicate instrument assignment.
                 new_lines.append(f"{parts[0]}, {parts[1]}, {cmd}, {copy_chan}, {remainder}")
+                # Add pitch bend for this ensemble copy.
+                new_lines.append(f"{parts[0]}, {parts[1]}, Pitch_bend_c, {copy_chan}, {pitch}")
             # fi
         # rof
     # rof
