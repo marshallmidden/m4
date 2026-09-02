@@ -30,10 +30,15 @@ Suffix convention: `foo.fs/.abc/.csv` = musicomp2abc output; `foo_2.fs/_2.abc/_2
 - **bare ARGH** = imscomp-vs-musicomp2abc output difference; **named ARGH** = execution failure. Baseline: 0 bare / 0 named. Any increase is a regression.
 - One suite: `cd music/b && ./AAA.diff._2`. Single compiler check: `cd music/ims && make tests`. (`ims/RUN-Tests` is older and references a stale `~/musicomp2abc/...` path — prefer DOALL.)
 
-## Audio/video needs a patched fluidsynth
+## Audio/video pipeline (works on the macOS box)
 
-- `.fs → .wav → .mp4` goes through `gcs2youtube`, which pipes the `.fs` into fluidsynth: `cat foo.fs | fluidsynth -q -F out.wav <soundfont>`. That stdin-render mode is a **custom patch** (documented in `music/DEVIN-2026-03-23.md`); stock fluidsynth fails with "No midi file specified!".
-- Scripts default to `~/bin/fluidsynth` (patched build). The current macOS box lacks it, so `make mp4`/`make wav` won't run here; the text pipeline (abc/pdf/midi/fs) works with stock tools.
+The full `make pdf` and `make mp4` pipelines now run on the current macOS (Apple Silicon) machine. All three audio/video tools live in `~/bin` (which is early on PATH), NOT in brew's `/opt/homebrew/bin`, to stay non-destructive to Homebrew-managed tools:
+
+- `~/bin/fluidsynth` — **patched build** with the stdin→WAV-render feature that `gcs2youtube` depends on. Source: `sparse` checkout at `~/src/fluidsynth.m4-editing` (also `saved-m4-stuff/src/fluidsynth.m4-editing`), built with `cmake -S . -B build2 -DBUILD_SHARED_LIBS=OFF` (static) then copied into `~/bin`. The patch adds `fluid_cmd_handler_set_renderer()` + a renderer field/`pending_samples` on the cmd handler, makes `sleep` render audio frames instead of sleeping when a renderer is attached, and restructures fluidsynth.c's `-F` path to render stdin `.fs` commands (see `music/DEVIN-2026-03-23.md`); stock fluidsynth still fails with "No midi file specified!".
+- `~/bin/ffmpeg` / `~/bin/ffprobe` — **source-built ffmpeg 9.0.1** (`/tmp/ffmpeg-9.0.1`) with `--enable-libass --enable-libfreetype --enable-libharfbuzz --enable-fontconfig --enable-libx264` (and x265/vpx/mp3lame/opus/videotoolbox/audiotoolbox). The brew ffmpeg 9.0.1 has **no text rendering** (`ass`/`drawtext`/`subtitles` filters missing), so `gcs2youtube`'s ASS overlay errored with "No option name near 'ass=…'"; this custom build provides those filters.
+- `~/bin/ps2pdf` (+ `ps2pdf14`/`ps2pdfwr`/`gs`) — symlinks to brew ghostscript 10.07.1 so `make pdf` works even when `/opt/homebrew/bin` isn't on PATH.
+
+- `.fs → .wav → .mp4` goes through `gcs2youtube` (`make mp4`), which pipes the `.fs` into fluidsynth: `cat foo.fs | fluidsynth -q -F out.wav <soundfont>`. The stdin-render mode is the custom patch above; stock fluidsynth fails with "No midi file specified!".
 - SoundFont: `/Users/m4/src/GeneralUser/GeneralUser.sf2` (macOS) or `/home/m4/src/GeneralUser_GS/GeneralUser.sf2` (Linux).
 - `mp4cat` concatenates `.mp4`s (multi-movement symphonies).
 
