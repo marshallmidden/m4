@@ -1,0 +1,317 @@
+#!/usr/bin/env python3
+"""gcs2sfz -- Render imscomp --sfzpipecsv instrument CSVs to an audio mixdown.
+
+Usage:
+    gcs2sfz <csv-or-dir> [--outdir DIR] [--sfzdir DIR] [--samplerate N]
+
+Pipeline:
+    <instrument>.csv  (start_sec,dur_sec,midi_note,velocity, one per line)
+        -> <instrument>.mid                  (per-instrument standard MIDI file)
+        -> ~/bin/sfizz_render <VPO>.sfz      (per-instrument WAV)
+        -> ffmpeg amix                        (one mixed WAV)
+
+For 1812-specific one-shots (gunshot/explosion/church bells) the mapping points
+at EFFECTS/*.wav files which are not part of VPO; those are skipped with a
+warning until samples are added.
+
+Requirements: python3, ~/bin/sfizz_render, ffmpeg, and the VPO library.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+from concurrent.futures import ThreadPoolExecutor
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_MUSIC = os.path.dirname(SCRIPT_DIR)
+SFPIPE_DIR = os.path.join(REPO_MUSIC, "sfz")
+
+sys.path.insert(0, SFPIPE_DIR)
+import instruments  # noqa: E402   (music/music/sfz/instruments.py)
+
+SFIZZ = os.environ.get("SFIZZ_RENDER", os.path.expanduser("~/bin/sfizz_render"))
+FFMPEG = shutil.which("ffmpeg") or os.path.expanduser("~/bin/ffmpeg")
+
+DEFAULT_SAMPLERATE = 48000
+TPQ = 480          # ticks per quarter for the output MIDI
+BPM = 120.0        # fixed tempo used to map CSV seconds -> MIDI ticks
+TICKS_PER_SEC = (TPQ * BPM) / 60.0
+WORKERS = int(os.environ.get("GCS2SFZ_WORKERS", "8"))  # parallel sfizz renders
+
+
+# ----------------------------------------------------------------------------
+# Minimal Standard MIDI File (SMF) writer -- no external dependencies.
+# ----------------------------------------------------------------------------
+
+def _varint(value: int) -> bytes:
+    """Encode a value as a MIDI variable-length quantity (MSB group first).
+
+    Standard MIDI VLQ: the 7-bit groups are written most-significant first, and
+    every byte except the last has the continuation bit (0x80) set.
+    """
+    value = int(value)
+    if value < 0:
+        value = 0
+    groups = []  # LSB group first
+    while True:
+        groups.append(value & 0x7F)
+        value >>= 7
+        if value == 0:
+            break
+    if len(groups) == 1:
+        return bytes([groups[0]])
+    out = []
+    for i in range(len(groups) - 1, -1, -1):
+        b = groups[i]
+        if i != 0:
+            b |= 0x80
+        out.append(b)
+    return bytes(out)
+
+
+def _encode_smf_track(events: list[tuple[int, bytes]]) -> bytes:
+    # events: list of (delta_time_ticks, delta-encoded event bytes)
+    data = b""
+    for delta, ev in events:
+        data += _varint(delta) + ev
+    data += _varint(0) + b"\xff\x2f\x00"  # End of Track
+    return b"MTrk" + struct.pack(">I", len(data)) + data
+
+
+def write_midi(csv_path: str, midi_path: str, track=0):
+    """Write a single-track MIDI file from a CSV (absolute times in seconds)."""
+    notes = []
+    with open(csv_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(",")
+            if len(parts) < 4:
+                continue
+            start_s, dur_s, pitch, vel = parts[0], parts[1], parts[2], parts[3]
+            try:
+                start_s = float(start_s)
+                dur_s = float(dur_s)
+                pitch = int(pitch)
+                vel = max(1, min(127, int(vel)))
+            except ValueError:
+                continue
+            on_tick = int(round(start_s * TICKS_PER_SEC))
+            off_tick = int(round((start_s + dur_s) * TICKS_PER_SEC))
+            if off_tick <= on_tick:
+                off_tick = on_tick + 1
+            notes.append((on_tick, off_tick, pitch, vel))
+
+    if not notes:
+        # Empty instrument: still write a valid file so the caller can decide.
+        with open(midi_path, "wb") as f:
+            f.write(b"MThd" + struct.pack(">IHHH", 6, 0, 1, TPQ))
+            f.write(_encode_smf_track([]))
+        return False
+
+    notes.sort(key=lambda n: (n[0], n[1]))
+    tempo_ppqn_micros = int(60000000.0 / BPM)  # 500000 us/qn @ 120bpm
+
+    # Group note-ons/offs onto a timeline keyed by absolute tick.
+    timeline: dict[int, list[tuple[int, int, int]]] = {}
+    for on, off, pitch, vel in notes:
+        timeline.setdefault(on, []).append((0, pitch, vel))
+        timeline.setdefault(off, []).append((1, pitch, vel))
+
+    name = os.path.splitext(os.path.basename(csv_path))[0]
+    name_b = name.encode("utf-8", "replace")
+
+    events = []
+    events.append((0, b"\xff\x51\x03" + struct.pack(">I", tempo_ppqn_micros)[1:]))
+    events.append((0, b"\xff\x03" + _varint(len(name_b)) + name_b))
+    last_tick = 0
+    for tick in sorted(timeline):
+        delta = tick - last_tick
+        last_tick = tick
+        batch = sorted(timeline[tick], key=lambda e: e[0])
+        for idx, (kind, pitch, vel) in enumerate(batch):
+            if kind == 0:
+                ev = b"\x90" + bytes([pitch & 0x7F, vel & 0x7F])
+            else:
+                ev = b"\x80" + bytes([pitch & 0x7F, 64])
+            events.append((delta if idx == 0 else 0, ev))
+
+    with open(midi_path, "wb") as f:
+        f.write(b"MThd" + struct.pack(">IHHH", 6, 0, 1, TPQ))
+        f.write(_encode_smf_track(events))
+    return True
+
+
+def render_instrument(csv_path, out_wav, vpo_root, samplerate):
+    """Render one instrument CSV to a WAV via sfizz_render."""
+    name = os.path.splitext(os.path.basename(csv_path))[0]
+    rel = instruments.vpo_rel_path(name)
+    if rel is None:
+        print(f"  !! {name}: no VPO mapping (fall back to GM). Skipping.")
+        return None
+    sfz_path = os.path.join(vpo_root, rel)
+    if not os.path.exists(sfz_path):
+        print(f"  !! {name}: missing VPO file {sfz_path}. Skipping.")
+        return None
+
+    with tempfile.TemporaryDirectory() as td:
+        midi_path = os.path.join(td, "in.mid")
+        has_notes = write_midi(csv_path, midi_path)
+        if not has_notes:
+            print(f"  .. {name}: empty part, skipping (no audio).")
+            return None
+        cmd = [SFIZZ, "--sfz", sfz_path, "--midi", midi_path, "--wav", out_wav,
+               "--samplerate", str(samplerate)]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"  !! {name}: sfizz_render failed:\n{r.stderr[-2000:]}")
+            return None
+    return out_wav
+
+
+def mixdown(wavs, out_wav):
+    """Mix a list of WAVs into one using ffmpeg amix."""
+    if not wavs:
+        return None
+    n = len(wavs)
+    cmd = [FFMPEG, "-y"]
+    for w in wavs:
+        cmd += ["-i", w]
+    cmd += ["-filter_complex", f"amix=inputs={n}:normalize=0:duration=longest",
+            "-ac", "2", "-ar", "48000", out_wav]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"mixdown failed:\n{r.stderr[-2000:]}")
+        return None
+    return out_wav
+
+
+def csv_max_end(csv_path):
+    """Return the latest note end (seconds) in an instrument CSV, or 0."""
+    mx = 0.0
+    try:
+        with open(csv_path) as f:
+            for line in f:
+                parts = line.strip().split(",")
+                if len(parts) < 2:
+                    continue
+                try:
+                    mx = max(mx, float(parts[0]) + float(parts[1]))
+                except ValueError:
+                    pass
+    except OSError:
+        return 0.0
+    return mx
+
+
+def trim_wav(in_wav, out_wav, duration):
+    """Trim/copy a WAV to the given duration (seconds)."""
+    cmd = [FFMPEG, "-y", "-i", in_wav, "-t", f"{duration:.3f}", "-c", "copy", out_wav]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        return False
+    return True
+
+
+def main(argv):
+    if not argv:
+        print(__doc__)
+        return 1
+    src = argv[0]
+    outdir = None
+    sfz_dir = None
+    samplerate = DEFAULT_SAMPLERATE
+    i = 1
+    while i < len(argv):
+        if argv[i] == "--outdir":
+            outdir = argv[i + 1]; i += 2
+        elif argv[i] == "--sfzdir":
+            sfz_dir = argv[i + 1]; i += 2
+        elif argv[i] == "--samplerate":
+            samplerate = int(argv[i + 1]); i += 2
+        else:
+            i += 1
+
+    if os.path.isdir(src):
+        csv_dir = src
+        csvs = sorted(os.path.join(csv_dir, f) for f in os.listdir(csv_dir)
+                      if f.endswith(".csv"))
+    elif src.endswith(".csv"):
+        csv_dir = os.path.dirname(os.path.abspath(src))
+        csvs = [src]
+    else:
+        print(f"gcs2sfz: not a .csv or dir: {src}")
+        return 1
+
+    if not csvs:
+        print("gcs2sfz: no .csv files found.")
+        return 1
+
+    if sfz_dir is None:
+        sfz_dir = os.path.join(SFPIPE_DIR, "library", "VPO")
+    vpo_root = os.path.join(sfz_dir, instruments.VPO_ROOT)
+    if not os.path.isdir(vpo_root):
+        print(f"gcs2sfz: VPO root not found: {vpo_root}")
+        return 1
+
+    if not shutil.which("sfizz_render") and not os.path.exists(SFIZZ):
+        print(f"gcs2sfz: sfizz_render not found ({SFIZZ})")
+        return 1
+    if not FFMPEG or not os.path.exists(FFMPEG):
+        print("gcs2sfz: ffmpeg not found")
+        return 1
+
+    workdir = tempfile.mkdtemp(prefix="gcs2sfz-")
+    TAIL = 6.0  # seconds of reverb/sustain tail after the last note
+
+    rendered_csvs = []
+    wavs = []
+    jobs = [
+        (csv_path, os.path.join(workdir, f"{os.path.splitext(os.path.basename(csv_path))[0]}.wav"))
+        for csv_path in csvs
+    ]
+    print(f"  rendering {len(jobs)} instrument(s) in parallel (max_workers={WORKERS}) ...")
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        futures = {
+            ex.submit(render_instrument, csv_path, out_wav, vpo_root, samplerate): (csv_path, out_wav)
+            for csv_path, out_wav in jobs
+        }
+        for fut in futures:
+            done = fut.result()
+            csv_path, out_wav = futures[fut]
+            if done:
+                wavs.append(done)
+                rendered_csvs.append(csv_path)
+
+    if not wavs:
+        print("gcs2sfz: nothing was rendered.")
+        return 1
+
+    piece_end = 0.0
+    for csv_path in rendered_csvs:
+        piece_end = max(piece_end, csv_max_end(csv_path))
+    target = piece_end + TAIL
+
+    if outdir is None:
+        outdir = csv_dir
+    os.makedirs(outdir, exist_ok=True)
+    mix_name = os.path.basename(os.path.normpath(csv_dir))
+    out_mix = os.path.join(outdir, f"{mix_name}-sfz-mix.wav")
+    raw_mix = os.path.join(workdir, "raw-mix.wav")
+    mixdown(wavs, raw_mix)
+    if piece_end > 0:
+        trim_wav(raw_mix, out_mix, target)
+    else:
+        shutil.copyfile(raw_mix, out_mix)
+    print(f"gcs2sfz: wrote {out_mix} ({target:.1f}s) from {len(wavs)} instrument renders")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
