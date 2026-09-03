@@ -5350,19 +5350,32 @@ def print_out_staves() -> None:
                 # reset in the next measure was skipped and the staff kept a
                 # drifted level, escalating into "already at X" recompile errors
                 # (Beethoven 6 m143, b2m1 m4/m12/m23, v1-1 m23).
-                last_pfx = None
+                # The recompile smears a vol/cresc/dimin prefix across EVERY
+                # voice of the staff, and a resting voice that catches a cresc
+                # ramp but not its matching later diminuendo is left at the ramp
+                # peak.  So the real residual is the HIGHEST vol/cresc/dimin
+                # target in the line, not just the last prefix -- using only the
+                # last one under-shoots here and skips a needed 'volumes' reset,
+                # letting the staff drift so a later cresc/dimin errors out with
+                # "already at" on recompile (v1-2 m141).  l_vl is only ever used
+                # as a != gate against the next measure's true entry volume, so
+                # over-estimating it merely emits a (correct-valued) reset.
+                peak_vl = None
                 for _pfx in re.finditer(r'(?:cresc|dimin)\((\w+),|vol\((\w+)\)', txt):
-                    if _pfx.group(1) is not None:
-                        last_pfx = _pfx.group(1)
+                    _vl = _pfx.group(1) if _pfx.group(1) is not None else _pfx.group(2)
+                    if _vl.isdigit():
+                        _n = int(_vl)
+                    elif _vl in v_name_print:
+                        _n = v_name_print[_vl]
                     else:
-                        last_pfx = _pfx.group(2)
+                        continue
+                    # fi
+                    if peak_vl is None or _n > peak_vl:
+                        peak_vl = _n
                     # fi
                 # rof
-                if last_pfx is not None:
-                    if last_pfx.isdigit():
-                        last_pfx = vol_to_name(int(last_pfx))
-                    # fi
-                    l_vl[label] = last_pfx
+                if peak_vl is not None:
+                    l_vl[label] = vol_to_name(peak_vl)
                 # fi
             # fi
         # rof
