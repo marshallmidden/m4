@@ -48,7 +48,7 @@ MAP = {
     "viola":            ("Strings", "viola-SEC-sustain.sfz"),
     "cello":            ("Strings", "cello-SEC-sustain.sfz"),
     "contrabass":       ("Strings", "bass-SEC-sustain.sfz"),
-    "pizzicato strings":("Strings", "cello-SEC-pizzicato.sfz"),
+    "pizzicato strings":("Strings", "all-strings-SEC-pizzicato.sfz"),
 
     # ---- Percussion --------------------------------------------------------
     "timpani":          ("Percussion", "timpani-hit.sfz"),
@@ -90,6 +90,9 @@ def vpo_rel_path(instrument_name: str) -> str:
     to the main library root (music/sfz/library).
     """
     name = (instrument_name or "").strip().lower()
+    # imscomp's CSV filenames use underscores (french_horn, pizzicato_strings);
+    # the MAP keys use spaces (french horn, pizzicato strings). Normalize.
+    name = name.replace("_", " ")
     hit = MAP.get(name)
     if hit is None:
         hit = KIT_FALLBACK.get(name)

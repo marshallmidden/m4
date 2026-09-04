@@ -24,6 +24,13 @@ GCS2YOUTUBE  = ../../gcs2youtube
 FLUIDSYNTH   = ~/bin/fluidsynth
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
+#-- SFZ (VPO sampler) pipeline: real orchestral samples via sfizz_render
+GCS2SFZ     = ../../music/music/sfz/gcs2sfz
+SFZ_LIBDIR  = ../../music/music/sfz/library/VPO
+SFZ_CSVDIR  = sfz-csv
+SFZ_MIXDIR  = sfz-mix
+WAV2WAVEFORM = ../../wav2waveform
+FS2ASS      = ../../fs2ass
 #-----------------------------------------------------------------------------
 # OS-specific settings for fluidsynth
 UNAME_S := $(shell uname -s)
@@ -112,6 +119,9 @@ help::
 	@echo "Targets:"
 	@echo "  all    - create music files for ${SONGS}."
 	@echo "  clean  - Remove postscript (ps), pdf, csv, and fs files."
+	@echo "  sfz    - render all pieces to SFZ VPO mix WAV (sfz-mix/)."
+	@echo "  sfz-mp4- encode all SFZ mixes to MP4 video."
+	@echo "  sfz-clean- remove SFZ artifacts (sfz-csv/, sfz-mix/)."
 	@echo ""
 	@echo "  s1     - create ${SONGS_ABC}, ${SONGS_2_PS}, and ${SONGS_FS} from ${SONGS}."
 #-----------------------------------------------------------------------------
@@ -149,10 +159,102 @@ clean:
 	rm -f ${SONGS_PS} ${SONGS_2_PS} ${SONGS_PS} ${SONGS_2_PS} ${SONGS_PDF} ${SONGS_2_PDF}
 	rm -f *.wav *.csv *.h *.v
 	rm -f *.E
+	rm -rf ${SFZ_CSVDIR} ${SFZ_MIXDIR}
+	rm -f ${SONGS:%=%-sfz.mp4}
 #-----------------------------------------------------------------------------
 .PHONY: s1
 s1: ${SONGS_FS} ${SONGS_2_FS}    Makefile ${MUSICOMP2ABC}
 s1: ${SONGS_PDF} ${SONGS_2_PDF}  Makefile ${IMSCOMP}
+#-----------------------------------------------------------------------------
+# SFZ (VPO sampler) pipeline: real orchestral samples via sfizz_render
+#   make sfz          - render all pieces to sfz-mix/*.wav
+#   make sfz-mp4      - encode all pieces to *-sfz.mp4 video
+#   make sfz-clean    - remove sfz-csv/ and sfz-mix/ directories
+#
+# Per-piece flow:
+#   .gcs -> .E -> [imscomp --sfzpipecsv] -> sfz-csv/<piece>/*.csv
+#                                          -> [gcs2sfz]      -> sfz-mix/<piece>-sfz-mix.wav
+#                                          -> [ffmpeg]        -> <piece>-sfz.mp4
+#-----------------------------------------------------------------------------
+# 1) Generate per-instrument CSVs via imscomp --sfzpipecsv
+#    Runs in the target CSV directory (absolute paths via CURDIR).
+sfz-csv/%/.done: %.E ${IMSCOMP}
+	@mkdir -p $${@D}
+	@rm -f $${@D}/*.csv
+	cd $${@D} && $(CURDIR)/../../ims/imscomp --sfzpipecsv $(CURDIR)/$*.E
+	@touch $@
+#-----------------------------------------------------------------------------
+# 2) Render instrument CSVs to a mixed WAV via gcs2sfz + sfizz_render
+sfz-mix/%-sfz-mix.wav: sfz-csv/%/.done
+	@mkdir -p $${@D}
+	"$(CURDIR)/$(GCS2SFZ)" "$(CURDIR)/$(SFZ_CSVDIR)/$*" \
+		--outdir "$(CURDIR)/$(SFZ_MIXDIR)" \
+		--sfzdir "$(CURDIR)/$(SFZ_LIBDIR)"
+#-----------------------------------------------------------------------------
+# 3) Encode SFZ mix to MP4 (same visual style as gcs2youtube: title card + waveform)
+%-sfz.mp4: sfz-mix/%-sfz-mix.wav %.E ${GCS2YOUTUBE} ${WAV2WAVEFORM} ${FS2ASS}
+	@DURATION=$$(ffprobe -v error -show_entries format=duration \
+		-of default=noprint_wrappers=1:nokey=1 "$<"); \
+	TITLE=$$(grep '^title ' $*.E | sed 's/^title[[:space:]]*//' | tail -1); \
+	TITLE=$${TITLE:-"$*"}; \
+	ASS_FLAG=""; \
+	WAVEFORM_FLAG=""; \
+	if [ -x "$(CURDIR)/$(FS2ASS)" ]; then \
+		ASS_FILE="$${TMPDIR:-/tmp}/$*_sfz.ass"; \
+		if python3 "$(CURDIR)/$(FS2ASS)" "$*.E" "$$ASS_FILE" --title "$$TITLE" 2>/dev/null; then \
+			ASS_FLAG="ass=$$ASS_FILE"; \
+		fi; \
+	fi; \
+	if [ -x "$(CURDIR)/$(WAV2WAVEFORM)" ]; then \
+		WAVEFORM_FILE="$${TMPDIR:-/tmp}/$*_sfz_waveform.mp4"; \
+		if uv run --script "$(CURDIR)/$(WAV2WAVEFORM)" "$<" "$$WAVEFORM_FILE" \
+				--fps 15 --window 10.0 2>/dev/null || \
+		   python3 "$(CURDIR)/$(WAV2WAVEFORM)" "$<" "$$WAVEFORM_FILE" \
+				--fps 15 --window 10.0 2>/dev/null; then \
+			WAVEFORM_FLAG="$$WAVEFORM_FILE"; \
+		fi; \
+	fi; \
+	if [ -n "$$ASS_FLAG" ] && [ -n "$$WAVEFORM_FLAG" ]; then \
+		ffmpeg -y \
+			-f lavfi -i "color=c=black:s=1920x1080:r=15:d=$$DURATION" \
+			-i "$<" -i "$$WAVEFORM_FLAG" \
+			-filter_complex "[0:v]$$ASS_FLAG[bg]; [bg][2:v]overlay=960:540[out]" \
+			-map "[out]" -map "1:a" \
+			-c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 192k \
+			-shortest -movflags +faststart "$@"; \
+	elif [ -n "$$ASS_FLAG" ]; then \
+		ffmpeg -y \
+			-f lavfi -i "color=c=black:s=1920x1080:r=15:d=$$DURATION" \
+			-i "$<" -vf "$$ASS_FLAG" \
+			-c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 192k \
+			-shortest -movflags +faststart "$@"; \
+	elif [ -n "$$WAVEFORM_FLAG" ]; then \
+		ffmpeg -y \
+			-f lavfi -i "color=c=black:s=1920x1080:r=15:d=$$DURATION" \
+			-i "$<" -i "$$WAVEFORM_FLAG" \
+			-filter_complex "[0:v]drawtext=text='$$TITLE':fontcolor=white:fontsize=48:x=(w-text_w)/2:y=(h-text_h)/2-40[bg]; [bg][2:v]overlay=960:540[out]" \
+			-map "[out]" -map "1:a" \
+			-c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 192k \
+			-shortest -movflags +faststart "$@"; \
+	else \
+		ffmpeg -y \
+			-f lavfi -i "color=c=black:s=1920x1080:r=1:d=$$DURATION" \
+			-i "$<" \
+			-vf "drawtext=text='$$TITLE':fontcolor=white:fontsize=48:x=(w-text_w)/2:y=(h-text_h)/2-40" \
+			-c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 192k \
+			-shortest -movflags +faststart "$@"; \
+	fi
+#-----------------------------------------------------------------------------
+.PHONY: sfz
+sfz: ${SONGS:%=${SFZ_MIXDIR}/%-sfz-mix.wav}
+#-----------------------------------------------------------------------------
+.PHONY: sfz-mp4
+sfz-mp4: ${SONGS:%=%-sfz.mp4}
+#-----------------------------------------------------------------------------
+.PHONY: sfz-clean
+sfz-clean:
+	rm -rf ${SFZ_CSVDIR} ${SFZ_MIXDIR}
+	rm -f ${SONGS:%=%-sfz.mp4}
 #-----------------------------------------------------------------------------
 # End of Makefile
 #-----------------------------------------------------------------------------
