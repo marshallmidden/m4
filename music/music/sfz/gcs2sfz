@@ -166,8 +166,8 @@ def render_instrument(csv_path, out_wav, vpo_root, samplerate):
         if not has_notes:
             print(f"  .. {name}: empty part, skipping (no audio).")
             return None
-        cmd = [SFIZZ, "--sfz", sfz_path, "--midi", midi_path, "--wav", out_wav,
-               "--samplerate", str(samplerate)]
+        cmd = [SFIZZ, "--use-eot", "--sfz", sfz_path, "--midi", midi_path,
+               "--wav", out_wav, "--samplerate", str(samplerate)]
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
             print(f"  !! {name}: sfizz_render failed:\n{r.stderr[-2000:]}")
@@ -175,16 +175,23 @@ def render_instrument(csv_path, out_wav, vpo_root, samplerate):
     return out_wav
 
 
-def mixdown(wavs, out_wav):
-    """Mix a list of WAVs into one using ffmpeg amix."""
+def mixdown(wavs, out_wav, lead_in=0.0):
+    """Mix a list of WAVs into one using ffmpeg amix.
+
+    Applies a light limiter (no clipping) and an optional lead-in of silence so
+    player startup latency never chops the first note(s).
+    """
     if not wavs:
         return None
     n = len(wavs)
+    chain = f"amix=inputs={n}:normalize=0:duration=longest,alimiter=limit=0.95:level=false"
+    if lead_in > 0:
+        lag = f"{lead_in*1000:.0f}"
+        chain += f",adelay={lag}ms:all=1"
     cmd = [FFMPEG, "-y"]
     for w in wavs:
         cmd += ["-i", w]
-    cmd += ["-filter_complex", f"amix=inputs={n}:normalize=0:duration=longest",
-            "-ac", "2", "-ar", "48000", out_wav]
+    cmd += ["-filter_complex", chain, "-ac", "2", "-ar", "48000", out_wav]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         print(f"mixdown failed:\n{r.stderr[-2000:]}")
@@ -269,6 +276,7 @@ def main(argv):
 
     workdir = tempfile.mkdtemp(prefix="gcs2sfz-")
     TAIL = 6.0  # seconds of reverb/sustain tail after the last note
+    LEAD_IN = float(os.environ.get("GCS2SFZ_LEAD_IN", "1.0"))  # silence before first note
 
     rendered_csvs = []
     wavs = []
@@ -296,7 +304,7 @@ def main(argv):
     piece_end = 0.0
     for csv_path in rendered_csvs:
         piece_end = max(piece_end, csv_max_end(csv_path))
-    target = piece_end + TAIL
+    target = LEAD_IN + piece_end + TAIL
 
     if outdir is None:
         outdir = csv_dir
@@ -304,7 +312,7 @@ def main(argv):
     mix_name = os.path.basename(os.path.normpath(csv_dir))
     out_mix = os.path.join(outdir, f"{mix_name}-sfz-mix.wav")
     raw_mix = os.path.join(workdir, "raw-mix.wav")
-    mixdown(wavs, raw_mix)
+    mixdown(wavs, raw_mix, lead_in=LEAD_IN)
     if piece_end > 0:
         trim_wav(raw_mix, out_mix, target)
     else:

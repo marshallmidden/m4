@@ -132,3 +132,87 @@ python3 ../../ims/imscomp --sfzpipecsv v3-1.E   # writes *.csv in CWD
 - Mirror `--sfzpipecsv` (and today's fixes conceptually) to `musicomp2abc/musicomp2abc`
   so the two compilers stay byte-identical (DOALL divergence check).
 - Full real-piece end-to-end SFZ render (e.g. b/09/b9m1) with parallel render.
+
+# 2026-09-05 session 2: full b9m2 render — the --use-eot bug (CRITICAL, fixed)
+
+## What happened
+- Launched the first full 13-instrument b9m2 render (all 8 workers in parallel,
+  detached via `screen -dmS b9m2sfz`). Parent ran ~1h35m, then the disk hit
+  **100% full (116 MiB free)** — `/var/folders/.../T/gcs2sfz-*/` contained
+  **532 GB** of per-instrument WAVs (cello.wav alone 121 GB = ~635,000 s of audio!).
+  Renders were NOT stuck on compute — they were pathologically over-long.
+
+## Root cause
+- `sfizz_render` WITHOUT `--use-eot` freewheels and, for **dense** parts, never
+  detects the end of the song — it keeps generating audio indefinitely.
+  - Sparse parts (contrabass/pizzicato/timpani/trombone, ≤1485 notes) terminate on
+    their own at the correct length (~1173 s / 225 MB).
+  - Dense parts (all 8 with >1447 notes, e.g. trumpet 1447, cello 1804, horn 5900)
+    produced 30–121 GB WAVs (encoded as 474k–635k s and still growing).
+  - Not a `write_midi`/`_varint` problem: MIDIs are correct (max tick ~1121k =
+    ~1168.7 s); CSVs are clean (max end 1171.6 s).
+- With `--use-eot`: trumpet renders exactly **1171.56 s** in <60 s. That's the fix.
+
+## Fix
+- `gcs2sfz.render_instrument` cmd now: `[SFIZZ, "--use-eot", "--sfz", ..., "--midi", ..., "--wav", ..., "--samplerate", ...]`
+
+## Validation
+- 3-instrument test (trumpet + french_horn + cello CSVs): finished in 16.3 s,
+  mix `b9m2-test-sfz-mix.wav` = 1177.6 s estimated (1171.56 actual) — correct.
+- **Full b9m2 render (all 13 instruments): DONE in ~1 min**, mix =
+  `~/b9m2-sfz-render/out/b9m2-sfz-render-sfz-mix.wav`, duration **1171.56 s**,
+  224.9 MB @1536 kbps, mean_volume -14.3 dB / max 0.0 dB. No orphan processes.
+
+## Lesson
+- `sfizz_render` ALWAYS needs `--use-eot` for dense music, or freewheeling runs
+  away and fills the disk. If a render "never finishes": check `du -sh` of the
+  gcs2sfz `tempfile.mkdtemp` dir; kill it, add `--use-eot`, rerun.
+
+## REMAINING
+- `musicomp2abc` mirror of `--sfzpipecsv` + `--use-eot` (keep byte-identical).
+- Note: `make sfz` / `make sfz-mp4` b/09 Makefile targets still untested end-to-end.
+
+# 2026-09-05 session 3: lead-in, limiter, audio levels (user listened with afplay)
+
+## What the user found
+- Playing the mix with `afplay` sounded like the first note(s) were chopped off.
+  - **Not a render bug**: audio began at t=0 (ramp to -37 dB by frame ~10), nothing
+    lost at sample level. `afplay` has startup latency; with zero lead-in the
+    attack plays during afplay's startup. 319 full-scale pins of 112M samples.
+  - `ffplay -nodisp -autoexit wav` and `open wav` (QuickTime/VLC) work fine.
+- Instrument timbres differ from fluidsynth GeneralUser — EXPECTED: VPO is a real
+  orchestral sample library; that is the point of the SFZ pipeline.
+
+## Fixes in gcs2sfz
+1. **Lead-in**: `LEAD_IN = float(os.environ.get("GCS2SFZ_LEAD_IN", "1.0"))`
+   seconds of silence before the first note. `mixdown(..., lead_in)` appends
+   `adelay=<lead_ms>ms:all=1` to the filter chain; `target = LEAD_IN + piece_end + TAIL`.
+2. **Limiter**: mixdown chain now `amix=...:normalize=0:duration=longest,
+   alimiter=limit=0.95:level=false`. `level=false` is REQUIRED — default auto
+   makeup gain pushes output back toward full scale (max stayed 0.0 dB / 372 clips).
+
+## test-pipeline (new)
+- `music/music/sfz/test-pipeline` — self-contained smoke test: writes 3 synthetic
+  instrument CSVs (cello/violin/french_horn, piece ends 3.0s), runs gcs2sfz with
+  `GCS2SFZ_LEAD_IN=1.0`, asserts: mix exists, duration ≈ piece_end + lead_in,
+  48000Hz/2ch, audio present (peak > 3000/32767), NO clipped samples, first note
+  onsets after lead_in (silencedetect). Run: `cd music/music/sfz && python3 test-pipeline`.
+  Note: mix output filename uses the input dir's basename — test finds `*-sfz-mix.wav`.
+  Use `-v info` (not error) when parsing silencedetect output (info-level).
+  Currently PASS.
+
+## Verified final b9m2 render (~/b9m2-sfz-render/out/b9m2-sfz-render-sfz-mix.wav)
+- duration 1172.56s (1171.6 piece + 1.0 lead-in), 225132110 bytes
+- 0 clipped samples of 112.5M, max 0.950 FS (limiter working), mean -14.3 dB
+- first sound at 1.031s (lead-in intact)
+
+## REMAINING (for next session)
+- **Mirror `--sfzpipecsv` (+ lead-in/limiter conceptually) to `musicomp2abc/`** so
+  imscomp/musicomp2abc stay byte-identical — DOALL regression gate. NOT done.
+- b/09 `make sfz` / `make sfz-mp4` / `make b9m2-sfz.mp4` targets added in e76ff628
+  still NOT validated end-to-end (render pipeline verified manually instead).
+- Clean up/ignore b/09 build artifacts (b9m2.E, *.csv, b9m2_2.fs) — not committed.
+- Optional: 1812 one-shots (gun/explosion/bells) still TODO from earlier projects;
+  GM drum-channel remap in imscomp still TODO.
+- Render notes: keep on macOS, run under `screen -dmS` (detached) to survive
+  workspace interruptions; ALWAYS `--use-eot`; watch `GCS2SFZ_WORKERS`/disk.

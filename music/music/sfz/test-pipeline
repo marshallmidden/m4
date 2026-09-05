@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""Smoke test for the gcs2sfz SFZ rendering pipeline.
+
+Builds 3 tiny synthetic instrument CSVs (known note times), renders them through
+gcs2sfz -> sfizz_render -> amix, then asserts the output is sane:
+  - file exists, stereo, 48kHz
+  - length matches piece_end + LEAD_IN (player-startup buffer)
+  - the lead-in is silent (first note is NOT chopped by afplay-like latency)
+  - there IS audible audio (not empty)
+  - no clipped samples (alimiter working)
+
+Run:  python3 test-pipeline  [--leave-files]
+New files are created in a temp dir and removed on success.
+"""
+import os
+import struct
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+GCS2SFZ = os.path.join(HERE, "gcs2sfz")
+VPO_ROOT = os.path.join(HERE, "library", "VPO")
+
+PIECE_END = 3.0      # last note ends at 3.0s
+LEAD_IN = 1.0        # must match GCS2SFZ_LEAD_IN default in gcs2sfz
+EARLIEST_NOTE = 0.2  # earliest note start in the synthetic CSVs
+
+
+def make_csv(path, notes):
+    with open(path, "w") as f:
+        for start, dur, pitch, vel in notes:
+            f.write(f"{start},{dur},{pitch},{vel}\n")
+
+
+def run(*cmd):
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print("  stderr:", r.stderr[-3000:])
+    return r
+
+
+def probe(path, group, key):
+    r = run("/Users/m4/bin/ffprobe", "-v", "error",
+            "-select_streams", "a:0", "-show_entries",
+            f"{group}={key}", "-of", "default=nw=1:nk=1", path)
+    v = r.stdout.strip()
+    return float(v) if v else 0.0
+
+
+def decoded_samples(path):
+    """Return (argmax_abs, n_clipped, n_frames) via ffmpeg -> s16stdin."""
+    p = subprocess.run(["/Users/m4/bin/ffmpeg", "-v", "error", "-i", path,
+                        "-f", "s16le", "-ac", "2", "-"],
+                       capture_output=True)
+    data = p.stdout
+    n = len(data) // 4
+    peak = 0.0
+    clipped = 0
+    for i in range(0, len(data) - 3, 2):
+        v = struct.unpack_from("<h", data, i)[0]
+        a = abs(v)
+        if a > peak:
+            peak = a
+        if a >= 32767:
+            clipped += 1
+    return peak, clipped, n
+
+
+def main():
+    leave = "--leave-files" in sys.argv
+    if not os.path.isdir(VPO_ROOT):
+        print(f"FAIL: VPO library not found at {VPO_ROOT}")
+        return 1
+    d = tempfile.mkdtemp(prefix="gcs2sfz-test-")
+    outdir = os.path.join(d, "out")
+    try:
+        # Orchestra feel: cello pad (low), violin line (high), horn chord.
+        make_csv(os.path.join(d, "cello.csv"), [
+            (0.2, 1.5, 55, 90), (1.0, 1.6, 60, 88),
+        ])
+        make_csv(os.path.join(d, "violin.csv"), [
+            (0.3, 0.5, 76, 85), (1.0, 0.5, 67, 85), (1.6, 0.6, 79, 85),
+            (2.4, 0.6, 74, 85),
+        ])
+        make_csv(os.path.join(d, "french_horn.csv"), [
+            (0.6, 1.2, 53, 80), (1.6, 1.4, 55, 80),
+        ])
+
+        env = dict(os.environ, GCS2SFZ_LEAD_IN=str(LEAD_IN))
+        r = run(sys.executable, "-u", GCS2SFZ, d, "--outdir", outdir,
+                "--sfzdir", VPO_ROOT)
+        mixes = [os.path.join(outdir, f) for f in os.listdir(outdir)
+                 if f.endswith("-sfz-mix.wav")] if os.path.isdir(outdir) else []
+        mix = mixes[0] if mixes else None
+        if r.returncode != 0 or not mix or not os.path.exists(mix):
+            print(f"FAIL: gcs2sfz did not produce a mix (rc={r.returncode})")
+            return 1
+            print(f"FAIL: gcs2sfz did not produce a mix (rc={r.returncode})")
+            return 1
+
+        dur = probe(mix, "format", "duration")
+        exp = PIECE_END + LEAD_IN
+        if not (exp - 0.3 <= dur <= exp + 0.3):
+            print(f"FAIL: duration {dur:.2f}s, expected ~{exp:.2f}s (piece {PIECE_END} + lead {LEAD_IN})")
+            return 1
+        print(f"OK  duration {dur:.2f}s (expected ~{exp:.2f}s)")
+
+        rate = probe(mix, "stream", "sample_rate")
+        ch = probe(mix, "stream", "channels")
+        if rate != 48000 or ch != 2:
+            print(f"FAIL: fmt {rate}Hz/{ch}ch, expected 48000/2")
+            return 1
+        print(f"OK  format {rate:.0f}Hz/{ch:.0f}ch")
+
+        peak, clipped, frames = decoded_samples(mix)
+        if frames <= 0:
+            print("FAIL: no audio decoded")
+            return 1
+        if peak < 3000:
+            print(f"FAIL: audio is effectively silent (peak={peak})")
+            return 1
+        print(f"OK  audio present (peak {peak/32767:.2f} FS, {frames/48000:.2f}s)")
+
+        if clipped:
+            print(f"FAIL: {clipped} clipped samples (limiter should prevent this)")
+            return 1
+        print("OK  no clipped samples (limiter working)")
+
+        # Lead-in: first signal must arrive at/after LEAD_IN, not at 0.
+        hole = ["/Users/m4/bin/ffmpeg", "-v", "info", "-i", mix,
+                "-af", "silencedetect=noise=-60dB:d=0.05", "-f", "null", "-"]
+        p = subprocess.Popen(hole, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True)
+        first_end = None
+        for line in p.stdout:
+            if "silence_end" in line:
+                first_end = float(line.split("silence_end: ")[1].split("|")[0].strip())
+                break
+        p.wait()
+        expect = LEAD_IN + EARLIEST_NOTE
+        if first_end is None or abs(first_end - expect) > 0.3:
+            print(f"FAIL: first sound at {first_end}, expected ~{expect:.2f}s (lead-in + earliest note)")
+            return 1
+        print(f"OK  first note onsets after ~{first_end:.2f}s lead-in (player safe)")
+
+        print("\nPASS: gcs2sfz pipeline render test")
+        return 0
+    finally:
+        if not leave:
+            subprocess.run(["rm", "-rf", d])
+
+
+if __name__ == "__main__":
+    sys.exit(main())
