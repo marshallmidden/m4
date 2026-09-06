@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+"""Dynamics loudness comparison: SFZ/VPO vs fluidsynth GM.
+
+Builds a tiny probe piece (dyn.gcs) with one sustained note per dynamic level
+(ppp pp p mp mf f ff fff) on violin, renders it through BOTH audio backends,
+then measures RMS/peak dB per dynamic and prints a side-by-side table.
+
+  - SFZ/VPO path : imscomp --sfzpipecsv -> src.csv -> gcs2sfz -> sfizz_render
+  - fluidsynth path : imscomp --fluidsynth -> dyn.fs -> ~/bin/fluidsynth
+
+Run:  cd music/music/sfz && python3 dynamics-test
+Prints a table of RMS/Peak dB per dynamic for each backend.
+"""
+import os
+import re
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PROBE = os.path.join(HERE, "dynprobe")
+IMSCOMP = os.path.join(HERE, "..", "..", "ims", "imscomp")
+GCS2SFZ = os.path.join(HERE, "gcs2sfz")
+SFZDIR = os.path.join(HERE, "library", "VPO")
+GENERALUSER = "/Users/m4/src/GeneralUser/GeneralUser.sf2"
+FLUIDSYNTH = os.path.expanduser("~/bin/fluidsynth")
+FFMPEG = os.path.expanduser("~/bin/ffmpeg")
+
+DYNAMICS = ["ppp", "pp", "p", "mp", "mf", "f", "ff", "fff"]
+
+NOTE_LEN = 1.6        # seconds to measure inside each note
+NOTE_START = 0.1      # offset into each note before measuring
+GAP = 2.0             # seconds between note onsets
+
+
+def sh(cmd, env=None):
+    r = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    if r.returncode != 0:
+        sys.exit(f"FAILED: {' '.join(cmd)}\n{r.stdout}\n{r.stderr}")
+    return r.stdout + r.stderr
+
+
+def measure(seg_start, wav):
+    """Return (peak_db, rms_db) of <NOTE_LEN> seconds at <seg_start>."""
+    out = sh([FFMPEG, "-ss", f"{seg_start:.2f}", "-t", str(NOTE_LEN),
+              "-i", wav, "-af", "astats=metadata=1", "-f", "null", "-"])
+    peaks = [float(v) for v in re.findall(r"Peak level dB: ([-\d.]+)", out)]
+    rmss = [float(v) for v in re.findall(r"RMS level dB: ([-\d.]+)", out)]
+    if not peaks or not rmss:
+        return None, None
+    return peaks[-1], rmss[-1]   # "Overall" measurement is the last one
+
+
+def main():
+    os.chdir(PROBE)
+
+    # 1) CPP-preprocess the probe and emit both formats.
+    sh(["gcc", "-E", "-x", "c", "-undef", "-Wundef", "-Werror", "-nostdinc",
+        "-C", "-CC", "-traditional-cpp", "dyn.gcs", "-o", "dyn.E"])
+    sh(["python3", IMSCOMP, "--sfzpipecsv", "--nohumanize", "--noarpeggio", "dyn.E"])
+    sh(["python3", IMSCOMP, "--fluidsynth", "--nohumanize", "--noarpeggio",
+        "dyn.E"])
+
+    # 2) Render both backends (lead-in disabled so both start at t=0 for a
+    #    like-for-like measurement window).
+    env = dict(os.environ, GCS2SFZ_LEAD_IN="0")
+    sh(["python3", GCS2SFZ, PROBE, "--sfzdir", SFZDIR,
+        "--outdir", os.path.join(PROBE, "out")], env=env)
+    with open("dyn.fs") as f:
+        fs = f.read()
+    r = subprocess.run([FLUIDSYNTH, "-F", "out-fluidsynth.wav", GENERALUSER],
+                       input=fs, capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit(f"FAILED fluidsynth render:\n{r.stdout}\n{r.stderr}")
+
+    sfz_wav = os.path.join(PROBE, "out", "dynprobe-sfz-mix.wav")
+
+    # 3) Measure per-dynamic segment in each WAV.
+    print(f"{'dyn':>4} {'vel':>4} | {'SFZ peak':>9} {'SFZ rms':>8} | "
+          f"{'FL peak':>9} {'FL rms':>8} | {'dRMS':>6}")
+    print("-" * 62)
+    results = {}
+    for i, dyn in enumerate(DYNAMICS):
+        start = NOTE_START + i * GAP
+        sp, sr = measure(start, sfz_wav)
+        fp, fr = measure(start, "out-fluidsynth.wav")
+        results[dyn] = (sp, sr, fp, fr)
+        if sp is None or fp is None:
+            sys.exit("astats produced no dB readings")
+        vel = 40 + 10 * i
+        print(f"{dyn:>4} {vel:>4} | {sp:>8.1f}dB {sr:>7.1f}dB | "
+              f"{fp:>8.1f}dB {fr:>7.1f}dB | {sr - fr:>+5.1f}")
+
+    print()
+    print("RMS range (fff - ppp):")
+    print(f"  SFZ/VPO     : {results['ppp'][1]:.1f} dB -> {results['fff'][1]:.1f} dB "
+          f"({results['fff'][1] - results['ppp'][1]:.1f} dB span)")
+    print(f"  fluidsynth  : {results['ppp'][3]:.1f} dB -> {results['fff'][3]:.1f} dB "
+          f"({results['fff'][3] - results['ppp'][3]:.1f} dB span)")
+    print()
+    print("Interpretation: a positive dRMS means SFZ/VPO is LOUDER than fluidsynth")
+    print("for that dynamic. VPO sustain patches have no velocity gain layers,")
+    print("so quiet dynamics (ppp/pp/p/mp) play far too loud vs fluidsynth's")
+    print("CC11-expression-driven level.")
+
+
+if __name__ == "__main__":
+    main()
