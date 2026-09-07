@@ -25,8 +25,8 @@ FLUIDSYNTH   = ~/bin/fluidsynth
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
 #-- SFZ (VPO sampler) pipeline: real orchestral samples via sfizz_render
-GCS2SFZ     = ../../music/music/sfz/gcs2sfz
-SFZ_LIBDIR  = ../../music/music/sfz/library/VPO
+GCS2SFZ     = ../../music/sfz/gcs2sfz
+SFZ_LIBDIR  = ../../music/sfz/library/VPO
 SFZ_CSVDIR  = sfz-csv
 SFZ_MIXDIR  = sfz-mix
 WAV2WAVEFORM = ../../wav2waveform
@@ -179,14 +179,14 @@ s1: ${SONGS_PDF} ${SONGS_2_PDF}  Makefile ${IMSCOMP}
 # 1) Generate per-instrument CSVs via imscomp --sfzpipecsv
 #    Runs in the target CSV directory (absolute paths via CURDIR).
 sfz-csv/%/.done: %.E ${IMSCOMP}
-	@mkdir -p $${@D}
-	@rm -f $${@D}/*.csv
-	cd $${@D} && $(CURDIR)/../../ims/imscomp --sfzpipecsv $(CURDIR)/$*.E
+	@mkdir -p $(dir $@)
+	@rm -f $(dir $@)*.csv
+	cd $(dir $@) && $(CURDIR)/../../ims/imscomp --sfzpipecsv $(CURDIR)/$*.E
 	@touch $@
 #-----------------------------------------------------------------------------
 # 2) Render instrument CSVs to a mixed WAV via gcs2sfz + sfizz_render
 sfz-mix/%-sfz-mix.wav: sfz-csv/%/.done
-	@mkdir -p $${@D}
+	@mkdir -p $(dir $@)
 	"$(CURDIR)/$(GCS2SFZ)" "$(CURDIR)/$(SFZ_CSVDIR)/$*" \
 		--outdir "$(CURDIR)/$(SFZ_MIXDIR)" \
 		--sfzdir "$(CURDIR)/$(SFZ_LIBDIR)"

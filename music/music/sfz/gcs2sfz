@@ -119,6 +119,7 @@ def write_midi(csv_path: str, midi_path: str, track=0):
     tempo_ppqn_micros = int(60000000.0 / BPM)  # 500000 us/qn @ 120bpm
 
     # Group note-ons/offs onto a timeline keyed by absolute tick.
+    # (kind 0=note-on, 1=note-off; CC11 expression is derived from note-ons.)
     timeline: dict[int, list[tuple[int, int, int]]] = {}
     for on, off, pitch, vel in notes:
         timeline.setdefault(on, []).append((0, pitch, vel))
@@ -135,12 +136,20 @@ def write_midi(csv_path: str, midi_path: str, track=0):
         delta = tick - last_tick
         last_tick = tick
         batch = sorted(timeline[tick], key=lambda e: e[0])
-        for idx, (kind, pitch, vel) in enumerate(batch):
+        first = True
+        for kind, pitch, vel in batch:
             if kind == 0:
-                ev = b"\x90" + bytes([pitch & 0x7F, vel & 0x7F])
+                # Emit CC11 expression (value = velocity, like fluidsynth's CC11=dyn)
+                # right before each note-on so the SFZ wrapper's amplitude_oncc11
+                # scales per-note loudness.
+                events.append((delta if first else 0,
+                               b"\xb0" + bytes([11, vel & 0x7F])))
+                first = False
+                events.append((0, b"\x90" + bytes([pitch & 0x7F, vel & 0x7F])))
             else:
                 ev = b"\x80" + bytes([pitch & 0x7F, 64])
-            events.append((delta if idx == 0 else 0, ev))
+                events.append((delta if first else 0, ev))
+                first = False
 
     with open(midi_path, "wb") as f:
         f.write(b"MThd" + struct.pack(">IHHH", 6, 0, 1, TPQ))
@@ -160,18 +169,36 @@ def render_instrument(csv_path, out_wav, vpo_root, samplerate):
         print(f"  !! {name}: missing VPO file {sfz_path}. Skipping.")
         return None
 
-    with tempfile.TemporaryDirectory() as td:
-        midi_path = os.path.join(td, "in.mid")
-        has_notes = write_midi(csv_path, midi_path)
-        if not has_notes:
-            print(f"  .. {name}: empty part, skipping (no audio).")
-            return None
-        cmd = [SFIZZ, "--use-eot", "--sfz", sfz_path, "--midi", midi_path,
-               "--wav", out_wav, "--samplerate", str(samplerate)]
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        if r.returncode != 0:
-            print(f"  !! {name}: sfizz_render failed:\n{r.stderr[-2000:]}")
-            return None
+    # VPO patches carry loudness via CC11 expression, not velocity, but the
+    # stock .sfz has no amplitude_oncc11 opcode. Wrap it in a same-directory
+    # wrapper so ./libs sample paths resolve and CC11 (== velocity, written by
+    # write_midi) scales per-note loudness like fluidsynth's CC11.
+    sfz_dir = os.path.dirname(sfz_path)
+    fd, wrapper = tempfile.mkstemp(dir=sfz_dir, prefix=".gcs2sfz-dyn-",
+                                   suffix=".sfz")
+    os.close(fd)
+    try:
+        with open(wrapper, "w") as f:
+            f.write("<global>\n")
+            f.write("amplitude_oncc11=100\n")
+            f.write(f'#include "{os.path.basename(sfz_path)}"\n')
+        with tempfile.TemporaryDirectory() as td:
+            midi_path = os.path.join(td, "in.mid")
+            has_notes = write_midi(csv_path, midi_path)
+            if not has_notes:
+                print(f"  .. {name}: empty part, skipping (no audio).")
+                return None
+            cmd = [SFIZZ, "--use-eot", "--sfz", wrapper, "--midi", midi_path,
+                   "--wav", out_wav, "--samplerate", str(samplerate)]
+            r = subprocess.run(cmd, capture_output=True, text=True)
+            if r.returncode != 0:
+                print(f"  !! {name}: sfizz_render failed:\n{r.stderr[-2000:]}")
+                return None
+    finally:
+        try:
+            os.remove(wrapper)
+        except OSError:
+            pass
     return out_wav
 
 
