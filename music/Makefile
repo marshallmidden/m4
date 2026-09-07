@@ -7,7 +7,12 @@ help:
 	@echo '  all       - Build all songs.'
 	@echo '  mp4       - Create .mp4 YouTube videos from all songs.'
 	@echo '  mp4_2     - Create _2.mp4 YouTube videos (imscomp variants) from all songs.'
+	@echo '  setup     - Check for missing tools/soundfonts (read-only).'
 	@echo '  clean     - Remove intermediate .csv,.mid,.abc,.ps,_m.ps,.fs, and .wav files.'
+#-----------------------------------------------------------------------------
+.PHONY: setup
+setup:
+	./setup.sh
 #-----------------------------------------------------------------------------
 .PHONY: all
 all:
