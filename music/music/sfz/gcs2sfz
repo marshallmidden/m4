@@ -10,9 +10,9 @@ Pipeline:
         -> ~/bin/sfizz_render <VPO>.sfz      (per-instrument WAV)
         -> ffmpeg amix                        (one mixed WAV)
 
-For 1812-specific one-shots (gunshot/explosion/church bells) the mapping points
-at EFFECTS/*.wav files which are not part of VPO; those are skipped with a
-warning until samples are added.
+For 1812-specific one-shots (gunshot/explosion/canon) the mapping points at
+EFFECTS/*.wav files at the library root; those are placed directly at their
+CSV note times via ffmpeg (trimmed to the scored duration, velocity-scaled).
 
 Requirements: python3, ~/bin/sfizz_render, ffmpeg, and the VPO library.
 """
@@ -83,8 +83,8 @@ def _encode_smf_track(events: list[tuple[int, bytes]]) -> bytes:
     return b"MTrk" + struct.pack(">I", len(data)) + data
 
 
-def write_midi(csv_path: str, midi_path: str, track=0):
-    """Write a single-track MIDI file from a CSV (absolute times in seconds)."""
+def read_csv_notes(csv_path: str) -> list[tuple[float, float, int, int]]:
+    """Parse an instrument CSV into (start_s, dur_s, pitch, vel) tuples."""
     notes = []
     with open(csv_path) as f:
         for line in f:
@@ -102,11 +102,19 @@ def write_midi(csv_path: str, midi_path: str, track=0):
                 vel = max(1, min(127, int(vel)))
             except ValueError:
                 continue
-            on_tick = int(round(start_s * TICKS_PER_SEC))
-            off_tick = int(round((start_s + dur_s) * TICKS_PER_SEC))
-            if off_tick <= on_tick:
-                off_tick = on_tick + 1
-            notes.append((on_tick, off_tick, pitch, vel))
+            notes.append((start_s, dur_s, pitch, vel))
+    return notes
+
+
+def write_midi(csv_path: str, midi_path: str, track=0):
+    """Write a single-track MIDI file from a CSV (absolute times in seconds)."""
+    notes = []
+    for start_s, dur_s, pitch, vel in read_csv_notes(csv_path):
+        on_tick = int(round(start_s * TICKS_PER_SEC))
+        off_tick = int(round((start_s + dur_s) * TICKS_PER_SEC))
+        if off_tick <= on_tick:
+            off_tick = on_tick + 1
+        notes.append((on_tick, off_tick, pitch, vel))
 
     if not notes:
         # Empty instrument: still write a valid file so the caller can decide.
@@ -157,6 +165,48 @@ def write_midi(csv_path: str, midi_path: str, track=0):
     return True
 
 
+def render_oneshot(csv_path: str, out_wav: str, sample_path: str, samplerate: int):
+    """Place a one-shot WAV sample at each CSV note-on using ffmpeg.
+
+    One-shots (gunshot/explosion/canon) are standalone WAVs positioned at the
+    note times; each placement is trimmed to its scored duration and scaled by
+    velocity, then all placements for the part are amixed into one instrument
+    WAV like any other render.
+    """
+    notes = read_csv_notes(csv_path)
+    if not notes:
+        print(f"  .. {os.path.basename(csv_path)}: empty part, skipping (no audio).")
+        return None
+    if not os.path.exists(sample_path):
+        print(f"  !! {os.path.basename(csv_path)}: missing one-shot sample {sample_path}. Skipping.")
+        return None
+
+    n = len(notes)
+    inputs = []
+    filters = []
+    for i, (start_s, dur_s, _pitch, vel) in enumerate(notes):
+        ms = int(round(start_s * 1000.0))
+        gain = vel / 127.0
+        inputs += ["-i", sample_path]
+        filters.append(
+            f"[{i}:a]atrim=0:{dur_s:.4f},asetpts=PTS-STARTPTS,"
+            f"adelay={ms}:all=1,volume={gain:.4f}[a{i}]"
+        )
+    filters.append(f"{''.join(f'[a{i}]' for i in range(n))}"
+                   f"amix=inputs={n}:normalize=0:duration=longest[aout]")
+    cmd = [FFMPEG, "-y"] + inputs + [
+        "-filter_complex", ";".join(filters),
+        "-map", "[aout]",
+        "-ar", str(samplerate),
+        out_wav,
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"  !! {os.path.basename(csv_path)}: ffmpeg one-shot render failed:\n{r.stderr[-2000:]}")
+        return None
+    return out_wav
+
+
 def render_instrument(csv_path, out_wav, vpo_root, samplerate):
     """Render one instrument CSV to a WAV via sfizz_render."""
     name = os.path.splitext(os.path.basename(csv_path))[0]
@@ -164,6 +214,11 @@ def render_instrument(csv_path, out_wav, vpo_root, samplerate):
     if rel is None:
         print(f"  !! {name}: no VPO mapping (fall back to GM). Skipping.")
         return None
+    if rel.startswith("EFFECTS/"):
+        # One-shots live at the library root (music/sfz/library/EFFECTS).
+        library_root = os.path.dirname(os.path.dirname(vpo_root))
+        sample_path = os.path.join(library_root, rel)
+        return render_oneshot(csv_path, out_wav, sample_path, samplerate)
     sfz_path = os.path.join(vpo_root, rel)
     if not os.path.exists(sfz_path):
         print(f"  !! {name}: missing VPO file {sfz_path}. Skipping.")

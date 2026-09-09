@@ -8,10 +8,11 @@
 #
 #   ./setup.sh              check only (report what's missing, exit 1 if any)
 #   ./setup.sh --check      same as above (also useful via `make setup`)
-#   ./setup.sh --all        fetch VPO library + GeneralUser.sf2 + sfizz, then check
+#   ./setup.sh --all        fetch VPO library + GeneralUser.sf2 + sfizz + effects, then check
 #   ./setup.sh --vpo        download VPO wave files (616MB) + standard scripts
 #   ./setup.sh --sf2        get GeneralUser.sf2 (git clone of the release)
 #   ./setup.sh --sfizz      put sfizz_render + libsfizz into ~/bin (macOS)
+#   ./setup.sh --effects    get CC0 one-shot effect samples (1812 canon)
 #   ./setup.sh --notes      print build recipes for the hand-built tools
 #
 # Non-destructive: fetches write only to music/music/sfz/library/ and ~/bin,
@@ -26,6 +27,7 @@ PIPELINE_DIR="$SCRIPT_DIR"                       # music/
 SFZ_DIR="$PIPELINE_DIR/music/sfz"                # music/music/sfz
 VPO_PARENT="$SFZ_DIR/library/VPO"                # target: .../library/VPO/
 VPO_DEST="$VPO_PARENT/Virtual-Playing-Orchestra3"
+EFFECTS_DIR="$SFZ_DIR/library/EFFECTS"           # one-shot samples (canon)
 
 BINDIR="${BINDIR:-$HOME/bin}"
 GENERALUSER_DIR="${GENERALUSER_DIR:-}"
@@ -40,10 +42,11 @@ fi
 FORCE=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --all) DO_VPO=1; DO_SF2=1; DO_SFIZZ=1; CHECK_AFTER=1 ;;
+        --all) DO_VPO=1; DO_SF2=1; DO_SFIZZ=1; DO_EFFECTS=1; CHECK_AFTER=1 ;;
         --vpo) DO_VPO=1 ;;
         --sf2) DO_SF2=1 ;;
         --sfizz) DO_SFIZZ=1 ;;
+        --effects) DO_EFFECTS=1 ;;
         --notes) DO_NOTES=1 ;;
         --check) DO_CHECK=1 ;;
         --force) FORCE=1 ;;
@@ -92,6 +95,11 @@ check() {
     else
         say_miss "VPO library -> $VPO_DEST  (needs wave files + scripts unzipped merge)"
     fi
+    if has_file "$EFFECTS_DIR/canon.wav"; then
+        say_ok "1812 canon one-shot ($EFFECTS_DIR/canon.wav)"
+    else
+        say_miss "canon one-shot -> $EFFECTS_DIR/canon.wav  (needed for t/e SFZ mixes)"
+    fi
 
     say_head "YouTube upload (only needed for ./youtube-upload / make mp4 upload)"
     if [ -r "$HOME/.config/youtube/client_secrets.json" ]; then
@@ -107,6 +115,7 @@ check() {
         done
         has_file "$GENERALUSER_DIR/GeneralUser.sf2" || missing=$((missing+1))
         has_dir "$VPO_DEST/libs" || missing=$((missing+1))
+        has_file "$EFFECTS_DIR/canon.wav" || missing=$((missing+1))
         printf '\n%d missing component(s). Run ./setup.sh --all (or --notes for tool recipes).\n' "$missing"
         if [ "$missing" -gt 0 ]; then exit 1; fi
     fi
@@ -205,6 +214,33 @@ fetch_sf2() {
 }
 
 # --------------------------------------------------------------------------
+fetch_effects() {
+    say_head "Fetching CC0 one-shot effect samples (1812 canon)"
+    if has_file "$EFFECTS_DIR/canon.wav" && [ "$FORCE" -eq 0 ]; then
+        say_ok "canon.wav already at $EFFECTS_DIR; skip (--force to refetch)"
+        return 0
+    fi
+    mkdir -p "$EFFECTS_DIR"
+    tmp="$(mktemp -d)"
+    # Freesound sound 187767 "Cannon Shot" by qubodup, CC0 / public domain
+    # (US-government-source filming; author asks only for a link credit). The
+    # full-length FLAC requires a Freesound login, so use the public CDN
+    # preview (HQ MP3) and re-encode to a 48 kHz stereo WAV.
+    MP3="https://cdn.freesound.org/previews/187/187767_71257-hq.mp3"
+    echo "  $MP3"
+    curl -fL --max-time 300 "$MP3" -o "$tmp/canon.mp3" || { echo "  FAILED canon download"; rm -rf "$tmp"; return 1; }
+    ffmpeg -y -loglevel error -i "$tmp/canon.mp3" -ac 2 -ar 48000 "$EFFECTS_DIR/canon.wav" \
+        || { echo "  FAILED ffmpeg re-encode"; rm -rf "$tmp"; return 1; }
+    rm -rf "$tmp"
+    if has_file "$EFFECTS_DIR/canon.wav"; then
+        say_ok "installed $EFFECTS_DIR/canon.wav (source: freesound.org/people/qubodup/sounds/187767)"
+    else
+        say_miss "conversion produced no canon.wav"
+        return 1
+    fi
+}
+
+# --------------------------------------------------------------------------
 print_notes() {
     cat <<'NOTES'
 
@@ -250,6 +286,7 @@ action=0
 if [ -n "${DO_SFIZZ:-}" ]; then fetch_sfizz; action=1; fi
 if [ -n "${DO_VPO:-}" ]; then fetch_vpo; action=1; fi
 if [ -n "${DO_SF2:-}" ]; then fetch_sf2; action=1; fi
+if [ -n "${DO_EFFECTS:-}" ]; then fetch_effects; action=1; fi
 if [ "$action" -eq 0 ] || [ -n "${DO_CHECK:-}" ] || [ -n "${CHECK_AFTER:-}" ]; then
     if [ "$action" -gt 0 ]; then
         check

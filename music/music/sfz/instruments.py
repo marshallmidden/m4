@@ -108,8 +108,14 @@ def vpo_rel_path(instrument_name: str) -> str:
 
 
 def resolve(root_library: str, instrument_name: str):
-    """Resolve an instrument to an absolute SFZ/WAV path under library root."""
+    """Resolve an instrument to an absolute SFZ/WAV path under library root.
+
+    One-shots (EFFECTS/...) live at the library root itself, not inside the
+    VPO tree, so they are joined directly under root_library.
+    """
     rel = vpo_rel_path(instrument_name)
     if rel is None:
         return None
+    if rel.startswith("EFFECTS/"):
+        return os.path.join(root_library, rel)
     return os.path.join(root_library, VPO_ROOT, rel)
