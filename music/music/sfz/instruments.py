@@ -61,6 +61,7 @@ MAP = {
 
     # ---- One-shot effects (no orchestral VPO sample) -----------------------
     # These are rendered from the standalone WAV files in library/EFFECTS/.
+    "canon":            "EFFECTS/canon.wav",
     "gunshot":          "EFFECTS/gunshot.wav",
     "explosion":        "EFFECTS/explosion.wav",
     "church bells":     "EFFECTS/church-bells.wav",

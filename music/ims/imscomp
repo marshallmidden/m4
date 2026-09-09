@@ -2640,6 +2640,7 @@ instruments = {
     'Applause'.lower() : [126, 0],
     'Gunshot'.lower() : [127, 0],
     'Gun Shot'.lower() : [127, 0],
+    'Canon'.lower() : [127, 0],
     'Synth Bass 101'.lower() : [38, 1],
     'Mono Strings Trem'.lower() : [44, 1],
     'Mono Strings Fast'.lower() : [48, 1],
@@ -7011,7 +7012,11 @@ def print_out_midi1csv_notes() -> None:
                             insert_sorted_tail([voice+1, note_time, f'Text_t, "On:{chan:>4} {last_note_on:>3}"'], 'HERE21')
                         # fi
                     # fi
-                    last_note_on = n
+                    if l_instrument in instruments:
+                        last_note_on = n
+                    else:
+                        last_note_on = drum_sounds[l_instrument]
+                    # fi
                     # fi
                 # fi
 
@@ -7724,12 +7729,16 @@ def print_out_sfzpipecsv() -> None:
 
     import os
 
-    # Build reverse map: (midi_port, channel) -> instrument_name
+    # Build reverse map: (voiceon, channel) -> instrument_name.
+    # Keying by MIDI port+channel is wrong for drums: every drum instrument gets
+    # its own port but they all share channel 9, so channel alone cannot pick the
+    # right instrument. Note events DO carry the 1-based voice number (field 0),
+    # which uniquely identifies the instrument per channel.
     chan_to_inst = {}
     for voiceon in inst:
         for instrument_name in inst[voiceon]:
             port, chan = inst[voiceon][instrument_name]
-            key = (port, chan)
+            key = (voiceon, chan)
             if key not in chan_to_inst:
                 chan_to_inst[key] = instrument_name
 
@@ -7776,19 +7785,14 @@ def print_out_sfzpipecsv() -> None:
                 velocity = int(fields[3])
             except (ValueError, IndexError):
                 continue
-            # Find which port this channel belongs to
-            port = 0
-            for (p, c) in chan_to_inst:
-                if c == chan:
-                    port = p
-                    break
-            key = (port, chan, pitch)
+            voiceon = voice_p - 1          # field 0 is the 1-based voice number
+            key = (voiceon, chan, pitch)
             if velocity == 0:
                 # Treat as note-off (velocity 0)
                 if key in pending_notes and pending_notes[key]:
                     start_tick, vel, spt = pending_notes[key].pop(0)
                     dur_sec = (current_tick - start_tick) * spt
-                    notes.setdefault((port, chan), []).append((start_tick * spt, dur_sec, pitch, vel))
+                    notes.setdefault((voiceon, chan), []).append((start_tick * spt, dur_sec, pitch, vel))
                 continue
             # Capture the tempo in effect at this note start
             spt = sfz_sec_per_tick(tempo_s, tempo_l)
@@ -7801,16 +7805,12 @@ def print_out_sfzpipecsv() -> None:
                 pitch = int(fields[2])
             except (ValueError, IndexError):
                 continue
-            port = 0
-            for (p, c) in chan_to_inst:
-                if c == chan:
-                    port = p
-                    break
-            key = (port, chan, pitch)
+            voiceon = voice_p - 1          # field 0 is the 1-based voice number
+            key = (voiceon, chan, pitch)
             if key in pending_notes and pending_notes[key]:
                 start_tick, vel, spt = pending_notes[key].pop(0)
                 dur_sec = (current_tick - start_tick) * spt
-                notes.setdefault((port, chan), []).append((start_tick * spt, dur_sec, pitch, vel))
+                notes.setdefault((voiceon, chan), []).append((start_tick * spt, dur_sec, pitch, vel))
 
         elif 'Tempo, ' in event_str or event_str.startswith('Tempo,'):
             try:
@@ -7845,8 +7845,8 @@ def print_out_sfzpipecsv() -> None:
     # of an instrument's channels must be rolled into a single CSV (not
     # overwriting each other).
     by_instrument = {}
-    for (port, chan), note_list in notes.items():
-        name = chan_to_inst.get((port, chan), f'port{port}_chan{chan}')
+    for (voiceon, chan), note_list in notes.items():
+        name = chan_to_inst.get((voiceon, chan), f'voice{voiceon}_chan{chan}')
         by_instrument.setdefault(name, []).extend(note_list)
 
     # Write per-instrument CSV files

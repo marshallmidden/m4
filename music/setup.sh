@@ -114,27 +114,41 @@ check() {
 }
 
 # --------------------------------------------------------------------------
+# sfizz_render: build from source at the known-good commit. The 1.2.3 release
+# tarball carries a stale Jan-2024 CI binary that predates the "Ensure that
+# voices are cleaned up before being force-reused" fix (1.2.3 tag) and can hang
+# forever on dense per-pitch note streams (reproduced on b/09). Pin to the
+# post-fix HEAD (f5c6e29, 1.2.4-dev) and build a static, copy-able binary.
+SFIZZ_SRC_URL="https://github.com/sfztools/sfizz"
+SFIZZ_SRC_COMMIT="f5c6e29"
 fetch_sfizz() {
-    say_head "Fetching sfizz_render 1.2.3 (macOS release)"
+    say_head "Building sfizz_render from source (git $SFIZZ_SRC_COMMIT)"
     if tool_ok sfizz_render && [ "$FORCE" -eq 0 ]; then
         say_ok "sfizz_render already available; skip (--force to re-fetch)"
         return 0
     fi
-    if [ "$OS" != "Darwin" ]; then
-        say_info "No prebuilt sfizz release for $OS. See --notes for a source build."
-        return 1
-    fi
+    for t in git cmake g++ make; do
+        if ! command -v "$t" >/dev/null 2>&1; then
+            say_info "Missing build tool: $t. Cannot build sfizz from source."
+            return 1
+        fi
+    done
     tmp="$(mktemp -d)"
-    url="https://github.com/sfztools/sfizz/releases/download/1.2.3/sfizz-1.2.3-macos.tar.gz"
-    echo "  downloading $url"
-    if ! curl -fL --max-time 600 "$url" -o "$tmp/sfizz.tgz"; then
-        echo "  FAILED to download sfizz release (network/ GitHub?)."
-        rm -rf "$tmp"; return 1
+    git clone --recursive "$SFIZZ_SRC_URL" "$tmp/sfizz" >/dev/null 2>&1 \
+        || { echo "  FAILED to clone sfizz (network/ GitHub?)."; rm -rf "$tmp"; return 1; }
+    git -C "$tmp/sfizz" checkout "$SFIZZ_SRC_COMMIT" >/dev/null 2>&1 \
+        || { echo "  FAILED to checkout $SFIZZ_SRC_COMMIT."; rm -rf "$tmp"; return 1; }
+    if ! cmake -S "$tmp/sfizz" -B "$tmp/build" -DCMAKE_BUILD_TYPE=Release \
+          -DBUILD_SHARED_LIBS=OFF -DCMAKE_CXX_FLAGS="-Wno-missing-template-arg-list-after-template-kw" \
+          >"$tmp/cmake.log" 2>&1; then
+        echo "  FAILED cmake configure (see $tmp/cmake.log)"; rm -rf "$tmp"; return 1
+    fi
+    if ! cmake --build "$tmp/build" --target sfizz_render -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 4)" \
+          >"$tmp/build.log" 2>&1; then
+        echo "  FAILED cmake build (see $tmp/build.log)"; rm -rf "$tmp"; return 1
     fi
     mkdir -p "$BINDIR"
-    tar xzf "$tmp/sfizz.tgz" -C "$tmp"
-    mv -f "$tmp/sfizz-1.2.3-macos/usr/local/bin/sfizz_render" "$BINDIR/sfizz_render"
-    cp -a "$tmp/sfizz-1.2.3-macos/usr/local/lib/." "$BINDIR/"
+    cp "$tmp/build/library/bin/sfizz_render" "$BINDIR/sfizz_render"
     chmod +x "$BINDIR/sfizz_render"
     rm -rf "$tmp"
     say_ok "installed $BINDIR/sfizz_render (verify: $BINDIR/sfizz_render --help)"
