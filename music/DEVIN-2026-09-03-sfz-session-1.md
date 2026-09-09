@@ -268,3 +268,62 @@ Makefiles (all wired to the b/09 pattern):
 - Optional full `make sfz-mp4` sweep + songs 106-piece render.
 - Carry-over from prior session: mirror `--sfzpipecsv` to musicomp2abc (still
   NOT done); b/09 targets fully validated now; 1812 one-shots still TODO.
+
+===================== SESSION 2 (2026-09-09): pan + reverb ==========================
+
+## Objective
+Wire `pan` (MIDI CC10) + `reverb` (MIDI CC91) from the score macros end-to-end
+into the SFZ render: imscomp CSV -> gcs2sfz MIDI -> sfizz/fluidsynth.
+
+## Changes in `ims/imscomp` `print_out_sfzpipecsv()` (~line 7719)
+- CSV is now 6 columns: `start_sec,dur_sec,midi_note,velocity,pan,reverb`.
+- `chan_pan`/`chan_rev` dicts keyed `(voiceon, chan)`; the `Control_c` handler
+  records CC10 pan and CC91 reverb so they reach the CSV per instrument.
+- CC events precede note-ons at the same tick (verified in midi1csv dumps:
+  CC10/CC91 at tick 0, first note-on tick 5).
+- Verified output: b/01 v1-1 violin pan 36, bassoon 74, french_horn 50.
+
+## Changes in `music/music/sfz/gcs2sfz`
+- `read_csv_notes()` -> 6-tuples (pan/rev default 64/0 for old 4-col CSVs).
+- `write_midi()` rewritten with a `cc_timeline`; CC10/CC91 are emitted on
+  channel 0 at the first note's tick whenever the value changes.
+- New `_instrument_reverb()` (mode of the CC91 column), `_apply_reverb()`.
+- `render_instrument()` bakes the reverb into VPO WAVs via a temp file +
+  os.replace when the part's dominant reverb > 0. GM path unchanged: fluidsynth
+  honors CC10/CC91 natively (`synth.reverb.active` defaults on).
+
+## Critical discoveries this session
+1. **sfizz honors CC10 -> pan by default** (sfizz #475 linkage). Probe MIDI:
+   CC10 0 -> hard L, 64 -> center, 127 -> hard R. NO pan_oncc10 opcode needed.
+2. **This sfizz build has NO reverb effect.** `<effect1>` -> "Unknown header:
+   effect1"; `<effect>` + region `effect1=100` -> no tail; `strings` shows
+   Effect/Disto only.
+3. **~/bin/ffmpeg 9.0.1's afir is broken for this use:** `afir=dry=1:wet=...`
+   outputs silence/leak regardless of gtype or float conversion (dry-only
+   `wet=0` also mutes to 0). Confirmed on sine and real violin audio. The
+   "working" afir probe earlier (decaying tail 26->17->silence) was measuring
+   that near-silent leak, not reverb. => Reverb is implemented with **aecho**:
+   a 20-tap early-reflection train (47..1238 ms) at unit dry; echo gains scaled
+   by wet = 0.85 * reverb/127, plus `apad=pad_dur=1.8` for ring-out. Verified:
+   dry preserved (peak 8191 -> 11235, rms 75 -> 78), real decaying tail.
+4. `musicomp2abc` is NOT byte-identical to imscomp: it lacks the whole
+   `--sfzpipecsv` feature. Precedent (938141ca made sfzpipecsv imscomp-only;
+   4151c3e8 didn't sync) => **skip mirroring this change**; AGENTS.md's
+   "byte-identical" claim is stale for this feature.
+
+## Verified
+- v1-1 full render: per-instrument pan L/R measured -- violin L 42.1 vs R 37.7,
+  contrabass R 38.6 vs L 34.2, bassoon (74) R-biased. Reverb 0 everywhere in
+  production (b/instruments.include: violin 36, 2nd 42, viola 64, cello 85,
+  bass 92; reverb 0) so only pan is audible.
+- GM fallback e2e (fluidsynth): CSV pan 20 -> L 51.5/R 40.5, pan 100 -> L 37.7/
+  R 48.4, pan 64 -> center; CC91=70 -> reverb tail present after last note.
+- `_apply_reverb` wet scaling: rev 20/64/127 -> tail 13/23/29 dB.
+- py_compile passes on both modified files.
+
+## Not done
+- User's `ims/test-vol-sf.gcs` is uncommitted -- NEVER stage it.
+- Whether to set per-instrument reverb values in `b/instruments.include`
+  (currently all 0) is the user's call.
+- Full-canon gcs2sfz hardening from earlier note (atrim/alimiter/wav_duration)
+  still pending.

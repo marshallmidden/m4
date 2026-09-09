@@ -5,10 +5,17 @@ Usage:
     gcs2sfz <csv-or-dir> [--outdir DIR] [--sfzdir DIR] [--samplerate N] [--sf2 FILE]
 
 Pipeline:
-    <instrument>.csv  (start_sec,dur_sec,midi_note,velocity, one per line)
+    <instrument>.csv  (start_sec,dur_sec,midi_note,velocity,pan,reverb, one per line)
         -> <instrument>.mid                  (per-instrument standard MIDI file)
         -> ~/bin/sfizz_render <VPO>.sfz      (per-instrument WAV)
         -> ffmpeg amix                        (one mixed WAV)
+
+Pan and reverb come verbatim from the score. Pan (MIDI CC10, 0..127) is written
+into the MIDI and honored by both sfizz (CC10->pan by default) and fluidsynth.
+Reverb (MIDI CC91, 0 dry..127) is honored natively by the fluidsynth GM
+fallback; for the sfizz/VPO path the instrument WAV gets an offline aecho
+early-reflection room tail scaled by reverb/127 (the ffmpeg here has a broken
+afir that mutes the dry signal, and this sfizz build has no reverb effect).
 
 For 1812-specific one-shots (gunshot/explosion/canon) the mapping points at
 EFFECTS/*.wav files at the library root; those are placed directly at their
@@ -97,8 +104,12 @@ def _encode_smf_track(events: list[tuple[int, bytes]]) -> bytes:
     return b"MTrk" + struct.pack(">I", len(data)) + data
 
 
-def read_csv_notes(csv_path: str) -> list[tuple[float, float, int, int]]:
-    """Parse an instrument CSV into (start_s, dur_s, pitch, vel) tuples."""
+def read_csv_notes(csv_path: str) -> list[tuple[float, float, int, int, int, int]]:
+    """Parse an instrument CSV into (start_s, dur_s, pitch, vel, pan, rev) tuples.
+
+    The pan (CC10) and reverb (CC91) columns are optional for backward
+    compatibility with older 4-column CSVs; they default to 64 (center) and 0.
+    """
     notes = []
     with open(csv_path) as f:
         for line in f:
@@ -116,19 +127,27 @@ def read_csv_notes(csv_path: str) -> list[tuple[float, float, int, int]]:
                 vel = max(1, min(127, int(vel)))
             except ValueError:
                 continue
-            notes.append((start_s, dur_s, pitch, vel))
+            pan = int(parts[4]) if len(parts) >= 5 else 64
+            rev = int(parts[5]) if len(parts) >= 6 else 0
+            notes.append((start_s, dur_s, pitch, vel, pan, rev))
     return notes
 
 
 def write_midi(csv_path: str, midi_path: str, track=0):
-    """Write a single-track MIDI file from a CSV (absolute times in seconds)."""
+    """Write a single-track MIDI file from a CSV (absolute times in seconds).
+
+    Each note carries velocity. Pan (CC10) and reverb (CC91) are written as
+    channel control changes whenever their value differs from the previous note
+    (CC10/CC91 ride on channel 0 like the per-note CC11 expression). sfizz
+    links CC10 to pan by default; fluidsynth honors both CC10 and CC91.
+    """
     notes = []
-    for start_s, dur_s, pitch, vel in read_csv_notes(csv_path):
+    for start_s, dur_s, pitch, vel, pan, rev in read_csv_notes(csv_path):
         on_tick = int(round(start_s * TICKS_PER_SEC))
         off_tick = int(round((start_s + dur_s) * TICKS_PER_SEC))
         if off_tick <= on_tick:
             off_tick = on_tick + 1
-        notes.append((on_tick, off_tick, pitch, vel))
+        notes.append((on_tick, off_tick, pitch, vel, pan, rev))
 
     if not notes:
         # Empty instrument: still write a valid file so the caller can decide.
@@ -143,9 +162,21 @@ def write_midi(csv_path: str, midi_path: str, track=0):
     # Group note-ons/offs onto a timeline keyed by absolute tick.
     # (kind 0=note-on, 1=note-off; CC11 expression is derived from note-ons.)
     timeline: dict[int, list[tuple[int, int, int]]] = {}
-    for on, off, pitch, vel in notes:
+    for on, off, pitch, vel, pan, rev in notes:
         timeline.setdefault(on, []).append((0, pitch, vel))
         timeline.setdefault(off, []).append((1, pitch, vel))
+
+    # CC10 pan / CC91 reverb changes, emitted at the tick of the first note
+    # they affect (before that note-on).
+    cc_timeline: dict[int, list[tuple[int, int]]] = {}
+    last_pan = last_rev = None
+    for on, off, pitch, vel, pan, rev in notes:
+        if pan != last_pan:
+            cc_timeline.setdefault(on, []).append((10, pan))
+            last_pan = pan
+        if rev != last_rev:
+            cc_timeline.setdefault(on, []).append((91, rev))
+            last_rev = rev
 
     name = os.path.splitext(os.path.basename(csv_path))[0]
     name_b = name.encode("utf-8", "replace")
@@ -154,11 +185,14 @@ def write_midi(csv_path: str, midi_path: str, track=0):
     events.append((0, b"\xff\x51\x03" + struct.pack(">I", tempo_ppqn_micros)[1:]))
     events.append((0, b"\xff\x03" + _varint(len(name_b)) + name_b))
     last_tick = 0
-    for tick in sorted(timeline):
+    for tick in sorted(set(timeline) | set(cc_timeline)):
         delta = tick - last_tick
         last_tick = tick
-        batch = sorted(timeline[tick], key=lambda e: e[0])
         first = True
+        for cc, value in sorted(cc_timeline.get(tick, [])):
+            events.append((delta if first else 0, b"\xb0" + bytes([cc, value & 0x7F])))
+            first = False
+        batch = sorted(timeline.get(tick, []), key=lambda e: e[0])
         for kind, pitch, vel in batch:
             if kind == 0:
                 # Emit CC11 expression (value = velocity, like fluidsynth's CC11=dyn)
@@ -221,6 +255,58 @@ def render_oneshot(csv_path: str, out_wav: str, sample_path: str, samplerate: in
     return out_wav
 
 
+# ----------------------------------------------------------------------------
+# Reverb: the score's CC91 per-instrument reverb send, applied offline.
+# ----------------------------------------------------------------------------
+
+# ffmpeg's afir produces only silence in this build (~/bin ffmpeg 9.0.1), so
+# the room is synthesized with aecho's dense early-reflection train instead.
+# Delays climb toward 1.24s; base gains are a ~440ms "hall" tail at full send,
+# scaled by wet = REVERB_WET_SCALE * reverb/127.
+ECHO_DELAYS_MS = (47, 61, 75, 101, 127, 163, 203, 247, 293, 343,
+                  403, 467, 537, 613, 697, 787, 887, 997, 1114, 1238)
+ECHO_GAINS = (0.30, 0.27, 0.24, 0.21, 0.18, 0.15, 0.13, 0.11, 0.09, 0.075,
+              0.062, 0.050, 0.041, 0.033, 0.027, 0.022, 0.018, 0.014, 0.011,
+              0.008)
+REVERB_PAD_SECONDS = 1.8        # silent gutter after the last note for ring-out
+REVERB_WET_SCALE = 0.85         # wet = this * reverb/127, so 127 => 0.85
+
+
+def _instrument_reverb(csv_path) -> int:
+    """Return the score's dominant (most frequent) CC91 reverb level, 0 if dry."""
+    counts = {}
+    for _, _, _, _, _, rev in read_csv_notes(csv_path):
+        counts[rev] = counts.get(rev, 0) + 1
+    if not counts:
+        return 0
+    return max(counts, key=lambda r: (counts[r], r))
+
+
+def _apply_reverb(in_wav, out_wav, reverb_val, samplerate: int) -> str:
+    """Add the hall tail to a rendered instrument WAV via aech o.
+
+    Replaces the missing sfizz reverb effect (this sfizz build has no reverb),
+    honoring the score's per-instrument CC91. Dry is passed through at unity;
+    only the echo train scales with reverb_val. Returns which file ends up
+    holding the audio (out_wav on success, in_wav untouched when skipped/failed).
+    """
+    rev = min(127, max(0, reverb_val))
+    if rev <= 0:
+        return in_wav
+    wet = REVERB_WET_SCALE * rev / 127.0
+    gains = "|".join(f"{g * wet:.4f}" for g in ECHO_GAINS)
+    delays = "|".join(str(d) for d in ECHO_DELAYS_MS)
+    cmd = [FFMPEG, "-y", "-i", in_wav, "-filter_complex",
+           f"apad=pad_dur={REVERB_PAD_SECONDS:.2f},"
+           f"aecho=1:1:{delays}:{gains}[a]",
+           "-map", "[a]", "-ar", str(samplerate), out_wav]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"  !! reverb failed on {os.path.basename(in_wav)}:\n{r.stderr[-1200:]}")
+        return in_wav
+    return out_wav
+
+
 def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
     """Render one instrument CSV to a WAV via sfizz_render (or GM fallback)."""
     name = os.path.splitext(os.path.basename(csv_path))[0]
@@ -271,6 +357,17 @@ def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
             os.remove(wrapper)
         except OSError:
             pass
+    # Bake the score's reverb send offline (sfizz has no reverb in this build).
+    reverb_val = _instrument_reverb(csv_path)
+    if reverb_val > 0:
+        rev_tmp = out_wav + ".rev.tmp.wav"
+        if _apply_reverb(out_wav, rev_tmp, reverb_val, samplerate) == rev_tmp:
+            os.replace(rev_tmp, out_wav)
+        else:
+            try:
+                os.remove(rev_tmp)
+            except OSError:
+                pass
     return out_wav
 
 

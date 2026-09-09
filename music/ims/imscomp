@@ -7719,7 +7719,11 @@ def print_out_fluidsynth() -> None:
 def print_out_sfzpipecsv() -> None:
     """Convert in-memory MIDI CSV events to per-instrument CSV files for sfizz rendering.
 
-    Each instrument gets a CSV file with lines: start_sec, dur_sec, midi_note, velocity
+    Each instrument gets a CSV file with lines:
+        start_sec, dur_sec, midi_note, velocity, pan, reverb
+    Pan (MIDI CC10, 0 hard left .. 127 hard right, 64 center) and reverb
+    (MIDI CC91, 0 dry .. 127 max send) are carried verbatim from the score's
+    Control_c events so the render backend can apply spatialization.
     The file is named <instrument_name>.csv in the current directory.
     """
     global array_of_lines
@@ -7749,10 +7753,16 @@ def print_out_sfzpipecsv() -> None:
     time_sig_num = 4
     time_sig_den = 4.0
 
+    # Track controls (CC10 pan, CC91 reverb) per (voiceon, chan) so each
+    # note can carry the score's pan/reverb state that was in effect at its
+    # note-on.
+    chan_pan = {}
+    chan_rev = {}
+
     # Track note-on events: pending_notes[(port, chan, pitch)] = list of
-    #   (start_tick, velocity, seconds_per_tick_at_start)
+    #   (start_tick, velocity, seconds_per_tick_at_start, pan, reverb)
     pending_notes = {}
-    # Result: notes[(port, chan)] = [(start_sec, dur_sec, pitch, velocity), ...]
+    # Result: notes[(port, chan)] = [(start_sec, dur_sec, pitch, velocity, pan, reverb), ...]
     notes = {}
     current_tick = 0
 
@@ -7776,7 +7786,23 @@ def print_out_sfzpipecsv() -> None:
         event_str = ', '.join(parts[2:])
         current_tick = time_p
 
-        if event_str.startswith('Note_on_c, '):
+        if event_str.startswith('Control_c, '):
+            # Control_c, chan, cc, value  (cc 10 = pan, 91 = reverb level)
+            try:
+                fields = event_str.split(', ')
+                chan = int(fields[1])
+                cc = int(fields[2])
+                value = int(fields[3])
+            except (ValueError, IndexError):
+                continue
+            voiceon = voice_p - 1          # field 0 is the 1-based voice number
+            key = (voiceon, chan)
+            if cc == 10:
+                chan_pan[key] = value
+            elif cc == 91:
+                chan_rev[key] = value
+
+        elif event_str.startswith('Note_on_c, '):
             # Note_on_c, chan, pitch, velocity
             try:
                 fields = event_str.split(', ')
@@ -7790,13 +7816,16 @@ def print_out_sfzpipecsv() -> None:
             if velocity == 0:
                 # Treat as note-off (velocity 0)
                 if key in pending_notes and pending_notes[key]:
-                    start_tick, vel, spt = pending_notes[key].pop(0)
+                    start_tick, vel, spt, pan, rev = pending_notes[key].pop(0)
                     dur_sec = (current_tick - start_tick) * spt
-                    notes.setdefault((voiceon, chan), []).append((start_tick * spt, dur_sec, pitch, vel))
+                    notes.setdefault((voiceon, chan), []).append((start_tick * spt, dur_sec, pitch, vel, pan, rev))
                 continue
             # Capture the tempo in effect at this note start
             spt = sfz_sec_per_tick(tempo_s, tempo_l)
-            pending_notes.setdefault(key, []).append((current_tick, velocity, spt))
+            ckey = (voiceon, chan)
+            pan = chan_pan.get(ckey, 64)
+            rev = chan_rev.get(ckey, 0)
+            pending_notes.setdefault(key, []).append((current_tick, velocity, spt, pan, rev))
 
         elif event_str.startswith('Note_off_c, '):
             try:
@@ -7808,9 +7837,9 @@ def print_out_sfzpipecsv() -> None:
             voiceon = voice_p - 1          # field 0 is the 1-based voice number
             key = (voiceon, chan, pitch)
             if key in pending_notes and pending_notes[key]:
-                start_tick, vel, spt = pending_notes[key].pop(0)
+                start_tick, vel, spt, pan, rev = pending_notes[key].pop(0)
                 dur_sec = (current_tick - start_tick) * spt
-                notes.setdefault((voiceon, chan), []).append((start_tick * spt, dur_sec, pitch, vel))
+                notes.setdefault((voiceon, chan), []).append((start_tick * spt, dur_sec, pitch, vel, pan, rev))
 
         elif 'Tempo, ' in event_str or event_str.startswith('Tempo,'):
             try:
@@ -7857,10 +7886,10 @@ def print_out_sfzpipecsv() -> None:
         filename = f'{safe_name}.csv'
         try:
             with open(filename, 'w') as f:
-                for start_sec, dur_sec, pitch, velocity in note_list:
+                for start_sec, dur_sec, pitch, velocity, pan, rev in note_list:
                     if dur_sec < 0.01:
                         dur_sec = 0.01  # minimum duration
-                    f.write(f'{start_sec:.6f},{dur_sec:.6f},{pitch},{velocity}\n')
+                    f.write(f'{start_sec:.6f},{dur_sec:.6f},{pitch},{velocity},{pan},{rev}\n')
             written += 1
         except IOError as e:
             print_error_no_line(f'sfzpipecsv: cannot write {filename}: {e}')

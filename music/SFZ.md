@@ -121,9 +121,20 @@ PIPELINE & TARGETS (added 2026-09-09) — now wired into all piece dirs.
 `gcs2sfz` (music/sfz/gcs2sfz) drives the whole SFZ render:
 
   imscomp --sfzpipecsv piece.E -> per-instrument CSVs (sfz-csv/<piece>/)
+      CSV schema: start,dur,midi_note,velocity,pan,reverb (pan = MIDI CC10,
+      reverb = MIDI CC91, both taken verbatim from the score's macros;
+      pan 36/42/64/85/92 violin/2nd/viola/cello/bass give an orchestral L/R
+      spread; reverb is 0 everywhere until macros set > 0).
   gcs2sfz sfz-csv/<piece>/ --sfzdir <VPO lib> --outdir sfz-mix/ -> mixed WAV
       - VPO-mapped instruments: sfizz_render per instrument, mixed with
         ffmpeg (amix + loudnorm implicit chain).
+      - Pan: write_midi emits CC10; sfizz honors CC10 -> pan by default
+        (sfizz #475 linkage), verified L<center<R. fluidsynth also honors it.
+      - Reverb: VPO has no reverb effect in this sfizz build, and ~/bin/ffmpeg's
+        afir mutes the dry signal, so the room is an offline aecho
+        early-reflection tail baked into each instrument WAV scaled by
+        reverb/127 (dry at unity; only echoes scale). The GM fallback gets
+        real reverb from fluidsynth's CC91 handling.
       - GM fallback (new): instruments with NO VPO mapping (default
         "acoustic grand piano", "bell tower", "church bell", any unknown
         instrument) render through fluidsynth + GeneralUser.sf2 with an
