@@ -31,15 +31,15 @@ mp4_2:
 #-----------------------------------------------------------------------------
 .PHONY: sfz
 sfz:
-	@for d in t b; do echo "=== make sfz in $$d ===" ; $(MAKE) -C $$d sfz ; done
+	@for d in songs ims t b; do echo "=== make sfz in $$d ===" ; $(MAKE) -C $$d sfz ; done
 #-----------------------------------------------------------------------------
 .PHONY: sfz-mp4
 sfz-mp4:
-	@for d in t b; do echo "=== make sfz-mp4 in $$d ===" ; $(MAKE) -C $$d sfz-mp4 ; done
+	@for d in songs ims t b; do echo "=== make sfz-mp4 in $$d ===" ; $(MAKE) -C $$d sfz-mp4 ; done
 #-----------------------------------------------------------------------------
 .PHONY: sfz-clean
 sfz-clean:
-	@for d in t b; do echo "=== make sfz-clean in $$d ===" ; $(MAKE) -C $$d sfz-clean ; done
+	@for d in songs ims t b; do echo "=== make sfz-clean in $$d ===" ; $(MAKE) -C $$d sfz-clean ; done
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:

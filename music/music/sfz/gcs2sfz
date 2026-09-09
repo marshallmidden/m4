@@ -2,7 +2,7 @@
 """gcs2sfz -- Render imscomp --sfzpipecsv instrument CSVs to an audio mixdown.
 
 Usage:
-    gcs2sfz <csv-or-dir> [--outdir DIR] [--sfzdir DIR] [--samplerate N]
+    gcs2sfz <csv-or-dir> [--outdir DIR] [--sfzdir DIR] [--samplerate N] [--sf2 FILE]
 
 Pipeline:
     <instrument>.csv  (start_sec,dur_sec,midi_note,velocity, one per line)
@@ -14,7 +14,13 @@ For 1812-specific one-shots (gunshot/explosion/canon) the mapping points at
 EFFECTS/*.wav files at the library root; those are placed directly at their
 CSV note times via ffmpeg (trimmed to the scored duration, velocity-scaled).
 
-Requirements: python3, ~/bin/sfizz_render, ffmpeg, and the VPO library.
+Instruments that have no VPO/one-shot mapping (e.g. the default "Acoustic
+Grand Piano", custom names like "Bell Tower") fall back to GM: their CSV is
+rendered through fluidsynth + GeneralUser.sf2 (--sf2), so default-piano pieces
+still produce audio instead of being silently skipped.
+
+Requirements: python3, ~/bin/sfizz_render, fluidsynth, ffmpeg, and the VPO
+library (plus GeneralUser.sf2 for GM fallback).
 """
 
 from __future__ import annotations
@@ -36,6 +42,14 @@ import instruments  # noqa: E402   (music/music/sfz/instruments.py)
 
 SFIZZ = os.environ.get("SFIZZ_RENDER", os.path.expanduser("~/bin/sfizz_render"))
 FFMPEG = shutil.which("ffmpeg") or os.path.expanduser("~/bin/ffmpeg")
+FLUIDSYNTH = os.environ.get("FLUIDSYNTH", os.path.expanduser("~/bin/fluidsynth"))
+# GM fallback soundfont (--sf2). Defaults match the AGENTS.md paths.
+if os.path.exists("/Users/m4/src/GeneralUser/GeneralUser.sf2"):
+    _DEFAULT_SF2 = "/Users/m4/src/GeneralUser/GeneralUser.sf2"
+elif os.path.exists("/home/m4/src/GeneralUser_GS/GeneralUser.sf2"):
+    _DEFAULT_SF2 = "/home/m4/src/GeneralUser_GS/GeneralUser.sf2"
+else:
+    _DEFAULT_SF2 = None
 
 DEFAULT_SAMPLERATE = 48000
 TPQ = 480          # ticks per quarter for the output MIDI
@@ -207,12 +221,15 @@ def render_oneshot(csv_path: str, out_wav: str, sample_path: str, samplerate: in
     return out_wav
 
 
-def render_instrument(csv_path, out_wav, vpo_root, samplerate):
-    """Render one instrument CSV to a WAV via sfizz_render."""
+def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
+    """Render one instrument CSV to a WAV via sfizz_render (or GM fallback)."""
     name = os.path.splitext(os.path.basename(csv_path))[0]
     rel = instruments.vpo_rel_path(name)
     if rel is None:
-        print(f"  !! {name}: no VPO mapping (fall back to GM). Skipping.")
+        if sf2_path:
+            print(f"  .. {name}: no VPO mapping (fall back to GM).")
+            return render_gm(csv_path, out_wav, sf2_path, samplerate)
+        print(f"  !! {name}: no VPO mapping and no --sf2 GM soundfont. Skipping.")
         return None
     if rel.startswith("EFFECTS/"):
         # One-shots live at the library root (music/sfz/library/EFFECTS).
@@ -255,6 +272,68 @@ def render_instrument(csv_path, out_wav, vpo_root, samplerate):
         except OSError:
             pass
     return out_wav
+
+
+def render_gm(csv_path, out_wav, sf2_path, samplerate):
+    """Render one instrument CSV to WAV via fluidsynth (GM fallback).
+
+    Used for instruments with no VPO mapping (default piano, bell tower, ...).
+    The CSV is written to MIDI exactly as for sfizz_render; note velocity is
+    carried both in the note-ons (respected by GeneralUser) and CC11 expression.
+    Program changes are bank-select-free so --sf2 GM set works.
+    """
+    name = os.path.splitext(os.path.basename(csv_path))[0]
+    program = instruments.gm_program(name)
+    if not os.path.exists(sf2_path):
+        print(f"  !! {name}: no VPO mapping, but GM soundfont {sf2_path} "
+              f"missing (pass --sf2). Skipping.")
+        return None
+    with tempfile.TemporaryDirectory() as td:
+        midi_path = os.path.join(td, "in.mid")
+        has_notes = write_midi(csv_path, midi_path)
+        if not has_notes:
+            print(f"  .. {name}: empty part, skipping (no audio).")
+            return None
+        # Insert a program change on channel 0 (first event, tick 0).
+        _patch_program(midi_path, program)
+        cmd = [FLUIDSYNTH, "-q", "-F", out_wav, sf2_path, midi_path]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"  !! {name}: fluidsynth GM render failed:\n{r.stderr[-2000:]}")
+            return None
+    print(f"  => {name}: rendered via GM fallback ({FLUIDSYNTH}).")
+    return out_wav
+
+
+def _patch_program(midi_path, program):
+    """Insert a channel-0 program-change event at tick 0 of the first track.
+
+    Rewrites the first track's data to prepend the PC byte (0xC0, internal
+    channel 0 -- external channel 1). Cheap and correct for our single-track,
+    single-channel output.
+    """
+    try:
+        with open(midi_path, "rb") as f:
+            data = f.read()
+        if not data:
+            return
+        # Find first MTrk chunk after the 14-byte MThd header.
+        p = data.find(b"MTrk", 14)
+        if p < 0:
+            return
+        hdr = data[:p]
+        rest = data[p + 8:]  # data of first track
+        # The track's data starts with a delta-time VLQ (0) then events. The
+        # program change must be inserted after the leading delta of the first
+        # event. Since the first timeline event has delta 0, we can simply
+        # prepend b'\x00\xc0<program>' before the existing track data.
+        padded = b"\x00\xc0" + bytes([program & 0x7F])
+        new_data = padded + rest
+        length = struct.pack(">I", len(new_data))
+        with open(midi_path, "wb") as f:
+            f.write(hdr + b"MTrk" + length + new_data)
+    except (OSError, ValueError):
+        pass
 
 
 def mixdown(wavs, out_wav, lead_in=0.0):
@@ -315,6 +394,7 @@ def main(argv):
     src = argv[0]
     outdir = None
     sfz_dir = None
+    sf2_path = _DEFAULT_SF2
     samplerate = DEFAULT_SAMPLERATE
     i = 1
     while i < len(argv):
@@ -324,6 +404,8 @@ def main(argv):
             sfz_dir = argv[i + 1]; i += 2
         elif argv[i] == "--samplerate":
             samplerate = int(argv[i + 1]); i += 2
+        elif argv[i] == "--sf2":
+            sf2_path = argv[i + 1]; i += 2
         else:
             i += 1
 
@@ -369,7 +451,7 @@ def main(argv):
     print(f"  rendering {len(jobs)} instrument(s) in parallel (max_workers={WORKERS}) ...")
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
         futures = {
-            ex.submit(render_instrument, csv_path, out_wav, vpo_root, samplerate): (csv_path, out_wav)
+            ex.submit(render_instrument, csv_path, out_wav, vpo_root, samplerate, sf2_path): (csv_path, out_wav)
             for csv_path, out_wav in jobs
         }
         for fut in futures:

@@ -113,3 +113,47 @@ corrections:
    sfizz_render + stem-mix), instead of trying to squeeze into 16 channels.
 7. 1812's cannon and church bells are in NO free SFZ library — need custom
    one-shot WAV files mapped to a trivial SFZ region.
+
+===============================================================================
+PIPELINE & TARGETS (added 2026-09-09) — now wired into all piece dirs.
+===============================================================================
+
+`gcs2sfz` (music/sfz/gcs2sfz) drives the whole SFZ render:
+
+  imscomp --sfzpipecsv piece.E -> per-instrument CSVs (sfz-csv/<piece>/)
+  gcs2sfz sfz-csv/<piece>/ --sfzdir <VPO lib> --outdir sfz-mix/ -> mixed WAV
+      - VPO-mapped instruments: sfizz_render per instrument, mixed with
+        ffmpeg (amix + loudnorm implicit chain).
+      - GM fallback (new): instruments with NO VPO mapping (default
+        "acoustic grand piano", "bell tower", "church bell", any unknown
+        instrument) render through fluidsynth + GeneralUser.sf2 with an
+        inserted General MIDI program change (0xC0). Detects the sf2
+        automatically: /Users/m4/src/GeneralUser/GeneralUser.sf2 (Darwin) or
+        /home/m4/src/GeneralUser_GS/GeneralUser.sf2 (Linux).
+  %-sfz.mp4: black 1920x1080 bg + ASS title overlay (fs2ass) + waveform
+        (wav2waveform) + audio from the mix WAV -> x264+aac.
+
+Make targets (now in EVERY piece dir: songs/, ims/, b/01..04, b/06, b/sonata14,
+b/09, t/e):
+
+  make sfz         - render all pieces in this dir to sfz-mix/*-sfz-mix.wav
+  make sfz-mp4     - encode sfz-mix/*.wav -> *-sfz.mp4
+  make sfz-clean   - rm -rf sfz-csv/ sfz-mix/ *-sfz.mp4
+
+ims/ also has:
+  make sfz-tests       - render the TESTS list too
+  make sfz-all         - SONGS + TESTS
+  make sfz-mp4-tests / sfz-mp4-all - same but encoide to mp4
+
+Top-level music/: `make sfz` / `make sfz-mp4` / `make sfz-clean` recurse into
+`songs ims t b` (b recurses into its subdirs).
+
+Known limitations:
+  - A0/A1 are intentional error-injection tests; they fail `make tests` too
+    (pre-existing). DECODE/ENCODE/L1/P2/STAFF/vc1-test also fail the plain
+    `%.fs` compile — none are SFZ regressions.
+  - The %-sfz.mp4 ffmpeg recipes need the source-built ~/bin/ffmpeg (ASS/
+    drawtext filters); the brew ffmpeg lacks them.
+  - sf2 path is auto-detected by $HOME layout; --sf2 overrides.
+  - imscomp's --midi1csv/velocity: write_midi emits note velocity AND CC11
+    = velocity so GeneralUser responds to dynamics.

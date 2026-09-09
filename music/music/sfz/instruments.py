@@ -80,6 +80,24 @@ KIT_FALLBACK = {
     "open triangle":      "Percussion/misc.sfz",
 }
 
+# GM program numbers for instruments with no VPO/one-shot mapping. Rendered via
+# the GeneralUser.sf2 fallback in gcs2sfz (--sf2). Keyed by the normalized
+# (underscores->spaces, lowercased) instrument name; anything unmapped defaults
+# to program 0 (Acoustic Grand Piano).
+GM_PROGRAM = {
+    "acoustic grand piano": 0,
+    "grand piano": 0,
+    "bell tower": 14,          # tubular bells
+    "church bell": 14,
+}
+GM_DEFAULT = 0
+
+
+def gm_program(instrument_name: str) -> int:
+    name = (instrument_name or "").strip().lower().replace("_", " ")
+    return GM_PROGRAM.get(name, GM_DEFAULT)
+
+
 VPO_ROOT = "Virtual-Playing-Orchestra3"
 
 

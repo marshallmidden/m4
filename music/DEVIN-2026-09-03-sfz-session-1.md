@@ -216,3 +216,55 @@ python3 ../../ims/imscomp --sfzpipecsv v3-1.E   # writes *.csv in CWD
   GM drum-channel remap in imscomp still TODO.
 - Render notes: keep on macOS, run under `screen -dmS` (detached) to survive
   workspace interruptions; ALWAYS `--use-eot`; watch `GCS2SFZ_WORKERS`/disk.
+
+===============================================================================
+SESSION 2 (2026-09-09) — GM fallback + wire SFZ into all piece dirs.
+===============================================================================
+Commits: NONE YET (in progress).
+
+### What changed
+gcs2sfz (`music/music/sfz/gcs2sfz`):
+- `--sf2 <soundfont>` flag + auto-detect default (`_DEFAULT_SF2`: Darwin
+  `/Users/m4/src/GeneralUser/GeneralUser.sf2`, else `/home/m4/src/...`).
+- New `render_gm()` GM-fallback path: pieces/instruments with NO VPO mapping
+  render via `~/bin/fluidsynth -q -F out.wav <sf2> <midi>` (plain MIDI gen +
+  `_patch_program()` inserting a 0xC0 GM program change at tick 0).
+  IMPORTANT: `-o synth.samplerate=...` must NOT be passed — patched fluidsynth
+  rejects it ("Setting parameter 'synth.samplerate' not found").
+- `render_instrument(sf2_path)` now falls through to GM inside the existing
+  ThreadPool when `vpo_rel_path()` returns None. Smoke-tested.
+
+instruments.py (`music/music/sfz/instruments.py`):
+- New `GM_PROGRAM` map + `gm_program(name)` (normalized: lowercase, _ -> space):
+  acoustic grand piano=0, grand piano=0, bell tower=14, church bell=14, default 0.
+
+Makefiles (all wired to the b/09 pattern):
+- Per-dir SFZ vars (GCS2SFZ, SFZ_LIBDIR, SFZ_CSVDIR, SFZ_MIXDIR, WAV2WAVEFORM,
+  FS2ASS) + OS-specific SOUNDFONT block + `sfz-csv/%/.done` (imscomp
+  --sfzpipecsv), `sfz-mix/%-sfz-mix.wav` (gcs2sfz --sf2), `%-sfz.mp4`
+  (ASS+waveform encode) + `sfz`/`sfz-mp4`/`sfz-clean` phony targets:
+  ims (extra: sfz-tests/sfz-all/sfz-mp4-tests/sfz-mp4-all), b/01..04, b/06,
+  b/sonata14, songs (106 pieces).
+- b/Makefile loops now `for d in ${DIRS}` instead of hardcoded 09.
+- Top-level music/Makefile: sfz{, -mp4, -clean} recurse `songs ims t b`.
+- `.gitignore` files added (ims, b/01..04, b/06, b/sonata14, songs, t/e):
+  `*.E *.fs *.abc *.csv *.mid *.ps *.pdf sfz-csv/ sfz-mix/ *-sfz.mp4`.
+
+### Verified
+- ims: SONGS (A-Flat-Prelude-Chopin 39.2s, clock_tower 25.9s) render via GM.
+  TESTS: 77/85 build `sfz-csv/*/.done`; the 8 that don't (A0, A1 — intentional
+  error-injection tests; DECODE, ENCODE, L1, P2, STAFF, vc1-test — undefined
+  process/edge cases) ALSO fail the pre-existing `make %.fs` path. Not a
+  regression.
+- b/01: all 4 (v1-1..v1-4, up to 11 instruments, VPO). b/02, b/03, b/04: all
+  built. b/06: b-6-sfz-mix.wav 984s. b/sonata14: s14 via GM piano 145.8s.
+- songs: 5-dollar-fuga via GM piano 73.8s (all 106 will use GM fallback —
+  default acoustic grand piano, no instrument lines).
+- mp4 encode verified (sonata14; relies on ~/bin/ffmpeg being early on PATH —
+  brew ffmpeg has no ass/drawtext).
+
+### Remaining for next session
+- Commit this work (user asked: update .md files, git commit, git push).
+- Optional full `make sfz-mp4` sweep + songs 106-piece render.
+- Carry-over from prior session: mirror `--sfzpipecsv` to musicomp2abc (still
+  NOT done); b/09 targets fully validated now; 1812 one-shots still TODO.
