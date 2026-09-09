@@ -49,6 +49,7 @@ import instruments  # noqa: E402   (music/music/sfz/instruments.py)
 
 SFIZZ = os.environ.get("SFIZZ_RENDER", os.path.expanduser("~/bin/sfizz_render"))
 FFMPEG = shutil.which("ffmpeg") or os.path.expanduser("~/bin/ffmpeg")
+FFPROBE = shutil.which("ffprobe") or os.path.expanduser("~/bin/ffprobe")
 FLUIDSYNTH = os.environ.get("FLUIDSYNTH", os.path.expanduser("~/bin/fluidsynth"))
 # GM fallback soundfont (--sf2). Defaults match the AGENTS.md paths.
 if os.path.exists("/Users/m4/src/GeneralUser/GeneralUser.sf2"):
@@ -217,9 +218,10 @@ def render_oneshot(csv_path: str, out_wav: str, sample_path: str, samplerate: in
     """Place a one-shot WAV sample at each CSV note-on using ffmpeg.
 
     One-shots (gunshot/explosion/canon) are standalone WAVs positioned at the
-    note times; each placement is trimmed to its scored duration and scaled by
-    velocity, then all placements for the part are amixed into one instrument
-    WAV like any other render.
+    note times; each placement plays in FULL (no atrim -- cannon/bell tails must
+    ring out naturally) scaled by velocity, then all placements for the part are
+    amixed into one instrument WAV like any other render. A part-level limiter
+    keeps overlapping placements from clipping.
     """
     notes = read_csv_notes(csv_path)
     if not notes:
@@ -232,16 +234,16 @@ def render_oneshot(csv_path: str, out_wav: str, sample_path: str, samplerate: in
     n = len(notes)
     inputs = []
     filters = []
-    for i, (start_s, dur_s, _pitch, vel) in enumerate(notes):
+    for i, (start_s, _dur_s, _pitch, vel, _pan, _rev) in enumerate(notes):
         ms = int(round(start_s * 1000.0))
         gain = vel / 127.0
         inputs += ["-i", sample_path]
         filters.append(
-            f"[{i}:a]atrim=0:{dur_s:.4f},asetpts=PTS-STARTPTS,"
-            f"adelay={ms}:all=1,volume={gain:.4f}[a{i}]"
+            f"[{i}:a]adelay={ms}:all=1,volume={gain:.4f}[a{i}]"
         )
     filters.append(f"{''.join(f'[a{i}]' for i in range(n))}"
-                   f"amix=inputs={n}:normalize=0:duration=longest[aout]")
+                   f"amix=inputs={n}:normalize=0:duration=longest,"
+                   f"alimiter=limit=0.95:level=false[aout]")
     cmd = [FFMPEG, "-y"] + inputs + [
         "-filter_complex", ";".join(filters),
         "-map", "[aout]",
@@ -484,6 +486,26 @@ def trim_wav(in_wav, out_wav, duration):
     return True
 
 
+def wav_duration(wav_path):
+    """Return a WAV's duration in seconds via ffprobe (None if unavailable).
+
+    The mix's target end is derived from the ACTUAL rendered stems: one-shot
+    placements now play in full (no atrim) and reverb adds a padded ring-out, so
+    stems can be longer than the CSV's latest note end.
+    """
+    if not FFPROBE or not os.path.exists(FFPROBE):
+        return None
+    cmd = [FFPROBE, "-v", "error", "-show_entries", "format=duration",
+           "-of", "default=nw=1:nk=1", wav_path]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    try:
+        return float(r.stdout.strip())
+    except ValueError:
+        return None
+
+
 def main(argv):
     if not argv:
         print(__doc__)
@@ -562,9 +584,15 @@ def main(argv):
         print("gcs2sfz: nothing was rendered.")
         return 1
 
+    # The piece ends where the LONGEST rendered stem ends (one-shot tails play
+    # in full and reverb pads ring out, so stems can outlast the CSV).
     piece_end = 0.0
-    for csv_path in rendered_csvs:
-        piece_end = max(piece_end, csv_max_end(csv_path))
+    durations = [wav_duration(w) for w in wavs]
+    if any(d is not None for d in durations):
+        piece_end = max(d for d in durations if d is not None)
+    else:
+        for csv_path in rendered_csvs:
+            piece_end = max(piece_end, csv_max_end(csv_path))
     target = LEAD_IN + piece_end + TAIL
 
     if outdir is None:

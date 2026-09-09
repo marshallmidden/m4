@@ -144,6 +144,10 @@ PIPELINE & TARGETS (added 2026-09-09) — now wired into all piece dirs.
         /home/m4/src/GeneralUser_GS/GeneralUser.sf2 (Linux).
   %-sfz.mp4: black 1920x1080 bg + ASS title overlay (fs2ass) + waveform
         (wav2waveform) + audio from the mix WAV -> x264+aac.
+      - One-shots (1812 canon): placements play the FULL sample (no atrim --
+        cannon/bell tails ring out) scaled by velocity, with a part-level
+        limiter (0.95 FS). Mix target length derives from the actual rendered
+        stems (ffprobe), so natural tails are never trimmed off.
 
 Make targets (now in EVERY piece dir: songs/, ims/, b/01..04, b/06, b/sonata14,
 b/09, t/e):

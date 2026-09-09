@@ -335,3 +335,20 @@ into the SFZ render: imscomp CSV -> gcs2sfz MIDI -> sfizz/fluidsynth.
 - Measured on a fresh render: last-note tail of french_horn went from
   -180 dB (dry) to a decaying 30.5 -> 24.3 -> 18.7 -> 12.9 -> 7.3 -> 0.5 dB
   over the following 1.5s. VPO path fully populated.
+
+## Session 2 addendum 2: full-canon gcs2sfz hardening (carry-over) DONE
+- `render_oneshot()`: (a) FIXED a latent crash — it still unpacked 4-tuples
+  after read_csv_notes moved to 6 columns (start,dur,pitch,vel,pan,rev); any
+  1812 canon/oneshot render would have died with "too many values to unpack".
+  (b) Dropped `atrim=0:{dur_s}` — one-shot placements now play the FULL sample
+  so cannon/bell tails ring out (1812 canon tail went from 0.6s to ~55s of
+  natural decay across 40+ shots; placement-local tails audible at +8s).
+  (c) Added a part-level `alimiter=limit=0.95:level=false` (matches mixdown)
+  so overlapping placements can't clip (verified peak 31130 ~= 0.95 FS).
+- New `wav_duration()` ffprobe helper + `FFPROBE` const; `main()` now computes
+  piece_end from the LONGEST rendered stem instead of the CSV's last note end,
+  so full one-shot tails and reverb pads are never trimmed off the mix
+  (fallback to csv_max_end if ffprobe is unavailable).
+- Verified end-to-end on t/e 1812: `make -B sfz-mix/e-sfz-mix.wav` renders all
+  24 instruments (canon via one-shot, orchestra via VPO/GM) in 23.7s wall,
+  mix 1414.5s, canon placements at 491/493/496s peak-limited with long tails.
