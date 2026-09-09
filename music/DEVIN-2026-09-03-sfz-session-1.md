@@ -323,7 +323,15 @@ into the SFZ render: imscomp CSV -> gcs2sfz MIDI -> sfizz/fluidsynth.
 
 ## Not done
 - User's `ims/test-vol-sf.gcs` is uncommitted -- NEVER stage it.
-- Whether to set per-instrument reverb values in `b/instruments.include`
-  (currently all 0) is the user's call.
 - Full-canon gcs2sfz hardening from earlier note (atrim/alimiter/wav_duration)
   still pending.
+
+## Session 2 addendum (same day): moderate hall defaults wired in
+- `b/instruments.include`: all 45 `reverb VOICE 0` lines replaced with
+  moderate hall sends per family (piccolo 50, woodwinds 55, brass/horns 62,
+  trombone/tuba 65, strings 48/52/55/55, pizz 45/50, timpani/bells 50,
+  percussion 35-38, gunshot 20, canon 25). Verified in regenerated v1-1 CSVs
+  (violin 48, viola 52, cello 55, bass 55, horn 62, timpani 50).
+- Measured on a fresh render: last-note tail of french_horn went from
+  -180 dB (dry) to a decaying 30.5 -> 24.3 -> 18.7 -> 12.9 -> 7.3 -> 0.5 dB
+  over the following 1.5s. VPO path fully populated.

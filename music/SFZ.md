@@ -122,9 +122,10 @@ PIPELINE & TARGETS (added 2026-09-09) — now wired into all piece dirs.
 
   imscomp --sfzpipecsv piece.E -> per-instrument CSVs (sfz-csv/<piece>/)
       CSV schema: start,dur,midi_note,velocity,pan,reverb (pan = MIDI CC10,
-      reverb = MIDI CC91, both taken verbatim from the score's macros;
-      pan 36/42/64/85/92 violin/2nd/viola/cello/bass give an orchestral L/R
-      spread; reverb is 0 everywhere until macros set > 0).
+      reverb = MIDI CC91, taken verbatim from the score's macros; pan
+      36/42/64/85/92 violin/2nd/viola/cello/bass plus woodwinds ~55-60,
+      brass ~62-65, percussion ~35-50 give an orchestral L/R spread with a
+      moderate hall send; adjustable per macro in b/instruments.include).
   gcs2sfz sfz-csv/<piece>/ --sfzdir <VPO lib> --outdir sfz-mix/ -> mixed WAV
       - VPO-mapped instruments: sfizz_render per instrument, mixed with
         ffmpeg (amix + loudnorm implicit chain).
