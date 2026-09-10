@@ -27,7 +27,7 @@ Suffix convention: `foo.fs/.abc/.csv` = musicomp2abc output; `foo_2.fs/_2.abc/_2
 ## Tests (differential regression — the real test suite)
 
 - `cd music/ims && ./DOALL` runs 5 suites in parallel (songs/, musicomp2abc/, b/, t/e/, tc-testing/gershwin/). Each `AAA.diff._2` compiles every listed `.gcs` with BOTH compilers across 5 formats (`--vert --hori --csv --fs --abc`) and diffs outputs.
-- **bare ARGH** = imscomp-vs-musicomp2abc output difference; **named ARGH** = execution failure. Baseline: 0 bare / 0 named. Any increase is a regression. (Pre-existing named failures, both compilers identical, not regressions: `b/02` b2m3/b2m4 "no measure processed yet" + gershwin new-g3.)
+- **bare ARGH** = imscomp-vs-musicomp2abc output difference; **named ARGH** = execution failure. Baseline: 0 bare / 0 named. Any increase is a regression. (Pre-existing named failures, both compilers identical, not regressions: gershwin new-g3.)
 - One suite: `cd music/b && ./AAA.diff._2`. Single compiler check: `cd music/ims && make tests`. (`ims/RUN-Tests` is older and references a stale `~/musicomp2abc/...` path — prefer DOALL.)
 
 ## Audio/video pipeline (works on the macOS box)
@@ -49,7 +49,7 @@ Second, higher-fidelity render path using the Virtual Playing Orchestra sample l
 - Chain: `.gcs` → `.E` (CPP) → **`imscomp --sfzpipecsv`** → per-instrument 6-col CSV (`start,dur,midi_note,velocity,pan,reverb`) → **`music/sfz/gcs2sfz`** → one WAV per instrument → mixed `*-sfz-mix.wav` → `*-sfz.mp4`. Suffix rules: `foo.fs`/`foo_2.fs` belong to the GM path; SFZ outputs are `sfz-csv/…`, `sfz-mix/`, `*-sfz.mp4`.
 - Instruments: VPO samples via `~/bin/sfizz_render` (pan = score CC10, reverb = CC91, offline `aecho` tail since `~/bin/ffmpeg`'s `afir` mutes dry audio); unmapped instruments fall back to GM via patched `~/bin/fluidsynth`; one-shot effects (1812 canon + church bells) play whole WAV sonics from `music/sfz/library/EFFECTS/` (`canon.wav`, `church-bells.wav` fetched — `setup.sh --effects`).
 - Commands: `make sfz` (= WAV mixes) / `make sfz-mp4` / `make sfz-clean` at each piece dir or the top level (`music/` recurses `songs ims t b`). `make sfz-mp4` **requires `~/bin` before `/opt/homebrew/bin` on PATH** — the brew ffmpeg has no `drawtext`, so the overlay (and `gcs2sfz`'s `shutil.which("ffmpeg")`) must resolve to `~/bin/ffmpeg`.
-- Full-sweep status: all SONGS/ims/t/e/b pieces render except `b/02 b2m3`/`b2m4` (same score bugs as DOALL named failures above). `songs` `SONGS_NO_PS` (`inv1 vinci sonata macros-complicated`) are excluded from sfz by design.
+- Full-sweep status: all SONGS/ims/t/e/b pieces render. `songs` `SONGS_NO_PS` (`inv1 vinci sonata macros-complicated`) are excluded from sfz by design.
 
 ## YouTube uploads
 

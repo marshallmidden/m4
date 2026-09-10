@@ -212,8 +212,10 @@ python3 ../../ims/imscomp --sfzpipecsv v3-1.E   # writes *.csv in CWD
 - b/09 `make sfz` / `make sfz-mp4` / `make b9m2-sfz.mp4` targets added in e76ff628
   still NOT validated end-to-end (render pipeline verified manually instead).
 - Clean up/ignore b/09 build artifacts (b9m2.E, *.csv, b9m2_2.fs) — not committed.
-- Optional: 1812 one-shots (gun/explosion/bells) still TODO from earlier projects;
-  GM drum-channel remap in imscomp still TODO.
+- 1812 one-shots: canon + church bells DONE (fetched via `setup.sh --effects`:
+  canon.wav + church-bells.wav, Freesound 425172 Audeption CC0; 1812 `bells`
+  macro → Church Bells one-shot). gun/explosion samples not needed by 1812.
+- GM drum-channel remap in imscomp still TODO.
 - Render notes: keep on macOS, run under `screen -dmS` (detached) to survive
   workspace interruptions; ALWAYS `--use-eot`; watch `GCS2SFZ_WORKERS`/disk.
 
@@ -267,7 +269,7 @@ Makefiles (all wired to the b/09 pattern):
 - Commit this work (user asked: update .md files, git commit, git push).
 - Optional full `make sfz-mp4` sweep + songs 106-piece render.
 - Carry-over from prior session: mirror `--sfzpipecsv` to musicomp2abc (still
-  NOT done); b/09 targets fully validated now; 1812 one-shots still TODO.
+  NOT done); b/09 targets fully validated now; 1812 one-shots canon+bells DONE.
 
 ===================== SESSION 2 (2026-09-09): pan + reverb ==========================
 
