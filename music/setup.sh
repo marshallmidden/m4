@@ -12,7 +12,7 @@
 #   ./setup.sh --vpo        download VPO wave files (616MB) + standard scripts
 #   ./setup.sh --sf2        get GeneralUser.sf2 (git clone of the release)
 #   ./setup.sh --sfizz      put sfizz_render + libsfizz into ~/bin (macOS)
-#   ./setup.sh --effects    get CC0 one-shot effect samples (1812 canon)
+#   ./setup.sh --effects    get CC0 one-shot effect samples (1812 canon, church bells)
 #   ./setup.sh --notes      print build recipes for the hand-built tools
 #
 # Non-destructive: fetches write only to music/music/sfz/library/ and ~/bin,
@@ -95,10 +95,10 @@ check() {
     else
         say_miss "VPO library -> $VPO_DEST  (needs wave files + scripts unzipped merge)"
     fi
-    if has_file "$EFFECTS_DIR/canon.wav"; then
-        say_ok "1812 canon one-shot ($EFFECTS_DIR/canon.wav)"
+    if has_file "$EFFECTS_DIR/canon.wav" && has_file "$EFFECTS_DIR/church-bells.wav"; then
+        say_ok "1812 one-shots: $EFFECTS_DIR/canon.wav, church-bells.wav"
     else
-        say_miss "canon one-shot -> $EFFECTS_DIR/canon.wav  (needed for t/e SFZ mixes)"
+        say_miss "one-shot effects -> $EFFECTS_DIR/  (canon.wav + church-bells.wav needed for t/e SFZ mixes)"
     fi
 
     say_head "YouTube upload (only needed for ./youtube-upload / make mp4 upload)"
@@ -116,6 +116,7 @@ check() {
         has_file "$GENERALUSER_DIR/GeneralUser.sf2" || missing=$((missing+1))
         has_dir "$VPO_DEST/libs" || missing=$((missing+1))
         has_file "$EFFECTS_DIR/canon.wav" || missing=$((missing+1))
+        has_file "$EFFECTS_DIR/church-bells.wav" || missing=$((missing+1))
         printf '\n%d missing component(s). Run ./setup.sh --all (or --notes for tool recipes).\n' "$missing"
         if [ "$missing" -gt 0 ]; then exit 1; fi
     fi
@@ -214,30 +215,37 @@ fetch_sf2() {
 }
 
 # --------------------------------------------------------------------------
+# Freesound CDN previews (HQ MP3) -> converted to 48kHz stereo WAV. All CC0.
+# Sound IDs / credits recorded in the source comments; the full-length originals
+# require a Freesound login, hence the public CDN preview.
+EFFECTS_SOURCES="
+canon|https://cdn.freesound.org/previews/187/187767_71257-hq.mp3|Freesound 187767 \"Cannon Shot\" by qubodup (CC0 / public domain; US-government-source filming, author asks only for a link credit)
+church-bells|https://cdn.freesound.org/previews/425/425172_8323418-hq.mp3|Freesound 425172 \"Church bell.wav\" by Audeption (CC0; \"credits to me are desirable but not required\")
+"
+
 fetch_effects() {
-    say_head "Fetching CC0 one-shot effect samples (1812 canon)"
-    if has_file "$EFFECTS_DIR/canon.wav" && [ "$FORCE" -eq 0 ]; then
-        say_ok "canon.wav already at $EFFECTS_DIR; skip (--force to refetch)"
-        return 0
-    fi
+    say_head "Fetching CC0 one-shot effect samples (1812 canon + church bells)"
+    missing=0
     mkdir -p "$EFFECTS_DIR"
-    tmp="$(mktemp -d)"
-    # Freesound sound 187767 "Cannon Shot" by qubodup, CC0 / public domain
-    # (US-government-source filming; author asks only for a link credit). The
-    # full-length FLAC requires a Freesound login, so use the public CDN
-    # preview (HQ MP3) and re-encode to a 48 kHz stereo WAV.
-    MP3="https://cdn.freesound.org/previews/187/187767_71257-hq.mp3"
-    echo "  $MP3"
-    curl -fL --max-time 300 "$MP3" -o "$tmp/canon.mp3" || { echo "  FAILED canon download"; rm -rf "$tmp"; return 1; }
-    ffmpeg -y -loglevel error -i "$tmp/canon.mp3" -ac 2 -ar 48000 "$EFFECTS_DIR/canon.wav" \
-        || { echo "  FAILED ffmpeg re-encode"; rm -rf "$tmp"; return 1; }
-    rm -rf "$tmp"
-    if has_file "$EFFECTS_DIR/canon.wav"; then
-        say_ok "installed $EFFECTS_DIR/canon.wav (source: freesound.org/people/qubodup/sounds/187767)"
-    else
-        say_miss "conversion produced no canon.wav"
-        return 1
-    fi
+    while IFS='|' read -r name url credit; do
+        [ -n "$name" ] || continue
+        out="$EFFECTS_DIR/$name.wav"
+        if has_file "$out" && [ "$FORCE" -eq 0 ]; then
+            say_ok "$name.wav already at $EFFECTS_DIR; skip (--force to refetch)"
+            continue
+        fi
+        tmp="$(mktemp -d)"
+        echo "  $url"
+        if ! curl -fL --max-time 300 "$url" -o "$tmp/$name.mp3"; then
+            echo "  FAILED $name download"; rm -rf "$tmp"; missing=1; continue
+        fi
+        if ! ffmpeg -y -loglevel error -i "$tmp/$name.mp3" -ac 2 -ar 48000 "$out"; then
+            echo "  FAILED ffmpeg re-encode for $name"; rm -rf "$tmp"; missing=1; continue
+        fi
+        rm -rf "$tmp"
+        say_ok "installed $out ($credit)"
+    done <<< "$EFFECTS_SOURCES"
+    if [ "$missing" -gt 0 ]; then return 1; fi
 }
 
 # --------------------------------------------------------------------------
