@@ -129,6 +129,13 @@ PIPELINE & TARGETS (added 2026-09-09) — now wired into all piece dirs.
   gcs2sfz sfz-csv/<piece>/ --sfzdir <VPO lib> --outdir sfz-mix/ -> mixed WAV
       - VPO-mapped instruments: sfizz_render per instrument, mixed with
         ffmpeg (amix + loudnorm implicit chain).
+  Voice/measure selection: `imscomp --sfzpipecsv` honors the SAME shared
+      selection the midi path uses — no sfz-specific wiring needed. The voice
+      filter lives in the shared note-print loop (imscomp ~line 6568) and the
+      measures filter at parse time, so `--sfzpipecsv --voices 14` or
+      `--measures 3` (or combined) slice the per-instrument CSVs correctly
+      (verified on b/01 v1-1 and synthetic tests). Voice args are NUMBERS only
+      (`--voices 14`); names are not accepted in either path (0 files).
       - Pan: write_midi emits CC10; sfizz honors CC10 -> pan by default
         (sfizz #475 linkage), verified L<center<R. fluidsynth also honors it.
       - Reverb: VPO has no reverb effect in this sfizz build, and ~/bin/ffmpeg's
@@ -156,6 +163,11 @@ b/09, t/e):
   make sfz-mp4     - encode sfz-mix/*.wav -> *-sfz.mp4
   make sfz-clean   - rm -rf sfz-csv/ sfz-mix/ *-sfz.mp4
 
+Every piece/tool Makefile sets `.DEFAULT_GOAL := help` (top of file), so a bare
+`make` (no goal) prints the help text instead of starting a VPO render — the
+sfz targets come before `help` in the file and would otherwise win default-goal
+selection (fixed 2026-09-10 across songs/, ims/, b/01..04, b/06).
+
 ims/ also has:
   make sfz-tests       - render the TESTS list too
   make sfz-all         - SONGS + TESTS
@@ -173,3 +185,13 @@ Known limitations:
   - sf2 path is auto-detected by $HOME layout; --sf2 overrides.
   - imscomp's --midi1csv/velocity: write_midi emits note velocity AND CC11
     = velocity so GeneralUser responds to dynamics.
+  - `print_out_sfzpipecsv` note pairing (fixed 2026-09-10): a note whose
+    note-off lands on a DIFFERENT channel than its note-on was dropped. This
+    happens at pizz→arco switches: imscomp emits the closing note-off on the
+    NEW (arco) channel while the note-on was on the OLD (pizz) channel, so the
+    exact-key `(voiceon, chan, pitch)` lookup missed it and the note stayed in
+    `pending_notes` forever. `release_sfz_note()` now falls back to the oldest
+    pending `(voiceon, pitch)` across channels and attributes it to its START
+    channel. Verified: full b/01 v1-1 run was 17269 sfz rows vs 17277 midi
+    note-ons (8 missing) -> now identical pitch/vel multiset; `--voices 14`
+    went 2056 -> 2057.

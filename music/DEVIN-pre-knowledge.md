@@ -55,6 +55,13 @@ Each composition directory has a `Makefile`. Key rules:
 Rebuild a specific output: `cd b/sonata14 && make -B s14_2.fs`
 Rebuild everything: `cd b/sonata14 && make -B`
 
+Bare `make` (no goal) always prints the help text, never builds: every piece/
+tool Makefile sets `.DEFAULT_GOAL := help` (added 2026-09-10). This matters
+because the SFZ targets (`sfz`, `sfz-mp4`, `sfz-clean`) sit near the top of the
+Makefile; without `.DEFAULT_GOAL`, GNU make would pick the first explicit
+slash-free non-pattern target (`sfz`) and a bare `make` would start a full VPO
+render instead of printing help. See SFZ.md for the sfz Make targets.
+
 ---
 
 ## imscomp Details
@@ -151,11 +158,14 @@ GCS variables and command-line flags.
 | 5464  | `def print_header(` - header output for all formats |
 | 5803  | `def do_midi_vpi(` - CC 11/10/7 emission during crescendo/diminuendo |
 | 5889  | `def print_out_midi1csv_notes(` - **main MIDI CSV note output** (sound quality features live here) |
+| 6568  | Shared voice filter inside the note-print loop — `--voices` slices BOTH `--midi1csv` and `--sfzpipecsv` (as of ~2026-09-10) |
 | 5917  | `random.seed(42)` - deterministic humanization seed |
 | 5920  | `_voice_staff_pos` - arpeggio voice position mapping |
 | 5982  | `last_cc11 = -1` - CC tracker initialization per voice |
 | 6620  | `change_name` dict - maps internal MIDI CSV names to FluidSynth commands |
 | 6638  | `def print_out_fluidsynth()` - FluidSynth output generator |
+| 7719  | `def print_out_sfzpipecsv()` - per-instrument SFZ CSV output (6-col: start,dur,pitch,vel,pan,rev; see SFZ.md). imscomp-only, NOT mirrored. |
+| 7785  | `def release_sfz_note(` - release pending note, cross-channel fallback for note-offs on a different channel than the note-on (pizz->arco switch fix, 2026-09-10) |
 | 8398  | `def put_on_bufs(` - add note to output buffers; updates mlth |
 | 8615  | `def instak(` - insert note into time-sorted stack |
 | 8700  | `def fill_voice_mlth(` - pad all voices with rests to match longest (has skip-set optimization) |

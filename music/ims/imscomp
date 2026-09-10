@@ -7773,6 +7773,28 @@ def print_out_sfzpipecsv() -> None:
         sec_per_quarter = (60.0 / (4.0 * cur_l * cur_s))
         return sec_per_quarter / ticks_per_quarter
 
+    # Release the oldest pending note matching (voiceon, pitch), preferring the
+    # exact channel. A channel can change between a note-on and its note-off
+    # (e.g. the pizz->arco switch emits the closing note-off on the NEW channel
+    # while the note-on was on the OLD channel); without this fallback such a
+    # note would be stuck in pending_notes and silently dropped.
+    def release_sfz_note(voiceon, chan, pitch, tick):
+        key = (voiceon, chan, pitch)
+        if key in pending_notes and pending_notes[key]:
+            start_tick, vel, spt, pan, rev = pending_notes[key].pop(0)
+        else:
+            candidates = []
+            for (v, c, p), q in pending_notes.items():
+                if v == voiceon and p == pitch and q:
+                    candidates.append((q[0][0], c))
+            if not candidates:
+                return
+            start_tick, c2 = min(candidates)
+            vel, spt, pan, rev = pending_notes[(voiceon, c2, pitch)].pop(0)[1:]
+            key = (voiceon, c2, pitch)
+        dur_sec = (tick - start_tick) * spt
+        notes.setdefault((voiceon, key[1]), []).append((start_tick * spt, dur_sec, pitch, vel, pan, rev))
+
     for i, line in enumerate(array_of_lines):
         parts = line.split(', ')
         if len(parts) < 2:
@@ -7812,14 +7834,11 @@ def print_out_sfzpipecsv() -> None:
             except (ValueError, IndexError):
                 continue
             voiceon = voice_p - 1          # field 0 is the 1-based voice number
-            key = (voiceon, chan, pitch)
             if velocity == 0:
                 # Treat as note-off (velocity 0)
-                if key in pending_notes and pending_notes[key]:
-                    start_tick, vel, spt, pan, rev = pending_notes[key].pop(0)
-                    dur_sec = (current_tick - start_tick) * spt
-                    notes.setdefault((voiceon, chan), []).append((start_tick * spt, dur_sec, pitch, vel, pan, rev))
+                release_sfz_note(voiceon, chan, pitch, current_tick)
                 continue
+            key = (voiceon, chan, pitch)
             # Capture the tempo in effect at this note start
             spt = sfz_sec_per_tick(tempo_s, tempo_l)
             ckey = (voiceon, chan)
@@ -7835,11 +7854,7 @@ def print_out_sfzpipecsv() -> None:
             except (ValueError, IndexError):
                 continue
             voiceon = voice_p - 1          # field 0 is the 1-based voice number
-            key = (voiceon, chan, pitch)
-            if key in pending_notes and pending_notes[key]:
-                start_tick, vel, spt, pan, rev = pending_notes[key].pop(0)
-                dur_sec = (current_tick - start_tick) * spt
-                notes.setdefault((voiceon, chan), []).append((start_tick * spt, dur_sec, pitch, vel, pan, rev))
+            release_sfz_note(voiceon, chan, pitch, current_tick)
 
         elif 'Tempo, ' in event_str or event_str.startswith('Tempo,'):
             try:

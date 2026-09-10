@@ -158,6 +158,33 @@ def write_midi(csv_path: str, midi_path: str, track=0):
         return False
 
     notes.sort(key=lambda n: (n[0], n[1]))
+
+    # Same-pitch overlap cleanup. A merged instrument CSV (all voices of an
+    # instrument in one part) often has a NEW note-on for a pitch whose
+    # previous note is STILL held (off_tick after the new on_tick). sfizz
+    # matches note-offs by pitch, so that stale off (arriving shortly after the
+    # new on) kills the freshly-started voice: the new articulation is silently
+    # dropped (~14% of notes in some pieces otherwise). The off-before-on
+    # ordering below only helps when both land on the same tick, so here we
+    # truncate the previous note's off to the new note's on. True simultaneous
+    # unisons (same pitch, same tick) are merged into one note (longer dur).
+    out: list[list] = []
+    alive: list[bool] = []
+    active: dict[int, int] = {}  # pitch -> index into out
+    for on, off, pitch, vel, pan, rev in notes:
+        j = active.get(pitch)
+        if j is not None and out[j][1] >= on:
+            if out[j][0] == on:
+                alive[j] = False  # unison double: drop the earlier note
+                off = max(off, out[j][1])
+            else:
+                out[j][1] = on  # repeated note: cut previous at new on
+        out.append([on, off, pitch, vel, pan, rev])
+        alive.append(True)
+        active[pitch] = len(out) - 1
+    notes = [tuple(n) for i, n in enumerate(out) if alive[i]]
+    notes.sort(key=lambda n: (n[0], n[1]))
+
     tempo_ppqn_micros = int(60000000.0 / BPM)  # 500000 us/qn @ 120bpm
 
     # Group note-ons/offs onto a timeline keyed by absolute tick.
@@ -193,7 +220,12 @@ def write_midi(csv_path: str, midi_path: str, track=0):
         for cc, value in sorted(cc_timeline.get(tick, [])):
             events.append((delta if first else 0, b"\xb0" + bytes([cc, value & 0x7F])))
             first = False
-        batch = sorted(timeline.get(tick, []), key=lambda e: e[0])
+        # Note-offs MUST precede note-ons at the same tick: a merged instrument
+        # CSV (e.g. all violin voices in one part) has the previous voice's
+        # note-off landing on the exact tick a new unison note-on starts; if the
+        # on were emitted first, sfizz's note-off would kill the freshly started
+        # note, silently dropping it (was ~6% of notes across the suite).
+        batch = sorted(timeline.get(tick, []), key=lambda e: e[0] == 0)
         for kind, pitch, vel in batch:
             if kind == 0:
                 # Emit CC11 expression (value = velocity, like fluidsynth's CC11=dyn)

@@ -354,3 +354,63 @@ into the SFZ render: imscomp CSV -> gcs2sfz MIDI -> sfizz/fluidsynth.
 - Verified end-to-end on t/e 1812: `make -B sfz-mix/e-sfz-mix.wav` renders all
   24 instruments (canon via one-shot, orchestra via VPO/GM) in 23.7s wall,
   mix 1414.5s, canon placements at 491/493/496s peak-limited with long tails.
+
+# 2026-09-10 session: voice/measure selection for sfz + dropped-note fix
+
+## Objective
+Confirm `--voices`/`--measures` work for `--sfzpipecsv`, and fix the notes the
+sfz pipeline was silently dropping (sfz row counts were below midi note-on
+counts).
+
+## Result 1: voice/measure selection needs NO sfz-specific code
+- The voice filter lives in the SHARED note-print loop (`print_out_midi1csv_notes`,
+  imscomp ~line 6568) and the measures filter at parse time; `print_out_sfzpipecsv`
+  (line ~7719) just consumes the already-filtered `array_of_lines`. So
+  `--voices N` / `--measures M` / combinations work transparently for sfz too.
+- Verified on synthetic tests (/tmp/m5test/v4.gcs, v5.gcs: full=16 rows,
+  `--voices 1`=8, `--measures 1`=8, `--voices 1 --measures 1`=4) and on the
+  real piece /tmp/m5test/real/v1.E (full=12 CSVs/17269 rows; `--measures 5`=9
+  CSVs/59 rows; `--voices 14`=2 CSVs/2056 rows; `--voices 1,3`=flute+oboe).
+- Voice args are NUMBERS only; names (`--voices violin1A`) give 0 files in
+  both midi and sfz paths (same as the midi path — not an sfz regression).
+
+## Result 2: fixed dropped notes in `print_out_sfzpipecsv`
+- Symptom: sfz output had fewer rows than midi note-ons. Full b/01 v1-1 run
+  emitted only 17269 notes vs 17277 midi note-ons (8 missing); `--voices 14`
+  was 2056 vs 2057.
+- Root cause: at the pizz->arco switch (tick 5760 in v1-1), imscomp emits the
+  last pizz note's closing `Note_off_c` on the NEW (arco) channel while the
+  `Note_on_c` was on the OLD (pizz) channel. The sfz parser keyed pending notes
+  by exact `(voiceon, chan, pitch)`, so the off never matched, the note-on
+  stayed stuck in `pending_notes`, and the whole note vanished. All 8 dropped
+  notes were the string/pizz notes straddling the m3/m4 boundary (tick 5276-5285).
+- Fix: new `release_sfz_note()` (imscomp ~line 7785) — if the exact key has no
+  pending note, fall back to the OLDEST pending `(voiceon, pitch)` across ALL
+  channels and release it, attributing the emitted note to its START channel
+  (so the pizz note lands in pizzicato_strings.csv, keeps its note-on pan/reverb).
+  Used by both the `Note_off_c` and `Note_on_c vel==0` paths.
+- Verified: full run now 17277 rows with pitch/vel multiset IDENTICAL to midi;
+  `--voices 14` now 2057; recovered e.g. pizz violin `78,82` @14.99s dur 1.375s
+  (tick 5276->5760) in pizzicato_strings.csv. midi1csv output byte-identical
+  before/after; `--fs` still compiles; py_compile clean. Change is isolated to
+  the sfz-only function (NOT mirrored to musicomp2abc — sfz stays bare-diff 0).
+
+## Result 3: bare `make` now prints help everywhere
+- b/01's Makefile had `sfz`/`sfz-mp4`/`sfz-clean` targets before `help`, so GNU
+  make picked `sfz` (which has a pattern-rule-free, slash-free target) as the
+  default goal — bare `make` started a full VPO render instead of printing help.
+- Fixed by adding `.DEFAULT_GOAL := help` at the top of the 7 affected
+  Makefiles: songs/, ims/, b/01..b/04, b/06. All 17 piece/tool Makefiles now
+  resolve `.DEFAULT_GOAL := help`; bare `make` in each dir prints its help text.
+- Note: `# make` (no args) in `music/` root or any piece dir = help, never a build.
+
+## Open / next
+- Debts carried from earlier: gcs2sfz `write_midi` same-pitch overlap fix still
+  UNCOMMITTED (`music/music/sfz/gcs2sfz`); user's `ims/test-vol-sf.gcs` must
+  never be staged. User decision still pending on re-rendering all 25 pieces
+  with the post-fix CSVs and committing.
+- Unresolved observation from this session: full vs `--voices N` midi1csv event
+  streams differ NOT ONLY in channel numbering but also around the pizz/arco
+  boundary (full: `15, 5276, Note_on_c, 15, 78, 82` + off at 5280; `--voices 14`:
+  off at 5280 then `15, 5283, Note_on_c, 1, 78, 82`). Cause not yet investigated
+  — a possible separate quirk of voice selection (timing/channel remap).
