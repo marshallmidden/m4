@@ -1,6 +1,4 @@
 #-----------------------------------------------------------------------------
-.DEFAULT_GOAL := help
-#-----------------------------------------------------------------------------
 V1 = v1-1
 V2 = v1-2
 V3 = v1-3
@@ -96,7 +94,7 @@ MC_ARGS ?= ${PAGES} ${MEASURES} ${VOICES}
 sfz-csv/%/.done: %.E ${IMSCOMP}
 	@mkdir -p $(dir $@)
 	@rm -f $(dir $@)*.csv
-	cd $(dir $@) && $(CURDIR)/../../ims/imscomp --sfzpipecsv $(CURDIR)/$*.E
+	cd $(dir $@) && ${IMSCOMP} ${MC_ARGS} --sfzpipecsv $(CURDIR)/$*.E
 	@touch $@
 #-----------------------------------------------------------------------------
 sfz-mix/%-sfz-mix.wav: sfz-csv/%/.done
@@ -108,17 +106,6 @@ sfz-mix/%-sfz-mix.wav: sfz-csv/%/.done
 #-----------------------------------------------------------------------------
 %-sfz.mp4: sfz-mix/%-sfz-mix.wav %_2.fs ${GCS2YOUTUBE} ${WAV2WAVEFORM} ${FS2ASS}
 	${GCS2YOUTUBE} -a "$<" -o "$@" "$*_2.fs" || (rm -f $@ ; exit 1)
-#-----------------------------------------------------------------------------
-.PHONY: sfz
-sfz: ${V1:%=${SFZ_MIXDIR}/%-sfz-mix.wav} ${V2:%=${SFZ_MIXDIR}/%-sfz-mix.wav} ${V3:%=${SFZ_MIXDIR}/%-sfz-mix.wav} ${V4:%=${SFZ_MIXDIR}/%-sfz-mix.wav}
-#-----------------------------------------------------------------------------
-.PHONY: sfz-mp4
-sfz-mp4: ${V1:%=%-sfz.mp4} ${V2:%=%-sfz.mp4} ${V3:%=%-sfz.mp4} ${V4:%=%-sfz.mp4}
-#-----------------------------------------------------------------------------
-.PHONY: sfz-clean
-sfz-clean:
-	rm -rf ${SFZ_CSVDIR} ${SFZ_MIXDIR}
-	rm -f ${V1:%=%-sfz.mp4} ${V2:%=%-sfz.mp4} ${V3:%=%-sfz.mp4} ${V4:%=%-sfz.mp4}
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 .PHONY: help
@@ -169,8 +156,19 @@ mp4: ${V1}.mp4 ${V2}.mp4 ${V3}.mp4 ${V4}.mp4
 .PHONY: mp4_2
 mp4_2: ${V1}_2.mp4 ${V2}_2.mp4 ${V3}_2.mp4 ${V4}_2.mp4
 #-----------------------------------------------------------------------------
+.PHONY: sfz
+sfz: ${V1:%=${SFZ_MIXDIR}/%-sfz-mix.wav} ${V2:%=${SFZ_MIXDIR}/%-sfz-mix.wav} ${V3:%=${SFZ_MIXDIR}/%-sfz-mix.wav} ${V4:%=${SFZ_MIXDIR}/%-sfz-mix.wav}
+#-----------------------------------------------------------------------------
+.PHONY: sfz-mp4
+sfz-mp4: ${V1:%=%-sfz.mp4} ${V2:%=%-sfz.mp4} ${V3:%=%-sfz.mp4} ${V4:%=%-sfz.mp4}
+#-----------------------------------------------------------------------------
+.PHONY: sfz-clean
+sfz-clean:
+	rm -rf ${SFZ_CSVDIR} ${SFZ_MIXDIR}
+	rm -f ${V1:%=%-sfz.mp4} ${V2:%=%-sfz.mp4} ${V3:%=%-sfz.mp4} ${V4:%=%-sfz.mp4}
+#-----------------------------------------------------------------------------
 .PHONY: clean
-clean:
+clean: sfz-clean
 	rm -f *.ps
 	rm -f *.stdout *.stderr
 	rm -f ${V1}.csv ${V1}.mid ${V1}.fs ${V1}.pdf ${V1}.abc ${V1}.wav ${V1}.E ${V1}.h ${V1}.v ${V1}.mp4 ${V1}_2.mp4

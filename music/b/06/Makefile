@@ -93,7 +93,7 @@ MC_ARGS ?= ${PAGES} ${MEASURES} ${VOICES}
 sfz-csv/${V}/.done: ${V}.E ${IMSCOMP}
 	@mkdir -p $(dir $@)
 	@rm -f $(dir $@)*.csv
-	cd $(dir $@) && $(CURDIR)/../../ims/imscomp --sfzpipecsv $(CURDIR)/${V}.E
+	cd $(dir $@) && ${IMSCOMP} ${MC_ARGS} --sfzpipecsv $(CURDIR)/${V}.E
 	@touch $@
 #-----------------------------------------------------------------------------
 sfz-mix/${V}-sfz-mix.wav: sfz-csv/${V}/.done
@@ -105,17 +105,6 @@ sfz-mix/${V}-sfz-mix.wav: sfz-csv/${V}/.done
 #-----------------------------------------------------------------------------
 ${V}-sfz.mp4: sfz-mix/${V}-sfz-mix.wav ${V}_2.fs ${GCS2YOUTUBE} ${WAV2WAVEFORM} ${FS2ASS}
 	${GCS2YOUTUBE} -a "$<" -o "$@" "${V}_2.fs" || (rm -f $@ ; exit 1)
-#-----------------------------------------------------------------------------
-.PHONY: sfz
-sfz: sfz-mix/${V}-sfz-mix.wav
-#-----------------------------------------------------------------------------
-.PHONY: sfz-mp4
-sfz-mp4: ${V}-sfz.mp4
-#-----------------------------------------------------------------------------
-.PHONY: sfz-clean
-sfz-clean:
-	rm -rf ${SFZ_CSVDIR} ${SFZ_MIXDIR}
-	rm -f ${V}-sfz.mp4
 #-----------------------------------------------------------------------------
 .PHONY: help
 help::
@@ -155,9 +144,20 @@ mp4: ${V}.mp4
 #-----------------------------------------------------------------------------
 .PHONY: mp4_2
 mp4_2: ${V}_2.mp4
+#-----------------------------------------------------------------------------
+.PHONY: sfz
+sfz: sfz-mix/${V}-sfz-mix.wav
+#-----------------------------------------------------------------------------
+.PHONY: sfz-mp4
+sfz-mp4: ${V}-sfz.mp4
+#-----------------------------------------------------------------------------
+.PHONY: sfz-clean
+sfz-clean:
+	rm -rf ${SFZ_CSVDIR} ${SFZ_MIXDIR}
+	rm -f ${V}-sfz.mp4
 #=============================================================================
 .PHONY: clean
-clean::
+clean: sfz-clean
 	rm -f *.ps
 	rm -f *.stdout *.stderr
 	rm -f *.csv *.mid *.fs

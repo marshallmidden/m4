@@ -118,6 +118,17 @@ mp4: ${V}.mp4
 .PHONY: mp4_2
 mp4_2: ${V}_2.mp4
 #-----------------------------------------------------------------------------
+.PHONY: sfz
+sfz: sfz-mix/${V}-sfz-mix.wav
+#-----------------------------------------------------------------------------
+.PHONY: sfz-mp4
+sfz-mp4: ${V}-sfz.mp4
+#-----------------------------------------------------------------------------
+.PHONY: sfz-clean
+sfz-clean:
+	rm -rf ${SFZ_CSVDIR} ${SFZ_MIXDIR}
+	rm -f ${V}-sfz.mp4
+#-----------------------------------------------------------------------------
 # SFZ (VPO sampler) pipeline. s14 is a solo piano: it has no VPO mapping, so
 # gcs2sfz renders it through fluidsynth + GeneralUser.sf2 (GM fallback).
 #   make sfz       - render ${V} to sfz-mix/${V}-sfz-mix.wav
@@ -127,7 +138,7 @@ mp4_2: ${V}_2.mp4
 sfz-csv/${V}/.done: ${V}.E ${IMSCOMP}
 	@mkdir -p $(dir $@)
 	@rm -f $(dir $@)*.csv
-	cd $(dir $@) && $(CURDIR)/../../ims/imscomp --sfzpipecsv $(CURDIR)/${V}.E
+	cd $(dir $@) && ${IMSCOMP} ${MC_ARGS} --sfzpipecsv $(CURDIR)/${V}.E
 	@touch $@
 #-----------------------------------------------------------------------------
 sfz-mix/${V}-sfz-mix.wav: sfz-csv/${V}/.done
@@ -139,17 +150,6 @@ sfz-mix/${V}-sfz-mix.wav: sfz-csv/${V}/.done
 #-----------------------------------------------------------------------------
 ${V}-sfz.mp4: sfz-mix/${V}-sfz-mix.wav ${V}_2.fs ${GCS2YOUTUBE} ${WAV2WAVEFORM} ${FS2ASS}
 	${GCS2YOUTUBE} -a "$<" -o "$@" "${V}_2.fs" || (rm -f $@ ; exit 1)
-#-----------------------------------------------------------------------------
-.PHONY: sfz
-sfz: sfz-mix/${V}-sfz-mix.wav
-#-----------------------------------------------------------------------------
-.PHONY: sfz-mp4
-sfz-mp4: ${V}-sfz.mp4
-#-----------------------------------------------------------------------------
-.PHONY: sfz-clean
-sfz-clean:
-	rm -rf ${SFZ_CSVDIR} ${SFZ_MIXDIR}
-	rm -f ${V}-sfz.mp4
 #=============================================================================
 S14 = s14-orig.mid
 #=============================================================================
@@ -157,7 +157,7 @@ s14:
 	${MCOMP} ${S14} vertical > s14.pre-gcs
 #=============================================================================
 .PHONY: clean
-clean:
+clean: sfz-clean
 	rm -f ${V}.abc ${V}_m.ps ${V}.pdf
 	rm -f ${V}.stdout ${V}.stderr
 	rm -f ${V}.csv ${V}.mid ${V}.wav

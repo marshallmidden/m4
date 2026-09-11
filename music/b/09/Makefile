@@ -151,8 +151,19 @@ mp4: ${SONGS_MP4}
 .PHONY: mp4_2
 mp4_2: ${SONGS_2_MP4}
 #-----------------------------------------------------------------------------
+.PHONY: sfz
+sfz: ${SONGS:%=${SFZ_MIXDIR}/%-sfz-mix.wav}
+#-----------------------------------------------------------------------------
+.PHONY: sfz-mp4
+sfz-mp4: ${SONGS:%=%-sfz.mp4}
+#-----------------------------------------------------------------------------
+.PHONY: sfz-clean
+sfz-clean:
+	rm -rf ${SFZ_CSVDIR} ${SFZ_MIXDIR}
+	rm -f ${SONGS:%=%-sfz.mp4}
+#-----------------------------------------------------------------------------
 .PHONY: clean
-clean:
+clean: sfz-clean
 	rm -f *.ps
 	rm -f *.stdout *.stderr
 	rm -f ${SONGS_E} ${SONGS_ABC} ${SONGS_2_ABC} ${SONGS_FS} ${SONGS_2_FS} ${SONGS_MP4} ${SONGS_2_MP4}
@@ -181,7 +192,7 @@ s1: ${SONGS_PDF} ${SONGS_2_PDF}  Makefile ${IMSCOMP}
 sfz-csv/%/.done: %.E ${IMSCOMP}
 	@mkdir -p $(dir $@)
 	@rm -f $(dir $@)*.csv
-	cd $(dir $@) && $(CURDIR)/../../ims/imscomp --sfzpipecsv $(CURDIR)/$*.E
+	cd $(dir $@) && ${IMSCOMP} ${MC_ARGS} --sfzpipecsv $(CURDIR)/$*.E
 	@touch $@
 #-----------------------------------------------------------------------------
 # 2) Render instrument CSVs to a mixed WAV via gcs2sfz + sfizz_render
@@ -194,17 +205,6 @@ sfz-mix/%-sfz-mix.wav: sfz-csv/%/.done
 # 3) Encode SFZ mix to MP4 (same visual style as gcs2youtube: title card + waveform)
 %-sfz.mp4: sfz-mix/%-sfz-mix.wav %_2.fs ${GCS2YOUTUBE} ${WAV2WAVEFORM} ${FS2ASS}
 	${GCS2YOUTUBE} -a "$<" -o "$@" "$*_2.fs" || (rm -f $@ ; exit 1)
-#-----------------------------------------------------------------------------
-.PHONY: sfz
-sfz: ${SONGS:%=${SFZ_MIXDIR}/%-sfz-mix.wav}
-#-----------------------------------------------------------------------------
-.PHONY: sfz-mp4
-sfz-mp4: ${SONGS:%=%-sfz.mp4}
-#-----------------------------------------------------------------------------
-.PHONY: sfz-clean
-sfz-clean:
-	rm -rf ${SFZ_CSVDIR} ${SFZ_MIXDIR}
-	rm -f ${SONGS:%=%-sfz.mp4}
 #-----------------------------------------------------------------------------
 # End of Makefile
 #-----------------------------------------------------------------------------

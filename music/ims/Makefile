@@ -199,7 +199,7 @@ CPP=gcc -E -x c -nostdinc -C -CC -Wno-error -Wno-extra -traditional-cpp
 sfz-csv/%/.done: %.E ${IMSCOMP}
 	@mkdir -p $(dir $@)
 	@rm -f $(dir $@)*.csv
-	cd $(dir $@) && $(CURDIR)/imscomp --sfzpipecsv $(CURDIR)/$*.E
+	cd $(dir $@) && ${IMSCOMP} ${MC_ARGS} --sfzpipecsv $(CURDIR)/$*.E
 	@touch $@
 #-----------------------------------------------------------------------------
 sfz-mix/%-sfz-mix.wav: sfz-csv/%/.done
@@ -211,29 +211,6 @@ sfz-mix/%-sfz-mix.wav: sfz-csv/%/.done
 #-----------------------------------------------------------------------------
 %-sfz.mp4: sfz-mix/%-sfz-mix.wav %.fs ${GCS2YOUTUBE} ${WAV2WAVEFORM} ${FS2ASS}
 	${GCS2YOUTUBE} -a "$<" -o "$@" "$*.fs" || (rm -f $@ ; exit 1)
-#-----------------------------------------------------------------------------
-.PHONY: sfz
-sfz: ${SONGS:%=${SFZ_MIXDIR}/%-sfz-mix.wav}
-#-----------------------------------------------------------------------------
-.PHONY: sfz-tests
-sfz-tests: ${TESTS:%=${SFZ_MIXDIR}/%-sfz-mix.wav}
-#-----------------------------------------------------------------------------
-.PHONY: sfz-all
-sfz-all: ${SONGS:%=${SFZ_MIXDIR}/%-sfz-mix.wav} ${TESTS:%=${SFZ_MIXDIR}/%-sfz-mix.wav}
-#-----------------------------------------------------------------------------
-.PHONY: sfz-mp4
-sfz-mp4: ${SONGS:%=%-sfz.mp4}
-#-----------------------------------------------------------------------------
-.PHONY: sfz-mp4-tests
-sfz-mp4-tests: ${TESTS:%=%-sfz.mp4}
-#-----------------------------------------------------------------------------
-.PHONY: sfz-mp4-all
-sfz-mp4-all: ${SONGS:%=%-sfz.mp4} ${TESTS:%=%-sfz.mp4}
-#-----------------------------------------------------------------------------
-.PHONY: sfz-clean
-sfz-clean:
-	rm -rf ${SFZ_CSVDIR} ${SFZ_MIXDIR}
-	rm -f ${SONGS:%=%-sfz.mp4} ${TESTS:%=%-sfz.mp4}
 #-----------------------------------------------------------------------------
 %.E: %.gcs
 	${CPP} $< -o $@
@@ -272,8 +249,31 @@ tests ${TESTS}: ${TESTS_PS} ${TESTS_FS} ${TESTS_PDF}
 .PHONY: mp4
 mp4: ${SONGS_MP4}
 #-----------------------------------------------------------------------------
+.PHONY: sfz
+sfz: ${SONGS:%=${SFZ_MIXDIR}/%-sfz-mix.wav}
+#-----------------------------------------------------------------------------
+.PHONY: sfz-tests
+sfz-tests: ${TESTS:%=${SFZ_MIXDIR}/%-sfz-mix.wav}
+#-----------------------------------------------------------------------------
+.PHONY: sfz-all
+sfz-all: ${SONGS:%=${SFZ_MIXDIR}/%-sfz-mix.wav} ${TESTS:%=${SFZ_MIXDIR}/%-sfz-mix.wav}
+#-----------------------------------------------------------------------------
+.PHONY: sfz-mp4
+sfz-mp4: ${SONGS:%=%-sfz.mp4}
+#-----------------------------------------------------------------------------
+.PHONY: sfz-mp4-tests
+sfz-mp4-tests: ${TESTS:%=%-sfz.mp4}
+#-----------------------------------------------------------------------------
+.PHONY: sfz-mp4-all
+sfz-mp4-all: ${SONGS:%=%-sfz.mp4} ${TESTS:%=%-sfz.mp4}
+#-----------------------------------------------------------------------------
+.PHONY: sfz-clean
+sfz-clean:
+	rm -rf ${SFZ_CSVDIR} ${SFZ_MIXDIR}
+	rm -f ${SONGS:%=%-sfz.mp4} ${TESTS:%=%-sfz.mp4}
+#-----------------------------------------------------------------------------
 .PHONY: clean
-clean:
+clean: sfz-clean
 	rm -f ${SONGS_FS} ${TESTS_FS} ${SONGS_M_FS} ${TESTS_M_FS}
 	rm -f ${SONGS_ABC} ${TESTS_ABC} ${SONGS_M_ABC} ${TESTS_M_ABC}
 	rm -f ${SONGS_PS} ${TESTS_PS} ${SONGS_M_PS} ${TESTS_M_PS}

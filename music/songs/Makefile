@@ -1,6 +1,4 @@
 #-----------------------------------------------------------------------------
-.DEFAULT_GOAL := help
-#-----------------------------------------------------------------------------
 SONGS  =
 SONGS += 5-dollar-fuga
 SONGS += BigBad
@@ -273,7 +271,7 @@ SONGS_2H= ${SONGS:=_2.h}
 sfz-csv/%/.done: %.E ${IMSCOMP}
 	@mkdir -p $(dir $@)
 	@rm -f $(dir $@)*.csv
-	cd $(dir $@) && $(CURDIR)/../ims/imscomp --sfzpipecsv $(CURDIR)/$*.E
+	cd $(dir $@) && ${IMSCOMP} ${MC_ARGS} --sfzpipecsv $(CURDIR)/$*.E
 	@touch $@
 #-----------------------------------------------------------------------------
 sfz-mix/%-sfz-mix.wav: sfz-csv/%/.done
@@ -285,17 +283,6 @@ sfz-mix/%-sfz-mix.wav: sfz-csv/%/.done
 #-----------------------------------------------------------------------------
 %-sfz.mp4: sfz-mix/%-sfz-mix.wav %_2.fs ${GCS2YOUTUBE} ${WAV2WAVEFORM} ${FS2ASS}
 	${GCS2YOUTUBE} -a "$<" -o "$@" "$*_2.fs" || (rm -f $@ ; exit 1)
-#-----------------------------------------------------------------------------
-.PHONY: sfz
-sfz: ${SONGS:%=${SFZ_MIXDIR}/%-sfz-mix.wav}
-#-----------------------------------------------------------------------------
-.PHONY: sfz-mp4
-sfz-mp4: ${SONGS:%=%-sfz.mp4}
-#-----------------------------------------------------------------------------
-.PHONY: sfz-clean
-sfz-clean:
-	rm -rf ${SFZ_CSVDIR} ${SFZ_MIXDIR}
-	rm -f ${SONGS:%=%-sfz.mp4}
 #-----------------------------------------------------------------------------
 %.v:    %.E ${MUSICOMP2ABC}
 	${MUSICOMP2ABC} ${MC_ARGS} --vert $< $@ || (rm -f $@ ; exit 1)
@@ -350,6 +337,17 @@ mp4: ${SONGS_MP4}
 .PHONY: mp4_2
 mp4_2: ${SONGS_2_MP4}
 #-----------------------------------------------------------------------------
+.PHONY: sfz
+sfz: ${SONGS:%=${SFZ_MIXDIR}/%-sfz-mix.wav}
+#-----------------------------------------------------------------------------
+.PHONY: sfz-mp4
+sfz-mp4: ${SONGS:%=%-sfz.mp4}
+#-----------------------------------------------------------------------------
+.PHONY: sfz-clean
+sfz-clean:
+	rm -rf ${SFZ_CSVDIR} ${SFZ_MIXDIR}
+	rm -f ${SONGS:%=%-sfz.mp4}
+#-----------------------------------------------------------------------------
 .PHONY: fs2 all_fs2
 fs2 all_fs2: ${SONGS_2FS}
 #-----------------------------------------------------------------------------
@@ -377,7 +375,7 @@ test:
 	@echo SONGS_2FS=${SONGS_2FS}
 #-----------------------------------------------------------------------------
 .PHONY: clean
-clean:
+clean: sfz-clean
 #--	rm -f ${SONGS_E}
 #--	rm -f ${SONGS_CSV} ${SONGS_MID} ${SONGS_WAV} ${SONGS_FS}
 #--	rm -f ${SONGS_ABC} ${SONGS_PS} ${SONGS_M_PS} ${SONGS_PDF}
