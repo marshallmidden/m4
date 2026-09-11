@@ -21,7 +21,7 @@ SONGS_MP4= ${SONGS:=.mp4}
 SONGS_2_MP4= ${SONGS:=_2.mp4}
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ../../musicomp2abc/musicomp2abc
-IMSCOMP      = ../../ims/imscomp
+IMSCOMP      = $(CURDIR)/../../ims/imscomp
 GCS2YOUTUBE  = ../../gcs2youtube
 FLUIDSYNTH   = ~/bin/fluidsynth
 ABCM2PS      = abcm2ps

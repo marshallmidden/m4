@@ -109,7 +109,7 @@ TESTS_M__PS = ${TESTS:=_m.ps}
 TESTS_PDF= ${TESTS:=.pdf}
 TESTS_M_PDF= ${TESTS:=_m.pdf}
 #-----------------------------------------------------------------------------
-IMSCOMP = ./imscomp
+IMSCOMP = $(CURDIR)/imscomp
 MUSICOMP = ../musicomp2abc/musicomp2abc
 GCS2YOUTUBE  = ../gcs2youtube
 MC_ARGS ?=

@@ -2,7 +2,7 @@ V            = s14
 #-----------------------------------------------------------------------------
 MCOMP        = ~/src/abc/mcomp/mcomp
 #++ MUSICOMP2ABC = ~/musicomp2abc/musicomp2abc
-IMSCOMP      = ../../ims/imscomp
+IMSCOMP      = $(CURDIR)/../../ims/imscomp
 MUSICOMP2ABC = ../../musicomp2abc/musicomp2abc
 GCS2YOUTUBE  = ../../gcs2youtube
 ABCM2PS      = abcm2ps

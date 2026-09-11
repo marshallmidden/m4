@@ -19,7 +19,7 @@ SONGS_MP4= ${SONGS:=.mp4}
 SONGS_2_MP4= ${SONGS:=_2.mp4}
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ../../musicomp2abc/musicomp2abc
-IMSCOMP      = ../../ims/imscomp
+IMSCOMP      = $(CURDIR)/../../ims/imscomp
 GCS2YOUTUBE  = ../../gcs2youtube
 FLUIDSYNTH   = ~/bin/fluidsynth
 ABCM2PS      = abcm2ps
@@ -200,7 +200,8 @@ sfz-mix/%-sfz-mix.wav: sfz-csv/%/.done
 	@mkdir -p $(dir $@)
 	"$(CURDIR)/$(GCS2SFZ)" "$(CURDIR)/$(SFZ_CSVDIR)/$*" \
 		--outdir "$(CURDIR)/$(SFZ_MIXDIR)" \
-		--sfzdir "$(CURDIR)/$(SFZ_LIBDIR)"
+		--sfzdir "$(CURDIR)/$(SFZ_LIBDIR)" \
+		--sf2 "$(SOUNDFONT)"
 #-----------------------------------------------------------------------------
 # 3) Encode SFZ mix to MP4 (same visual style as gcs2youtube: title card + waveform)
 %-sfz.mp4: sfz-mix/%-sfz-mix.wav %_2.fs ${GCS2YOUTUBE} ${WAV2WAVEFORM} ${FS2ASS}

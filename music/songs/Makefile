@@ -129,7 +129,7 @@ SONGS += slidall
 
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ../musicomp2abc/musicomp2abc
-IMSCOMP = ../ims/imscomp
+IMSCOMP = $(CURDIR)/../ims/imscomp
 GCS2YOUTUBE  = ../gcs2youtube
 FLUIDSYNTH   = ~/bin/fluidsynth
 #-- YAPS         = yaps

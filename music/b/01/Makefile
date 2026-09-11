@@ -6,7 +6,7 @@ V4 = v1-4
 #-----------------------------------------------------------------------------
 SEPARATE     = ./A.separate
 MUSICOMP2ABC = ../../musicomp2abc/musicomp2abc
-IMSCOMP      = ../../ims/imscomp
+IMSCOMP      = $(CURDIR)/../../ims/imscomp
 GCS2YOUTUBE  = ../../gcs2youtube
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf

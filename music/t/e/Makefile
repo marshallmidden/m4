@@ -2,7 +2,7 @@ V            = e
 M            = instruments.include
 #-----------------------------------------------------------------------------
 MUSICOMP2ABC = ../../musicomp2abc/musicomp2abc
-IMSCOMP      = ../../ims/imscomp
+IMSCOMP      = $(CURDIR)/../../ims/imscomp
 GCS2YOUTUBE  = ../../gcs2youtube
 ABCM2PS      = abcm2ps
 PS2PDF       = ps2pdf
@@ -223,7 +223,8 @@ sfz-mix/${V}-sfz-mix.wav: sfz-csv/${V}/.done
 	@mkdir -p $(dir $@)
 	"$(CURDIR)/$(GCS2SFZ)" "$(CURDIR)/$(SFZ_CSVDIR)/${V}" \
 		--outdir "$(CURDIR)/$(SFZ_MIXDIR)" \
-		--sfzdir "$(CURDIR)/$(SFZ_LIBDIR)"
+		--sfzdir "$(CURDIR)/$(SFZ_LIBDIR)" \
+		--sf2 "$(SOUNDFONT)"
 #-----------------------------------------------------------------------------
 # 3) Encode SFZ mix to MP4 (same visual style as gcs2youtube: title card + waveform)
 ${V}-sfz.mp4: sfz-mix/${V}-sfz-mix.wav ${V}_2.fs ${GCS2YOUTUBE} ${WAV2WAVEFORM} ${FS2ASS}
