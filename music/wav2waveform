@@ -21,6 +21,41 @@ import wave
 
 import numpy as np
 
+# ---------------------------------------------------------------------------
+# Tiny 5x7 bitmap font (0-9 and '-') for dB-scale labels
+# ---------------------------------------------------------------------------
+
+FONT5X7 = {
+    '0': ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
+    '1': ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
+    '2': ["11110", "00001", "00001", "11110", "10000", "10000", "11111"],
+    '3': ["11110", "00001", "00001", "01110", "00001", "00001", "11110"],
+    '4': ["10001", "10001", "10001", "11111", "00001", "00001", "00001"],
+    '5': ["11111", "10000", "10000", "11110", "00001", "00001", "11110"],
+    '6': ["01110", "10000", "10000", "11110", "10001", "10001", "01110"],
+    '7': ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
+    '8': ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
+    '9': ["01110", "10001", "10001", "01111", "00001", "00001", "01110"],
+    '-': ["00000", "00000", "00000", "11111", "00000", "00000", "00000"],
+}
+
+
+def text_mask(text, x, y, mask, strength, W):
+    """Draw bitmap text into a (H,W) float mask at (x,y). Strength<1.0."""
+    x0 = x
+    for ch in text:
+        glyph = FONT5X7.get(ch)
+        if glyph is None:
+            x0 += 6
+            continue
+        for gy, row in enumerate(glyph):
+            for gx, bit in enumerate(row):
+                if bit == '1':
+                    xx, yy = x0 + gx, y + gy
+                    if 0 <= xx < W and 0 <= yy < mask.shape[0]:
+                        mask[yy, xx] = strength
+        x0 += 6
+
 
 # ---------------------------------------------------------------------------
 # Envelope computation
@@ -83,6 +118,9 @@ def main():
     ap.add_argument('--fps',    type=int,   default=15)
     ap.add_argument('--window', type=float, default=10.0,
                     help='Seconds of audio visible (default 10)')
+    ap.add_argument('--db-markers', default='-6,-12,-18,-24',
+                    help='Comma-separated loudness reference lines in dBFS '
+                         '(cyan dashed lines + labels); empty disables')
     args = ap.parse_args()
 
     W, H, FPS = args.width, args.height, args.fps
@@ -143,6 +181,29 @@ def main():
     ys2    = ys.reshape(-1, 1)          # (H, 1)  -- for broadcasting
     fade2d = fade.reshape(1, -1)        # (1, W)
 
+    # -- Loudness reference scale (static cyan dashed lines + labels) --------
+    # Amplitude at dBFS: 10^(db/20); y offset from centre = amp * half_h.
+    db_mask = np.zeros((H, W), dtype=np.float32)
+    if args.db_markers.strip():
+        dash_w = 6                       # on / off dash period
+        for db_lvl in (float(x.strip()) for x in args.db_markers.split(',')):
+            amp = 10.0 ** (db_lvl / 20.0)
+            y_off = int(amp * half_h)
+            if y_off <= 0 or y_off >= int(half_h):
+                continue
+            for yy in (int(half_h) - y_off, int(half_h) + y_off):
+                for thk in (0, 1):                   # 2 px thick (survives 4:2:0)
+                    yx = yy + thk
+                    db_mask[yx, 0::dash_w * 2] = 0.40
+                    db_mask[yx, 1::dash_w * 2] = 0.40
+                    db_mask[yx, 2::dash_w * 2] = 0.40
+            text_mask(f"{db_lvl:g}dB", 4, int(half_h) - y_off - 6,
+                      db_mask, 0.90, W)
+            text_mask(f"{db_lvl:g}dB", 4, int(half_h) + y_off + 3,
+                      db_mask, 0.90, W)
+        print(f"[wav2waveform] dB markers: {args.db_markers}",
+              file=sys.stderr)
+
     for fi in range(n_frames):
         if fi % (FPS * 30) == 0:
             print(f"  frame {fi}/{n_frames}  ({100.0*fi/n_frames:.0f}%)",
@@ -197,11 +258,12 @@ def main():
             if 0 <= col < W:
                 brt[:, col] = np.maximum(brt[:, col], 0.40)
 
-        # -- Write frame (pure green) ---------------------------------------
+        # -- Write frame (pure green + cyan loudness scale) ------------------
         g = (brt * 255).clip(0, 255).astype(np.uint8)
+        c = (db_mask * 255).clip(0, 255).astype(np.uint8)
         frame[:, :, 0] = 0
-        frame[:, :, 1] = g
-        frame[:, :, 2] = 0
+        frame[:, :, 1] = np.maximum(g, c)
+        frame[:, :, 2] = c
 
         enc.stdin.write(frame.tobytes())
 
