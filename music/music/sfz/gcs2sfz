@@ -105,11 +105,13 @@ def _encode_smf_track(events: list[tuple[int, bytes]]) -> bytes:
     return b"MTrk" + struct.pack(">I", len(data)) + data
 
 
-def read_csv_notes(csv_path: str) -> list[tuple[float, float, int, int, int, int]]:
-    """Parse an instrument CSV into (start_s, dur_s, pitch, vel, pan, rev) tuples.
+def read_csv_notes(csv_path: str) -> list[tuple[float, float, int, int, int, int, int, int, int]]:
+    """Parse an instrument CSV into 9-tuples:
+    (start_s, dur_s, pitch, vel, pan, rev, vol_start, vol_end, pan_end).
 
-    The pan (CC10) and reverb (CC91) columns are optional for backward
-    compatibility with older 4-column CSVs; they default to 64 (center) and 0.
+    Columns 7-9 (expression/pan ramp endpoints) are optional for backward
+    compatibility: older 6-column CSVs yield vol_start=vol_end=vel and
+    pan_end=pan (no in-note swell/pan motion).
     """
     notes = []
     with open(csv_path) as f:
@@ -130,7 +132,11 @@ def read_csv_notes(csv_path: str) -> list[tuple[float, float, int, int, int, int
                 continue
             pan = int(parts[4]) if len(parts) >= 5 else 64
             rev = int(parts[5]) if len(parts) >= 6 else 0
-            notes.append((start_s, dur_s, pitch, vel, pan, rev))
+            vol_start = int(parts[6]) if len(parts) >= 7 else vel
+            vol_end = int(parts[7]) if len(parts) >= 8 else vol_start
+            pan_end = int(parts[8]) if len(parts) >= 9 else pan
+            notes.append((start_s, dur_s, pitch, vel, pan, rev,
+                          vol_start, vol_end, pan_end))
     return notes
 
 
@@ -141,14 +147,21 @@ def write_midi(csv_path: str, midi_path: str, track=0):
     channel control changes whenever their value differs from the previous note
     (CC10/CC91 ride on channel 0 like the per-note CC11 expression). sfizz
     links CC10 to pan by default; fluidsynth honors both CC10 and CC91.
+
+    In-note dynamics (crescendo/diminuendo) and pan sweeps: the CSV's
+    vol_start..vol_end and pan..pan_end columns are interpolated as LINEAR CC11/
+    CC10 ramps across each note's duration (matching imscomp's per-tick ramp).
+    The CC11 value in effect at the note-on (vol_start) is emitted right before
+    the note-on (the VPO wrapper's amplitude_oncc11 + fluidsynth's CC11
+    expression both respond in real time). Equal start/end values emit nothing.
     """
     notes = []
-    for start_s, dur_s, pitch, vel, pan, rev in read_csv_notes(csv_path):
+    for start_s, dur_s, pitch, vel, pan, rev, vol_s, vol_e, pan_e in read_csv_notes(csv_path):
         on_tick = int(round(start_s * TICKS_PER_SEC))
         off_tick = int(round((start_s + dur_s) * TICKS_PER_SEC))
         if off_tick <= on_tick:
             off_tick = on_tick + 1
-        notes.append((on_tick, off_tick, pitch, vel, pan, rev))
+        notes.append((on_tick, off_tick, pitch, vel, pan, rev, vol_s, vol_e, pan_e))
 
     if not notes:
         # Empty instrument: still write a valid file so the caller can decide.
@@ -171,7 +184,7 @@ def write_midi(csv_path: str, midi_path: str, track=0):
     out: list[list] = []
     alive: list[bool] = []
     active: dict[int, int] = {}  # pitch -> index into out
-    for on, off, pitch, vel, pan, rev in notes:
+    for on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e in notes:
         j = active.get(pitch)
         if j is not None and out[j][1] >= on:
             if out[j][0] == on:
@@ -179,7 +192,7 @@ def write_midi(csv_path: str, midi_path: str, track=0):
                 off = max(off, out[j][1])
             else:
                 out[j][1] = on  # repeated note: cut previous at new on
-        out.append([on, off, pitch, vel, pan, rev])
+        out.append([on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e])
         alive.append(True)
         active[pitch] = len(out) - 1
     notes = [tuple(n) for i, n in enumerate(out) if alive[i]]
@@ -190,21 +203,50 @@ def write_midi(csv_path: str, midi_path: str, track=0):
     # Group note-ons/offs onto a timeline keyed by absolute tick.
     # (kind 0=note-on, 1=note-off; CC11 expression is derived from note-ons.)
     timeline: dict[int, list[tuple[int, int, int]]] = {}
-    for on, off, pitch, vel, pan, rev in notes:
+    for on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e in notes:
         timeline.setdefault(on, []).append((0, pitch, vel))
         timeline.setdefault(off, []).append((1, pitch, vel))
 
-    # CC10 pan / CC91 reverb changes, emitted at the tick of the first note
-    # they affect (before that note-on).
+    # CC10 pan / CC91 reverb / CC11 expression, emitted at the tick of the
+    # first note they affect (before that note-on), plus per-tick LINEAR ramps
+    # for in-note cresc/dim (CC11 vol_start->vol_end) and pan sweeps
+    # (CC10 pan->pan_end).
     cc_timeline: dict[int, list[tuple[int, int]]] = {}
-    last_pan = last_rev = None
-    for on, off, pitch, vel, pan, rev in notes:
+    last_pan = last_rev = last_vol = None
+
+    def interp_ramp(on, off, val_from, val_to, cc):
+        """Emit a linear CC ramp across a note's [on, off) span."""
+        if val_from == val_to or off <= on:
+            return
+        span = val_to - val_from
+        steps = abs(span)
+        dur = off - on
+        for s in range(1, steps + 1):
+            val = val_from + (span * s) // steps
+            t = on + (dur * s) // (steps + 1)
+            if t >= off:
+                t = off - 1
+            if t > on and 0 <= val <= 127:
+                cc_timeline.setdefault(t, []).append((cc, val))
+
+    for on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e in notes:
         if pan != last_pan:
             cc_timeline.setdefault(on, []).append((10, pan))
             last_pan = pan
         if rev != last_rev:
             cc_timeline.setdefault(on, []).append((91, rev))
             last_rev = rev
+        if vol_s != last_vol:
+            cc_timeline.setdefault(on, []).append((11, vol_s))
+            last_vol = vol_s
+        # In-note ramps (crescendo/diminuendo + pan sweeps). Start a new
+        # straight note at the ramp's endpoint so the NEXT note (whose
+        # pan/vol_start usually equals this note's end value) still gets an
+        # explicit CC event when it differs.
+        interp_ramp(on, off, vol_s, vol_e, 11)
+        interp_ramp(on, off, pan, pan_e, 10)
+        last_vol = vol_e
+        last_pan = pan_e
 
     name = os.path.splitext(os.path.basename(csv_path))[0]
     name_b = name.encode("utf-8", "replace")
@@ -228,13 +270,13 @@ def write_midi(csv_path: str, midi_path: str, track=0):
         batch = sorted(timeline.get(tick, []), key=lambda e: e[0] == 0)
         for kind, pitch, vel in batch:
             if kind == 0:
-                # Emit CC11 expression (value = velocity, like fluidsynth's CC11=dyn)
-                # right before each note-on so the SFZ wrapper's amplitude_oncc11
-                # scales per-note loudness.
+                # CC11 expression value in effect at note-on is already in
+                # cc_timeline (vol_start / vol entity); the VPO wrapper's
+                # amplitude_oncc11 and fluidsynth's CC11 expression both respond
+                # continuously, so a mid-note ramp swells/fades audibly.
                 events.append((delta if first else 0,
-                               b"\xb0" + bytes([11, vel & 0x7F])))
+                               b"\x90" + bytes([pitch & 0x7F, vel & 0x7F])))
                 first = False
-                events.append((0, b"\x90" + bytes([pitch & 0x7F, vel & 0x7F])))
             else:
                 ev = b"\x80" + bytes([pitch & 0x7F, 64])
                 events.append((delta if first else 0, ev))
@@ -266,7 +308,7 @@ def render_oneshot(csv_path: str, out_wav: str, sample_path: str, samplerate: in
     n = len(notes)
     inputs = []
     filters = []
-    for i, (start_s, _dur_s, _pitch, vel, _pan, _rev) in enumerate(notes):
+    for i, (start_s, _dur_s, _pitch, vel, _pan, _rev, *_ramp) in enumerate(notes):
         ms = int(round(start_s * 1000.0))
         gain = vel / 127.0
         inputs += ["-i", sample_path]
@@ -309,7 +351,7 @@ REVERB_WET_SCALE = 0.85         # wet = this * reverb/127, so 127 => 0.85
 def _instrument_reverb(csv_path) -> int:
     """Return the score's dominant (most frequent) CC91 reverb level, 0 if dry."""
     counts = {}
-    for _, _, _, _, _, rev in read_csv_notes(csv_path):
+    for _, _, _, _, _, rev, *_ramp in read_csv_notes(csv_path):
         counts[rev] = counts.get(rev, 0) + 1
     if not counts:
         return 0

@@ -459,3 +459,30 @@ counts).
   investigation). Fix (per-note start/end + ramp) was deferred per user.
 - `music/ims/test-vol-sf.gcs` still uncommitted (NEVER stage).
 - Screenshot `b-v1-1-mp4-screenshot.png` at music/ root — user reference image.
+
+## Session 3 (2026-09-10): crescendo/diminuendo + pan IN MOTION
+- Root cause (as deferred): sfzpipecsv snapshotted only note-on CC10/CC91
+  (6-col CSV), dropping the per-tick CC11/CC10/CC7 ramps that do_midi_vpi
+  emits during a sustained note. Those ramps DO land in the shared event
+  stream (array_of_lines).
+- Fix in imscomp (print_out_sfzpipecsv): track chan_vol; snapshot CC11 at
+  note-on (vol_start) and CC11/CC10 at note-off (vol_end/pan_end). CSV now
+  9-col: start,dur,midi_note,velocity,pan,reverb,vol_start,vol_end,pan_end.
+  Old 6-col files still read (back-compat defaults: vol flat at velocity,
+  pan_end=pan => no behavior change).
+- Fix in gcs2sfz: write_midi emits CC11=vol_start before note-on (only when
+  changed vs last), then linear interp_ramp CC11 vol_s->vol_e and CC10
+  pan->pan_end across [on,off) (<=127 steps). last_vol/last_pan update to the
+  ramp END after each note so a successor whose values equal the ramp end
+  still gets an explicit CC when it differs.
+- Audio verification (VPO violin sustain, sfizz_render --use-eot):
+  CC11 40->120 on a 4s note: RMS late/early 1.54 vs 0.93 flat (cresc audible);
+  pan 30->100: L/R balance flips L>R to R>L across the note. CC11 ramps via
+  the amplitude_oncc11=100 wrapper, CC10 via sfizz's default pan linkage.
+  fluidsynth/GM likewise confirmed earlier (40->100 swells 58->112.9 RMS).
+- Regression: full ./DOALL (5 suites) = 0 bare ARGH; only named failures are
+  the pre-existing gershwin new-g3 (identical in both compilers). Standard
+  --vert/--hori/--csv/--fs/--abc outputs byte-identical via the same edit
+  (sfzpipecsv-only code path; precedent 938141ca).
+- New ims output: sfz-csv CSVs are now 9-col; gcs2sfz is backward
+  compatible so old CSVs (or a downgraded compiler) still render unchanged.

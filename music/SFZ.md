@@ -121,11 +121,18 @@ PIPELINE & TARGETS (added 2026-09-09) — now wired into all piece dirs.
 `gcs2sfz` (music/sfz/gcs2sfz) drives the whole SFZ render:
 
   imscomp --sfzpipecsv piece.E -> per-instrument CSVs (sfz-csv/<piece>/)
-      CSV schema: start,dur,midi_note,velocity,pan,reverb (pan = MIDI CC10,
-      reverb = MIDI CC91, taken verbatim from the score's macros; pan
-      36/42/64/85/92 violin/2nd/viola/cello/bass plus woodwinds ~55-60,
-      brass ~62-65, percussion ~35-50 give an orchestral L/R spread with a
-      moderate hall send; adjustable per macro in b/instruments.include).
+      CSV schema: start,dur,midi_note,velocity,pan,reverb,vol_start,vol_end,pan_end
+      (9 columns). pan = MIDI CC10, reverb = MIDI CC91, taken verbatim from the
+      score's macros; pan 36/42/64/85/92 violin/2nd/viola/cello/bass plus
+      woodwinds ~55-60, brass ~62-65, percussion ~35-50 give an orchestral L/R
+      spread with a moderate hall send; adjustable per macro in
+      b/instruments.include.
+      vol_start/vol_end/pan_end capture the expression value AT the note
+      (CC11 snapshot at note-on/note-off) plus the pan CC10 at note-off, so
+      in-note crescendo/diminuendo and pan sweeps survive into the render.
+      imscomp's humanized CC11/CC10 per-tick ramps (do_midi_vpi) are read from
+      the shared event stream; a note's vol_start==vol_end means flat
+      expression for that note (no extra MIDI emitted by gcs2sfz).
   gcs2sfz sfz-csv/<piece>/ --sfzdir <VPO lib> --outdir sfz-mix/ -> mixed WAV
       - VPO-mapped instruments: sfizz_render per instrument, mixed with
         ffmpeg (amix + loudnorm implicit chain).
@@ -138,6 +145,12 @@ PIPELINE & TARGETS (added 2026-09-09) — now wired into all piece dirs.
       (`--voices 14`); names are not accepted in either path (0 files).
       - Pan: write_midi emits CC10; sfizz honors CC10 -> pan by default
         (sfizz #475 linkage), verified L<center<R. fluidsynth also honors it.
+      - In-motion dynamics (2026-09-10): write_midi emits the note's expression
+        as CC11=vol_start and linearly ramps CC11 vol_start->vol_end and CC10
+        pan->pan_end across the note [on,off). Audio-verified with VPO violin
+        (sustain): CC11 40->120 swells RMS by ~1.5x while CC11 flat decays
+        slightly; pan 30->100 sweeps audibly L->R. CC11 (via amplitude_oncc11)
+        and CC10 both respond mid-note in sfizz; fluidsynth/GM likewise.
       - Reverb: VPO has no reverb effect in this sfizz build, and ~/bin/ffmpeg's
         afir mutes the dry signal, so the room is an offline aecho
         early-reflection tail baked into each instrument WAV scaled by
