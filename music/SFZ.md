@@ -151,6 +151,12 @@ PIPELINE & TARGETS (added 2026-09-09) — now wired into all piece dirs.
         /home/m4/src/GeneralUser_GS/GeneralUser.sf2 (Linux).
   %-sfz.mp4: black 1920x1080 bg + ASS title overlay (fs2ass) + waveform
         (wav2waveform) + audio from the mix WAV -> x264+aac.
+        (Fixed 2026-09-10: was feeding fs2ass the `.E` file, which has no
+        echo/sleep lines — fs2ass failed and the sfz mp4 fell back to a plain
+        static title. Now routes through `gcs2youtube -a <mix.wav> -o ... <_2.fs>`
+        (new `--audio` option) so the sfz video gets the SAME overlay as the GM
+        mp4: ALL title lines from the .E as a persistent heading, scrolling
+        measure echoes, and the centre playhead arrow.)
       - One-shots (1812 canon + church bells): placements play the FULL sample (no atrim --
         cannon/bell tails ring out) scaled by velocity, with a part-level
         limiter (0.95 FS). Mix target length derives from the actual rendered

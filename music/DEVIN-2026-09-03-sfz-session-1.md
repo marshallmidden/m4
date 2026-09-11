@@ -414,3 +414,48 @@ counts).
   boundary (full: `15, 5276, Note_on_c, 15, 78, 82` + off at 5280; `--voices 14`:
   off at 5280 then `15, 5283, Note_on_c, 1, 78, 82`). Cause not yet investigated
   — a possible separate quirk of voice selection (timing/channel remap).
+
+# 2026-09-10 session 2: sfz mp4 got the original mp4's full overlay
+
+## What was wrong
+- The `%-sfz.mp4` Makefile recipes (songs/, ims/, b/01..04, b/06, b/09,
+  b/sonata14, t/e) ran `fs2ass` on the **`.E`** file with only the LAST title
+  line (`tail -1`). The `.E` has no `echo`/`sleep` lines, so fs2ass always
+  failed ("no echo events found") and every sfz mp4 fell back to a plain
+  static drawtext title — no multi-line title, no scrolling measures, no
+  playhead arrow. The GM/fluidsynth mp4s got the full overlay because
+  `gcs2youtube` feeds fs2ass the `.fs` (echo/sleep timing) + ALL title lines.
+
+## Fix
+- `gcs2youtube` gained `-a/--audio FILE`: uses a pre-rendered WAV (e.g. the
+  sfz-mix) instead of running fluidsynth; skips the fluidsynth/soundfont
+  checks when given. Everything else (waveform + ASS overlay + ffmpeg wrap)
+  is identical to the GM path, so the sfz video now matches the original's
+  look exactly.
+- SFZ Makefile rules replaced (all 9 dirs): `*-sfz.mp4: ... %_2.fs` recipe is
+  now just `$(GCS2YOUTUBE) -a "$<" -o "$@" "$*_2.fs"`. Uses the **imscomp**
+  `.fs` (`_2.fs`; ims/ uses plain `%.fs` since ITS imscomp output is `.fs`),
+  whose echo timing matches the sfz CSVs (verified: m5 echo @16.365s vs
+  oboe.csv note @16.355s), so measures/arrow line up with the mix audio.
+- `fs2ass` got `--title-file FILE` (one title per line) as a quoting-safe
+  alternative to repeated `--title` (not currently used by the Makefiles,
+  but useful and tested).
+- `gcs2youtube` also now guards against `set -u` + empty `TITLE_ARGS[]` on
+  macOS bash 3.2 (pieces without title lines crashed differently before).
+
+## Verified
+- `make clock_tower-sfz.mp4` (ims/, no titles) -> static card path, works.
+- `make indiana-sfz.mp4` (3 title lines) -> ASS has
+  `INDIANA fight song\Narranged by R. Hayman\NenGooched by Silas Warner`
+  + centre triangle (`\p1` arrow) + 748 measure dialogues; mp4 audio duration
+  64.416604s == the sfz-mix wav exactly (mix audio, not fluidsynth).
+- `make -n v1-1-sfz.mp4` / `b2m1-sfz.mp4` show the right deps: imscomp
+  --sfzpipecsv -> sfz-mix -> gcs2youtube -a mix ... _2.fs.
+
+## Not done / notes
+- sfz-crescendo-in-motion question from TODO answered separately: sfz CSV
+  captures only per-note snapshots (vel, pan, rev at note-on) — sustained-note
+  CC11/CC10 sweeps are dropped (see the "crescendos/dimin and pans in motion"
+  investigation). Fix (per-note start/end + ramp) was deferred per user.
+- `music/ims/test-vol-sf.gcs` still uncommitted (NEVER stage).
+- Screenshot `b-v1-1-mp4-screenshot.png` at music/ root — user reference image.

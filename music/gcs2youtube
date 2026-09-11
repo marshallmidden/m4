@@ -55,6 +55,7 @@ only the .fs -> .wav -> .mp4 conversion.
 Options:
   -o, --output FILE
                     Output .mp4 path (default: same dir/basename as input)
+  -a, --audio FILE  Use FILE as the rendered audio (skips fluidsynth step)
   -s, --soundfont FILE
                     Path to .sf2 SoundFont file
   -k, --keep        Keep intermediate files (.wav) in output directory
@@ -70,6 +71,7 @@ Examples:
   $(basename "$0") songs/promenade.fs
   $(basename "$0") songs/promenade_2.fs
   $(basename "$0") --no-waveform b/02/b2m1.fs
+  $(basename "$0") -a b/02/sfz-mix/b2m1-sfz-mix.wav b/02/b2m1_2.fs
   $(basename "$0") -o ~/Videos/b9m2.mp4 b/09/b9m2.fs
 EOF
     exit 0
@@ -83,12 +85,14 @@ warn() { echo "WARNING: $*" >&2; }
 # Parse arguments
 # -----------------------------------------------------------------------------
 OUTPUT=""
+AUDIO_FILE=""
 KEEP_INTERMEDIATES=0
 NO_WAVEFORM=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -o|--output)     OUTPUT="$2";   shift 2 ;;
+        -a|--audio)      AUDIO_FILE="$2"; shift 2 ;;
         -s|--soundfont)  SOUNDFONT="$2"; shift 2 ;;
         -k|--keep)       KEEP_INTERMEDIATES=1; shift ;;
         --no-waveform)   NO_WAVEFORM=1; shift ;;
@@ -134,8 +138,10 @@ check_tool() {
 }
 
 check_tool "ffmpeg"     "ffmpeg"         "PATH"
-check_tool "fluidsynth" "$FLUIDSYNTH"    "FLUIDSYNTH"
-[[ -f "$SOUNDFONT" ]] || die "SoundFont not found: $SOUNDFONT"
+if [[ -z "$AUDIO_FILE" ]]; then
+    check_tool "fluidsynth" "$FLUIDSYNTH"    "FLUIDSYNTH"
+    [[ -f "$SOUNDFONT" ]] || die "SoundFont not found: $SOUNDFONT"
+fi
 
 # -----------------------------------------------------------------------------
 # Create temp working directory (clean up on exit unless --keep)
@@ -164,14 +170,22 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# STEP 1/3: .fs -> .wav  (FluidSynth renders audio)
+# STEP 1/3: audio acquisition
+#   --audio FILE: use the provided WAV (already rendered elsewhere, e.g. the
+#                 SFZ-mix).  Otherwise render .fs -> .wav with fluidsynth.
 # -----------------------------------------------------------------------------
-info "Step 1/3: Rendering $FULLBASE.fs -> $FULLBASE.wav  (fluidsynth)"
-"$FLUIDSYNTH" -q -n -K 256 -r96000 -F "$TMPDIR/${FULLBASE}.wav" "$SOUNDFONT" < "$INPUT_FULL" > /dev/null \
-    || die "FluidSynth rendering failed."
+if [[ -n "$AUDIO_FILE" ]]; then
+    [[ -f "$AUDIO_FILE" ]] || die "Audio file not found: $AUDIO_FILE"
+    info "Step 1/3: Using provided audio $AUDIO_FILE"
+    cp -f "$AUDIO_FILE" "$TMPDIR/${FULLBASE}.wav"
+else
+    info "Step 1/3: Rendering $FULLBASE.fs -> $FULLBASE.wav  (fluidsynth)"
+    "$FLUIDSYNTH" -q -n -K 256 -r96000 -F "$TMPDIR/${FULLBASE}.wav" "$SOUNDFONT" < "$INPUT_FULL" > /dev/null \
+        || die "FluidSynth rendering failed."
+fi
 
 # Verify we got a non-empty WAV
-[[ -s "$TMPDIR/${FULLBASE}.wav" ]] || die "FluidSynth produced an empty .wav file."
+[[ -s "$TMPDIR/${FULLBASE}.wav" ]] || die "No usable audio (.wav) produced."
 
 # -----------------------------------------------------------------------------
 # STEP 2/3: waveform visualisation (optional)
@@ -238,11 +252,15 @@ if [[ -x "$FS2ASS" ]] || command -v "$FS2ASS" &>/dev/null; then
         done < <(grep '^title ' "$E_FILE" | sed 's/^title[[:space:]]*//' || true)
     fi
 
-    if python3 "$FS2ASS" "$INPUT_FULL" "$ASS_FILE" "${TITLE_ARGS[@]}" 2>/dev/null; then
-        USE_ASS=1
-        info "  Scrolling echo overlay ready"
+    if [[ ${#TITLE_ARGS[@]} -gt 0 ]]; then
+        if python3 "$FS2ASS" "$INPUT_FULL" "$ASS_FILE" "${TITLE_ARGS[@]}" 2>/dev/null; then
+            USE_ASS=1
+            info "  Scrolling echo overlay ready"
+        else
+            warn "fs2ass failed; falling back to static title card."
+        fi
     else
-        warn "fs2ass failed; falling back to static title card."
+        warn "No titles found in $E_FILE; skipping scrolling overlay."
     fi
 else
     info "  fs2ass not found; using static title card."
