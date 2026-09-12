@@ -26,6 +26,23 @@ Grand Piano", custom names like "Bell Tower") fall back to GM: their CSV is
 rendered through fluidsynth + GeneralUser.sf2 (--sf2), so default-piano pieces
 still produce audio instead of being silently skipped.
 
+Loudness balance: sample libraries differ widely in recorded level (VPO brass
+sustains sit far above the soft NoBudget woodwinds), so a per-instrument gain
+table is available via the GCS2SFZ_GAIN env var as "name:db,name:db":
+    GCS2SFZ_GAIN="flute:6,french horn:-4"  gcs2sfz <csv-or-dir>
+Gains (dB, positive louder) are applied to each rendered stem before the
+mixdown so the melody isn't buried by the texture.
+
+Articulation: the VPO sustain patches attack over 0.2-0.6s and release over
+0.6-2.25s, blurring fast melodic runs. The default recipe splits each part by
+note length (GCS2SFZ_ARTIC_MAX) and renders short notes as staccato blended
+under a fast-attack sustain (GCS2SFZ_ARTIC_BLEND + GCS2SFZ_ATTACK), giving
+crisp onsets on a connected, sustained line:
+
+    GCS2SFZ_ARTIC_MAX    note-length split threshold (s), default 0.5, 0 disables
+    GCS2SFZ_ARTIC_BLEND  layer sustain under staccato short notes, default 1
+    GCS2SFZ_ATTACK       sustain-patch ampeg_attack override (s), default 0.03
+
 Requirements: python3, ~/bin/sfizz_render, fluidsynth, ffmpeg, and the VPO
 library (plus GeneralUser.sf2 for GM fallback).
 """
@@ -33,6 +50,7 @@ library (plus GeneralUser.sf2 for GM fallback).
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -383,8 +401,118 @@ def _apply_reverb(in_wav, out_wav, reverb_val, samplerate: int) -> str:
     return out_wav
 
 
+def _staccato_variant(rel, vpo_root):
+    """Return the staccato .sfz path for a sustain mapping, or None.
+
+    ``rel`` looks like ``"Strings/1st-violin-SEC-sustain.sfz"``; the
+    articulation token is swapped for ``staccato`` (keeping SOLO/SEC + family),
+    so short melodic notes get a real articulated attack instead of the sustain
+    patch's slow re-attack smear. Returns None when no such variant exists
+    (percussion/pizzicato/one-shot mappings) or when the map already points at
+    a non-sustain patch.
+    """
+    base = os.path.basename(rel)
+    new_base = re.sub(r"-(SEC|SOLO)-(sustain|normal-mod-wheel)\b",
+                      r"-\1-staccato", base)
+    if new_base == base:
+        return None
+    cand = os.path.join(vpo_root, os.path.dirname(rel), new_base)
+    return cand if os.path.exists(cand) else None
+
+
+def _notes_to_csv(notes, dst_csv):
+    """Write a 9-column CSV subset (same format read_csv_notes parses)."""
+    with open(dst_csv, "w") as f:
+        for s, d, p, v, pan, rev, vs, ve, pe in notes:
+            f.write(f"{s:.6f},{d:.6f},{p},{v},{pan},{rev},{vs},{ve},{pe}\n")
+
+
+def _amix(wavs, out_wav, samplerate):
+    """Sum instrument WAVs without normalization or limiting."""
+    cmd = [FFMPEG, "-y"]
+    for w in wavs:
+        cmd += ["-i", w]
+    cmd += ["-filter_complex",
+            f"amix=inputs={len(wavs)}:normalize=0:duration=longest",
+            "-ar", str(samplerate), out_wav]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"  !! amix failed:\n{r.stderr[-1200:]}")
+        return False
+    return True
+
+
+def _render_sfz(csv_path, sfz_path, out_wav, samplerate, name):
+    """Render one CSV with one SFZ patch (CC11-driven). Returns success bool.
+
+    The stock VPO patches carry loudness via CC11 expression, not velocity, but
+    have no amplitude_oncc11 opcode, so each render is wrapped in a
+    same-directory wrapper (./libs sample paths still resolve) that adds
+    amplitude_oncc11=100 and #includes the real patch.
+    """
+    sfz_dir = os.path.dirname(sfz_path)
+    fd, wrapper = tempfile.mkstemp(dir=sfz_dir, prefix=".gcs2sfz-dyn-",
+                                   suffix=".sfz")
+    os.close(fd)
+    try:
+        with open(wrapper, "w") as f:
+            f.write("<global>\n")
+            f.write("amplitude_oncc11=100\n")
+            f.write(f'#include "{os.path.basename(sfz_path)}"\n')
+        with tempfile.TemporaryDirectory() as td:
+            midi_path = os.path.join(td, "in.mid")
+            if not write_midi(csv_path, midi_path):
+                print(f"  .. {name}: empty part, skipping (no audio).")
+                return False
+            cmd = [SFIZZ, "--use-eot", "--sfz", wrapper, "--midi", midi_path,
+                   "--wav", out_wav, "--samplerate", str(samplerate)]
+            r = subprocess.run(cmd, capture_output=True, text=True)
+            if r.returncode != 0:
+                print(f"  !! {name}: sfizz_render failed:\n{r.stderr[-2000:]}")
+                return False
+    finally:
+        try:
+            os.remove(wrapper)
+        except OSError:
+            pass
+    return True
+
+
+def _edited_patch(sfz_path, attack):
+    """Return a same-dir temp copy of the patch with ampeg_attack overridden.
+
+    Stock sustain patches attack over 0.2-0.6s, smearing melodic onsets into
+    the preceding note. Rewriting the text (a wrapper #include cannot override
+    group-level ampeg opcodes) makes every group attack in ``attack`` seconds
+    while keeping release and body, so legato lines stay connected and loud but
+    each onset is distinct. Caller removes the returned temp file.
+    """
+    with open(sfz_path, "rb") as f:
+        text = f.read()
+    new = re.sub(rb"ampeg_attack\s*=\s*[0-9.]+",
+                 ("ampeg_attack=" + format(attack, ".3f")).encode(), text)
+    if new == text:
+        return None
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(sfz_path),
+                               prefix=".gcs2sfz-atk-", suffix=".sfz")
+    with os.fdopen(fd, "wb") as f:
+        f.write(new)
+    return tmp
+
+
 def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
-    """Render one instrument CSV to a WAV via sfizz_render (or GM fallback)."""
+    """Render one instrument CSV to a WAV via sfizz_render (or GM fallback).
+
+    Articulation (defaults give the blended recipe: articulated onsets on a
+    connected, sustained line) is configurable via env:
+      - GCS2SFZ_ARTIC_MAX (seconds, default 0.5): notes shorter than this use a
+        staccato variant (fast onset, decays fast), longer notes the sustain
+        patch; set 0 to disable.
+      - GCS2SFZ_ARTIC_BLEND (default 1): layer the sustain patch under the
+        staccato notes too, so their body does not decay to silence.
+      - GCS2SFZ_ATTACK (seconds, default 0.03): override the sustain patch's
+        ampeg_attack; keeps the connected legato body with crisp onsets.
+    """
     name = os.path.splitext(os.path.basename(csv_path))[0]
     rel = instruments.vpo_rel_path(name)
     if rel is None:
@@ -403,36 +531,78 @@ def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
         print(f"  !! {name}: missing VPO file {sfz_path}. Skipping.")
         return None
 
-    # VPO patches carry loudness via CC11 expression, not velocity, but the
-    # stock .sfz has no amplitude_oncc11 opcode. Wrap it in a same-directory
-    # wrapper so ./libs sample paths resolve and CC11 (== velocity, written by
-    # write_midi) scales per-note loudness like fluidsynth's CC11.
-    sfz_dir = os.path.dirname(sfz_path)
-    fd, wrapper = tempfile.mkstemp(dir=sfz_dir, prefix=".gcs2sfz-dyn-",
-                                   suffix=".sfz")
-    os.close(fd)
+    # -- Articulation: split short->staccato, attack-override, or blend -------
     try:
-        with open(wrapper, "w") as f:
-            f.write("<global>\n")
-            f.write("amplitude_oncc11=100\n")
-            f.write(f'#include "{os.path.basename(sfz_path)}"\n')
-        with tempfile.TemporaryDirectory() as td:
-            midi_path = os.path.join(td, "in.mid")
-            has_notes = write_midi(csv_path, midi_path)
-            if not has_notes:
-                print(f"  .. {name}: empty part, skipping (no audio).")
-                return None
-            cmd = [SFIZZ, "--use-eot", "--sfz", wrapper, "--midi", midi_path,
-                   "--wav", out_wav, "--samplerate", str(samplerate)]
-            r = subprocess.run(cmd, capture_output=True, text=True)
-            if r.returncode != 0:
-                print(f"  !! {name}: sfizz_render failed:\n{r.stderr[-2000:]}")
-                return None
+        artic_max = float(os.environ.get("GCS2SFZ_ARTIC_MAX", "0.5") or "0")
+    except ValueError:
+        artic_max = 0.5
+    try:
+        attack = float(os.environ.get("GCS2SFZ_ATTACK", "0.03") or "0")
+    except ValueError:
+        attack = 0.03
+    blend = os.environ.get("GCS2SFZ_ARTIC_BLEND", "1") in ("1", "true", "yes")
+
+    # GCS2SFZ_ATTACK gives the sustain patch a fast attack so a legato line
+    # keeps its connected body/level while each note-onset is crisp (instead of
+    # the stock 0.4-0.6s smear). A wrapper #include can't override group-level
+    # ampeg, so we rewrite the patch text in a same-dir copy.
+    sfz_use = sfz_path
+    tmp_patch = None
+    if attack > 0:
+        tmp_patch = _edited_patch(sfz_path, attack)
+        if tmp_patch:
+            sfz_use = tmp_patch
+    try:
+        stacc_path = _staccato_variant(rel, vpo_root) if artic_max > 0 else None
+        rendered = False
+        if stacc_path:
+            notes = read_csv_notes(csv_path)
+            short = [n for n in notes if n[1] < artic_max]
+            longs = [n for n in notes if n[1] >= artic_max]
+            if short and longs:
+                with tempfile.TemporaryDirectory() as td:
+                    scsv = os.path.join(td, "short.csv")
+                    lcsv = os.path.join(td, "long.csv")
+                    _notes_to_csv(short, scsv)
+                    _notes_to_csv(longs, lcsv)
+                    swav = os.path.join(td, "short.wav")
+                    lwav = os.path.join(td, "long.wav")
+                    ok_s = _render_sfz(scsv, stacc_path, swav, samplerate, name)
+                    ok_l = _render_sfz(lcsv, sfz_use, lwav, samplerate, name)
+                    if ok_s and ok_l:
+                        if blend:
+                            # Layer the sustain body under the short notes too,
+                            # so the staccato attack no longer decays to
+                            # silence between onsets (GCS2SFZ_ARTIC_BLEND=1).
+                            swav2 = os.path.join(td, "short2.wav")
+                            ok_s2 = _render_sfz(scsv, sfz_use, swav2,
+                                                 samplerate, name)
+                            if ok_s2:
+                                rendered = _amix([swav, swav2, lwav], out_wav,
+                                                 samplerate)
+                        if not rendered:
+                            rendered = _amix([swav, lwav], out_wav, samplerate)
+                        if rendered:
+                            print(f"  {name}: {len(short)} short->staccato"
+                                  f"{'+sustain' if blend else ''} + "
+                                  f"{len(longs)} long->sustain")
+                    elif ok_s:
+                        shutil.copyfile(swav, out_wav)
+                        rendered = True
+                    elif ok_l:
+                        shutil.copyfile(lwav, out_wav)
+                        rendered = True
+        if not rendered:
+            rendered = _render_sfz(csv_path, sfz_use, out_wav, samplerate, name)
     finally:
-        try:
-            os.remove(wrapper)
-        except OSError:
-            pass
+        if tmp_patch:
+            try:
+                os.remove(tmp_patch)
+            except OSError:
+                pass
+    if not rendered:
+        return None
+
     # Bake the score's reverb send offline (sfizz has no reverb in this build).
     reverb_val = _instrument_reverb(csv_path)
     if reverb_val > 0:
@@ -507,6 +677,14 @@ def _patch_program(midi_path, program):
             f.write(hdr + b"MTrk" + length + new_data)
     except (OSError, ValueError):
         pass
+
+
+def _volume_db(in_wav, out_wav, db):
+    """Scale a WAV's loudness by db dB via ffmpeg volume filter."""
+    cmd = [FFMPEG, "-y", "-i", in_wav, "-af", f"volume={db:.2f}dB",
+           "-c", "pcm_s16le", out_wav]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    return r.returncode == 0
 
 
 def mixdown(wavs, out_wav, lead_in=0.0):
@@ -653,6 +831,33 @@ def main(argv):
             if done:
                 wavs.append(done)
                 rendered_csvs.append(csv_path)
+
+    # Optional per-instrument loudness tilt (GCS2SFZ_GAIN="name:db,name:db").
+    # Applied to the rendered stems BEFORE mixdown so sample-library volume
+    # differences don't bury the melody; e.g. soft NoBudget flute sustain vs
+    # the strong VPO French-horn whole notes.
+    gains = {}
+    for tok in os.environ.get("GCS2SFZ_GAIN", "").split(","):
+        tok = tok.strip()
+        if tok and ":" in tok:
+            name, db = tok.split(":", 1)
+            try:
+                gains[name.strip()] = float(db)
+            except ValueError:
+                pass
+    if gains:
+        gained = []
+        for w in wavs:
+            name = os.path.splitext(os.path.basename(w))[0]
+            db = gains.get(name)
+            if db:
+                g = os.path.join(workdir, f"gain-{name}.wav")
+                if _volume_db(w, g, db):
+                    w = g
+                else:
+                    print(f"  !! {w}: gain {db}dB failed; keeping original")
+            gained.append(w)
+        wavs = gained
 
     if not wavs:
         print("gcs2sfz: nothing was rendered.")

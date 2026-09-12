@@ -162,6 +162,22 @@ PIPELINE & TARGETS (added 2026-09-09) — now wired into all piece dirs.
         inserted General MIDI program change (0xC0). Detects the sf2
         automatically: /Users/m4/src/GeneralUser/GeneralUser.sf2 (Darwin) or
         /home/m4/src/GeneralUser_GS/GeneralUser.sf2 (Linux).
+      - Articulation (2026-09-11): VPO sustain patches attack 0.2-0.6s and
+        release 0.6-2.25s, blurring fast (16th/32nd) melodic runs - the melody
+        was present (often LOUDER than GM) yet inaudible because every onset
+        smeared into the previous note. Default recipe now splits each part by
+        note length (GCS2SFZ_ARTIC_MAX=0.5): notes shorter than the threshold
+        render staccato blended under a fast-attack sustain
+        (GCS2SFZ_ARTIC_BLEND=1, GCS2SFZ_ATTACK=0.03), summing the staccato
+        onset with the sustain body so the line neither smears nor decays to
+        silence; longer notes use the fast-attack sustain alone. Verified on
+        b/01 v: the violin melody now pulses (mix RMS 0.022-0.034 vs the old
+        flat 0.004-0.008) and reads clearly against the texture. Env: set
+        ARTIC_MAX=0 to disable the split, ARTIC_BLEND=0 to disable blending,
+        ATTACK=0 to disable the attack override.
+      - Per-instrument gain (2026-09-11): GCS2SFZ_GAIN="name:db,name:db"
+        (e.g. GCS2SFZ_GAIN="violin:5") applies an ffmpeg volume ramp to each
+        rendered stem before mixdown for quiet libraries (Sonatina strings).
   %-sfz.mp4: black 1920x1080 bg + ASS title overlay (fs2ass) + waveform
         (wav2waveform) + audio from the mix WAV -> x264+aac.
         (Fixed 2026-09-10: was feeding fs2ass the `.E` file, which has no
