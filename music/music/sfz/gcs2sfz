@@ -158,20 +158,30 @@ def read_csv_notes(csv_path: str) -> list[tuple[float, float, int, int, int, int
     return notes
 
 
-def write_midi(csv_path: str, midi_path: str, track=0):
+def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True):
     """Write a single-track MIDI file from a CSV (absolute times in seconds).
 
-    Each note carries velocity. Pan (CC10) and reverb (CC91) are written as
-    channel control changes whenever their value differs from the previous note
-    (CC10/CC91 ride on channel 0 like the per-note CC11 expression). sfizz
-    links CC10 to pan by default; fluidsynth honors both CC10 and CC91.
+    ``pred_expr`` controls CC11 behavior and selects which path is taken:
 
-    In-note dynamics (crescendo/diminuendo) and pan sweeps: the CSV's
-    vol_start..vol_end and pan..pan_end columns are interpolated as LINEAR CC11/
-    CC10 ramps across each note's duration (matching imscomp's per-tick ramp).
-    The CC11 value in effect at the note-on (vol_start) is emitted right before
-    the note-on (the VPO wrapper's amplitude_oncc11 + fluidsynth's CC11
-    expression both respond in real time). Equal start/end values emit nothing.
+    - ``pred_expr=True`` (sfizz/VPO path): CC11 is predistorted as
+      127*(v/127)^E and emitted before every note-on (at vol_start), plus
+      in-note crescendo/diminuendo ramps via ``interp_ramp``. The wrapper's
+      ``amplitude_oncc11`` applies it linearly in amplitude and each instrument
+      renders on its own MIDI channel, so per-note expression is safe.
+
+    - ``pred_expr=False`` (GM/fluidsynth fallback): per-note CC11 emission is
+      *skipped entirely*. All instrument voices in the CSV merge onto a single
+      MIDI channel; if vol_start were emitted before every note-on, alternating
+      voices (e.g. accompaniment pp vs melody mf, ~every note tick) would pump
+      all sustained notes on that channel — the audible "stutter" at ~26s in
+      Chopin. Per-note dynamics already ride on velocity (the CSV velocity
+      column carries the note-on level); only CC10 pan sweeps, CC91 reverb, and
+      in-note cresc/dim ramps are retained for musical expression.
+
+    Each note carries velocity. Pan (CC10) and reverb (CC91) are written as
+    channel control changes whenever their value differs from the previous note.
+    sfizz links CC10 to pan by default; fluidsynth honors both CC10 and CC91.
+    Equal start/end pan values emit nothing.
     """
     notes = []
     for start_s, dur_s, pitch, vel, pan, rev, vol_s, vol_e, pan_e in read_csv_notes(csv_path):
@@ -232,6 +242,20 @@ def write_midi(csv_path: str, midi_path: str, track=0):
     cc_timeline: dict[int, list[tuple[int, int]]] = {}
     last_pan = last_rev = last_vol = None
 
+    # sfizz (via the VPO wrapper's amplitude_oncc11=100) applies CC11
+    # expression LINEARLY in amplitude; GM/fluidsynth applies it
+    # exponentially. Predistort the *emitted* CC11 as 127*(v/127)^E so
+    # in-note fp->p ramps keep the GM-style contrast. E=1.0 is pure linear.
+    # Only active when pred_expr=True (sfizz path); GM fallback passes
+    # pred_expr=False to preserve fluidsynth's native exponential response.
+    if pred_expr:
+        expr_exp = float(os.environ.get("GCS2SFZ_EXPR_EXP", "4.0"))
+
+        def _pred(v: int) -> int:
+            return max(0, min(127, int(round(127.0 * pow(v / 127.0, expr_exp)))))
+    else:
+        _pred = lambda v: v
+
     def interp_ramp(on, off, val_from, val_to, cc):
         """Emit a linear CC ramp across a note's [on, off) span."""
         if val_from == val_to or off <= on:
@@ -254,16 +278,25 @@ def write_midi(csv_path: str, midi_path: str, track=0):
         if rev != last_rev:
             cc_timeline.setdefault(on, []).append((91, rev))
             last_rev = rev
-        if vol_s != last_vol:
-            cc_timeline.setdefault(on, []).append((11, vol_s))
-            last_vol = vol_s
-        # In-note ramps (crescendo/diminuendo + pan sweeps). Start a new
-        # straight note at the ramp's endpoint so the NEXT note (whose
-        # pan/vol_start usually equals this note's end value) still gets an
-        # explicit CC event when it differs.
-        interp_ramp(on, off, vol_s, vol_e, 11)
+        if pred_expr:
+            # sfizz path: per-note CC11 (predistorted) + in-note cresc/dim
+            # ramps. The wrapper's amplitude_oncc11=100 applies CC11 linearly;
+            # each instrument renders on its own channel, so per-note expression
+            # changes don't pump other voices.
+            if vol_s != last_vol:
+                cc_timeline.setdefault(on, []).append((11, _pred(vol_s)))
+                last_vol = vol_s
+            interp_ramp(on, off, _pred(vol_s), _pred(vol_e), 11)
+            last_vol = vol_e
+        else:
+            # GM path: all instrument voices merge onto one MIDI channel.
+            # Per-note CC11 toggles would pump every sustained note as voices
+            # alternate expression (~every note tick in Chopin-style pieces).
+            # Velocity alone carries per-note dynamics here; only in-note
+            # cresc/dim ramps are emitted for genuine musical swells.
+            interp_ramp(on, off, vol_s, vol_e, 11)
+        # Pan sweeps apply on both paths.
         interp_ramp(on, off, pan, pan_e, 10)
-        last_vol = vol_e
         last_pan = pan_e
 
     name = os.path.splitext(os.path.basename(csv_path))[0]
@@ -633,7 +666,7 @@ def render_gm(csv_path, out_wav, sf2_path, samplerate):
         return None
     with tempfile.TemporaryDirectory() as td:
         midi_path = os.path.join(td, "in.mid")
-        has_notes = write_midi(csv_path, midi_path)
+        has_notes = write_midi(csv_path, midi_path, pred_expr=False)
         if not has_notes:
             print(f"  .. {name}: empty part, skipping (no audio).")
             return None
