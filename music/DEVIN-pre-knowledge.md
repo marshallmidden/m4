@@ -164,7 +164,7 @@ GCS variables and command-line flags.
 | 5982  | `last_cc11 = -1` - CC tracker initialization per voice |
 | 6620  | `change_name` dict - maps internal MIDI CSV names to FluidSynth commands |
 | 6638  | `def print_out_fluidsynth()` - FluidSynth output generator |
-| 7719  | `def print_out_sfzpipecsv()` - per-instrument SFZ CSV output (6-col: start,dur,pitch,vel,pan,rev; see SFZ.md). imscomp-only, NOT mirrored. |
+| 7719  | `def print_out_sfzpipecsv()` - per-instrument SFZ CSV output (9-col: start,dur,pitch,vel,pan,rev,vol_start,vol_end,pan_end; see SFZ.md). imscomp-only, NOT mirrored. |
 | 7785  | `def release_sfz_note(` - release pending note, cross-channel fallback for note-offs on a different channel than the note-on (pizz->arco switch fix, 2026-09-10) |
 | 8398  | `def put_on_bufs(` - add note to output buffers; updates mlth |
 | 8615  | `def instak(` - insert note into time-sorted stack |

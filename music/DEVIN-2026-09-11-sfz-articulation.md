@@ -85,7 +85,9 @@ Verified in the v1-1 measure-5 mix: violin melody presences pulses at RMS
 1. 1812 (`t/e/e.gcs`) uses nearly all the smearing families (piccolo, oboes,
    clarinets, english horn, bassoons, horns, cornets, trombones, strings) —
    expect the same win there; re-render all 25 mp4s with `make sfz`/`sfz-mp4`
-   once the user approves.
+   once the user approves. (STATUS 2026-09-16: full suite — all 130 mixes +
+   130 mp4s — has been re-rendered multiple times since, including after the
+   CC11 expression work; 1812 included.)
 2. `GCS2SFZ_GAIN` has no default gain table yet — Sonatina string samples run
    quiet vs VPO brass; per-family defaults could be added to
    `instruments.py`/gcs2sfz if a piece still buries melody after articulation.
@@ -98,4 +100,5 @@ Verified in the v1-1 measure-5 mix: violin melody presences pulses at RMS
    candidates: per-note velocity/CC11 handling for the pizz part, imscomp
    accent/stress on that note, or the VPO pizzicato mapping velocity layers.
    Trigger: `make sfz` in b/01 (or `--sfzpipecsv --measures 1` slice) and
-   A/B that pizz phrase against the GM render.
+   A/B that pizz phrase against the GM render. (STATUS 2026-09-16: STILL OPEN —
+   top item in SFZ.md's next-fixes list.)

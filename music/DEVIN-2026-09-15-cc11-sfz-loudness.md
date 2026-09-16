@@ -42,17 +42,24 @@ The fix adds `pred_expr=True` to `write_midi` (default = sfizz path);
 `render_gm` passes `pred_expr=False` so GM-fallback instruments keep their
 native exponential response. Full suite re-rendered at E=4.0 after this.
 
-## Wiring checklist (verify on the exact disk file before shipping)
+## Shipped (commit 4d7d486c, pushed)
 
-1. helper once: `def _pred(v)` (or `_expr`) predistorting `127*(v/127)^exp`
-   with `GCS2SFZ_EXPR_EXP`, `from math import pow as _pow`.  (currently
-   DUPLICATED + some copies never defined — dedupe.)
-2. note-on CC11: `append((11, _pred(vol_s)))`  (+ `last_vol = vol_s`)
-3. in-note ramp: `interp_ramp(on, off, _pred(vol_s), _pred(vol_e), 11)`
+The fix is now in `gcs2sfz` on the canonical disk file only (worktree
+`/Users/m4/newtmp/saved-m4-stuff/...`); the old duplicated-copy confusion is
+resolved — there is ONE gcs2sfz and it is the renderer the piece Makefiles
+reference. Implementation in `write_midi`:
 
-Sites that were found RAW on the last verified reading of the canonical
-spelling (line ~300): `interp_ramp(on, off, vol_s, vol_e, 11)` then
-`last_vol = vol_e`.
+- `pred_expr` flag (default True = sfizz path): predistort note-on CC11 with
+  `_pred(vol_s)` and the in-note ramp with `_pred(vol_s)`/`_pred(vol_e)` where
+  `_pred(v) = 127*(v/127)^GCS2SFZ_EXPR_EXP` (default 4.0), defined once near
+  the `interp_ramp` helper.
+- `pred_expr=False` (render_gm): skip per-note CC11 (`vol_s != last_vol`
+  emission AND `last_vol` tracking) — velocity carries note dynamics; keep CC10
+  pan sweeps, CC91 reverb, and in-note cresc/dim ramps.
+
+All 130 sfz-mix WAVs + 130 sfz-mp4s re-rendered with the default at E=4.0;
+DOALL regression clean (0 bare ARGHs; 2 gershwin new-g3 named ARGHs,
+pre-existing).
 
 ## GM-fallback stutter fix (2026-09-16) — CC11 cross-voice pumping
 

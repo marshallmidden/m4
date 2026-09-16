@@ -151,6 +151,8 @@ PIPELINE & TARGETS (added 2026-09-09) — now wired into all piece dirs.
         (sustain): CC11 40->120 swells RMS by ~1.5x while CC11 flat decays
         slightly; pan 30->100 sweeps audibly L->R. CC11 (via amplitude_oncc11)
         and CC10 both respond mid-note in sfizz; fluidsynth/GM likewise.
+        (On the GM fallback the per-note CC11=vol_start emission is skipped —
+        see the Expression / stutter-fix notes below.)
       - Reverb: VPO has no reverb effect in this sfizz build, and ~/bin/ffmpeg's
         afir mutes the dry signal, so the room is an offline aecho
         early-reflection tail baked into each instrument WAV scaled by
@@ -175,6 +177,25 @@ PIPELINE & TARGETS (added 2026-09-09) — now wired into all piece dirs.
         flat 0.004-0.008) and reads clearly against the texture. Env: set
         ARTIC_MAX=0 to disable the split, ARTIC_BLEND=0 to disable blending,
         ATTACK=0 to disable the attack override.
+      - Expression (2026-09-15/16): sfizz (VPO wrapper `amplitude_oncc11=100`)
+        applies CC11 LINEARLY in amplitude while GM/fluidsynth applies it
+        exponentially, so the same vol_start..vol_end ramp rendered ~2.5 dB on
+        sfizz vs ~-9 dB on GM (b/01 horn fp->p 91->61). write_midi now
+        predistorts the emitted CC11 as 127*(v/127)^E
+        (GCS2SFZ_EXPR_EXP, default 4.0) on the sfizz path so the fp->p contrast
+        matches GM — measured on the b/01 `v` slice: SFZ E=4.0 = 12.2 dB vs GM
+        12.5 dB (beat1-vs-beat5). Velocity, CC10, CC91 untouched (velocity-layer
+        patches keep their timbral response).
+      - GM-fallback stutter fix (2026-09-16): the GM path passes
+        pred_expr=False and SKIPS the per-note CC11 emission entirely. The sfz
+        CSV merges every voice of one instrument onto a SINGLE MIDI channel,
+        while the `.fs` uses one channel per voice; emitting vol_start before
+        every note-on toggled CC11 every ~90ms between voices (accompaniment
+        pp vs melody mf) and pumped ALL sustained notes on that channel — the
+        audible "stutter" ~26s into Chopin. Per-note dynamics already ride on
+        note velocity; only CC10 pan sweeps, CC91 reverb, and in-note
+        cresc/dim ramps still get CC events on the GM path. Full suite (130
+        mixes + 130 sfz-mp4s) re-rendered; DOALL clean.
       - Per-instrument gain (2026-09-11): GCS2SFZ_GAIN="name:db,name:db"
         (e.g. GCS2SFZ_GAIN="violin:5") applies an ffmpeg volume ramp to each
         rendered stem before mixdown for quiet libraries (Sonatina strings).
@@ -230,3 +251,47 @@ Known limitations:
     channel. Verified: full b/01 v1-1 run was 17269 sfz rows vs 17277 midi
     note-ons (8 missing) -> now identical pitch/vel multiset; `--voices 14`
     went 2056 -> 2057.
+
+===============================================================================
+NEXT FIXES / OPEN ITEMS for the SFZ path (as of 2026-09-16)
+===============================================================================
+
+Open bugs / quality items, in rough priority order:
+
+1. **b/01 v1-1 first-measure pizzicato — 2nd pizz note too loud.** Reported
+   2026-09-11 (see DEVIN-2026-09-11-sfz-articulation.md), still open. Likely
+   candidates: per-note velocity/CC11 handling for the pizz part, imscomp
+   accent/stress on that note, or the VPO pizzicato mapping's velocity layers.
+   Repro: `make sfz` in b/01, A/B the first-measure pizz phrase against the
+   GM render (`--sfzpipecsv --measures 1` slice).
+
+2. **GM-fallback rendered loudness sits ~10 dB below the `.fs` render.** On
+   Chopin (25-27s window) the `.fs` reference rides ~-28..-31 dBFS while the
+   gravity CSV→GM render is ~-37 dBFS. Pre-existing (HEAD == current), so it is
+   NOT caused by the stutter/expression work — but the piano's final mix level
+   is noticeably lower than the GM `.fs` version. Investigate whether it's the
+   velocity column vs `.fs` note velocity, CC11-only dynamics in `.fs` coming
+   from the score-level expression, or just the 9-col CSV carrying vol in CC11
+   that GM no longer scales with. Decide whether to add a per-instrument level
+   table (like `GCS2SFZ_GAIN`) for GM fallback.
+
+3. **`sfz-mix/%-sfz-mix.wav` does NOT depend on `gcs2sfz` in the piece
+   Makefiles.** The mp4 rule lists GCS2YOUTUBE etc. as prereqs; the mix rule
+   only lists `sfz-csv/%/.done`, so edits to `gcs2sfz` do NOT trigger a
+   re-render (`make sfz` says "Nothing to be done"). Add
+   `$(CURDIR)/$(GCS2SFZ)` (or the canonical `../music/sfz/gcs2sfz`) to the mix
+   rule in songs/, ims/, b/01..04, b/06, b/09, b/sonata14, t/e. Until then,
+   force re-renders by deleting `sfz-mix/*.wav` first (documented memo in
+   DEVIN-2026-09-15-cc11-sfz-loudness.md).
+
+Carried-over improvements (not regressions):
+
+4. `GCS2SFZ_GAIN` still has no default gain table — quiet libraries (Sonatina
+   strings) run below VPO brass until manually boosted.
+5. Articulation choice is duration-only; the CSV has no per-note
+   legato/staccato marking, so slurred (`l`) and marked-staccato short notes
+   render the same. A future `--sfzpipecsv` `articulation` column could carry
+   per-note intent.
+6. `ARTIC_MAX=0` to disable is overridden by nothing today; switching the
+   GM fallback of unmapped instruments to use sfizz's GM-capable soundfonts
+   (or a default VPO piano) would remove the last GM-dependent instruments.
