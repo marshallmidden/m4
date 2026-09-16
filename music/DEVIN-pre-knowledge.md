@@ -632,6 +632,40 @@ page    45                          $$ page number annotation
 $$ inline comment                   $$ inline comment
 ```
 
+### Macros (`macro` / `endm`)
+
+A macro is defined with `macro name(arg1,arg2,...)` ... `endm` and invoked by
+name; it can be used anywhere in a note line or, at the start of a line, as a
+command.  Arguments are substituted into the macro body textually.
+
+```
+macro this(a,b.c)
+calc a = b + c
+endm
+this(A,4.5)
+vars A
+Flute: 3c4 this(A,60.3) (A)4
+```
+
+**Loop bounds:** macro arguments substitute in note lines, `calc`/`calcs`/`calcc`,
+`if`, and `loop` bounds/increment.  `do_loop()` is on the caller's "do not
+substitute" list, so it calls `replace_macro_arguments()` on its bounds and
+increment itself; a macro argument may therefore be used directly as a bound:
+
+```
+macro mm(AK)
+    vars ev
+    loop ev = 0,AK,1   $$ AK is a macro argument; works directly
+        s1: 3c4 r((0.25))
+    endloop
+endm
+```
+
+Ordinary (non-argument) variables always worked directly as loop bounds because
+`is_float()` resolves them.  (Previously macro arguments were NOT substituted in
+`loop` bounds and failed with `loop - final value is not a value ... bad input
+to calculator#3`; fixed in `do_loop()`, mirrored in `musicomp2abc`.)
+
 ## Octave Handling
 
 - `middle_c = None` (default): standard, middle C = MIDI 60 = internal `3c`

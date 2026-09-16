@@ -2,147 +2,79 @@
 *
 * Simulates 24-hour clock chimes
 *
+* Plays from the current wall-clock time (at compile time) to the end of the
+* current 12-hour half-day cycle: a short chime at every quarter-hour and a
+* count of ringing bells at every full hour.
+*
+* Timing model: the half-day dial holds 720 one-minute slots; clock(4) gives
+* the current dial hour (0..11), clock(5) the minute, so the piece spans from
+* dial minute SM = nowhr*60 + nowmin to 720 (one full revolution).  The next
+* quarter mark is toq minutes away, and the events land on the dial grid
+* d0, d0+15, d0+30, ... (d0 = SM + toq).  Each event owns a fixed 15-minute
+* (900 s) slot: the chime melody (~12 s), a count of bells on the hour
+* (2 s each), then a fill rest, so the mono-grid never drifts and the piece
+* ends exactly at dial 720.
+*
+* All mod() arithmetic stays non-negative (f_mod misbehaves for negative
+* operands).  Runtime values computed from clock() are passed into macros as
+* macro arguments (literal substitution), which is the one plumbing that is
+* fully reliable in the compiler; macro arguments substitute in calc, if, and
+* loop bounds/increment.
+*
 staff   s1: 1
 tempo   60,4
 meter   60,1
 instrument 1 Bell Tower
 *
-macro   do_chimes
-    vars    ring,y
-    measure meas = meas + 1
-    s1: 5e8 d c 4g r r g 5d e c r r e d c 4g r r 5c d e c r r
-    loop    ring = 1,hours
-        s1: 3c4 r
-    endloop
-    calc slp = 60 - time
-    calc y = int(slp / 3.0)
-    loop ring = 1, y
-        s1: r(3)
-    endloop
-    calc slp = slp - y*3.0
-    if slp > 0
-        s1: r(slp)
-    endif
-endmacro    $$ do_chimes
-
-macro   do_minute
-    measure meas = meas + 1
-    s1: r(3) r(3) r(3) r(3) r(3) r(3) r(3) r(3) r(3) r(3) r(3) r(3) r(3) r(3) r(3) r(3) r(3) r(3) r(3) r(3)
-endmacro    $$ do_minute
-
-macro do_hour
-    vars minutes
-    do_chimes
-    loop minutes = 2,60,1
-        do_minute
-    endloop
-endmacro    $$ do_hour
-
-macro do_day
-    vars hourloop
-    loop hourloop = 0,11,1
-        if hourloop == 0
-            calc hours = 12
-        else:
-            calc hours = hourloop
-        endif
-        do_hour
-        goto 99999
-    endloop
-endmacro    $$ do_day
+vars    nowhr,nowmin,toq,lead,totalmin,d0,K
 *
-vars    meas,hours,slp,nowhr,nowmin,nowsec
-calc nowhr = mod(clock(4),12)
+calc nowhr  = mod(clock(4),12)
 calc nowmin = clock(5)
-calc nowsec = clock(6)
-measure meas = 0
-calc slp = 60-nowsec
-if slp != 0
-*--     s1: r(slp)
+calc toq    = 15 - mod(nowmin,15)
+if toq == 15
+    calc toq = 0
 endif
-goto 60*nowhr + 1
-*    goto (60*nowhr + nowmin + 1)
-do_day
-measure 99999
-cstop*
-*-----------------------------------------------------------------------------
+calc lead   = toq*15
+calc totalmin = (12 - nowhr)*60 - nowmin
+calc d0    = nowhr*60 + nowmin + toq
+calc K     = int((719 - d0)/15)
 *
-* Simulates 24-hour clock chimes
+macro   do_chimes
+    vars    ring
+    s1: 5e8 d8 c8 4g8 r8 r8 g8 5d8 e8 c8 r8 r8 e8 d8 c8 4g8 r8 r8 5c8 5d8 5e8 5c8 r8 r8
+    loop    ring = 1,bw
+        s1: 3c4 r((0.25))
+    endloop
+endmacro    $$ do_chimes
 *
-format  systems
-vars    hour,ring,start,m
+macro   do_event(A0,AK)
+    vars    ev,d,bw,content,fill
+    loop    ev = 0,AK,1
+        calc d = A0 + 15*ev
+        if mod(d,60) == 0
+            calc bw = mod(int(d / 60),12)
+            if bw == 0
+                calc bw = 12
+            endif
+            calc content = 12.0 + 2.0*bw
+        else:
+            calc bw = 0
+            calc content = 12.0
+        endif
+        if ev < AK
+            calc fill = (900.0 - content)/4.0
+        else:
+            calc fill = (60.0*(720 - d) - content)/4.0
+        endif
+        do_chimes
+        s1: r((fill))
+    endloop
+endmacro    $$ do_event
 *
-* hour: used to determine how many times to ring
-* ring: number of times rung so far (looping variable)
-* start: the initial hour when piece first played
-* m: current measure number
-*
-staff   s1: 1
-tempo   60,4
-instr   musique,Clock Tower
-*
-calc    start ^= 4
-calc    m ^= 0
-*
-macro   wait(A)
-*
-* A is the number of notes played in the chime. 0 @< A @< 120.
-* First rest to fill out 1 minute, then rest for
-* 14 minutes.  (A is number of eighth-notes).
-*
-* If x notes, (120-x)/2 seconds to wait.  If X seconds to
-* wait, (r,X/4).  @D (120-(A))/8 is length tag of rest.
-*
-calc    m ^= m + 1
-s1:     (r,(120-(A))/8)
-*
-* The first minute has been padded out.  Do 14 more
-* minutes of rest.
-*
-measure (m)
-*
-* Wait here for 14 minutes (each repeat to s1: waits for
-* 4 seconds)  2 sequential repeat commands, one with
-* 21 times through and one with 10 times through causes
-* s1: to be executed 210 times; 210 ^* 4 seconds ^/ 60
-* = 14 minutes.
-*
-s1:     (r,1)
-repeat  (m),(m),(m),(m),(m),(m),(m),(m),(m),(m),(m),(m),(m),(m),(m),(m),(m),(m),(m),(m),x
-repeat  (m),(m),(m),(m),(m),(m),(m),(m),(m),x
-endmacro
-*
-macro   chimes
-*
-s1:     5e8 d c 4g r r g 5d e c r r e d c 4g r r
-        5c d e c r r
-*
-loop    ring ^= 1,hour
-.       s1:     3c4 r
-endloop
-*
-* Each ring lasts for 4 eighth-notes.
-*
-wait(24 + 4*hour)
-s1:     5e8 d c 4g
-wait(4)
-s1:     5e8 d c 4g r r g 5d e c
-wait(10)
-s1:     5e8 d c 4g r r g 5d e c r r e d c 4g
-wait(16)
-*
-endmacro
-*
-* Here begins the fun!
-*
-*-- measure begin
-*-- calc    hour ^= start
-*-- hour
-calc    hour ^= start
-measure hour
-*
-chimes
-*
-calcs   hour = 12,hour ^= 1,hour + 1
-goto    (hour @= start),hour,x
-*-- repeat  begin
+measure 1
+if lead > 0
+    s1: r((lead))
+endif
+if toq < totalmin
+    do_event(d0,K)
+endif
