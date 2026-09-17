@@ -194,7 +194,16 @@ PIPELINE & TARGETS (added 2026-09-09) — now wired into all piece dirs.
         pp vs melody mf) and pumped ALL sustained notes on that channel — the
         audible "stutter" ~26s into Chopin. Per-note dynamics already ride on
         note velocity; only CC10 pan sweeps, CC91 reverb, and in-note
-        cresc/dim ramps still get CC events on the GM path. Full suite (130
+        cresc/dim ramps still get CC events on the GM path.
+      - GM-fallback loudness (2026-09-16): two knobs make the fallback match
+        the `.fs` render. `GCS2SFZ_GM_GAIN` (default 0.5) sets fluidsynth's
+        `-g` — its default is 0.2, which left every fallback stem ~8 dB quiet
+        (20*log10(0.2/0.5)); the `.fs` emits `synth.gain 0.5`. And because
+        CC11 is skipped, the expression level never reaches the synth, so
+        write_midi folds it into the note-on velocity as
+        `vel * (vol/127)^GCS2SFZ_GM_EXPR` (default 1.3, calibrated on
+        ims/test-volume-levels: pppp +1.5 dB vs GM, mp within 1 dB, ppppp
+        silent). Full details: DEVIN-2026-09-15-cc11-sfz-loudness.md. Full suite (130
         mixes + 130 sfz-mp4s) re-rendered; DOALL clean.
       - Per-instrument gain (2026-09-11): GCS2SFZ_GAIN="name:db,name:db"
         (e.g. GCS2SFZ_GAIN="violin:5") applies an ffmpeg volume ramp to each
@@ -265,15 +274,12 @@ Open bugs / quality items, in rough priority order:
    Repro: `make sfz` in b/01, A/B the first-measure pizz phrase against the
    GM render (`--sfzpipecsv --measures 1` slice).
 
-2. **GM-fallback rendered loudness sits ~10 dB below the `.fs` render.** On
-   Chopin (25-27s window) the `.fs` reference rides ~-28..-31 dBFS while the
-   gravity CSV→GM render is ~-37 dBFS. Pre-existing (HEAD == current), so it is
-   NOT caused by the stutter/expression work — but the piano's final mix level
-   is noticeably lower than the GM `.fs` version. Investigate whether it's the
-   velocity column vs `.fs` note velocity, CC11-only dynamics in `.fs` coming
-   from the score-level expression, or just the 9-col CSV carrying vol in CC11
-   that GM no longer scales with. Decide whether to add a per-instrument level
-   table (like `GCS2SFZ_GAIN`) for GM fallback.
+2. ~~GM-fallback rendered loudness sits ~10 dB below the `.fs` render.~~ **RESOLVED
+   2026-09-16** — was two compounding causes, both fixed in `a834d9ee`:
+   fluidsynth's default master gain 0.2 vs the `.fs`'s `synth.gain 0.5`
+   (`GCS2SFZ_GM_GAIN`, ~-8 dB), plus the skipped per-note CC11 leaving
+   expression stuck at 127 → dynamics compressed (`GCS2SFZ_GM_EXPR` folds the
+   expression into note velocity). Calibrated on ims/test-volume-levels.
 
 3. **`sfz-mix/%-sfz-mix.wav` does NOT depend on `gcs2sfz` in the piece
    Makefiles.** The mp4 rule lists GCS2YOUTUBE etc. as prereqs; the mix rule
