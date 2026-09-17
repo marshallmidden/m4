@@ -42,6 +42,15 @@ crisp onsets on a connected, sustained line:
     GCS2SFZ_ARTIC_MAX    note-length split threshold (s), default 0.5, 0 disables
     GCS2SFZ_ARTIC_BLEND  layer sustain under staccato short notes, default 1
     GCS2SFZ_ATTACK       sustain-patch ampeg_attack override (s), default 0.03
+    GCS2SFZ_GM_GAIN      fluidsynth master gain for GM-fallback stems, default
+                         0.5 -- matches the "synth.gain 0.5" imscomp emits in
+                         the .fs.  Fluidsynth's default is 0.2, which would
+                         otherwise make every GM-fallback piece (default piano,
+                         bell tower, ...) ~8 dB quieter than its GM render.
+    GCS2SFZ_GM_EXPR      GM-fallback expression exponent (default 1.3): the
+                         note-on velocity is scaled by (expression/127)^E to
+                         fold the skipped per-note CC11 into velocity.  Higher
+                         deepens the soft dynamics (toward the .fs render).
 
 Requirements: python3, ~/bin/sfizz_render, fluidsynth, ffmpeg, and the VPO
 library (plus GeneralUser.sf2 for GM fallback).
@@ -174,8 +183,10 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True):
       MIDI channel; if vol_start were emitted before every note-on, alternating
       voices (e.g. accompaniment pp vs melody mf, ~every note tick) would pump
       all sustained notes on that channel — the audible "stutter" at ~26s in
-      Chopin. Per-note dynamics already ride on velocity (the CSV velocity
-      column carries the note-on level); only CC10 pan sweeps, CC91 reverb, and
+      Chopin. Per-note dynamics ride on velocity, which is multiplied by
+      (expression/127)^GCS2SFZ_GM_EXPR so the skipped expression level is
+      folded into the note-on velocity (otherwise every note sits at CC11=127,
+      far too loud at low dynamics); only CC10 pan sweeps, CC91 reverb, and
       in-note cresc/dim ramps are retained for musical expression.
 
     Each note carries velocity. Pan (CC10) and reverb (CC91) are written as
@@ -225,6 +236,25 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True):
         active[pitch] = len(out) - 1
     notes = [tuple(n) for i, n in enumerate(out) if alive[i]]
     notes.sort(key=lambda n: (n[0], n[1]))
+
+    if not pred_expr:
+        # GM fallback: per-note CC11 is skipped (cross-voice pumping on the
+        # merged single channel), so expression rides on the note velocity
+        # instead.  Without the expression factor every note would sit at
+        # CC11=127 -- vol(mp) far louder than the .fs render and vol(ppppp)
+        # still clearly audible (its .fs expression is 0).  Multiply the CSV
+        # velocity by (expression/127)^E, the same loudness-shaping idea as
+        # the sfizz path's CC11 predistortion but tuned (E~1.3, calibrated
+        # against the .fs render of test-volume-levels) so low dynamics dim
+        # toward inaudible while mp..fffff track the GM render within ~2 dB.
+        _gm_expr = float(os.environ.get("GCS2SFZ_GM_EXPR", "1.3"))
+        notes = [
+            (on, off, pitch,
+             max(1, min(127, int(round(vel * pow(vol_s / 127.0, _gm_expr))))),
+             pan, rev, vol_s, vol_e, pan_e)
+            for on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e in notes
+        ]
+        notes.sort(key=lambda n: (n[0], n[1]))
 
     tempo_ppqn_micros = int(60000000.0 / BPM)  # 500000 us/qn @ 120bpm
 
@@ -672,7 +702,10 @@ def render_gm(csv_path, out_wav, sf2_path, samplerate):
             return None
         # Insert a program change on channel 0 (first event, tick 0).
         _patch_program(midi_path, program)
-        cmd = [FLUIDSYNTH, "-q", "-F", out_wav, sf2_path, midi_path]
+        # The .fs render sets "synth.gain 0.5"; fluidsynth's default is 0.2,
+        # which would leave GM-fallback stems ~8 dB quieter than the GM path.
+        gain = os.environ.get("GCS2SFZ_GM_GAIN", "0.5")
+        cmd = [FLUIDSYNTH, "-q", "-g", gain, "-F", out_wav, sf2_path, midi_path]
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
             print(f"  !! {name}: fluidsynth GM render failed:\n{r.stderr[-2000:]}")
