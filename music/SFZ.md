@@ -262,8 +262,25 @@ Known limitations:
     went 2056 -> 2057.
 
 ===============================================================================
-NEXT FIXES / OPEN ITEMS for the SFZ path (as of 2026-09-16)
+NEXT FIXES / OPEN ITEMS for the SFZ path (as of 2026-09-17)
 ===============================================================================
+
+**Current TODO (2026-09-17)** — full session record in
+`DEVIN-2026-09-17-sfz-drums-loudness.md`:
+- [x] SFZ drums split per instrument + voiced on VPO patch keys.
+- [x] GM-fallback CC11 in-note ramp stale-state bug fixed (`piano` was silent
+      after note 1 in `test-volume-levels`).
+- [x] DOALL clean (0 bare / 2 pre-existing named).
+- [x] **Per-instrument, per-level loudness normalization to the piano** (all 12
+      `test-volume-levels` levels, interpolated for crescendos) — see item 4.
+      Implemented as a flat stem gain (= the gain at vol 127, where CC11 has
+      no headroom) plus a CC11 residual; in-range instruments now within ~0–2 dB
+      across mp..fffff.
+- [ ] ppp/pppp residuals (~3–8 dB on some instruments) — likely the slow VPO
+      soft attack vs the 0.25 s measurement window; re-measure with a longer
+      window before tuning the table further.
+- [ ] (Deferred) Silent VPO range mappings: piccolo (patch only d5–d#5),
+      timpani high notes, tuba high notes. These stay out of `LEVEL_GAIN`.
 
 Open bugs / quality items, in rough priority order:
 
@@ -292,8 +309,18 @@ Open bugs / quality items, in rough priority order:
 
 Carried-over improvements (not regressions):
 
-4. `GCS2SFZ_GAIN` still has no default gain table — quiet libraries (Sonatina
-   strings) run below VPO brass until manually boosted.
+4. **Per-instrument per-level loudness table — DONE 2026-09-17.** A flat
+   per-instrument gain was not enough: the SFZ/VPO instruments' loudness *curve*
+   differs from the piano's, so the correction is **per level** and interpolated
+   between the 12 `test-volume-levels` points. Target = the piano stem
+   (`acoustic_grand_piano`); each instrument's dB offset lives in
+   `instruments.LEVEL_GAIN`. The correction is split into a **flat stem gain**
+   (`base_gain_db` = gain at vol 127, applied in `gcs2sfz.main` alongside
+   `GCS2SFZ_GAIN`) plus a **CC11 residual** (`write_midi._pred`), because the
+   predistorted CC11 is already ~127 at the top dynamics and cannot deliver a
+   boost there. In-range instruments now match within ~0–2 dB over mp..fffff.
+   Repro/notes: `/tmp/calibrate2.py` method in
+   `DEVIN-2026-09-17-sfz-drums-loudness.md`.
 5. Articulation choice is duration-only; the CSV has no per-note
    legato/staccato marking, so slurred (`l`) and marked-staccato short notes
    render the same. A future `--sfzpipecsv` `articulation` column could carry

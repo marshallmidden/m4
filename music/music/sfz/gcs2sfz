@@ -167,7 +167,7 @@ def read_csv_notes(csv_path: str) -> list[tuple[float, float, int, int, int, int
     return notes
 
 
-def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True):
+def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None):
     """Write a single-track MIDI file from a CSV (absolute times in seconds).
 
     ``pred_expr`` controls CC11 behavior and selects which path is taken:
@@ -186,14 +186,18 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True):
       Chopin. Per-note dynamics ride on velocity, which is multiplied by
       (expression/127)^GCS2SFZ_GM_EXPR so the skipped expression level is
       folded into the note-on velocity (otherwise every note sits at CC11=127,
-      far too loud at low dynamics); only CC10 pan sweeps, CC91 reverb, and
-      in-note cresc/dim ramps are retained for musical expression.
+      far too loud at low dynamics); only CC10 pan sweeps and CC91 reverb are
+      emitted, and CC11 is left at 127 throughout (see the GM branch comment:
+      in-note CC11 ramps too leave stale channel state that silences later
+      notes).
 
     Each note carries velocity. Pan (CC10) and reverb (CC91) are written as
     channel control changes whenever their value differs from the previous note.
     sfizz links CC10 to pan by default; fluidsynth honors both CC10 and CC91.
     Equal start/end pan values emit nothing.
     """
+    if name is None:
+        name = os.path.splitext(os.path.basename(csv_path))[0]
     notes = []
     for start_s, dur_s, pitch, vel, pan, rev, vol_s, vol_e, pan_e in read_csv_notes(csv_path):
         on_tick = int(round(start_s * TICKS_PER_SEC))
@@ -282,7 +286,17 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True):
         expr_exp = float(os.environ.get("GCS2SFZ_EXPR_EXP", "4.0"))
 
         def _pred(v: int) -> int:
-            return max(0, min(127, int(round(127.0 * pow(v / 127.0, expr_exp)))))
+            # Per-instrument loudness normalization: scale the predistorted CC11
+            # by the instrument's piano-matched gain at this expression level
+            # (10^(dB/20) is linear amplitude, matching the VPO wrapper's linear
+            # amplitude_oncc11). Interpolated in vol, so in-note cresc/dim ramps
+            # glide between the measured levels.
+            base = 127.0 * pow(v / 127.0, expr_exp)
+            # Residual after the flat stem gain (instruments.base_gain_db, added
+            # in main()); the top-level part has no CC11 headroom so it lives on
+            # the stem instead.
+            gain = instruments.level_gain_db(name, v) - instruments.base_gain_db(name)
+            return max(0, min(127, int(round(base * (10.0 ** (gain / 20.0))))))
     else:
         _pred = lambda v: v
 
@@ -320,16 +334,20 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True):
             last_vol = vol_e
         else:
             # GM path: all instrument voices merge onto one MIDI channel.
-            # Per-note CC11 toggles would pump every sustained note as voices
-            # alternate expression (~every note tick in Chopin-style pieces).
-            # Velocity alone carries per-note dynamics here; only in-note
-            # cresc/dim ramps are emitted for genuine musical swells.
-            interp_ramp(on, off, vol_s, vol_e, 11)
+            # CC11 is channel-wide, so ANY CC11 here is unsafe: per-note toggles
+            # pump every sustained note as voices alternate expression (~every
+            # note tick in Chopin-style pieces). In-note cresc/dim ramps are no
+            # better -- they leave the channel at the note's vol_end, and because
+            # no CC11 is re-emitted at the next note-on, every later note whose
+            # vol_start==vol_end inherits it (a first note fading to vol(0)
+            # silenced the rest of ims/test-volume-levels' piano, whose notes
+            # 2-12 have equal endpoints). Velocity alone carries per-note
+            # dynamics here; CC11 stays at its default 127 throughout.
+            pass
         # Pan sweeps apply on both paths.
         interp_ramp(on, off, pan, pan_e, 10)
         last_pan = pan_e
 
-    name = os.path.splitext(os.path.basename(csv_path))[0]
     name_b = name.encode("utf-8", "replace")
 
     events = []
@@ -524,7 +542,7 @@ def _render_sfz(csv_path, sfz_path, out_wav, samplerate, name):
             f.write(f'#include "{os.path.basename(sfz_path)}"\n')
         with tempfile.TemporaryDirectory() as td:
             midi_path = os.path.join(td, "in.mid")
-            if not write_midi(csv_path, midi_path):
+            if not write_midi(csv_path, midi_path, name=name):
                 print(f"  .. {name}: empty part, skipping (no audio).")
                 return False
             cmd = [SFIZZ, "--use-eot", "--sfz", wrapper, "--midi", midi_path,
@@ -584,14 +602,43 @@ def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
             return render_gm(csv_path, out_wav, sf2_path, samplerate)
         print(f"  !! {name}: no VPO mapping and no --sf2 GM soundfont. Skipping.")
         return None
+
+    # Drum one-shots: the CSV carries the GM drum key (35/38/49/54/81), but the
+    # VPO percussion patch is voiced on its own key (bassdrum c2, snare c3, ...).
+    # Rewrite every note to the patch's key so the sample actually sounds.
+    orig_csv_path = csv_path
+    tmp_kit_csv = None
+    kit_key = instruments.kit_key(name)
+    if kit_key is not None:
+        kit_notes = read_csv_notes(csv_path)
+        if kit_notes:
+            fd, tmp_kit_csv = tempfile.mkstemp(prefix=".gcs2sfz-kit-",
+                                               suffix=".csv")
+            with os.fdopen(fd, "w") as f:
+                for s, d, _p, v, pan, rev, vs, ve, pe in kit_notes:
+                    f.write(f"{s:.6f},{d:.6f},{kit_key},{v},{pan},{rev},"
+                            f"{vs},{ve},{pe}\n")
+            csv_path = tmp_kit_csv
+
     if rel.startswith("EFFECTS/"):
         # One-shots live at the library root (music/sfz/library/EFFECTS).
         library_root = os.path.dirname(os.path.dirname(vpo_root))
         sample_path = os.path.join(library_root, rel)
-        return render_oneshot(csv_path, out_wav, sample_path, samplerate)
+        out = render_oneshot(csv_path, out_wav, sample_path, samplerate)
+        if tmp_kit_csv:
+            try:
+                os.remove(tmp_kit_csv)
+            except OSError:
+                pass
+        return out
     sfz_path = os.path.join(vpo_root, rel)
     if not os.path.exists(sfz_path):
         print(f"  !! {name}: missing VPO file {sfz_path}. Skipping.")
+        if tmp_kit_csv:
+            try:
+                os.remove(tmp_kit_csv)
+            except OSError:
+                pass
         return None
 
     # -- Articulation: split short->staccato, attack-override, or blend -------
@@ -663,11 +710,16 @@ def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
                 os.remove(tmp_patch)
             except OSError:
                 pass
+        if tmp_kit_csv:
+            try:
+                os.remove(tmp_kit_csv)
+            except OSError:
+                pass
     if not rendered:
         return None
 
     # Bake the score's reverb send offline (sfizz has no reverb in this build).
-    reverb_val = _instrument_reverb(csv_path)
+    reverb_val = _instrument_reverb(orig_csv_path)
     if reverb_val > 0:
         rev_tmp = out_wav + ".rev.tmp.wav"
         if _apply_reverb(out_wav, rev_tmp, reverb_val, samplerate) == rev_tmp:
@@ -911,19 +963,22 @@ def main(argv):
                 gains[name.strip()] = float(db)
             except ValueError:
                 pass
-    if gains:
-        gained = []
-        for w in wavs:
-            name = os.path.splitext(os.path.basename(w))[0]
-            db = gains.get(name)
-            if db:
-                g = os.path.join(workdir, f"gain-{name}.wav")
-                if _volume_db(w, g, db):
-                    w = g
-                else:
-                    print(f"  !! {w}: gain {db}dB failed; keeping original")
-            gained.append(w)
-        wavs = gained
+    gained = []
+    for w in wavs:
+        name = os.path.splitext(os.path.basename(w))[0]
+        # instruments.base_gain_db is the flat part of the piano-matched
+        # per-instrument loudness correction (the top-dynamic gain CC11 cannot
+        # supply because it is already at 127); GCS2SFZ_GAIN adds a manual tilt
+        # on top. The rest of the correction rides on CC11 in write_midi().
+        db = instruments.base_gain_db(name) + gains.get(name, 0.0)
+        if db:
+            g = os.path.join(workdir, f"gain-{name}.wav")
+            if _volume_db(w, g, db):
+                w = g
+            else:
+                print(f"  !! {w}: gain {db}dB failed; keeping original")
+        gained.append(w)
+    wavs = gained
 
     if not wavs:
         print("gcs2sfz: nothing was rendered.")

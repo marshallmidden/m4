@@ -7759,6 +7759,15 @@ def print_out_sfzpipecsv() -> None:
             if key not in chan_to_inst:
                 chan_to_inst[key] = instrument_name
 
+    # Drums: every drum sounds on channel 9 at its own fixed GM key (35 bass
+    # drum, 38 snare, ...), so the pitch on the drum channel identifies WHICH
+    # drum instrument the note belongs to. Multiple drums may even share the
+    # same (voiceon, channel) tuple (e.g. several drums in one voice), so we
+    # must split channel-9 notes by pitch, never by (voiceon, chan) alone.
+    drum_key_to_inst = {}
+    for drum_name in drum_sounds:
+        drum_key_to_inst[drum_sounds[drum_name]] = drum_name
+
     # Parse array_of_lines to extract note events with timing
     tempo_s = 500000      # microseconds per quarter note (default 120 BPM)
     tempo_l = 4.0         # tempo note length
@@ -7789,6 +7798,29 @@ def print_out_sfzpipecsv() -> None:
         sec_per_quarter = (60.0 / (4.0 * cur_l * cur_s))
         return sec_per_quarter / ticks_per_quarter
 
+    # Tempo timeline: [(start_tick, sec_per_tick, seconds_at_start_tick), ...]
+    # Absolute ticks MUST be converted by accumulating seconds across tempo
+    # changes. Multiplying an absolute tick by the tempo in effect at that note
+    # (start_tick * spt) collapses the timeline backwards after any tempo
+    # increase, piling all later notes onto an early timestamp.
+    tempo_points = [(0, sfz_sec_per_tick(tempo_s, tempo_l), 0.0)]
+
+    def add_tempo(tick, new_spt):
+        p_tick, p_spt, p_sec = tempo_points[-1]
+        if tick == p_tick:
+            tempo_points[-1] = (p_tick, new_spt, p_sec)
+        elif tick > p_tick and new_spt != p_spt:
+            tempo_points.append((tick, new_spt, p_sec + (tick - p_tick) * p_spt))
+
+    def tick_to_sec(t):
+        p_tick, p_spt, p_sec = tempo_points[0]
+        for pt, pspt, psec in tempo_points:
+            if pt <= t:
+                p_tick, p_spt, p_sec = pt, pspt, psec
+            else:
+                break
+        return p_sec + (t - p_tick) * p_spt
+
     # Release the oldest pending note matching (voiceon, pitch), preferring the
     # exact channel. A channel can change between a note-on and its note-off
     # (e.g. the pizz->arco switch emits the closing note-off on the NEW channel
@@ -7797,7 +7829,7 @@ def print_out_sfzpipecsv() -> None:
     def release_sfz_note(voiceon, chan, pitch, tick):
         key = (voiceon, chan, pitch)
         if key in pending_notes and pending_notes[key]:
-            start_tick, vel, spt, pan, rev, vol = pending_notes[key].pop(0)
+            start_tick, vel, pan, rev, vol = pending_notes[key].pop(0)
         else:
             candidates = []
             for (v, c, p), q in pending_notes.items():
@@ -7806,13 +7838,14 @@ def print_out_sfzpipecsv() -> None:
             if not candidates:
                 return
             start_tick, c2 = min(candidates)
-            vel, spt, pan, rev, vol = pending_notes[(voiceon, c2, pitch)].pop(0)[1:]
+            vel, pan, rev, vol = pending_notes[(voiceon, c2, pitch)].pop(0)[1:]
             key = (voiceon, c2, pitch)
-        dur_sec = (tick - start_tick) * spt
+        start_sec = tick_to_sec(start_tick)
+        dur_sec = tick_to_sec(tick) - start_sec
         ckey = (voiceon, key[1])
         vol_end = chan_vol.get(ckey, vol)
         pan_end = chan_pan.get(ckey, pan)
-        notes.setdefault((voiceon, key[1]), []).append((start_tick * spt, dur_sec, pitch, vel, pan, rev, vol, vol_end, pan_end))
+        notes.setdefault((voiceon, key[1]), []).append((start_sec, dur_sec, pitch, vel, pan, rev, vol, vol_end, pan_end))
 
     for i, line in enumerate(array_of_lines):
         parts = line.split(', ')
@@ -7860,13 +7893,11 @@ def print_out_sfzpipecsv() -> None:
                 release_sfz_note(voiceon, chan, pitch, current_tick)
                 continue
             key = (voiceon, chan, pitch)
-            # Capture the tempo in effect at this note start
-            spt = sfz_sec_per_tick(tempo_s, tempo_l)
             ckey = (voiceon, chan)
             pan = chan_pan.get(ckey, 64)
             rev = chan_rev.get(ckey, 0)
             vol = chan_vol.get(ckey, 64)
-            pending_notes.setdefault(key, []).append((current_tick, velocity, spt, pan, rev, vol))
+            pending_notes.setdefault(key, []).append((current_tick, velocity, pan, rev, vol))
 
         elif event_str.startswith('Note_off_c, '):
             try:
@@ -7884,6 +7915,7 @@ def print_out_sfzpipecsv() -> None:
                 tempo_s = float(fields[1].strip())
                 if len(fields) >= 3:
                     tempo_l = float(fields[2].strip())
+                add_tempo(current_tick, sfz_sec_per_tick(tempo_s, tempo_l))
             except (ValueError, IndexError):
                 pass
 
@@ -7895,25 +7927,29 @@ def print_out_sfzpipecsv() -> None:
             except (ValueError, IndexError):
                 pass
 
-    # Convert ticks to seconds.
-    # The compiler emits Tempo primarily as "Tempo, {bpm}, {note_len}" in fluidsynth/sfz mode.
-    # Convert to microseconds per quarter note the same way the non-fluidsynth MIDI branch
-    # does (see print_out_midi1csv_tempo): X = 60e6 / (4*l*c)  (µs per quarter).
-    # seconds per quarter = X/1e6 = 60/(4*l*c); seconds per tick = that / ticks_per_quarter.
-    def sfz_sec_per_tick(cur_s, cur_l):
-        if cur_s == 0 or cur_l == 0:
-            return 0.0
-        sec_per_quarter = (60.0 / (4.0 * cur_l * cur_s))
-        return sec_per_quarter / ticks_per_quarter
+    # Ticks were converted to seconds above via tick_to_sec(), which accumulates
+    # across tempo changes (see the tempo timeline / add_tempo()).
 
     # Aggregate notes across all channels that share the same instrument name.
     # Multiple voices/parts of one instrument use distinct MIDI channels, so all
     # of an instrument's channels must be rolled into a single CSV (not
-    # overwriting each other).
+    # overwriting each other). Drums are special: they all share channel 9 (the
+    # GM drum channel), so those notes are attributed by their fixed GM key --
+    # pitch 35 -> 'acoustic bass drum', 38 -> 'acoustic snare', etc.
     by_instrument = {}
     for (voiceon, chan), note_list in notes.items():
-        name = chan_to_inst.get((voiceon, chan), f'voice{voiceon}_chan{chan}')
-        by_instrument.setdefault(name, []).extend(note_list)
+        if chan == 9:
+            name = chan_to_inst.get((voiceon, chan), f'voice{voiceon}_chan{chan}')
+            for note in note_list:
+                pitch = note[2]
+                drum_name = drum_key_to_inst.get(pitch)
+                if drum_name:
+                    by_instrument.setdefault(drum_name, []).append(note)
+                else:
+                    by_instrument.setdefault(name, []).append(note)
+        else:
+            name = chan_to_inst.get((voiceon, chan), f'voice{voiceon}_chan{chan}')
+            by_instrument.setdefault(name, []).extend(note_list)
 
     # Write per-instrument CSV files
     written = 0
