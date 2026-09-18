@@ -387,6 +387,110 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
     return True
 
 
+# ----------------------------------------------------------------------------
+# Keyrange warning: some VPO patches cover a limited span (e.g. the solo piccolo
+# only d5..c8), so notes the score writes outside it would silently not sound.
+# ----------------------------------------------------------------------------
+
+_NOTE_SEMI = {"c": 0, "c#": 1, "d": 2, "d#": 3, "e": 4, "f": 5, "f#": 6,
+              "g": 7, "g#": 8, "a": 9, "a#": 10, "b": 11}
+
+
+def _sfz_note_num(n: str) -> int:
+    """'c4' -> 60, 'd#5' -> 75, 'c-1' -> 0 (SFZ/MIDI convention)."""
+    n = n.lower().strip()
+    m = re.fullmatch(r"([a-g]#?)(-?\d+)", n)
+    if not m:
+        return -1
+    return (_NOTE_SEMI[m.group(1)] +
+            (int(m.group(2)) + 1) * 12)
+
+
+def _midi_note_name(num: int) -> str:
+    semi = ("c", "c#", "d", "d#", "e", "f", "f#", "g", "g#", "a", "a#", "b")
+    return f"{semi[num % 12]}{num // 12 - 1}"
+
+
+def sfz_keyrange(sfz_path: str):
+    """Return (lo, hi) MIDI keys a patch actually covers, or None.
+
+    Best-effort parse of the .sfz: every <region> (and <group>/<global>
+    defaults it inherits) contributes lokey..hikey (or a lone key=). The
+    overall span is [min lokey, max hikey].
+    """
+    try:
+        with open(sfz_path) as f:
+            text = f.read()
+    except OSError:
+        return None
+    low = high = None
+    prev = None  # group/global-level defaults carried into following regions
+    def add(lo, hi):
+        nonlocal low, high
+        if lo is not None:
+            low = lo if low is None else min(low, lo)
+        if hi is not None:
+            high = hi if high is None else max(high, hi)
+
+    blocks = re.split(r"<(?:region|group|global|control)>", text)
+    for b in blocks:
+        body = b.lower()
+        lo = hi = key = None
+        for line in body.splitlines():
+            line = line.split("//", 1)[0].strip()
+            if not line:
+                continue
+            for attr, val in re.findall(r"\b(lokey|hikey|key)=([a-g]?#?-?\d+|\d+)", line):
+                try:
+                    num = int(val) if val.isdigit() else _sfz_note_num(val)
+                except ValueError:
+                    continue
+                if num < 0:
+                    continue
+                if attr == "lokey":
+                    lo = num
+                elif attr == "hikey":
+                    hi = num
+                elif key is None:
+                    key = num
+        # region inherits <group>/<global> defaults for unspecified bounds
+        if lo is None:
+            lo = prev.get("lo") if prev else None
+        if hi is None:
+            hi = prev.get("hi") if prev else None
+        if lo is None and key is not None:
+            lo = key
+        if hi is None and key is not None:
+            hi = key
+        add(lo, hi)
+        prev = {"lo": lo, "hi": hi}
+    if low is None or high is None:
+        return None
+    return low, high
+
+
+def warn_out_of_range(name: str, sfz_path: str, csv_path: str) -> None:
+    """Print a warning for notes the VPO patch cannot play (not failures).
+
+    Skips silently-unplayable cases: a patch whose keyrange cannot be parsed,
+    drum-kit keys (rewritten to the patch's fixed key) and one-shot EFFECTS
+    (sample plays regardless of pitch)."""
+    rng = sfz_keyrange(sfz_path)
+    if rng is None:
+        return
+    lo, hi = rng
+    pitches = (int(round(n[2])) for n in read_csv_notes(csv_path))
+    bad = sorted({p for p in pitches if p < lo or p > hi})
+    if not bad:
+        return
+    shown = ", ".join(f"{p} ({_midi_note_name(p)})" for p in bad[:8])
+    if len(bad) > 8:
+        shown += f", ... ({len(bad)} pitches)"
+    print(f"  !! {name}: {len(bad)} pitch(es) out of patch range "
+          f"{_midi_note_name(lo)}..{_midi_note_name(hi)} "
+          f"({lo}..{hi}) will be silent: {shown}")
+
+
 def render_oneshot(csv_path: str, out_wav: str, sample_path: str, samplerate: int,
                    trim_to_dur: bool = False):
     """Place a one-shot WAV sample at each CSV note-on using ffmpeg.
@@ -649,6 +753,8 @@ def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
             except OSError:
                 pass
         return None
+    if kit_key is None:
+        warn_out_of_range(name, sfz_path, csv_path)
 
     # -- Articulation: split short->staccato, attack-override, or blend -------
     try:

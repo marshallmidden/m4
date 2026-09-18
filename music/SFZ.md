@@ -284,8 +284,15 @@ NEXT FIXES / OPEN ITEMS for the SFZ path (as of 2026-09-17)
 - [ ] ppp/pppp residuals (~3–8 dB on some instruments) — likely the slow VPO
       soft attack vs the 0.25 s measurement window; re-measure with a longer
       window before tuning the table further.
-- [ ] (Deferred) Silent VPO range mappings: piccolo (patch only d5–d#5),
-      timpani high notes, tuba high notes. These stay out of `LEVEL_GAIN`.
+- [x] **Out-of-range note warning** (2026-09-18): `gcs2sfz` parses each VPO
+      patch's lokey..hikey span and warns when the CSV writes notes outside it
+      (`warn_out_of_range` + `sfz_keyrange`, skipping kit drums and one-shots).
+      On `test-volume-levels`: piccolo 6/6 out (patch d5..c8), timpani 5/6
+      (c2..c4), tuba 4/6 (d1..d4), contrabass 1/6 (a4 > g4). The test piece
+      writes C4–A4 on every instrument, so these notes simply have no VPO
+      sample and stay silent; the warning surfaces them instead of failing
+      silently. GM-fallback for out-of-range notes is NOT implemented (deferred
+      — offer if a piece genuinely needs it). These stay out of `LEVEL_GAIN`.
 
 Open bugs / quality items, in rough priority order:
 

@@ -49,11 +49,23 @@ the bells. `e-sfz.mp4` rebuilt: **868.01 s**.
    ~0–2 dB for essentially all in-range instruments. Remaining shortfalls
    (iterated below) mostly ppp/pppp ~3–8 dB (soft VPO attack vs the 0.25 s
    measurement window) and a few one-level outliers.
-8. [ ] (Deferred by user — "just the gain table" for now) Silent VPO range
-   mappings: **piccolo fully silent** (its sustain patch covers only d5–d#5;
-   written concert 60–69 misses it), **timpani high notes silent**
-   (`timpani-hit.sfz` tops out ~f#3), **tuba high notes**. These stay OUT of
-   `LEVEL_GAIN` (a flat base gain would make their audible notes too loud).
+8. [x] **Out-of-range note warning** (2026-09-18). `gcs2sfz` now parses each
+   VPO patch's `lokey..hikey` span (`sfz_keyrange`, inherited from
+   `<group>`/`<global>`, covers inline and split-line `lokey=`/`hikey=` and lone
+   `key=`; skips kit drums + one-shot EFFECTS) and warns on notes outside it
+   (`warn_out_of_range` in `render_instrument`). Standing deferral — make the
+   notes SOUND (per-note GM fallback, or transpose): not implemented.
+
+   Root cause for "piccolo/timpani/tuba do not play correctly": the
+   `test-volume-levels` piece writes the same C4–A4 (60/62/64/65/67/69) on every
+   instrument, but the VPO patches play only a limited span:
+   - **piccolo** (SOLO-sustain): d5..c8 = 74..108 → all 6 notes silent (fully mute).
+   - **tuba** (SOLO-sustain): d1..d4 = 26..62 → 64/65/67/69 silent (the familiar
+     "something strange" — half the sweep drops out mid-way).
+   - **timpani** (hit): c2..c4 = 36..60 → 62/64/65/67/69 silent.
+   - **contrabass** (SEC-sustain): c1..g4 = 24..67 → 69 (a4) silent.
+   Warnings verified on the full dir render (26 instruments, others clean;
+   violin/kit-drums/canon correctly not warned).
 
 ## Completed this session
 
