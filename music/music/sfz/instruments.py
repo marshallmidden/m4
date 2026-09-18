@@ -67,6 +67,15 @@ MAP = {
     "church bells":     "EFFECTS/church-bells.wav",
 }
 
+# One-shot effects whose placements are trimmed to their SCORED duration
+# (start-column dur) instead of ringing out in full. The church-bells sample is
+# a 31.6s sustained peal; the score strikes it as short notes, so full-ring
+# placement smears the bells over the whole finale and on past the canon.
+# cannon/gunshot/explosion keep their full tails (the boom IS the sound).
+ONESHOT_TRIM_TO_DUR = {
+    "church bells",
+}
+
 # cymbal / drumkit GM names that map to VPO percussion (rough).
 # KIT_FALLBACK maps name -> patch; KIT_KEY additionally pins the MIDI key each
 # drum must be voiced on. imscomp emits the GM drum key (35 bass, 38 snare, 49

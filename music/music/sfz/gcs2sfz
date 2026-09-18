@@ -387,7 +387,8 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
     return True
 
 
-def render_oneshot(csv_path: str, out_wav: str, sample_path: str, samplerate: int):
+def render_oneshot(csv_path: str, out_wav: str, sample_path: str, samplerate: int,
+                   trim_to_dur: bool = False):
     """Place a one-shot WAV sample at each CSV note-on using ffmpeg.
 
     One-shots (gunshot/explosion/canon) are standalone WAVs positioned at the
@@ -395,6 +396,11 @@ def render_oneshot(csv_path: str, out_wav: str, sample_path: str, samplerate: in
     ring out naturally) scaled by velocity, then all placements for the part are
     amixed into one instrument WAV like any other render. A part-level limiter
     keeps overlapping placements from clipping.
+
+    When trim_to_dur is set, each placement is cut (atrim 0..dur_s) to its SCORED
+    duration instead of ringing out; used for effects whose sample is far longer
+    than the notes the score writes for them (e.g. the 31.6s church-bells peal
+    struck as ~2.7s notes -- full ring smears over the canon and past the end).
     """
     notes = read_csv_notes(csv_path)
     if not notes:
@@ -407,12 +413,13 @@ def render_oneshot(csv_path: str, out_wav: str, sample_path: str, samplerate: in
     n = len(notes)
     inputs = []
     filters = []
-    for i, (start_s, _dur_s, _pitch, vel, _pan, _rev, *_ramp) in enumerate(notes):
+    for i, (start_s, dur_s, _pitch, vel, _pan, _rev, *_ramp) in enumerate(notes):
         ms = int(round(start_s * 1000.0))
         gain = vel / 127.0
         inputs += ["-i", sample_path]
+        trim = f"atrim=duration={dur_s:.4f}," if trim_to_dur else ""
         filters.append(
-            f"[{i}:a]adelay={ms}:all=1,volume={gain:.4f}[a{i}]"
+            f"[{i}:a]{trim}adelay={ms}:all=1,volume={gain:.4f}[a{i}]"
         )
     filters.append(f"{''.join(f'[a{i}]' for i in range(n))}"
                    f"amix=inputs={n}:normalize=0:duration=longest,"
@@ -624,7 +631,9 @@ def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
         # One-shots live at the library root (music/sfz/library/EFFECTS).
         library_root = os.path.dirname(os.path.dirname(vpo_root))
         sample_path = os.path.join(library_root, rel)
-        out = render_oneshot(csv_path, out_wav, sample_path, samplerate)
+        out = render_oneshot(csv_path, out_wav, sample_path, samplerate,
+                             trim_to_dur=name.replace("_", " ").strip().lower()
+                             in instruments.ONESHOT_TRIM_TO_DUR)
         if tmp_kit_csv:
             try:
                 os.remove(tmp_kit_csv)

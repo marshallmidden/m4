@@ -3,6 +3,32 @@
 Session record + **TODO list** for the SFZ drum / loudness work. Kept in-repo so
 progress survives tooling failures. Companion: `SFZ.md` (NEXT FIXES), `AGENTS.md`.
 
+## RESOLVED (2026-09-18): church bells smear over the canon and ring past it
+
+Report: "the church bells overlap the canon, and continue playing well after the
+canon finishes." Root cause: `render_oneshot` played every placement in FULL, and
+`music/sfz/library/EFFECTS/church-bells.wav` is a **31.6 s** peal. The score
+strikes the bells as short notes (`vol(fff) 2e2d`/`2e1`, CSV dur ~0.3–2.7 s), but
+each of the 29 placements rang 31.6 s — a wall of bells 746–882 s that buried the
+canon volleys (821–842 s) and rang **27 s past the last cannon** (842.2 + 12.3 s
+boom = 854.5 s). The mix was stretched to 882.04 s purely by the bells.
+
+Fix (`music/sfz/gcs2sfz` + `music/sfz/instruments.py`):
+- Added `ONESHOT_TRIM_TO_DUR` (currently `{"church bells"}`): those placements are
+  trimmed with `atrim=duration={csv dur}` to their SCORED length before the
+  adelay, so each bell is a struck note ~as written.
+- cannon/gunshot/explosion keep full tails (the boom IS the sound).
+- `render_oneshot(csv_path, ..., trim_to_dur=...)`; the flag is passed from
+  `render_instrument` using the **normalized** name
+  (`name.replace("_"," ").strip().lower()` — CSV files use `church_bells`, the map
+  uses `church bells`; the first attempt keyed on the raw name and silently didn't
+  trim).
+
+Verified: bell stem now ends **850.708 s** = last onset 850.400345 + dur
+0.308239 (was ~882 s). `t/e/e-sfz-mix.wav` 882.04 → **868.01 s**, now ended by
+the orchestra's own final sustained chord (violin/brass CSVs end 867.99 s), not
+the bells. `e-sfz.mp4` rebuilt: **868.01 s**.
+
 ## TODO (current)
 
 1. [x] Separate drums into per-instrument CSVs in `imscomp --sfzpipecsv`

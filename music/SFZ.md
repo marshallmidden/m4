@@ -217,9 +217,14 @@ PIPELINE & TARGETS (added 2026-09-09) — now wired into all piece dirs.
         mp4: ALL title lines from the .E as a persistent heading, scrolling
         measure echoes, and the centre playhead arrow.)
       - One-shots (1812 canon + church bells): placements play the FULL sample (no atrim --
-        cannon/bell tails ring out) scaled by velocity, with a part-level
-        limiter (0.95 FS). Mix target length derives from the actual rendered
-        stems (ffprobe), so natural tails are never trimmed off.
+        cannon/gunshot/explosion tails ring out; a boom IS the sound) scaled by
+        velocity, with a part-level limiter (0.95 FS). Exception: `church bells`
+        (in `ONESHOT_TRIM_TO_DUR`) are trimmed to their SCORED duration, because
+        the 31.6s church-bells.wav peal struck as ~2.7s notes would otherwise
+        smear over the whole finale and ring 30s past the canon (fixed
+        2026-09-18: e-sfz.mp4 882s -> 868s, ending on the orchestra's final
+        chord). Mix target length derives from the actual rendered stems
+        (ffprobe), so natural tails are never trimmed off.
 
 Make targets (now in EVERY piece dir: songs/, ims/, b/01..04, b/06, b/sonata14,
 b/09, t/e):
