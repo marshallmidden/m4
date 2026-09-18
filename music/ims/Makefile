@@ -4,6 +4,7 @@
 SONGS  = A-Flat-Prelude-Chopin
 SONGS += clock_tower
 SONGS += test-volume-levels
+SONGS += test-voice-volume-levels
 #-----------------------------------------------------------------------------
 TESTS  = A0
 TESTS += A1
