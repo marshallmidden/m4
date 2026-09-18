@@ -139,11 +139,41 @@ Blast radius: this affects EVERY multi-tempo piece's SFZ render (the bug needed
 only two distinct tempos). Affected `SONGS`/`ims`/`t`/`b` pieces include
 b/01 v1-1, b/02 b2m1, b/03 v3-3/4, b/04 v4-1/3, b/06, b/09 b9m2/m3, t/e,
 all Gershwin, and songs gnome/m1a/macros-fugue-in-c/kleine-suite/pete/etc.
-Their `*-sfz.mp4`s are wrong until re-rendered (`make sfz-mp4`); the GM
-`*_2.mp4`s are unaffected. Full SFZ re-render pending user go-ahead.
+Their `*-sfz.mp4`s are wrong until re-rendered; the GM `*_2.mp4`s are
+unaffected.
 
 Removed the temporary `SFZ_DBG` debug dumps (per-note `.raw`/`.rel`) and the
 now-duplicate second `sfz_sec_per_tick` def after verification.
+
+## Re-render + WARNING: DOALL deletes every SFZ mp4
+
+`make clean` in songs/ims/t/e/b (and the b subdirs) is `clean: sfz-clean`, and
+DOALL runs `make clean` in each suite. So running `./DOALL` wipes ALL
+`*-sfz.mp4`, `sfz-csv/`, and `sfz-mix/` — not just the plain `.fs`/`.mp4`
+artifacts. After the fix, DOALL was run to check for regressions and it deleted
+the whole SFZ render set (only `ims/test-volume-levels-sfz.mp4` survived).
+**Do not run DOALL between rendering and uploading; `make clean` is
+destructive to SFZ outputs.** (Possible future fix: drop `sfz-clean` from the
+`clean` dependency, or gate it behind a separate target — the AGENTS.md note
+that "make clean removes .E/.fs" understates it.)
+
+Detection of affected pieces (`--midi1csv`, >1 distinct `Tempo`): 31 render
+targets. Of the top-level `make sfz-mp4` set (songs + ims SONGS + t/e + b):
+- b/01 v1-1, v1-4; b/02 b2m1; b/03 v3-3, v3-4; b/04 v4-1, v4-3; b/06 b-6;
+  b/09 b9m2, b9m3; t/e e.
+- songs: 5-dollar-fuga, david, gnome, handel, kleine-suite, m1a, m1b,
+  macros-abstraction, macros-fugue-in-c, pete, promenade2, promenade4,
+  sonic-squeak, vinci, warren1.
+- (Affected but NOT in the top-level set, i.e. `ims` TESTS only: A2, A7,
+  SIMPLE, tempo, tempo-ramp.)
+
+All 26 top-level affected pieces were re-rendered (`make -C <dir> -j4
+<name>-sfz.mp4`). v1-1-sfz.mp4 = 476.958 s, matching the GM mp4.
+
+**Still missing**: DOALL deleted the *non-affected* SFZ mp4s too — only 15 of
+106 `songs` SONGS now have `*-sfz.mp4`, and the single-tempo ims/b/t pieces are
+gone. A full `make sfz-mp4` sweep (or per-dir `-j`) is needed to restore the
+rest; pending user go-ahead.
 
 ## Measurement notes (for the loudness table)
 - Method: parse each `ims/sfz-csv/test-volume-levels/*.csv` for note starts;
