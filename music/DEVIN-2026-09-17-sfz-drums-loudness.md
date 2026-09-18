@@ -170,10 +170,18 @@ targets. Of the top-level `make sfz-mp4` set (songs + ims SONGS + t/e + b):
 All 26 top-level affected pieces were re-rendered (`make -C <dir> -j4
 <name>-sfz.mp4`). v1-1-sfz.mp4 = 476.958 s, matching the GM mp4.
 
-**Still missing**: DOALL deleted the *non-affected* SFZ mp4s too — only 15 of
-106 `songs` SONGS now have `*-sfz.mp4`, and the single-tempo ims/b/t pieces are
-gone. A full `make sfz-mp4` sweep (or per-dir `-j`) is needed to restore the
-rest; pending user go-ahead.
+**Full sweep DONE (user go-ahead).** Re-rendered the entire SFZ set via
+`make -C {songs,ims,t,b} -j3 sfz-mp4` (4 dirs concurrently, fully detached so it
+survives client kills). Result: **132 `*-sfz.mp4`** (songs 107, b 21, ims 3,
+t/e 1), all dirs EXIT=0. Only files <1 MB are the genuinely short pieces
+(4–22 s: putd-test, SixtyFour, Inv3a, ...). v1-1 = 476.958 s, b9m3 = 854.7 s,
+t/e = 882.0 s.
+
+Note: there were four stale `fluidsynth` processes pegging CPU at ~100% for
+23 h–1.5 d (stuck render-loop, e.g. `-F /tmp/tvl-gm.wav ... test-volume-levels.fs`
+and `-F dt.wav dt.fs`) left over from the previous session; killed them
+(`kill -9`). Keep an eye out for a busy-wait in the patched stdin→WAV renderer
+if a GM-fallback piece ever stalls.
 
 ## Measurement notes (for the loudness table)
 - Method: parse each `ims/sfz-csv/test-volume-levels/*.csv` for note starts;
