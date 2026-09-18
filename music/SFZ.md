@@ -310,14 +310,11 @@ Open bugs / quality items, in rough priority order:
    expression stuck at 127 → dynamics compressed (`GCS2SFZ_GM_EXPR` folds the
    expression into note velocity). Calibrated on ims/test-volume-levels.
 
-3. **`sfz-mix/%-sfz-mix.wav` does NOT depend on `gcs2sfz` in the piece
-   Makefiles.** The mp4 rule lists GCS2YOUTUBE etc. as prereqs; the mix rule
-   only lists `sfz-csv/%/.done`, so edits to `gcs2sfz` do NOT trigger a
-   re-render (`make sfz` says "Nothing to be done"). Add
-   `$(CURDIR)/$(GCS2SFZ)` (or the canonical `../music/sfz/gcs2sfz`) to the mix
-   rule in songs/, ims/, b/01..04, b/06, b/09, b/sonata14, t/e. Until then,
-   force re-renders by deleting `sfz-mix/*.wav` first (documented memo in
-   DEVIN-2026-09-15-cc11-sfz-loudness.md).
+3. ~~**`sfz-mix/%-sfz-mix.wav` does NOT depend on `gcs2sfz`.**~~ **RESOLVED
+   2026-09-18** — the mix rule only listed `sfz-csv/%/.done`, so edits to
+   `gcs2sfz` did NOT trigger a re-render (`make sfz` said "Nothing to be
+   done"). `$(CURDIR)/$(GCS2SFZ)` is now a prereq of every mix rule
+   (songs/, ims/, b/01..04, b/06, b/09, b/sonata14, t/e).
 
 Carried-over improvements (not regressions):
 

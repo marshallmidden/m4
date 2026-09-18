@@ -110,7 +110,7 @@ sfz-csv/%/.done: %.E ${IMSCOMP}
 	cd $(dir $@) && ${IMSCOMP} ${MC_ARGS} --sfzpipecsv $(CURDIR)/$*.E
 	@touch $@
 #-----------------------------------------------------------------------------
-sfz-mix/%-sfz-mix.wav: sfz-csv/%/.done
+sfz-mix/%-sfz-mix.wav: sfz-csv/%/.done $(CURDIR)/$(GCS2SFZ)
 	@mkdir -p $(dir $@)
 	"$(CURDIR)/$(GCS2SFZ)" "$(CURDIR)/$(SFZ_CSVDIR)/$*" \
 		--outdir "$(CURDIR)/$(SFZ_MIXDIR)" \

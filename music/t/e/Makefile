@@ -219,7 +219,7 @@ sfz-csv/${V}/.done: ${V}.E ${IMSCOMP}
 	@touch $@
 #-----------------------------------------------------------------------------
 # 2) Render instrument CSVs to a mixed WAV via gcs2sfz + sfizz_render
-sfz-mix/${V}-sfz-mix.wav: sfz-csv/${V}/.done
+sfz-mix/${V}-sfz-mix.wav: sfz-csv/${V}/.done $(CURDIR)/$(GCS2SFZ)
 	@mkdir -p $(dir $@)
 	"$(CURDIR)/$(GCS2SFZ)" "$(CURDIR)/$(SFZ_CSVDIR)/${V}" \
 		--outdir "$(CURDIR)/$(SFZ_MIXDIR)" \
