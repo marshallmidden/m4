@@ -7761,7 +7761,7 @@ def print_out_sfzpipecsv() -> None:
     """Convert in-memory MIDI CSV events to per-instrument CSV files for sfizz rendering.
 
     Each instrument gets a CSV file with lines:
-        start_sec,dur_sec,midi_note,velocity,pan,reverb,vol_start,vol_end,pan_end,articulation
+        start_sec,dur_sec,midi_note,velocity,pan,reverb,vol_start,vol_end,pan_end,articulation,staff
     Pan (MIDI CC10, 0 hard left .. 127 hard right, 64 center), reverb
     (MIDI CC91, 0 dry .. 127 max send) and the expression envelope
     (CC11) are carried verbatim from the score's Control_c events so the
@@ -7778,6 +7778,11 @@ def print_out_sfzpipecsv() -> None:
       - articulation = per-note token from the score's suffixes (sfz_note_on_line):
         staccato/marcato/tenuto/accent/legato/tied/sustain. The backend uses it
         to pick a staccato patch for staccato/marcato notes and sustain otherwise.
+      - staff (11th column) = the 0-based voice number the note came from. An
+        instrument spread across several staffs is an ENSEMBLE: the render
+        backend detunes all of its staffs by one shared offset and fans their
+        pans out across the stage. A single-staff instrument is rendered tuned
+        the same as today.
     The file is named <instrument_name>.csv in the current directory.
     """
     global array_of_lines
@@ -7829,7 +7834,8 @@ def print_out_sfzpipecsv() -> None:
     pending_notes = {}
     # Result: notes[(port, chan)] = [(start_sec, dur_sec, pitch, velocity,
     #                                 pan, reverb, vol_start, vol_end, pan_end,
-    #                                 articulation), ...]
+    #                                 articulation, voiceon), ...]
+    # (voiceon = the 0-based staff number; see the staff column above.)
     notes = {}
     current_tick = 0
 
@@ -7887,7 +7893,7 @@ def print_out_sfzpipecsv() -> None:
         ckey = (voiceon, key[1])
         vol_end = chan_vol.get(ckey, vol)
         pan_end = chan_pan.get(ckey, pan)
-        notes.setdefault((voiceon, key[1]), []).append((start_sec, dur_sec, pitch, vel, pan, rev, vol, vol_end, pan_end, artic))
+        notes.setdefault((voiceon, key[1]), []).append((start_sec, dur_sec, pitch, vel, pan, rev, vol, vol_end, pan_end, artic, voiceon))
 
     for i, line in enumerate(array_of_lines):
         parts = line.split(', ')
@@ -8003,11 +8009,11 @@ def print_out_sfzpipecsv() -> None:
         try:
             with open(filename, 'w') as f:
                 for fields in note_list:
-                    start_sec, dur_sec, pitch, velocity, pan, rev, vol_start, vol_end, pan_end, artic = fields
+                    start_sec, dur_sec, pitch, velocity, pan, rev, vol_start, vol_end, pan_end, artic, staff = fields
                     if dur_sec < 0.01:
                         dur_sec = 0.01  # minimum duration
                     f.write(f'{start_sec:.6f},{dur_sec:.6f},{pitch},{velocity},'
-                            f'{pan},{rev},{vol_start},{vol_end},{pan_end},{artic}\n')
+                            f'{pan},{rev},{vol_start},{vol_end},{pan_end},{artic},{staff}\n')
             written += 1
         except IOError as e:
             print_error_no_line(f'sfzpipecsv: cannot write {filename}: {e}')

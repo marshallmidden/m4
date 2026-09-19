@@ -57,6 +57,7 @@ Second, higher-fidelity render path using the Virtual Playing Orchestra sample l
   - `music/DEVIN-2026-09-11-sfz-articulation.md` — articulation recipe defaults + open b/01 v1-1 first-measure pizzicato bug.
   - `music/DEVIN-2026-09-11-sfz-leadin-waveform.md` — `GCS2SFZ_LEAD_IN/TAIL` timeline alignment + wav2waveform dB scale.
   - `music/DEVIN-2026-09-15-cc11-sfz-loudness.md` — CC11 predistortion (`GCS2SFZ_EXPR_EXP`) + GM-fallback stutter fix; gain sync (`GCS2SFZ_GM_GAIN`) and expression-in-velocity (`GCS2SFZ_GM_EXPR`) calibrated on `test-volume-levels`; make-clean re-render memo.
+  - `music/DEVIN-2026-09-19-sfz-ensemble.md` — stage/ensemble simulation: 11th CSV `staff` column; per-ensemble shared detune (crc32 of name, ±8 cent, pitch-bend at tick 0 + re-zero) + per-staff pan spread (±10), each staff rendered as its own stream and amixed; `GCS2SFZ_ENSEMBLE=0` disables.
   - `music/AAA.README.md` — differential-test suite HOWTO for `AAA.diff._2`/DOALL.
 
 ## YouTube uploads

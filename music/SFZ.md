@@ -48,10 +48,13 @@ CSV schema
     split) and renders staccato/marcato notes with the staccato patch, all
     others with sustain. Implementation: imscomp sfz_articulation_token() /
     sfz_note_on_line() at the three Note_on_c sites; gcs2sfz read_csv_notes()
-    returns 10-tuples. Full detail: DEVIN-2026-09-11-sfz-articulation.md.
-  - staff column (11th, PLANNED with the ensemble work below): the per-staff
-    split key so each staff duplicated inside an ensemble can be detuned and
-    panned separately.
+    returns 11-tuples. Full detail: DEVIN-2026-09-11-sfz-articulation.md.
+  - staff (11th column, added 2026-09-19): the 0-based voice number a note
+    came from. An instrument spread across several staffs is an ENSEMBLE; the
+    render backend detunes all of its staffs by one shared offset and fans
+    their pans out across the stage (see the Stage/ensemble simulation
+    section). Single-staff instruments carry no offset and render tuned the
+    same as ever.
 
 Voice/measure selection is shared with the midi path -- no sfz-specific
 wiring: `--voices 14` / `--measures 3` slice the per-instrument CSVs via the
@@ -116,22 +119,23 @@ gcs2sfz render behaviors
     sfizz render itself is deterministic per input.
 
 ===============================================================================
-Stage / ensemble simulation (tuning, detune, pan) -- PLAN, implementing now
+Stage / ensemble simulation (tuning, detune, pan) -- implemented 2026-09-19
 ===============================================================================
 
-Facts about the current render:
+Facts the design rests on:
 
   - All voices are tuned IDENTICALLY (same semitones). The only per-note
     randomization is imscomp's humanize: timing jitter of +/-5 ticks
     (~ +/-2.6ms at 120 bpm, random.seed(42) for determinism) plus a small
-    velocity/volume wobble. There is NO pitch detune or per-voice pitch
-    offset anywhere in the pipeline today.
+    velocity/volume wobble. No pitch detune or per-voice pitch offset existed
+    before this feature.
   - Pan is per-part from the score (CC10, the seating above). All voices of
     one instrument MERGE onto a single MIDI channel in the sfz CSV
-    (by_instrument roll-up), so there is no intra-section spread: a
-    12-violin section sounds like one voice in one seat.
+    (by_instrument roll-up), so before this feature there was no
+    intra-section spread: a violin section of several desks sounded like one
+    voice in one seat (all its desks carry pan 36, for example).
 
-Fluidsynth/sfizz pitch-bend mechanics (used by the design):
+Pitch-bend mechanics (why it works this way):
 
   - Pitch bend is CHANNEL-wide: it shifts every currently-sounding and future
     voice on that channel by a fixed interval (cents), not per-note.
@@ -139,42 +143,44 @@ Fluidsynth/sfizz pitch-bend mechanics (used by the design):
     range"). fluidsynth's default is +/-2 semitones (200 cents); raw bend
     values span 0..16383 with 8192 = center. So at the default range,
     cents_from_bend = (bend - 8192) * 200 / 8192  (~41 cents per 4096 steps;
-    +8 cents ~= bend 8519).
-  - Bend is PERSISTENT per channel: if you don't re-zero it (write 8192)
-    after the passage, later notes inherit the shift.
-  - sfizz honors CC pitch bend the same channel-wide way with the same
-    default range.
+    +8 cents ~= bend 8519). sfizz honors CC pitch bend the same way.
+  - Bend is PERSISTENT per channel: write_midi re-zeros it (back to 8192) at
+    the end of every detuned stream, so no stale bend bleeds into a stream
+    that reuses the channel.
 
-Decided behavior:
+Implemented behavior:
 
-  - Non-ensemble instruments (a single staff): tuned the same as today -- NO
-    detune, score pan verbatim. This must stay byte-identical to current
-    output.
-  - Ensembles (an instrument that spans multiple staffs/voices): give the
-    whole ensemble ONE small detune shared by ALL its staffs (so the section
-    reads as one unit, set slightly against the rest of the orchestra), and
-    PAN EACH duplicated staff slightly differently around the instrument's
-    base pan (so the section spreads across the stage like an orchestra).
+  - Non-ensemble instruments (a single staff): tuned the same as before -- NO
+    detune, score pan verbatim. Output stays byte-identical to pre-feature.
+  - Ensembles (an instrument spanning multiple staffs): the whole ensemble
+    gets ONE small detune shared by ALL its staffs (the section reads as one
+    unit, set slightly against the rest of the orchestra), and each duplicated
+    staff is panned slightly differently around the score's base pan (the
+    section spreads across the stage like an orchestra).
   - Implementation:
       * imscomp --sfzpipecsv appends the 11th column: staff id (= voice_on,
-        the 1-based staff number; 0/absent ->> single-staff or legacy).
+        the 0-based voice number; ''/absent -> single-staff or legacy).
         Gated on --sfzpipecsv like the articulation column; all other
-        outputs stay byte-identical.
-      * gcs2sfz groups a multi-staff instrument's notes by staff and renders
-        each staff as its OWN stream (own MIDI file, own sfizz_render), then
-        amixes the staff WAVs into the instrument stem. Because each stream
-        is its own channel, the channel-wide pitch bend applies per staff.
-      * Detune: emit one pitch-bend at tick 0 of each ensemble stream; the
-        VALUE is shared by all staffs of the ensemble (per-instrument
-        constant). Magnitude small by default (~8 cents), DETERMINISTIC
-        (e.g. hash of the instrument name), re-zeroed at the stream end so no
-        stale bend bleeds elsewhere. GM-fallback streams get the same bend.
-      * Pan: each staff stream runs the note pans from the score plus a
-        deterministic per-staff offset spread around the instrument's base
-        pan (modal score pan or 64). Single-staff instruments use the score
-        pan verbatim (no offset).
-  - Env knobs: GCS2SFZ_ENSEMBLE=0 disables the whole feature (current
-    single-channel behavior). Default ON.
+        outputs stay byte-identical (DOALL 0 bare).
+      * gcs2sfz _ensemble_plan() groups a multi-staff instrument's notes by
+        staff and render_instrument() renders each staff as its OWN stream
+        (own MIDI file/channel, own sfizz_render or fluidsynth run), then
+        amixes the staff WAVs into the instrument stem. Because each stream is
+        its own channel, the channel-wide pitch bend applies per stream.
+      * Detune: write_midi emits a tick-0 pitch-bend (raw = 8192 + cents *
+        8192/200, clamped) and a trailing re-zero. The VALUE is shared by all
+        staffs of the ensemble -- a deterministic per-instrument constant,
+        `crc32(name) % 17 - 8` (+/-8 cents). GM-fallback streams get the same
+        bend. Observed on b/01 (consistent across v1-1..v1-4): violin -4
+        cent, viola -7, oboe -7, clarinet +2, bassoon -1, french horn +2,
+        trumpet +7, pizzicato_strings +3.
+      * Pan: each staff stream adds a deterministic per-staff offset to the
+        score's per-note pans (and pan_end): the staffs fan evenly across
+        +/-10 pan units (clamped 0..127) with a small per-staff jitter, e.g.
+        the 7 violin desks fan [-9,-8,-3,+1,+2,+8,+11] around 36. Single-staff
+        instruments use the score pan verbatim (offset 0).
+  - Env knobs: GCS2SFZ_ENSEMBLE=0 disables the whole feature (pre-feature
+    single-stream behavior). Default ON.
   - Backwards compat: legacy 9-col CSVs, and 10-col with empty 11th, parse
     and render exactly as before (no staff => no split).
 
@@ -240,6 +246,12 @@ Resolved:
     / dynamic_vol / level_gain_db_named / per-instrument LEVEL_VELOCITY
     velocity map, identity until calibrated). DOALL 0 bare / 2 pre-existing
     named; full `make sfz` in b/01.
+  - Stage/ensemble simulation -- DONE 2026-09-19 (11th staff column +
+    per-ensemble shared detune + per-staff pan spread; see the section above).
+    Full `make sfz` in b/01 (all 4 movements): violin -4 cent / 7 staffs,
+    viola -7 / 3, winds +- ~7 / 2 each, cello+contrabass single-staff
+    untouched; GCS2SFZ_ENSEMBLE=0 restores pre-feature output; legacy 9/10-col
+    CSVs render unchanged; DOALL 0 bare / 2 pre-existing named.
 
 Open:
   - Calibrate per-instrument LEVEL_VELOCITY entries (velocity-map named
@@ -248,8 +260,9 @@ Open:
   - ppp/pppp residuals (~3-8 dB on some instruments) -- likely the slow VPO
     soft attack vs the 0.25s measurement window; re-measure with a longer
     window.
-  - Stage/ensemble simulation above is half the list; after landing, re-run
-    the full suite (130 mixes + 130 sfz-mp4s) and DOALL.
+  - A/B-listen the ensemble detune/pan choices across pieces after the full
+    suite re-render (130 mixes + 130 sfz-mp4s) and tune the detune magnitude /
+    pan spread to taste (currently +/-8 cent, +/-10 pan, deterministic).
   - ARTIC_MAX=0 is not overridden by anything; switching the GM fallback to a
     sfizz-renderable GM soundfont (or a default VPO piano) would drop the
     last GM-dependent instruments.

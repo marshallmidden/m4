@@ -73,6 +73,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import zlib
 from concurrent.futures import ThreadPoolExecutor
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -140,14 +141,18 @@ def _encode_smf_track(events: list[tuple[int, bytes]]) -> bytes:
     return b"MTrk" + struct.pack(">I", len(data)) + data
 
 
-def read_csv_notes(csv_path: str) -> list[tuple[float, float, int, int, int, int, int, int, int, str]]:
-    """Parse an instrument CSV into 10-tuples:
-    (start_s, dur_s, pitch, vel, pan, rev, vol_start, vol_end, pan_end, artic).
+def read_csv_notes(csv_path: str) -> list[tuple[float, float, int, int, int, int, int, int, int, str, str]]:
+    """Parse an instrument CSV into 11-tuples:
+    (start_s, dur_s, pitch, vel, pan, rev, vol_start, vol_end, pan_end, artic,
+     staff).
 
     Columns 7-10 (expression/pan ramp endpoints + articulation) are optional for
     backward compatibility: older 6-column CSVs yield vol_start=vol_end=vel and
     pan_end=pan (no in-note swell/pan motion); CSVs without the articulation
-    column yield artic='' (renders keep the GCS2SFZ_ARTIC_MAX duration split).
+    column yield artic='' (renders keep the GCS2SFZ_ARTIC_MAX duration split);
+    CSVs without the 11th staff column yield staff='' (single-staff render: no
+    ensemble detune/pan spread). staff = the 0-based voice number, the key that
+    tells the ensemble split which staff each note belongs to.
     """
     notes = []
     with open(csv_path) as f:
@@ -172,12 +177,14 @@ def read_csv_notes(csv_path: str) -> list[tuple[float, float, int, int, int, int
             vol_end = int(parts[7]) if len(parts) >= 8 else vol_start
             pan_end = int(parts[8]) if len(parts) >= 9 else pan
             artic = parts[9].strip() if len(parts) >= 10 else ''
+            staff = parts[10].strip() if len(parts) >= 11 else ''
             notes.append((start_s, dur_s, pitch, vel, pan, rev,
-                          vol_start, vol_end, pan_end, artic))
+                          vol_start, vol_end, pan_end, artic, staff))
     return notes
 
 
-def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None):
+def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None,
+               detune_cents=0.0, pan_off=0):
     """Write a single-track MIDI file from a CSV (absolute times in seconds).
 
     ``pred_expr`` controls CC11 behavior and selects which path is taken:
@@ -205,15 +212,33 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
     channel control changes whenever their value differs from the previous note.
     sfizz links CC10 to pan by default; fluidsynth honors both CC10 and CC91.
     Equal start/end pan values emit nothing.
+
+    ``detune_cents`` offsets the whole stream by a fixed interval in cents via a
+    channel-wide pitch bend (RPN 0 bend range, the fluidsynth/sfizz default of
+    +/-2 semitones -> ~41 cents per 4096 bend steps; +8 cents ~= bend 8519).
+    Pitch bend is CHANNEL-wide and persistent, so 1) it must be applied at tick 0
+    before any note (each ensemble staff renders on its OWN midi file/channel,
+    so the offset is safe) and 2) a re-zero (bend 8192) is appended at the very
+    end so no stale bend bleeds into a concatenated stream. Applied only when
+    nonzero.
+
+    ``pan_off`` shifts every note's pan AND pan_end by a fixed amount (clamped),
+    giving each staff of an ensemble its own seat on the stage while the score's
+    pan layout stays intact.
     """
     if name is None:
         name = os.path.splitext(os.path.basename(csv_path))[0]
     notes = []
-    for start_s, dur_s, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic in read_csv_notes(csv_path):
+    for start_s, dur_s, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic, staff in read_csv_notes(csv_path):
         on_tick = int(round(start_s * TICKS_PER_SEC))
         off_tick = int(round((start_s + dur_s) * TICKS_PER_SEC))
         if off_tick <= on_tick:
             off_tick = on_tick + 1
+        if pan_off:
+            # Per-staff seat: each duplicated staff of an ensemble fans slightly
+            # off the score's base pan (clamped to MIDI range).
+            pan = max(0, min(127, pan + pan_off))
+            pan_e = max(0, min(127, pan_e + pan_off))
         # Per-instrument velocity mapping (instruments.velocity_mult): each
         # instrument's named dynamics (pp..fff) land its sample-layer velocity
         # ranges consistently, so a piece's dynamics don't sit in a neighbor's
@@ -368,6 +393,12 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
     events = []
     events.append((0, b"\xff\x51\x03" + struct.pack(">I", tempo_ppqn_micros)[1:]))
     events.append((0, b"\xff\x03" + _varint(len(name_b)) + name_b))
+    if detune_cents:
+        # Channel-wide detune via pitch bend (default +/-2 semitone range; the
+        # shared per-ensemble offset). Emitted at tick 0, before any note.
+        bend = int(round(8192 + detune_cents * 8192.0 / 200.0))
+        bend = max(0, min(16383, bend))
+        events.append((0, b"\xe0" + bytes([bend & 0x7F, (bend >> 7) & 0x7F])))
     last_tick = 0
     for tick in sorted(set(timeline) | set(cc_timeline)):
         delta = tick - last_tick
@@ -395,6 +426,11 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
                 ev = b"\x80" + bytes([pitch & 0x7F, 64])
                 events.append((delta if first else 0, ev))
                 first = False
+
+    if detune_cents:
+        # Re-zero the bend (8192 = center) at the very end of the stream so no
+        # stale bend state survives into anything that reuses this channel.
+        events.append((0, b"\xe0\x00\x40"))
 
     with open(midi_path, "wb") as f:
         f.write(b"MThd" + struct.pack(">IHHH", 6, 0, 1, TPQ))
@@ -628,10 +664,14 @@ def _staccato_variant(rel, vpo_root):
 
 
 def _notes_to_csv(notes, dst_csv):
-    """Write a CSV subset (same 10-column format read_csv_notes parses)."""
+    """Write a CSV subset in the same column format read_csv_notes parses."""
     with open(dst_csv, "w") as f:
-        for s, d, p, v, pan, rev, vs, ve, pe, art in notes:
-            f.write(f"{s:.6f},{d:.6f},{p},{v},{pan},{rev},{vs},{ve},{pe},{art}\n")
+        for n in notes:
+            s, d, p, v, pan, rev, vs, ve, pe = n[:9]
+            art = n[9] if len(n) > 9 else ''
+            stf = n[10] if len(n) > 10 else ''
+            f.write(f"{s:.6f},{d:.6f},{p},{v},{pan},{rev},{vs},{ve},{pe},"
+                    f"{art},{stf}\n")
 
 
 def _amix(wavs, out_wav, samplerate):
@@ -649,7 +689,8 @@ def _amix(wavs, out_wav, samplerate):
     return True
 
 
-def _render_sfz(csv_path, sfz_path, out_wav, samplerate, name):
+def _render_sfz(csv_path, sfz_path, out_wav, samplerate, name,
+                detune_cents=0.0, pan_off=0):
     """Render one CSV with one SFZ patch (CC11-driven). Returns success bool.
 
     The stock VPO patches carry loudness via CC11 expression, not velocity, but
@@ -668,7 +709,8 @@ def _render_sfz(csv_path, sfz_path, out_wav, samplerate, name):
             f.write(f'#include "{os.path.basename(sfz_path)}"\n')
         with tempfile.TemporaryDirectory() as td:
             midi_path = os.path.join(td, "in.mid")
-            if not write_midi(csv_path, midi_path, name=name):
+            if not write_midi(csv_path, midi_path, name=name,
+                              detune_cents=detune_cents, pan_off=pan_off):
                 print(f"  .. {name}: empty part, skipping (no audio).")
                 return False
             cmd = [SFIZZ, "--use-eot", "--sfz", wrapper, "--midi", midi_path,
@@ -785,6 +827,123 @@ def _cello_velocity_fix(sfz_path):
     return tmp
 
 
+# ----------------------------------------------------------------------------
+# Ensemble / stage simulation: an instrument spread across several staffs is an
+# ensemble. Every staff of that ensemble shares ONE small detune (so the section
+# reads as one unit, set slightly against the rest of the orchestra) and each
+# duplicated staff is panned slightly differently around the score's base pan,
+# emulating an orchestra on a stage. Single-staff instruments are untouched
+# (tuned the same, score pan verbatim -> byte-identical to pre-ensemble output).
+# GCS2SFZ_ENSEMBLE=0 disables the whole feature.
+# ----------------------------------------------------------------------------
+
+def _stable_hash(s: str) -> int:
+    """Deterministic (non-randomized) hash for the detune/pan spread choices."""
+    return zlib.crc32(s.encode("utf-8"))
+
+
+def _ensemble_plan(name, notes):
+    """Return a per-staff render plan for an ensemble, or None.
+
+    The plan is a list of (staff_notes, pan_off, detune_cents) — one entry per
+    staff — plus the shared detune and the per-staff pan offset. A CSV needs
+    staffs = 2+ distinct staff columns to count as an ensemble; any note without
+    a staff column, or GCS2SFZ_ENSEMBLE=0, yields None (single-stream render).
+    """
+    if os.environ.get("GCS2SFZ_ENSEMBLE", "1") in ("0", "false", "no", ""):
+        return None
+    if any(n[10] == '' for n in notes):
+        return None
+    staffs = sorted({n[10] for n in notes})
+    if len(staffs) < 2:
+        return None
+    # One detune shared by ALL staffs of the ensemble, deterministic per
+    # instrument name: +/-8 cents, inaudible alone but a real section sheen.
+    detune = _stable_hash(name) % 17 - 8
+    groups = []
+    n = len(staffs)
+    for i, st in enumerate(staffs):
+        sub = [n for n in notes if n[10] == st]
+        # Fan the duplicated staffs evenly across +/-10 pan units around the
+        # score's base pan, plus a tiny deterministic per-staff jitter so two
+        # desks of the same section don't land on top of each other.
+        spread = (2 * 10.0 * i / (n - 1) - 10.0 if n > 1 else 0.0)
+        jitter = _stable_hash(f"{name}|{st}") % 3 - 1
+        groups.append((sub, int(round(spread + jitter)), detune))
+    return groups
+
+
+def _render_instrument_csv(csv_path, out_wav, samplerate, name, sfz_use,
+                           stacc_path, blend, artic_max,
+                           detune_cents=0.0, pan_off=0):
+    """Render ONE CSV (a whole single-staff instrument or one ensemble staff).
+
+    Applies the articulation split (staccato/marcato notes on the staccato
+    patch, everything else on the fast-attack sustain, orchestrated by the
+    10th CSV column or the GCS2SFZ_ARTIC_MAX duration fallback) and falls back
+    to a plain sustain render when there is nothing to split. ``detune_cents``
+    and ``pan_off`` are forwarded to write_midi (channel-wide pitch-bend offset
+    + per-staff pan seat), so each ensemble staff stream is self-contained.
+    Returns True if out_wav was produced.
+    """
+    notes = read_csv_notes(csv_path)
+    # Per-note articulation (10th CSV column, from imscomp's --sfzpipecsv)
+    # supersedes the duration heuristic: staccato/marcato marks use the
+    # staccato patch, everything else (tenuto/accent/legato/tied/sustain) stays
+    # on the sustain patch. CSVs without the column fall back to the
+    # GCS2SFZ_ARTIC_MAX duration split.
+    has_artic = any(n[9] for n in notes)
+    rendered = False
+    if stacc_path:
+        if has_artic:
+            short = [n for n in notes if n[9] in ('staccato', 'marcato')]
+            longs = [n for n in notes if n[9] not in ('staccato', 'marcato')]
+        else:
+            short = [n for n in notes if n[1] < artic_max]
+            longs = [n for n in notes if n[1] >= artic_max]
+        if short and longs:
+            with tempfile.TemporaryDirectory() as td:
+                scsv = os.path.join(td, "short.csv")
+                lcsv = os.path.join(td, "long.csv")
+                _notes_to_csv(short, scsv)
+                _notes_to_csv(longs, lcsv)
+                swav = os.path.join(td, "short.wav")
+                lwav = os.path.join(td, "long.wav")
+                ok_s = _render_sfz(scsv, stacc_path, swav, samplerate, name,
+                                   detune_cents=detune_cents, pan_off=pan_off)
+                ok_l = _render_sfz(lcsv, sfz_use, lwav, samplerate, name,
+                                   detune_cents=detune_cents, pan_off=pan_off)
+                if ok_s and ok_l:
+                    if blend:
+                        # Layer the sustain body under the short notes too,
+                        # so the staccato attack no longer decays to
+                        # silence between onsets (GCS2SFZ_ARTIC_BLEND=1).
+                        swav2 = os.path.join(td, "short2.wav")
+                        ok_s2 = _render_sfz(scsv, sfz_use, swav2,
+                                            samplerate, name,
+                                            detune_cents=detune_cents,
+                                            pan_off=pan_off)
+                        if ok_s2:
+                            rendered = _amix([swav, swav2, lwav], out_wav,
+                                             samplerate)
+                    if not rendered:
+                        rendered = _amix([swav, lwav], out_wav, samplerate)
+                    if rendered:
+                        print(f"  {name}: {len(short)} short->staccato"
+                              f"{'+sustain' if blend else ''} + "
+                              f"{len(longs)} long->sustain")
+                elif ok_s:
+                    shutil.copyfile(swav, out_wav)
+                    rendered = True
+                elif ok_l:
+                    shutil.copyfile(lwav, out_wav)
+                    rendered = True
+    if not rendered:
+        rendered = _render_sfz(csv_path, sfz_use, out_wav, samplerate, name,
+                               detune_cents=detune_cents, pan_off=pan_off)
+    return rendered
+
+
 def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
     """Render one instrument CSV to a WAV via sfizz_render (or GM fallback).
 
@@ -822,9 +981,9 @@ def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
             fd, tmp_kit_csv = tempfile.mkstemp(prefix=".gcs2sfz-kit-",
                                                suffix=".csv")
             with os.fdopen(fd, "w") as f:
-                for s, d, _p, v, pan, rev, vs, ve, pe, art in kit_notes:
+                for s, d, _p, v, pan, rev, vs, ve, pe, art, stf in kit_notes:
                     f.write(f"{s:.6f},{d:.6f},{kit_key},{v},{pan},{rev},"
-                            f"{vs},{ve},{pe},{art}\n")
+                            f"{vs},{ve},{pe},{art},{stf}\n")
             csv_path = tmp_kit_csv
 
     if rel.startswith("EFFECTS/"):
@@ -894,58 +1053,43 @@ def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
         tmp_patch = vel_tmp
         sfz_use = vel_tmp
     notes = read_csv_notes(csv_path)
-    # Per-note articulation (10th CSV column, from imscomp's --sfzpipecsv)
-    # supersedes the duration heuristic: staccato/marcato marks use the
-    # staccato patch, everything else (tenuto/accent/legato/tied/sustain) stays
-    # on the sustain patch. CSVs without the column fall back to the
-    # GCS2SFZ_ARTIC_MAX duration split.
     has_artic = any(n[9] for n in notes)
     stacc_path = (_staccato_variant(rel, vpo_root)
                   if (has_artic or artic_max > 0) else None)
+
+    # Ensemble split: an instrument with several distinct staff columns renders
+    # each staff as its OWN stream (own MIDI channel), sharing one detune and
+    # fanning its staffs across the stage; the staff WAVs are amixed. Single-
+    # staff instruments (and drums/one-shots) take the plain single-stream path,
+    # byte-identical to pre-ensemble output.
+    groups = None
+    if kit_key is None and not rel.startswith("EFFECTS/"):
+        groups = _ensemble_plan(name, notes)
     rendered = False
     try:
-        if stacc_path:
-            if has_artic:
-                short = [n for n in notes if n[9] in ('staccato', 'marcato')]
-                longs = [n for n in notes if n[9] not in ('staccato', 'marcato')]
-            else:
-                short = [n for n in notes if n[1] < artic_max]
-                longs = [n for n in notes if n[1] >= artic_max]
-            if short and longs:
-                with tempfile.TemporaryDirectory() as td:
-                    scsv = os.path.join(td, "short.csv")
-                    lcsv = os.path.join(td, "long.csv")
-                    _notes_to_csv(short, scsv)
-                    _notes_to_csv(longs, lcsv)
-                    swav = os.path.join(td, "short.wav")
-                    lwav = os.path.join(td, "long.wav")
-                    ok_s = _render_sfz(scsv, stacc_path, swav, samplerate, name)
-                    ok_l = _render_sfz(lcsv, sfz_use, lwav, samplerate, name)
-                    if ok_s and ok_l:
-                        if blend:
-                            # Layer the sustain body under the short notes too,
-                            # so the staccato attack no longer decays to
-                            # silence between onsets (GCS2SFZ_ARTIC_BLEND=1).
-                            swav2 = os.path.join(td, "short2.wav")
-                            ok_s2 = _render_sfz(scsv, sfz_use, swav2,
-                                                 samplerate, name)
-                            if ok_s2:
-                                rendered = _amix([swav, swav2, lwav], out_wav,
-                                                 samplerate)
-                        if not rendered:
-                            rendered = _amix([swav, lwav], out_wav, samplerate)
-                        if rendered:
-                            print(f"  {name}: {len(short)} short->staccato"
-                                  f"{'+sustain' if blend else ''} + "
-                                  f"{len(longs)} long->sustain")
-                    elif ok_s:
-                        shutil.copyfile(swav, out_wav)
-                        rendered = True
-                    elif ok_l:
-                        shutil.copyfile(lwav, out_wav)
-                        rendered = True
-        if not rendered:
-            rendered = _render_sfz(csv_path, sfz_use, out_wav, samplerate, name)
+        if groups:
+            with tempfile.TemporaryDirectory() as td:
+                wavs = []
+                for i, (snotes, pan_off, detune) in enumerate(groups):
+                    scsv = os.path.join(td, f"staff{i}.csv")
+                    _notes_to_csv(snotes, scsv)
+                    swav = os.path.join(td, f"staff{i}.wav")
+                    if _render_instrument_csv(scsv, swav, samplerate, name,
+                                              sfz_use, stacc_path, blend,
+                                              artic_max,
+                                              detune_cents=detune,
+                                              pan_off=pan_off):
+                        wavs.append(swav)
+                if len(wavs) == len(groups):
+                    offsets = ",".join(f"{p:+d}" for _s, p, _d in groups)
+                    print(f"  {name}: {len(groups)} staffs, "
+                          f"detune {groups[0][2]:+d} cent, "
+                          f"pan offsets [{offsets}] -> amix")
+                    rendered = _amix(wavs, out_wav, samplerate)
+        else:
+            rendered = _render_instrument_csv(csv_path, out_wav, samplerate,
+                                              name, sfz_use, stacc_path, blend,
+                                              artic_max)
     finally:
         if tmp_patch:
             try:
@@ -974,23 +1118,13 @@ def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
     return out_wav
 
 
-def render_gm(csv_path, out_wav, sf2_path, samplerate):
-    """Render one instrument CSV to WAV via fluidsynth (GM fallback).
-
-    Used for instruments with no VPO mapping (default piano, bell tower, ...).
-    The CSV is written to MIDI exactly as for sfizz_render; note velocity is
-    carried both in the note-ons (respected by GeneralUser) and CC11 expression.
-    Program changes are bank-select-free so --sf2 GM set works.
-    """
-    name = os.path.splitext(os.path.basename(csv_path))[0]
-    program = instruments.gm_program(name)
-    if not os.path.exists(sf2_path):
-        print(f"  !! {name}: no VPO mapping, but GM soundfont {sf2_path} "
-              f"missing (pass --sf2). Skipping.")
-        return None
+def _render_gm_csv(csv_path, out_wav, sf2_path, samplerate, name, program,
+                   detune_cents=0.0, pan_off=0):
+    """Render ONE CSV via fluidsynth (GM fallback), shared detune/pan supported."""
     with tempfile.TemporaryDirectory() as td:
         midi_path = os.path.join(td, "in.mid")
-        has_notes = write_midi(csv_path, midi_path, pred_expr=False)
+        has_notes = write_midi(csv_path, midi_path, pred_expr=False, name=name,
+                               detune_cents=detune_cents, pan_off=pan_off)
         if not has_notes:
             print(f"  .. {name}: empty part, skipping (no audio).")
             return None
@@ -1004,6 +1138,49 @@ def render_gm(csv_path, out_wav, sf2_path, samplerate):
         if r.returncode != 0:
             print(f"  !! {name}: fluidsynth GM render failed:\n{r.stderr[-2000:]}")
             return None
+    return out_wav
+
+
+def render_gm(csv_path, out_wav, sf2_path, samplerate):
+    """Render one instrument CSV to WAV via fluidsynth (GM fallback).
+
+    Used for instruments with no VPO mapping (default piano, bell tower, ...).
+    The CSV is written to MIDI exactly as for sfizz_render; note velocity is
+    carried both in the note-ons (respected by GeneralUser) and CC11 expression.
+    Program changes are bank-select-free so --sf2 GM set works.
+
+    Multi-staff ensembles get the same treatment as the VPO path: each staff is
+    rendered as its own stream (detune + per-staff pan spread) and amixed.
+    """
+    name = os.path.splitext(os.path.basename(csv_path))[0]
+    program = instruments.gm_program(name)
+    if not os.path.exists(sf2_path):
+        print(f"  !! {name}: no VPO mapping, but GM soundfont {sf2_path} "
+              f"missing (pass --sf2). Skipping.")
+        return None
+    groups = _ensemble_plan(name, read_csv_notes(csv_path))
+    if groups:
+        with tempfile.TemporaryDirectory() as td:
+            wavs = []
+            ok_all = True
+            for i, (snotes, pan_off, detune) in enumerate(groups):
+                scsv = os.path.join(td, f"staff{i}.csv")
+                _notes_to_csv(snotes, scsv)
+                swav = os.path.join(td, f"staff{i}.wav")
+                if not _render_gm_csv(scsv, swav, sf2_path, samplerate,
+                                      name, program, detune_cents=detune,
+                                      pan_off=pan_off):
+                    ok_all = False
+                    break
+                wavs.append(swav)
+            if ok_all and _amix(wavs, out_wav, samplerate):
+                print(f"  => {name}: {len(groups)} staffs via GM fallback "
+                      f"(detune {groups[0][2]:+d} cent).")
+                return out_wav
+            return None
+    out = _render_gm_csv(csv_path, out_wav, sf2_path, samplerate, name, program)
+    if not out:
+        return None
     print(f"  => {name}: rendered via GM fallback ({FLUIDSYNTH}).")
     return out_wav
 
