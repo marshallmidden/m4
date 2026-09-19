@@ -118,3 +118,54 @@ Verified in the v1-1 measure-5 mix: violin melody presences pulses at RMS
    no library file edits (that tree is gitignored). Verified: cello-only sweep
    monotonic after fix, b/01 v1-1 full pizz aggregate unchanged (55.7/42.2 dB
    note1/note2).)
+===============================================================================
+2026-09-19 (part 2) — per-note articulation COLUMN in --sfzpipecsv
+===============================================================================
+
+Feature (user-requested, all three parts):
+1. Per-note articulation column in the SFZ CSVs (SFZ.md item 5).
+2. Dynamics levels made "relative to each instrument" at NAMED levels
+   (pppp..ffff) with interpolation for cresc/dim — formalized as
+   instruments.NAMED_LEVELS + level_gain_db_named (LEVEL_GAIN was already
+   per-instrument + interpolated in vol; the named-surface makes the
+   correspondence explicit and gives a natural key for future tables).
+3. Per-instrument velocity mapping (instruments.LEVEL_VELOCITY + velocity_mult,
+   applied in gcs2sfz write_midi on BOTH sfizz and GM paths). Identity until
+   calibrated (open item).
+
+Implementation notes:
+- imscomp emits the token by APPENDING to the Note_on_c event string, ONLY
+  when args.sfzpipecsv is set. New helpers sfz_articulation_token(suffixes)
+  and sfz_note_on_line(chan,pitch,vel,suffixes) (inserted after
+  insert_sorted_tail ~5750); the three emission sites are the tied-note
+  (HERE13), legato-continuation (HERE16) and normal (HERE20) branches of
+  print_out_midi1csv_notes. Because print_output() routes to array_of_lines
+  (not stdout) whenever fluidsynth OR sfzpipecsv is on, and print_out_fluidsynth
+  only runs under `--fluidsynth and not --sfzpipecsv`, the 5th field is
+  invisible to every non-sfz output. VERIFIED: --fluidsynth and --midi1csv
+  outputs on b/01 v1-1 contain zero articulation tokens; DOALL = 0 bare /
+  2 pre-existing named (new-g3, identical in both compilers).
+- print_out_sfzpipecsv carries artic through pending_notes -> release_sfz_note
+  -> notes 10-tuples -> CSV writes a 10th column. Default 'sustain' when the
+  field is absent. drum note[2] pitch indexing unaffected.
+- gcs2sfz read_csv_notes now returns 10-tuples (artic='' when absent);
+  write_midi (loops + overlap cleanup + GM-expr path + kit rewrite), and
+  _notes_to_csv were all updated to the 10-field shape. render_instrument
+  prefers the articulation column (has_artic = any(n[9])): staccato/marcato ->
+  staccato patch, everything else sustain; no column -> the old
+  GCS2SFZ_ARTIC_MAX duration split. b/01 `make sfz`: all four movements
+  rendered, e.g. v1-1 violin "1135 short->staccato+sustain + 4067 long->sustain"
+  (now score-marked, not duration).
+- Token priority in sfz_articulation_token: staccato > marcato > tenuto >
+  accent > legato > tied > sustain. 'z' and 'l' both = legato; 'a'/'A' accent.
+- musicomp2abc deliberately untouched (no --sfzpipecsv); calculate.py untouched.
+
+Verification:
+- py_compile all three files OK.
+- /tmp/sfztest: b/01 v1-1 -> 10-col CSVs; violin artic counts
+  {sustain:3477, legato:590, staccato:1135}; pizzicato all sustain (correct:
+  pizz is an instrument switch, not a staccato mark). 9-col legacy CSV
+  roundtrips to has_artic=False and renders fine (GM and VPO paths).
+  violin.wav end-to-end render = 84 MB, split fires.
+- DOALL: 0 bare / 2 named (pre-existing new-g3, both compilers).
+- b/01 `make sfz`: all 4 movements rendered to sfz-mix/*.wav.

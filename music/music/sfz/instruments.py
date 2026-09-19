@@ -193,8 +193,12 @@ def resolve(root_library: str, instrument_name: str):
 # Measured from ims/test-volume-levels against the acoustic_grand_piano stem
 # (2026-09-17); see DEVIN-2026-09-17-sfz-drums-loudness.md. Points are
 # interpolated linearly in vol (and in dB) so crescendos/diminuendos glide
-# between levels. Levels the test can't measure (instrument silent, e.g. the
-# out-of-range piccolo/timpani high notes) are simply absent -> gain 0.
+# between levels. The keys are the measured emitted CC11 values (see
+# NAMED_LEVELS below for their named-level correspondence, e.g. vol 30 = pppp);
+# the effective per-instrument levels are therefore exactly the named dynamics
+# and every moment between them. Levels the test can't measure (instrument
+# silent, e.g. the out-of-range piccolo/timpani high notes) are simply absent
+# -> gain 0.
 LEVEL_GAIN = {
     "acoustic_bass_drum": [(28, 12.1), (38, 20.1), (48, 15.7), (59, 9.5), (68, 8.0), (82, 6.9), (89, 2.5), (102, 1.6), (111, 1.0), (118, -1.5), (127, -3.4)],
     "acoustic_snare": [(48, 25.7), (59, 19.8), (68, 19.2), (82, 14.0), (89, 12.7), (102, 12.4), (111, 12.0), (118, 9.1), (127, 7.7)],
@@ -269,3 +273,70 @@ def _interp_gain(pts, vol: int) -> float:
                 g = g0 + (g1 - g0) * f
                 break
     return max(LEVEL_GAIN_MIN_DB, min(LEVEL_GAIN_MAX_DB, g))
+
+
+# ---------------------------------------------------------------------------
+# Named dynamic levels. imscomp's v<name> variables default to these CC11
+# values (its vlprint map: ppppp=0, pppp=30, ppp=40, pp=50, p=60, mp=70, mf=80,
+# f=90, ff=100, fff=110, ffff=120, fffff=127); a score's vol(mp) therefore
+# emits CC11 ~70. LEVEL_GAIN rows above are keyed by the measured emitted
+# values, which land on or between the named grid, so interpolation already
+# gives every named level its per-instrument loudness and cresc/dim ramps glide
+# between them. dynamic_vol()/level_gain_db_named() express that correspondence
+# explicitly; crescendo/diminuendo between levels are supported because all the
+# per-instrument tables interpolate linearly in vol.
+NAMED_LEVELS = [
+    ("ppppp", 0), ("pppp", 30), ("ppp", 40), ("pp", 50), ("p", 60),
+    ("mp", 70), ("mf", 80), ("f", 90), ("ff", 100), ("fff", 110),
+    ("ffff", 120), ("fffff", 127),
+]
+
+NAMED_LEVEL_VOL = {name: vol for name, vol in NAMED_LEVELS}
+
+
+def dynamic_vol(level: str):
+    """Return the score CC11 value for a named dynamic (``ppp``, ``mp``, ...)."""
+    return NAMED_LEVEL_VOL.get((level or "").strip())
+
+
+def level_gain_db_named(instrument_name: str, level: str) -> float:
+    """level_gain_db() keyed by a named dynamic instead of a vol value."""
+    vol = dynamic_vol(level)
+    if vol is None:
+        return 0.0
+    return level_gain_db(instrument_name, vol)
+
+
+# Per-instrument note-velocity mapping, keyed by vol (0..127) with linear
+# interpolation for cresc/dim, exactly like LEVEL_GAIN. The score's velocity
+# already scales with the dynamic; this per-instrument table lets each
+# instrument place its named pp..fff into the sample-library velocity layers it
+# actually has (e.g. a quiet patch that only triggers its loud layer at high
+# velocity can be boosted in ppp/p/pp without touching the CC11 loudness
+# curve). Empty row = identity (1.0, current behavior); calibrate against
+# ims/test-volume-levels like LEVEL_GAIN.
+LEVEL_VELOCITY = {}
+
+
+def velocity_mult(instrument_name: str, vol: int) -> float:
+    """Scale a note's velocity for an instrument at score expression ``vol``.
+
+    Returns 1.0 (no change) for unmapped instruments. Interpolated linearly in
+    vol, so crescendo/diminuendo ramps glide between the table's points.
+    """
+    name = (instrument_name or "").strip().lower().replace(" ", "_")
+    pts = LEVEL_VELOCITY.get(name)
+    if not pts:
+        return 1.0
+    if vol <= pts[0][0]:
+        m = pts[0][1]
+    elif vol >= pts[-1][0]:
+        m = pts[-1][1]
+    else:
+        m = pts[0][1]
+        for (v0, m0), (v1, m1) in zip(pts, pts[1:]):
+            if v0 <= vol <= v1:
+                f = (vol - v0) / (v1 - v0) if v1 > v0 else 0.0
+                m = m0 + (m1 - m0) * f
+                break
+    return m

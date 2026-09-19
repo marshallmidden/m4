@@ -5774,6 +5774,44 @@ def insert_sorted_tail(na, s='') -> None:
 # End of insert_sorted_tail
 
 # ----------------------------------------------------------------------------
+def sfz_articulation_token(suffixes) -> str:
+    """Map a note's score suffixes to a single render-compatible articulation.
+
+    Two priorities: first the assault/detached marks (which the render backend
+    plays with a staccato patch), then the marks that stay on the sustain
+    patch. Suffix alphabet (see bit_from_character): 's' staccato, 'm' marcato,
+    'u' tenuto, 'a'/'A' accent/emphasis, 'l'/'z' legato/slur, 't' tied.
+    """
+    if 's' in suffixes:
+        return 'staccato'
+    if 'm' in suffixes:
+        return 'marcato'
+    if 'u' in suffixes:
+        return 'tenuto'
+    if 'a' in suffixes or 'A' in suffixes:
+        return 'accent'
+    if 'l' in suffixes or 'z' in suffixes:
+        return 'legato'
+    if 't' in suffixes:
+        return 'tied'
+    return 'sustain'
+
+
+def sfz_note_on_line(chan, pitch, velocity, suffixes) -> str:
+    """Build a Note_on_c CSV line, appending a per-note articulation token.
+
+    Only --sfzpipecsv (the SFZ render path) needs the articulation column;
+    midi1csv/fluidsynth outputs must stay byte-identical, so the extra field is
+    appended exclusively in that mode. The token drives patch choice in the
+    render backend (staccato/marcato -> staccato patch, the rest sustain) and
+    is consumed by print_out_sfzpipecsv().
+    """
+    line = f'Note_on_c, {chan}, {pitch}, {velocity}'
+    if args.sfzpipecsv:
+        line += ', ' + sfz_articulation_token(suffixes)
+    return line
+
+# ----------------------------------------------------------------------------
 def print_out_midi1csv_start(voiceon) -> None:
     """Write the MIDI CSV track start header for a voice."""
     global tm
@@ -6942,7 +6980,7 @@ def print_out_midi1csv_notes() -> None:
                         if not args.nohumanize and _humanize_vel > 0:
                             note_velocity = max(_velocity_min, min(127, note_velocity + random.randint(-_humanize_vel, _humanize_vel)))
                         # fi
-                        insert_sorted_tail([voice+1, note_time, f'Note_on_c, {chan}, {last_note_on}, {note_velocity}'], 'HERE13')
+                        insert_sorted_tail([voice+1, note_time, sfz_note_on_line(chan, last_note_on, note_velocity, last_suffixes)], 'HERE13')
                         if args.echoonoff:
                             insert_sorted_tail([voice+1, note_time, f'Text_t, "On:{chan:>4} {last_note_on:>3}"'], 'HERE15')
                         # fi
@@ -6990,7 +7028,7 @@ def print_out_midi1csv_notes() -> None:
                         else:
                             n = drum_sounds[l_instrument]
                         # fi
-                        insert_sorted_tail([voice+1, note_time, f'Note_on_c, {chan}, {n}, {note_velocity}'], 'HERE16')
+                        insert_sorted_tail([voice+1, note_time, sfz_note_on_line(chan, n, note_velocity, last_suffixes)], 'HERE16')
                         if args.echoonoff:
                             insert_sorted_tail([voice+1, note_time, f'Text_t, "On:{chan:>4} {n:>3}"'], 'HERE17')
                         # fi
@@ -7008,7 +7046,7 @@ def print_out_midi1csv_notes() -> None:
                         else:
                             last_note_on = drum_sounds[l_instrument]
                         # fi
-                        insert_sorted_tail([voice+1, note_time, f'Note_on_c, {chan}, {last_note_on}, {note_velocity}'], 'HERE20')
+                        insert_sorted_tail([voice+1, note_time, sfz_note_on_line(chan, last_note_on, note_velocity, last_suffixes)], 'HERE20')
                         if args.echoonoff:
                             insert_sorted_tail([voice+1, note_time, f'Text_t, "On:{chan:>4} {last_note_on:>3}"'], 'HERE21')
                         # fi
@@ -7723,7 +7761,7 @@ def print_out_sfzpipecsv() -> None:
     """Convert in-memory MIDI CSV events to per-instrument CSV files for sfizz rendering.
 
     Each instrument gets a CSV file with lines:
-        start_sec,dur_sec,midi_note,velocity,pan,reverb,vol_start,vol_end,pan_end
+        start_sec,dur_sec,midi_note,velocity,pan,reverb,vol_start,vol_end,pan_end,articulation
     Pan (MIDI CC10, 0 hard left .. 127 hard right, 64 center), reverb
     (MIDI CC91, 0 dry .. 127 max send) and the expression envelope
     (CC11) are carried verbatim from the score's Control_c events so the
@@ -7737,6 +7775,9 @@ def print_out_sfzpipecsv() -> None:
         note. Equal values = no in-note swell.
       - pan_end  = CC10 at note-off; a pan sweep (pan(x)<) moves the panner
         linearly across the note, else pan_end == pan.
+      - articulation = per-note token from the score's suffixes (sfz_note_on_line):
+        staccato/marcato/tenuto/accent/legato/tied/sustain. The backend uses it
+        to pick a staccato patch for staccato/marcato notes and sustain otherwise.
     The file is named <instrument_name>.csv in the current directory.
     """
     global array_of_lines
@@ -7784,10 +7825,11 @@ def print_out_sfzpipecsv() -> None:
     chan_vol = {}
 
     # Track note-on events: pending_notes[(port, chan, pitch)] = list of
-    #   (start_tick, velocity, seconds_per_tick_at_start, pan, reverb, vol)
+    #   (start_tick, velocity, seconds_per_tick_at_start, pan, reverb, vol, articulation)
     pending_notes = {}
     # Result: notes[(port, chan)] = [(start_sec, dur_sec, pitch, velocity,
-    #                                 pan, reverb, vol_start, vol_end, pan_end), ...]
+    #                                 pan, reverb, vol_start, vol_end, pan_end,
+    #                                 articulation), ...]
     notes = {}
     current_tick = 0
 
@@ -7829,7 +7871,7 @@ def print_out_sfzpipecsv() -> None:
     def release_sfz_note(voiceon, chan, pitch, tick):
         key = (voiceon, chan, pitch)
         if key in pending_notes and pending_notes[key]:
-            start_tick, vel, pan, rev, vol = pending_notes[key].pop(0)
+            start_tick, vel, pan, rev, vol, artic = pending_notes[key].pop(0)
         else:
             candidates = []
             for (v, c, p), q in pending_notes.items():
@@ -7838,14 +7880,14 @@ def print_out_sfzpipecsv() -> None:
             if not candidates:
                 return
             start_tick, c2 = min(candidates)
-            vel, pan, rev, vol = pending_notes[(voiceon, c2, pitch)].pop(0)[1:]
+            vel, pan, rev, vol, artic = pending_notes[(voiceon, c2, pitch)].pop(0)[1:]
             key = (voiceon, c2, pitch)
         start_sec = tick_to_sec(start_tick)
         dur_sec = tick_to_sec(tick) - start_sec
         ckey = (voiceon, key[1])
         vol_end = chan_vol.get(ckey, vol)
         pan_end = chan_pan.get(ckey, pan)
-        notes.setdefault((voiceon, key[1]), []).append((start_sec, dur_sec, pitch, vel, pan, rev, vol, vol_end, pan_end))
+        notes.setdefault((voiceon, key[1]), []).append((start_sec, dur_sec, pitch, vel, pan, rev, vol, vol_end, pan_end, artic))
 
     for i, line in enumerate(array_of_lines):
         parts = line.split(', ')
@@ -7879,12 +7921,13 @@ def print_out_sfzpipecsv() -> None:
                 chan_vol[key] = value
 
         elif event_str.startswith('Note_on_c, '):
-            # Note_on_c, chan, pitch, velocity
+            # Note_on_c, chan, pitch, velocity[, articulation]
             try:
                 fields = event_str.split(', ')
                 chan = int(fields[1])
                 pitch = int(fields[2])
                 velocity = int(fields[3])
+                artic = fields[4] if len(fields) >= 5 else 'sustain'
             except (ValueError, IndexError):
                 continue
             voiceon = voice_p - 1          # field 0 is the 1-based voice number
@@ -7897,7 +7940,7 @@ def print_out_sfzpipecsv() -> None:
             pan = chan_pan.get(ckey, 64)
             rev = chan_rev.get(ckey, 0)
             vol = chan_vol.get(ckey, 64)
-            pending_notes.setdefault(key, []).append((current_tick, velocity, pan, rev, vol))
+            pending_notes.setdefault(key, []).append((current_tick, velocity, pan, rev, vol, artic))
 
         elif event_str.startswith('Note_off_c, '):
             try:
@@ -7960,11 +8003,11 @@ def print_out_sfzpipecsv() -> None:
         try:
             with open(filename, 'w') as f:
                 for fields in note_list:
-                    start_sec, dur_sec, pitch, velocity, pan, rev, vol_start, vol_end, pan_end = fields
+                    start_sec, dur_sec, pitch, velocity, pan, rev, vol_start, vol_end, pan_end, artic = fields
                     if dur_sec < 0.01:
                         dur_sec = 0.01  # minimum duration
                     f.write(f'{start_sec:.6f},{dur_sec:.6f},{pitch},{velocity},'
-                            f'{pan},{rev},{vol_start},{vol_end},{pan_end}\n')
+                            f'{pan},{rev},{vol_start},{vol_end},{pan_end},{artic}\n')
             written += 1
         except IOError as e:
             print_error_no_line(f'sfzpipecsv: cannot write {filename}: {e}')

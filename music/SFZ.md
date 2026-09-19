@@ -284,6 +284,17 @@ NEXT FIXES / OPEN ITEMS for the SFZ path (as of 2026-09-17)
 - [ ] ppp/pppp residuals (~3–8 dB on some instruments) — likely the slow VPO
       soft attack vs the 0.25 s measurement window; re-measure with a longer
       window before tuning the table further.
+- [x] **Per-note articulation column + patch choice** (2026-09-19) — see item 5:
+      `--sfzpipecsv` 10th column (`staccato/marcato/tenuto/accent/legato/tied/
+      sustain`) from the score's suffixes; `gcs2sfz` picks staccato vs sustain
+      per note (duration split stays as the no-column fallback). Also added the
+      named-level machinery: `instruments.NAMED_LEVELS` (ppppp..fffff ↔ vol),
+      `dynamic_vol`/`level_gain_db_named`, and the per-instrument
+      `LEVEL_VELOCITY` table + `velocity_mult` (applied in `write_midi`,
+      identity until calibrated).
+- [ ] Calibrate per-instrument `LEVEL_VELOCITY` entries (velocity-map the named
+      dynamics per instrument so each patch's pp..fff lands in its sample-layer
+      ranges) — currently identity; use ims/test-volume-levels like LEVEL_GAIN.
 - [x] **Out-of-range note warning** (2026-09-18): `gcs2sfz` parses each VPO
       patch's lokey..hikey span and warns when the CSV writes notes outside it
       (`warn_out_of_range` + `sfz_keyrange`, skipping kit drums and one-shots).
@@ -340,10 +351,19 @@ Carried-over improvements (not regressions):
    boost there. In-range instruments now match within ~0–2 dB over mp..fffff.
    Repro/notes: `/tmp/calibrate2.py` method in
    `DEVIN-2026-09-17-sfz-drums-loudness.md`.
-5. Articulation choice is duration-only; the CSV has no per-note
+5. ~~**Articulation choice is duration-only; the CSV has no per-note
    legato/staccato marking, so slurred (`l`) and marked-staccato short notes
-   render the same. A future `--sfzpipecsv` `articulation` column could carry
-   per-note intent.
+   render the same.**~~ **RESOLVED 2026-09-19** — `--sfzpipecsv` now appends a
+   10th per-note `articulation` column to every `Note_on_c` (only in sfzpipecsv
+   mode; midi1csv/fluidsynth/abc outputs stay byte-identical and DOALL stayed
+   0 bare / 2 pre-existing named). The token comes from the note's score
+   suffixes (`sfz_articulation_token`: `s`→staccato, `m`→marcato, `u`→tenuto,
+   `a`/`A`→accent, `l`/`z`→legato, `t`→tied, else sustain). `gcs2sfz` reads
+   the column (optional; older 9-col CSVs keep the `GCS2SFZ_ARTIC_MAX`
+   duration split) and renders staccato/marcato notes with the staccato patch,
+   the rest with sustain. Also added `instruments.NAMED_LEVELS`/named-level
+   gain lookup and a per-instrument `LEVEL_VELOCITY` velocity map (identity by
+   default; see the open items). DOALL-verified and full `make sfz` in b/01.
 6. `ARTIC_MAX=0` to disable is overridden by nothing today; switching the
    GM fallback of unmapped instruments to use sfizz's GM-capable soundfonts
    (or a default VPO piano) would remove the last GM-dependent instruments.

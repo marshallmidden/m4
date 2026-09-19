@@ -10,6 +10,9 @@ Pipeline:
         -> ~/bin/sfizz_render <VPO>.sfz      (per-instrument WAV)
         -> ffmpeg amix                        (one mixed WAV)
 
+The 10th CSV column (optional) is the per-note articulation token from
+imscomp --sfzpipecsv -- see "Articulation" below.
+
 Pan and reverb come verbatim from the score. Pan (MIDI CC10, 0..127) is written
 into the MIDI and honored by both sfizz (CC10->pan by default) and fluidsynth.
 Reverb (MIDI CC91, 0 dry..127) is honored natively by the fluidsynth GM
@@ -34,12 +37,17 @@ Gains (dB, positive louder) are applied to each rendered stem before the
 mixdown so the melody isn't buried by the texture.
 
 Articulation: the VPO sustain patches attack over 0.2-0.6s and release over
-0.6-2.25s, blurring fast melodic runs. The default recipe splits each part by
-note length (GCS2SFZ_ARTIC_MAX) and renders short notes as staccato blended
-under a fast-attack sustain (GCS2SFZ_ARTIC_BLEND + GCS2SFZ_ATTACK), giving
-crisp onsets on a connected, sustained line:
+0.6-2.25s, blurring fast melodic runs. imscomp's --sfzpipecsv writes a 10th
+per-note articulation column (staccato/marcato/tenuto/accent/legato/tied/
+sustain) straight from the score's suffixes; staccato and marcato notes render
+with a staccato patch, everything else stays on the sustain patch. CSVs
+without the column (older 9-col output) fall back to a note-length split
+(GCS2SFZ_ARTIC_MAX) and render short notes as staccato blended under a
+fast-attack sustain (GCS2SFZ_ARTIC_BLEND + GCS2SFZ_ATTACK), giving crisp
+onsets on a connected, sustained line:
 
-    GCS2SFZ_ARTIC_MAX    note-length split threshold (s), default 0.5, 0 disables
+    GCS2SFZ_ARTIC_MAX    note-length split threshold (s), default 0.5, 0 disa-
+                         bles (only used when the CSV has no articulation col)
     GCS2SFZ_ARTIC_BLEND  layer sustain under staccato short notes, default 1
     GCS2SFZ_ATTACK       sustain-patch ampeg_attack override (s), default 0.03
     GCS2SFZ_GM_GAIN      fluidsynth master gain for GM-fallback stems, default
@@ -132,13 +140,14 @@ def _encode_smf_track(events: list[tuple[int, bytes]]) -> bytes:
     return b"MTrk" + struct.pack(">I", len(data)) + data
 
 
-def read_csv_notes(csv_path: str) -> list[tuple[float, float, int, int, int, int, int, int, int]]:
-    """Parse an instrument CSV into 9-tuples:
-    (start_s, dur_s, pitch, vel, pan, rev, vol_start, vol_end, pan_end).
+def read_csv_notes(csv_path: str) -> list[tuple[float, float, int, int, int, int, int, int, int, str]]:
+    """Parse an instrument CSV into 10-tuples:
+    (start_s, dur_s, pitch, vel, pan, rev, vol_start, vol_end, pan_end, artic).
 
-    Columns 7-9 (expression/pan ramp endpoints) are optional for backward
-    compatibility: older 6-column CSVs yield vol_start=vol_end=vel and
-    pan_end=pan (no in-note swell/pan motion).
+    Columns 7-10 (expression/pan ramp endpoints + articulation) are optional for
+    backward compatibility: older 6-column CSVs yield vol_start=vol_end=vel and
+    pan_end=pan (no in-note swell/pan motion); CSVs without the articulation
+    column yield artic='' (renders keep the GCS2SFZ_ARTIC_MAX duration split).
     """
     notes = []
     with open(csv_path) as f:
@@ -162,8 +171,9 @@ def read_csv_notes(csv_path: str) -> list[tuple[float, float, int, int, int, int
             vol_start = int(parts[6]) if len(parts) >= 7 else vel
             vol_end = int(parts[7]) if len(parts) >= 8 else vol_start
             pan_end = int(parts[8]) if len(parts) >= 9 else pan
+            artic = parts[9].strip() if len(parts) >= 10 else ''
             notes.append((start_s, dur_s, pitch, vel, pan, rev,
-                          vol_start, vol_end, pan_end))
+                          vol_start, vol_end, pan_end, artic))
     return notes
 
 
@@ -199,12 +209,17 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
     if name is None:
         name = os.path.splitext(os.path.basename(csv_path))[0]
     notes = []
-    for start_s, dur_s, pitch, vel, pan, rev, vol_s, vol_e, pan_e in read_csv_notes(csv_path):
+    for start_s, dur_s, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic in read_csv_notes(csv_path):
         on_tick = int(round(start_s * TICKS_PER_SEC))
         off_tick = int(round((start_s + dur_s) * TICKS_PER_SEC))
         if off_tick <= on_tick:
             off_tick = on_tick + 1
-        notes.append((on_tick, off_tick, pitch, vel, pan, rev, vol_s, vol_e, pan_e))
+        # Per-instrument velocity mapping (instruments.velocity_mult): each
+        # instrument's named dynamics (pp..fff) land its sample-layer velocity
+        # ranges consistently, so a piece's dynamics don't sit in a neighbor's
+        # layer. Interpolated in vol, so cresc/dim glides between levels.
+        vel = max(1, min(127, int(round(vel * instruments.velocity_mult(name, vol_s)))))
+        notes.append((on_tick, off_tick, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic))
 
     if not notes:
         # Empty instrument: still write a valid file so the caller can decide.
@@ -227,7 +242,7 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
     out: list[list] = []
     alive: list[bool] = []
     active: dict[int, int] = {}  # pitch -> index into out
-    for on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e in notes:
+    for on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic in notes:
         j = active.get(pitch)
         if j is not None and out[j][1] >= on:
             if out[j][0] == on:
@@ -235,7 +250,7 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
                 off = max(off, out[j][1])
             else:
                 out[j][1] = on  # repeated note: cut previous at new on
-        out.append([on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e])
+        out.append([on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic])
         alive.append(True)
         active[pitch] = len(out) - 1
     notes = [tuple(n) for i, n in enumerate(out) if alive[i]]
@@ -255,8 +270,8 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
         notes = [
             (on, off, pitch,
              max(1, min(127, int(round(vel * pow(vol_s / 127.0, _gm_expr))))),
-             pan, rev, vol_s, vol_e, pan_e)
-            for on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e in notes
+             pan, rev, vol_s, vol_e, pan_e, artic)
+            for on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic in notes
         ]
         notes.sort(key=lambda n: (n[0], n[1]))
 
@@ -265,7 +280,7 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
     # Group note-ons/offs onto a timeline keyed by absolute tick.
     # (kind 0=note-on, 1=note-off; CC11 expression is derived from note-ons.)
     timeline: dict[int, list[tuple[int, int, int]]] = {}
-    for on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e in notes:
+    for on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic in notes:
         timeline.setdefault(on, []).append((0, pitch, vel))
         timeline.setdefault(off, []).append((1, pitch, vel))
 
@@ -315,7 +330,7 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
             if t > on and 0 <= val <= 127:
                 cc_timeline.setdefault(t, []).append((cc, val))
 
-    for on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e in notes:
+    for on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic in notes:
         if pan != last_pan:
             cc_timeline.setdefault(on, []).append((10, pan))
             last_pan = pan
@@ -613,10 +628,10 @@ def _staccato_variant(rel, vpo_root):
 
 
 def _notes_to_csv(notes, dst_csv):
-    """Write a 9-column CSV subset (same format read_csv_notes parses)."""
+    """Write a CSV subset (same 10-column format read_csv_notes parses)."""
     with open(dst_csv, "w") as f:
-        for s, d, p, v, pan, rev, vs, ve, pe in notes:
-            f.write(f"{s:.6f},{d:.6f},{p},{v},{pan},{rev},{vs},{ve},{pe}\n")
+        for s, d, p, v, pan, rev, vs, ve, pe, art in notes:
+            f.write(f"{s:.6f},{d:.6f},{p},{v},{pan},{rev},{vs},{ve},{pe},{art}\n")
 
 
 def _amix(wavs, out_wav, samplerate):
@@ -773,8 +788,11 @@ def _cello_velocity_fix(sfz_path):
 def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
     """Render one instrument CSV to a WAV via sfizz_render (or GM fallback).
 
-    Articulation (defaults give the blended recipe: articulated onsets on a
-    connected, sustained line) is configurable via env:
+    When the CSV carries a per-note articulation column (10th, from imscomp
+    --sfzpipecsv), staccato/marcato notes use a staccato variant and all others
+    the sustain patch, ignoring GCS2SFZ_ARTIC_MAX. Without that column the
+    duration-based recipe applies (defaults give the blended recipe:
+    articulated onsets on a connected, sustained line), configurable via env:
       - GCS2SFZ_ARTIC_MAX (seconds, default 0.5): notes shorter than this use a
         staccato variant (fast onset, decays fast), longer notes the sustain
         patch; set 0 to disable.
@@ -804,9 +822,9 @@ def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
             fd, tmp_kit_csv = tempfile.mkstemp(prefix=".gcs2sfz-kit-",
                                                suffix=".csv")
             with os.fdopen(fd, "w") as f:
-                for s, d, _p, v, pan, rev, vs, ve, pe in kit_notes:
+                for s, d, _p, v, pan, rev, vs, ve, pe, art in kit_notes:
                     f.write(f"{s:.6f},{d:.6f},{kit_key},{v},{pan},{rev},"
-                            f"{vs},{ve},{pe}\n")
+                            f"{vs},{ve},{pe},{art}\n")
             csv_path = tmp_kit_csv
 
     if rel.startswith("EFFECTS/"):
@@ -875,13 +893,24 @@ def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
                 pass
         tmp_patch = vel_tmp
         sfz_use = vel_tmp
+    notes = read_csv_notes(csv_path)
+    # Per-note articulation (10th CSV column, from imscomp's --sfzpipecsv)
+    # supersedes the duration heuristic: staccato/marcato marks use the
+    # staccato patch, everything else (tenuto/accent/legato/tied/sustain) stays
+    # on the sustain patch. CSVs without the column fall back to the
+    # GCS2SFZ_ARTIC_MAX duration split.
+    has_artic = any(n[9] for n in notes)
+    stacc_path = (_staccato_variant(rel, vpo_root)
+                  if (has_artic or artic_max > 0) else None)
+    rendered = False
     try:
-        stacc_path = _staccato_variant(rel, vpo_root) if artic_max > 0 else None
-        rendered = False
         if stacc_path:
-            notes = read_csv_notes(csv_path)
-            short = [n for n in notes if n[1] < artic_max]
-            longs = [n for n in notes if n[1] >= artic_max]
+            if has_artic:
+                short = [n for n in notes if n[9] in ('staccato', 'marcato')]
+                longs = [n for n in notes if n[9] not in ('staccato', 'marcato')]
+            else:
+                short = [n for n in notes if n[1] < artic_max]
+                longs = [n for n in notes if n[1] >= artic_max]
             if short and longs:
                 with tempfile.TemporaryDirectory() as td:
                     scsv = os.path.join(td, "short.csv")
