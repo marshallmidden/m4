@@ -50,11 +50,10 @@ CSV schema
     sfz_note_on_line() at the three Note_on_c sites; gcs2sfz read_csv_notes()
     returns 11-tuples. Full detail: DEVIN-2026-09-11-sfz-articulation.md.
   - staff (11th column, added 2026-09-19): the 0-based voice number a note
-    came from. An instrument spread across several staffs is an ENSEMBLE; the
-    render backend detunes all of its staffs by one shared offset and fans
-    their pans out across the stage (see the Stage/ensemble simulation
-    section). Single-staff instruments carry no offset and render tuned the
-    same as ever.
+    came from. An instrument spread across several staffs is a section of
+    DESKS; the render backend gives each desk its own small detune and pans
+    them across the stage (see the Stage/ensemble simulation section).
+    Single-staff instruments render tuned the same as ever.
 
 Voice/measure selection is shared with the midi path -- no sfz-specific
 wiring: `--voices 14` / `--measures 3` slice the per-instrument CSVs via the
@@ -152,11 +151,20 @@ Implemented behavior:
 
   - Non-ensemble instruments (a single staff): tuned the same as before -- NO
     detune, score pan verbatim. Output stays byte-identical to pre-feature.
-  - Ensembles (an instrument spanning multiple staffs): the whole ensemble
-    gets ONE small detune shared by ALL its staffs (the section reads as one
-    unit, set slightly against the rest of the orchestra), and each duplicated
-    staff is panned slightly differently around the score's base pan (the
-    section spreads across the stage like an orchestra).
+  - Ensembles (an instrument spanning multiple staffs) are rendered as a
+    section of DESKS, tuned the way real desks are:
+      * Each desk is internally in tune -- all its notes sit on one channel
+        and the per-stream pitch-bend shifts the WHOLE desk together, exactly
+        like a real player whose strings are tuned against each other.
+      * Each desk is tuned slightly DIFFERENTLY from its neighbors -- the
+        desks spread deterministically over -4..+4 cents (GCS2SFZ_ENSEMBLE_
+        DETUNE), no two desks of a section ever on the same tuning (two desks
+        on the same tuning would just double the volume, the "why have two
+        violins" trap). One desk carries 0 and is the section's tuning
+        reference.
+      * Each desk is panned slightly differently around the score's base pan
+        (the desks can't stand on top of each other); they fan across +/-10
+        pan units (GCS2SFZ_ENSEMBLE_PAN).
   - Implementation:
       * imscomp --sfzpipecsv appends the 11th column: staff id (= voice_on,
         the 0-based voice number; ''/absent -> single-staff or legacy).
@@ -168,19 +176,24 @@ Implemented behavior:
         amixes the staff WAVs into the instrument stem. Because each stream is
         its own channel, the channel-wide pitch bend applies per stream.
       * Detune: write_midi emits a tick-0 pitch-bend (raw = 8192 + cents *
-        8192/200, clamped) and a trailing re-zero. The VALUE is shared by all
-        staffs of the ensemble -- a deterministic per-instrument constant,
-        `crc32(name) % 17 - 8` (+/-8 cents). GM-fallback streams get the same
-        bend. Observed on b/01 (consistent across v1-1..v1-4): violin -4
-        cent, viola -7, oboe -7, clarinet +2, bassoon -1, french horn +2,
-        trumpet +7, pizzicato_strings +3.
+        8192/200, clamped) and a trailing re-zero. Each desk gets its own
+        value: the deterministic permutation of -R..+R (R = GCS2SFZ_ENSEMBLE_
+        DETUNE, default 4) keyed on crc32(name|value), re-zeroed per stream.
+        GM-fallback streams get the same bend. Observed on b/01 v1-1: violin
+        (7 desks) [+4,+0,-3,-2,+1,+3,-4] cent; viola 3 desks [-1,+3,+2];
+        winds 2 desks each; pizzicato_strings (9 desks) [-2,+3,+2,-3,-1,+4,
+        +0,+1,-4].
       * Pan: each staff stream adds a deterministic per-staff offset to the
         score's per-note pans (and pan_end): the staffs fan evenly across
-        +/-10 pan units (clamped 0..127) with a small per-staff jitter, e.g.
-        the 7 violin desks fan [-9,-8,-3,+1,+2,+8,+11] around 36. Single-staff
-        instruments use the score pan verbatim (offset 0).
-  - Env knobs: GCS2SFZ_ENSEMBLE=0 disables the whole feature (pre-feature
-    single-stream behavior). Default ON.
+        +/-GCS2SFZ_ENSEMBLE_PAN units (clamped 0..127) with a small per-staff
+        jitter, e.g. v1-1's 7 violin desks fan [-9,-8,-3,+1,+2,+8,+11] around
+        base pan 36. Single-staff instruments use the score pan verbatim
+        (offset 0).
+  - Env knobs:
+      * GCS2SFZ_ENSEMBLE=0 disables the whole feature (pre-feature single-
+        stream behavior). Default ON.
+      * GCS2SFZ_ENSEMBLE_DETUNE (default 4): +/- cents per desk.
+      * GCS2SFZ_ENSEMBLE_PAN (default 10): +/- pan units per desk.
   - Backwards compat: legacy 9-col CSVs, and 10-col with empty 11th, parse
     and render exactly as before (no staff => no split).
 
@@ -247,9 +260,11 @@ Resolved:
     velocity map, identity until calibrated). DOALL 0 bare / 2 pre-existing
     named; full `make sfz` in b/01.
   - Stage/ensemble simulation -- DONE 2026-09-19 (11th staff column +
-    per-ensemble shared detune + per-staff pan spread; see the section above).
-    Full `make sfz` in b/01 (all 4 movements): violin -4 cent / 7 staffs,
-    viola -7 / 3, winds +- ~7 / 2 each, cello+contrabass single-staff
+    per-desk detune + per-staff pan spread; see the section above). Each desk
+    internally in tune, tuned slightly differently from its neighbors (no two
+    desks on the same tuning), one reference desk at 0. Full sfz+`sfz-mp4` in
+    b/01 (v1-1..v1-4) and b/09 (b9m1..b9m3): violin 8 desks [-4..+4], viola 3-4,
+    winds 2 each, pizz 9 desks; cello/contrabass/timpani single-staff
     untouched; GCS2SFZ_ENSEMBLE=0 restores pre-feature output; legacy 9/10-col
     CSVs render unchanged; DOALL 0 bare / 2 pre-existing named.
 

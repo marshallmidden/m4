@@ -394,8 +394,8 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
     events.append((0, b"\xff\x51\x03" + struct.pack(">I", tempo_ppqn_micros)[1:]))
     events.append((0, b"\xff\x03" + _varint(len(name_b)) + name_b))
     if detune_cents:
-        # Channel-wide detune via pitch bend (default +/-2 semitone range; the
-        # shared per-ensemble offset). Emitted at tick 0, before any note.
+        # Channel-wide detune via pitch bend (default +/-2 semitone range; this
+        # desk's offset). Emitted at tick 0, before any note.
         bend = int(round(8192 + detune_cents * 8192.0 / 200.0))
         bend = max(0, min(16383, bend))
         events.append((0, b"\xe0" + bytes([bend & 0x7F, (bend >> 7) & 0x7F])))
@@ -829,12 +829,17 @@ def _cello_velocity_fix(sfz_path):
 
 # ----------------------------------------------------------------------------
 # Ensemble / stage simulation: an instrument spread across several staffs is an
-# ensemble. Every staff of that ensemble shares ONE small detune (so the section
-# reads as one unit, set slightly against the rest of the orchestra) and each
-# duplicated staff is panned slightly differently around the score's base pan,
-# emulating an orchestra on a stage. Single-staff instruments are untouched
-# (tuned the same, score pan verbatim -> byte-identical to pre-ensemble output).
+# ensemble (a section of desks). Each desk is tuned like a REAL one: internally
+# in tune with itself (the per-channel pitch-bend shifts the whole desk
+# together -- its own strings are tuned against each other), but slightly
+# different from the next desk (each desk's tuning reference differs a little,
+# exactly why two violins sound like two violins rather than one louder one).
+# The staffs are also fanned out across the stage (they can't stand on top of
+# each other). Single-staff instruments are untouched (tuned the same, score
+# pan verbatim -> byte-identical to pre-ensemble output).
 # GCS2SFZ_ENSEMBLE=0 disables the whole feature.
+# GCS2SFZ_ENSEMBLE_DETUNE (default 4) = +/-cents spread, GCS2SFZ_ENSEMBLE_PAN
+# (default 10) = +/-pan-unit spread.
 # ----------------------------------------------------------------------------
 
 def _stable_hash(s: str) -> int:
@@ -845,10 +850,13 @@ def _stable_hash(s: str) -> int:
 def _ensemble_plan(name, notes):
     """Return a per-staff render plan for an ensemble, or None.
 
-    The plan is a list of (staff_notes, pan_off, detune_cents) — one entry per
-    staff — plus the shared detune and the per-staff pan offset. A CSV needs
-    staffs = 2+ distinct staff columns to count as an ensemble; any note without
-    a staff column, or GCS2SFZ_ENSEMBLE=0, yields None (single-stream render).
+    The plan is a list of (staff_notes, pan_off, detune_cents) -- one entry per
+    staff. Each desk gets its OWN detune: a deterministic permutation of the
+    values in -R..+R (R = GCS2SFZ_ENSEMBLE_DETUNE, default 4), so no two desks
+    of a section ever land on the same tuning while each desk stays internally
+    in tune. A CSV counts as an ensemble when it has 2+ distinct staff columns;
+    any note without a staff column, or GCS2SFZ_ENSEMBLE=0, yields None
+    (single-stream render).
     """
     if os.environ.get("GCS2SFZ_ENSEMBLE", "1") in ("0", "false", "no", ""):
         return None
@@ -857,19 +865,25 @@ def _ensemble_plan(name, notes):
     staffs = sorted({n[10] for n in notes})
     if len(staffs) < 2:
         return None
-    # One detune shared by ALL staffs of the ensemble, deterministic per
-    # instrument name: +/-8 cents, inaudible alone but a real section sheen.
-    detune = _stable_hash(name) % 17 - 8
+    spread = int(os.environ.get("GCS2SFZ_ENSEMBLE_PAN", "10"))
+    if spread < 0:
+        spread = 10
+    r = abs(int(os.environ.get("GCS2SFZ_ENSEMBLE_DETUNE", "4")))
+    # Deterministic permutation of the desk tunings in -r..+r so every desk of
+    # a section is tuned slightly differently than its neighbors (a real
+    # section; two desks on the same tuning would just double the volume).
+    tunings = sorted(range(-r, r + 1),
+                     key=lambda v: _stable_hash(f"{name}|{v}"))
     groups = []
     n = len(staffs)
     for i, st in enumerate(staffs):
         sub = [n for n in notes if n[10] == st]
-        # Fan the duplicated staffs evenly across +/-10 pan units around the
+        # Fan the duplicated staffs evenly across +/-spread pan units around the
         # score's base pan, plus a tiny deterministic per-staff jitter so two
         # desks of the same section don't land on top of each other.
-        spread = (2 * 10.0 * i / (n - 1) - 10.0 if n > 1 else 0.0)
+        pan = (2 * spread * i / (n - 1) - spread if n > 1 else 0.0)
         jitter = _stable_hash(f"{name}|{st}") % 3 - 1
-        groups.append((sub, int(round(spread + jitter)), detune))
+        groups.append((sub, int(round(pan + jitter)), tunings[i % len(tunings)]))
     return groups
 
 
@@ -1058,10 +1072,10 @@ def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
                   if (has_artic or artic_max > 0) else None)
 
     # Ensemble split: an instrument with several distinct staff columns renders
-    # each staff as its OWN stream (own MIDI channel), sharing one detune and
-    # fanning its staffs across the stage; the staff WAVs are amixed. Single-
-    # staff instruments (and drums/one-shots) take the plain single-stream path,
-    # byte-identical to pre-ensemble output.
+    # each desk as its OWN stream (own MIDI channel), each desk tuned slightly
+    # differently from its neighbors and fanned across the stage; the desk WAVs
+    # are amixed. Single-staff instruments (and drums/one-shots) take the plain
+    # single-stream path, byte-identical to pre-ensemble output.
     groups = None
     if kit_key is None and not rel.startswith("EFFECTS/"):
         groups = _ensemble_plan(name, notes)
@@ -1081,10 +1095,11 @@ def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
                                               pan_off=pan_off):
                         wavs.append(swav)
                 if len(wavs) == len(groups):
-                    offsets = ",".join(f"{p:+d}" for _s, p, _d in groups)
-                    print(f"  {name}: {len(groups)} staffs, "
-                          f"detune {groups[0][2]:+d} cent, "
-                          f"pan offsets [{offsets}] -> amix")
+                    dets = ",".join(f"{d:+d}" for _s, _p, d in groups)
+                    pans = ",".join(f"{p:+d}" for _s, p, _d in groups)
+                    print(f"  {name}: {len(groups)} desks, "
+                          f"detune [{dets}] cent, "
+                          f"pan [{pans}] -> amix")
                     rendered = _amix(wavs, out_wav, samplerate)
         else:
             rendered = _render_instrument_csv(csv_path, out_wav, samplerate,
@@ -1120,7 +1135,7 @@ def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
 
 def _render_gm_csv(csv_path, out_wav, sf2_path, samplerate, name, program,
                    detune_cents=0.0, pan_off=0):
-    """Render ONE CSV via fluidsynth (GM fallback), shared detune/pan supported."""
+    """Render ONE CSV via fluidsynth (GM fallback), per-desk detune/pan supported."""
     with tempfile.TemporaryDirectory() as td:
         midi_path = os.path.join(td, "in.mid")
         has_notes = write_midi(csv_path, midi_path, pred_expr=False, name=name,
@@ -1149,8 +1164,9 @@ def render_gm(csv_path, out_wav, sf2_path, samplerate):
     carried both in the note-ons (respected by GeneralUser) and CC11 expression.
     Program changes are bank-select-free so --sf2 GM set works.
 
-    Multi-staff ensembles get the same treatment as the VPO path: each staff is
-    rendered as its own stream (detune + per-staff pan spread) and amixed.
+    Multi-staff ensembles get the same treatment as the VPO path: each desk is
+    rendered as its own stream (per-desk detune + per-staff pan spread) and
+    amixed.
     """
     name = os.path.splitext(os.path.basename(csv_path))[0]
     program = instruments.gm_program(name)
@@ -1174,8 +1190,9 @@ def render_gm(csv_path, out_wav, sf2_path, samplerate):
                     break
                 wavs.append(swav)
             if ok_all and _amix(wavs, out_wav, samplerate):
-                print(f"  => {name}: {len(groups)} staffs via GM fallback "
-                      f"(detune {groups[0][2]:+d} cent).")
+                dets = ",".join(f"{d:+d}" for _s, _p, d in groups)
+                print(f"  => {name}: {len(groups)} desks via GM fallback "
+                      f"(detune [{dets}] cent).")
                 return out_wav
             return None
     out = _render_gm_csv(csv_path, out_wav, sf2_path, samplerate, name, program)
