@@ -102,3 +102,19 @@ Verified in the v1-1 measure-5 mix: violin melody presences pulses at RMS
    Trigger: `make sfz` in b/01 (or `--sfzpipecsv --measures 1` slice) and
    A/B that pizz phrase against the GM render. (STATUS 2026-09-16: STILL OPEN —
    top item in SFZ.md's next-fixes list.)
+
+   (STATUS 2026-09-19: RESOLVED — root cause was an inverted velocity-layer
+   balance in the merged `all-strings-SEC-pizzicato[-panned].sfz` patches: the
+   VSCO cello section's low-velocity layer (xfout_lovel=0, hivel=62) carries
+   per-region volume ~23-30 while its high-velocity layer (xfin_lovel=54,
+   hivel=127) carries ~10-18, so a soft pluck (vel 54-62, both layers active)
+   renders LOUDER than a strong one (63+, high layer only). Measured cello-only
+   sweep at p50: v62=47.2dB -> v64=40.6dB (a 6.6dB DROP as velocity rises).
+   The soft 2nd note (vel 57-64) lands exactly on that boundary. Fix:
+   `gcs2sfz._cello_velocity_fix()` rewrites each low-velocity cello region's
+   `volume=` to match its high-velocity partner (matched by lokey/hikey) at
+   render time, restoring a monotonic velocity->loudness curve (sfizz's default
+   amp_veltrack supplies the range). Applies to SEC + panned pizz patches only;
+   no library file edits (that tree is gitignored). Verified: cello-only sweep
+   monotonic after fix, b/01 v1-1 full pizz aggregate unchanged (55.7/42.2 dB
+   note1/note2).)

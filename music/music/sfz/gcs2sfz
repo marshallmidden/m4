@@ -692,6 +692,84 @@ def _edited_patch(sfz_path, attack):
     return tmp
 
 
+def _cello_velocity_fix(sfz_path):
+    """Rebalance the merged string patches' inverted cello velocity layers.
+
+    The VPO all-strings-SEC-pizzicato[-panned] patches layer the VSCO cello
+    section by velocity: a low-velocity layer (xfout_lovel=0, hivel=62) carries
+    per-region volume ~23-30 (LOUDER) while the high-velocity layer
+    (xfin_lovel=54, hivel=127) carries volume ~10-18 (quieter). A soft pluck
+    (velocity 54-62, both layers active) therefore renders several dB above a
+    strong one (63+, high layer only), inverting the score's dynamics -- the
+    b/01 v1-1 "2nd pizz note too loud" bug (sfz velocity sweep: p40..p53 shows
+    a hard drop at vel 62->64, e.g. p50 v62=47.2dB -> v64=40.6dB).
+
+    Fix: set each low-velocity cello region's volume equal to its high-velocity
+    partner (matched by lokey/hikey), so loudness rises monotonically with
+    velocity (sfizz's default amp_veltrack then supplies the dynamic range).
+    Returns a same-dir temp copy if anything changed, else None; caller removes
+    the returned file.
+    """
+    with open(sfz_path, "rb") as f:
+        text = f.read().replace(b"\r\n", b"\n").decode("utf-8", "replace")
+
+    # Split into (marker, body) units: the split pattern captures the header
+    # tokens; everything between two headers lands in the preceding unit's body.
+    units = []
+    for part in re.split(r"(?m)^(<group>|<region>)$", text):
+        if part in ("<group>", "<region>"):
+            units.append([part, ""])
+        else:
+            if units:
+                units[-1][1] += part
+
+    # Collect region bodies keyed by their velocity layer.
+    lows, highs = [], []
+    for marker, body in units:
+        if marker != "<region>":
+            continue
+        op = {}
+        for m in re.finditer(r"(?m)^\s*([a-z0-9_]+)=([^\r\n]*)", body):
+            op[m.group(1)] = m.group(2)
+        if "volume" not in op or "lokey" not in op or "hikey" not in op:
+            continue
+        if "xfout_lovel" in op and op.get("hivel") == "62":
+            lows.append((body, op))
+        elif "xfin_lovel" in op and op.get("hivel") == "127":
+            highs.append((body, op))
+
+    hi_by_pitch = {}
+    for body, op in highs:
+        hi_by_pitch[(op["lokey"], op["hikey"])] = (body, op)
+
+    changed = 0
+    for body, op in lows:
+        pitch = (op["lokey"], op["hikey"])
+        if pitch not in hi_by_pitch:
+            continue
+        target = hi_by_pitch[pitch][1]["volume"]
+        if str(op["volume"]) == str(target):
+            continue
+        # Rewrite the volume= line inside this region body.
+        new_body = re.sub(r"(?m)^(volume\s*=\s*)[^\r\n]*",
+                          r"\g<1>" + str(target), body)
+        if new_body != body:
+            for u in units:
+                if u[0] == "<region>" and u[1] == body:
+                    u[1] = new_body
+                    changed += 1
+                    break
+    if not changed:
+        return None
+
+    rebuilt = "".join(m + b for m, b in units)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(sfz_path),
+                               prefix=".gcs2sfz-vel-", suffix=".sfz")
+    with os.fdopen(fd, "w") as f:
+        f.write(rebuilt)
+    return tmp
+
+
 def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
     """Render one instrument CSV to a WAV via sfizz_render (or GM fallback).
 
@@ -782,6 +860,21 @@ def render_instrument(csv_path, out_wav, vpo_root, samplerate, sf2_path=None):
         tmp_patch = _edited_patch(sfz_path, attack)
         if tmp_patch:
             sfz_use = tmp_patch
+
+    # Merge-patch cello velocity-layer inversion: low-velocity layer regions
+    # carry ~12 dB MORE volume than their high-velocity partners, so soft
+    # plucks (vel 54-62, both layers active) sound louder than strong ones
+    # (63+). Equalize each low region's volume to its high partner so
+    # velocity->loudness is monotonic. Appended to the attack edit (if any).
+    vel_tmp = _cello_velocity_fix(sfz_use)
+    if vel_tmp:
+        if tmp_patch:
+            try:
+                os.remove(tmp_patch)
+            except OSError:
+                pass
+        tmp_patch = vel_tmp
+        sfz_use = vel_tmp
     try:
         stacc_path = _staccato_variant(rel, vpo_root) if artic_max > 0 else None
         rendered = False

@@ -296,10 +296,20 @@ NEXT FIXES / OPEN ITEMS for the SFZ path (as of 2026-09-17)
 
 Open bugs / quality items, in rough priority order:
 
-1. **b/01 v1-1 first-measure pizzicato — 2nd pizz note too loud.** Reported
-   2026-09-11 (see DEVIN-2026-09-11-sfz-articulation.md), still open. Likely
-   candidates: per-note velocity/CC11 handling for the pizz part, imscomp
-   accent/stress on that note, or the VPO pizzicato mapping's velocity layers.
+1. ~~**b/01 v1-1 first-measure pizzicato — 2nd pizz note too loud.**~~ **RESOLVED
+   2026-09-19** — root cause was an inverted velocity-layer balance in the VPO
+   cello section of the merged `all-strings-SEC-pizzicato[-panned].sfz` patches:
+   the low-velocity layer (xfout_lovel=0, hivel=62) carries per-region volume
+   ~23-30 while the high-velocity layer (xfin_lovel=54, hivel=127) carries
+   ~10-18, so a soft pluck (vel 54-62, both layers active) renders louder than a
+   strong one (63+). The soft 2nd note (vel 57-64) lands exactly on that
+   inverted boundary. Measured on a cello-only sweep (p50): v62=47.2dB ->
+   v64=40.6dB, a 6.6dB drop as velocity increases. `gcs2sfz._cello_velocity_fix`
+   now rewrites each low-velocity cello region's `volume=` to match its
+   high-velocity partner (matched by lokey/hikey) at render time, making
+   velocity->loudness monotonic (sfizz's default amp_veltrack supplies the
+   range); applies to the SEC + panned pizz patches, no library edit needed.
+   Original report: 2026-09-11 (see DEVIN-2026-09-11-sfz-articulation.md).
    Repro: `make sfz` in b/01, A/B the first-measure pizz phrase against the
    GM render (`--sfzpipecsv --measures 1` slice).
 
