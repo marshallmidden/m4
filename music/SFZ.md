@@ -257,8 +257,19 @@ Resolved:
   - Per-note articulation column -- RESOLVED 2026-09-19 (10th CSV column;
     commit 9be0a4f7), plus the named-level machinery (instruments.NAMED_LEVELS
     / dynamic_vol / level_gain_db_named / per-instrument LEVEL_VELOCITY
-    velocity map, identity until calibrated). DOALL 0 bare / 2 pre-existing
-    named; full `make sfz` in b/01.
+    velocity map, calibrated 2026-09-20 see below). DOALL 0 bare / 2
+    pre-existing named; full `make sfz` in b/01.
+  - Per-instrument LEVEL_VELOCITY calibration -- DONE 2026-09-20. Only the 5
+    patches with REAL velocity layers got rows (french_horn/trumpet/
+    brass_section: 75-crossfade, mp anchored 70->68; trombone: 75/90
+    crossfade, mp 70->68 and f 90->93 staying clear of the blend; pizzicato:
+    54/62 crossfade, p 60->58 centered); the ~12 single-layer instruments are
+    documented as intentionally absent (velocity == pure loudness there,
+    LEVEL_GAIN owns it). Moves are <=0.5 dB, within measurement noise, so
+    LEVEL_GAIN was untouched. Note: the fff/ffff pizzicato inversion at high
+    velocity is a pre-existing patch/measurement quirk (those velocities are
+    identity), not a LEVEL_VELOCITY regression. See
+    DEVIN-2026-09-20-sfz-level-velocity.md.
   - Stage/ensemble simulation -- DONE 2026-09-19 (11th staff column +
     per-desk detune + per-staff pan spread; see the section above). Each desk
     internally in tune, tuned slightly differently from its neighbors (no two
@@ -269,9 +280,6 @@ Resolved:
     CSVs render unchanged; DOALL 0 bare / 2 pre-existing named.
 
 Open:
-  - Calibrate per-instrument LEVEL_VELOCITY entries (velocity-map named
-    dynamics per patch so pp..fff land in the sample-layer ranges) -- use
-    ims/test-volume-levels like LEVEL_GAIN.
   - ppp/pppp residuals (~3-8 dB on some instruments) -- likely the slow VPO
     soft attack vs the 0.25s measurement window; re-measure with a longer
     window.

@@ -313,9 +313,64 @@ def level_gain_db_named(instrument_name: str, level: str) -> float:
 # instrument place its named pp..fff into the sample-library velocity layers it
 # actually has (e.g. a quiet patch that only triggers its loud layer at high
 # velocity can be boosted in ppp/p/pp without touching the CC11 loudness
-# curve). Empty row = identity (1.0, current behavior); calibrate against
-# ims/test-volume-levels like LEVEL_GAIN.
-LEVEL_VELOCITY = {}
+# curve). Absent row = identity (1.0). Calibrated 2026-09-20; see
+# DEVIN-2026-09-20-sfz-level-velocity.md.
+#
+# IMPORTANT CAVEAT: the VPO MAP patches above set NO amp_veltrack, so sfizz's
+# default velocity->amplitude tracking is active in all of them. Velocity is
+# therefore a LOUDNESS knob everywhere, not just a layer selector (a clean
+# fixed-CC11 violin sweep moved RMS ~-70 -> -38 dB over vel 20..127). Any row
+# != identity changes loudness, so LEVEL_GAIN (calibrated at vel=vol) must be
+# re-fit wherever velocity moves.
+#
+# Strategy (surgical layer-only): populate rows only for the instruments that
+# have REAL velocity layers in their *-SEC-*.sfz patch (verified from the
+# region/group structure, boundaries listed per row); the multipliers are close
+# to identity because the named-dynamic grid (mp=70 < 75 < mf=80; pizz
+# pp=50 < 54 < p=60 < 62 < mp=70) was already designed to straddle them. The
+# value is explicit per-layer anchoring with margin for imscomp's humanize
+# velocity jitter (+/-3), mechanically placing each named dynamic in the layer
+# range it belongs to regardless of small table drift.
+#
+# The remaining instruments are single-layer (no velocity layers: all velocity
+# does is change loudness, i.e. a redundant duplicate of LEVEL_GAIN, and any
+# row there would force a needless LEVEL_GAIN re-fit). They are intentionally
+# ABSENT (identity): flute oboe clarinet bassoon piccolo english_horn
+# bass_trombone tuba violin viola cello contrabass, plus all percussion and
+# one-shots. Do NOT add rows for them without first adding velocity layers to
+# their patches (or a loudness rationale).
+LEVEL_VELOCITY = {
+    # 75 crossfade into the loud layer (xfin_lovel=75 xfin_hivel=127):
+    # below 75 soft layer only. All named dynamics below 75 except mp, which
+    # sits 5 below the edge; anchor mp 70 -> 68 so +/-3 jitter still stays
+    # clear. mf..fffff land across 75-127 identically.
+    "french_horn": [(0, 1.0), (30, 1.0), (40, 1.0), (50, 1.0), (60, 1.0),
+                    (70, 0.97), (80, 1.0), (90, 1.0), (100, 1.0), (110, 1.0),
+                    (120, 1.0), (127, 1.0)],
+    "trumpet":     [(0, 1.0), (30, 1.0), (40, 1.0), (50, 1.0), (60, 1.0),
+                    (70, 0.97), (80, 1.0), (90, 1.0), (100, 1.0), (110, 1.0),
+                    (120, 1.0), (127, 1.0)],
+    # Mixed per-pitch-range patch with both 75/127 and 75/90 crossfades; the
+    # high-level 75 boundary is shared with french_horn/trumpet, so treat it
+    # as a 75 boundary.
+    "brass_section": [(0, 1.0), (30, 1.0), (40, 1.0), (50, 1.0), (60, 1.0),
+                      (70, 0.97), (80, 1.0), (90, 1.0), (100, 1.0), (110, 1.0),
+                      (120, 1.0), (127, 1.0)],
+    # Piano samples xfout 75-90, forte samples xfin 75-90: below 75 piano
+    # only, above 90 forte only. mp anchors 70 -> 68 (clear of 75); f sits on
+    # the 90 xfade top edge (jitter 87-93 could drop into the blend), so anchor
+    # f 90 -> 93 for a consistent full-forte sound; mf stays in the 75-90 blend.
+    "trombone":    [(0, 1.0), (30, 1.0), (40, 1.0), (50, 1.0), (60, 1.0),
+                    (70, 0.97), (80, 1.0), (90, 1.03), (100, 1.0), (110, 1.0),
+                    (120, 1.0), (127, 1.0)],
+    # Soft pluck below 54, 54-62 crossfade into the loud pluck (hivel=62 /
+    # xfin_lovel=54). pp=50 stays clear of 54 (50+3); p=60 straddles 62
+    # (jitter 57-63), so anchor p 60 -> 58 to center the crossfade; mp=70 is
+    # well into the loud layer (67+).
+    "pizzicato_strings": [(0, 1.0), (30, 1.0), (40, 1.0), (50, 1.0), (60, 0.97),
+                          (70, 1.0), (80, 1.0), (90, 1.0), (100, 1.0),
+                          (110, 1.0), (120, 1.0), (127, 1.0)],
+}
 
 
 def velocity_mult(instrument_name: str, vol: int) -> float:
