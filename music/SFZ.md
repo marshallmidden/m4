@@ -283,6 +283,14 @@ Open:
   - ppp/pppp residuals (~3-8 dB on some instruments) -- likely the slow VPO
     soft attack vs the 0.25s measurement window; re-measure with a longer
     window.
+  - pizzicato high-velocity inversion (saw it again 2026-09-20: single-pitch
+    fff=-35.1 vs ffff=-37.7 at identity velocities 110/120) -- same VPO
+    inverted-layer-volume quirk as the cello, needs a cello-style
+    layer-balance fix, not LEVEL_VELOCITY remapping.
+  - timpani/tuba/piccolo LEVEL_GAIN absent (deliberate) -- their out-of-range
+    note mappings measure as silence, so any gain would over-boost the audible
+    notes (comment in instruments.py). Fix the VPO mappings first, then
+    calibrate their LEVEL_GAIN rows.
   - A/B-listen the ensemble detune/pan choices across pieces after the full
     suite re-render (130 mixes + 130 sfz-mp4s) and tune the detune magnitude /
     pan spread to taste (currently +/-8 cent, +/-10 pan, deterministic).
