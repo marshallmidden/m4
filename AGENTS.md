@@ -58,6 +58,7 @@ Second, higher-fidelity render path using the Virtual Playing Orchestra sample l
   - `music/DEVIN-2026-09-11-sfz-leadin-waveform.md` — `GCS2SFZ_LEAD_IN/TAIL` timeline alignment + wav2waveform dB scale.
   - `music/DEVIN-2026-09-15-cc11-sfz-loudness.md` — CC11 predistortion (`GCS2SFZ_EXPR_EXP`) + GM-fallback stutter fix; gain sync (`GCS2SFZ_GM_GAIN`) and expression-in-velocity (`GCS2SFZ_GM_EXPR`) calibrated on `test-volume-levels`; make-clean re-render memo.
   - `music/DEVIN-2026-09-19-sfz-ensemble.md` — stage/ensemble simulation: 11th CSV `staff` column; per-desk detune (each desk internally in tune via channel-wide pitch-bend at tick 0 + re-zero, desks spread over ±4 cent via `GCS2SFZ_ENSEMBLE_DETUNE`, never two desks on the same tuning) + per-staff pan spread (`GCS2SFZ_ENSEMBLE_PAN`), each desk rendered as its own stream and amixed; `GCS2SFZ_ENSEMBLE=0` disables.
+  - `music/DEVIN-2026-09-20-b9m2-horn-imbalance.md` — RESOLVED: b/09 b9m2 horns overwhelmed mm 51-58; m45 `vol(p)<` + late-placement `vol<` made horns/clarinet ramp to ~ff by ~m49 while orchestra stayed ~pp until m57 `ff`. Fixed in b9m2.gcs: two `vol(p)<`->`vol<`, `vol<` moved to line head, HorninBV16 + Timpani got lead-ins, redundant m46 `vol<` dropped.
   - `music/AAA.README.md` — differential-test suite HOWTO for `AAA.diff._2`/DOALL.
 
 ## YouTube uploads
