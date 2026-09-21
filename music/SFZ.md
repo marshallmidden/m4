@@ -278,15 +278,20 @@ Resolved:
     winds 2 each, pizz 9 desks; cello/contrabass/timpani single-staff
     untouched; GCS2SFZ_ENSEMBLE=0 restores pre-feature output; legacy 9/10-col
     CSVs render unchanged; DOALL 0 bare / 2 pre-existing named.
+  - pizzicato high-velocity "inversion" -- RESOLVED 2026-09-21 as a MEASUREMENT
+    ARTIFACT, not a bug: every pizz note gets `amp_random=1.5` (+/-1.5 dB), and
+    test-volume-levels plays a different pitch per level (fff on 3f8, ffff on
+    3g8; higher pizz samples are ~2-3 dB quieter). Repeat-averaged: raw patch
+    v110->v120 monotonic at all 17 pitches; full pipeline fff->ffff monotonic
+    at all tested pitches; piece CSV monotonic. No code change. Full evidence:
+    DEVIN-2026-09-21-sfz-pizz-high-velocity.md. (Optional follow-up: the LEVEL_
+    GAIN top end (111:8.6, 118:4.8, 127:5.5) has a small wobble that chews the
+    ffff margin to ~0.5 dB; re-measure single-pitch before touching.)
 
 Open:
   - ppp/pppp residuals (~3-8 dB on some instruments) -- likely the slow VPO
     soft attack vs the 0.25s measurement window; re-measure with a longer
     window.
-  - pizzicato high-velocity inversion (saw it again 2026-09-20: single-pitch
-    fff=-35.1 vs ffff=-37.7 at identity velocities 110/120) -- same VPO
-    inverted-layer-volume quirk as the cello, needs a cello-style
-    layer-balance fix, not LEVEL_VELOCITY remapping.
   - timpani/tuba/piccolo LEVEL_GAIN absent (deliberate) -- their out-of-range
     note mappings measure as silence, so any gain would over-boost the audible
     notes (comment in instruments.py). Fix the VPO mappings first, then
