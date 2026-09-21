@@ -288,10 +288,19 @@ Resolved:
     GAIN top end (111:8.6, 118:4.8, 127:5.5) has a small wobble that chews the
     ffff margin to ~0.5 dB; re-measure single-pitch before touching.)
 
+- ppp/pppp loudness residuals (~3-13 dB, systematic) -- RESOLVED 2026-09-21
+    as REAL but structural + inaudible: survives longer windows (the "slow
+    attack vs 0.25s window" idea is retired), and is (1) a test-piece high-pitch
+    pppp confound (home-register ppp/pppp are within ~0-3 dB), (2) the CC11-pred
+    floor -- `127*(v/127)^4` delivers CC~3-10 at vol 28-40, no headroom left for
+    table gain -- and (3) -70..-82 dBFS absolute, below a mastered mix's floor
+    (ppppp=vol0 is silent by design in both renders). A table bump would move
+    -78 to -70 dB at the cost of a 130-mix re-render; not warranted. Follow-ups
+    tracked: mp steady-state SUSTAIN spread (violin ~22 dB over the GM-piano once
+    the piano decays; calibration-TOFU) goes to the ensemble A/B pass. Evidence:
+    DEVIN-2026-09-21-sfz-ppp-residuals.md.
+
 Open:
-  - ppp/pppp residuals (~3-8 dB on some instruments) -- likely the slow VPO
-    soft attack vs the 0.25s measurement window; re-measure with a longer
-    window.
   - timpani/tuba/piccolo LEVEL_GAIN absent (deliberate) -- their out-of-range
     note mappings measure as silence, so any gain would over-boost the audible
     notes (comment in instruments.py). Fix the VPO mappings first, then
