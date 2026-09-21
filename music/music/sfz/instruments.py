@@ -198,7 +198,10 @@ def resolve(root_library: str, instrument_name: str):
 # the effective per-instrument levels are therefore exactly the named dynamics
 # and every moment between them. Levels the test can't measure (instrument
 # silent, e.g. the out-of-range piccolo/timpani high notes) are simply absent
-# -> gain 0.
+# -> gain 0. piccolo/tuba/timpani (2026-09-21) were measured with fixed-pitch
+# probes at in-range notes (test-volume-levels' pitches 60-69 are silent for
+# them) and PCM RMS compared against the piano probe at the same pitch; see
+# DEVIN-2026-09-21-sfz-tubatimpanipiccolo.md.
 LEVEL_GAIN = {
     "acoustic_bass_drum": [(28, 12.1), (38, 20.1), (48, 15.7), (59, 9.5), (68, 8.0), (82, 6.9), (89, 2.5), (102, 1.6), (111, 1.0), (118, -1.5), (127, -3.4)],
     "acoustic_snare": [(48, 25.7), (59, 19.8), (68, 19.2), (82, 14.0), (89, 12.7), (102, 12.4), (111, 12.0), (118, 9.1), (127, 7.7)],
@@ -214,14 +217,13 @@ LEVEL_GAIN = {
     "oboe": [(38, 24.4), (48, 22.5), (59, 18.1), (68, 12.1), (82, 13.9), (89, 9.8), (102, 11.7), (111, 13.6), (118, 6.7), (127, 8.7)],
     "open_triangle": [(48, 27.4), (59, 23.7), (68, 21.5), (82, 21.3), (89, 20.4), (102, 17.5), (111, 19.1), (118, 16.1), (127, 15.8)],
     "piano": [(28, -3.7), (38, -3.2), (48, 1.1), (59, 0.5), (68, -0.5), (82, -0.4), (89, -1.3), (102, 0.4), (111, 0.5), (118, 0.1), (127, 0.5)],
+    "piccolo": [(28, 10.7), (38, 15.2), (48, 12.0), (59, 11.1), (68, 10.5), (82, 9.3), (89, 6.5), (102, 4.9), (111, 2.0), (118, 0.8), (127, -1.1)],
     "pizzicato_strings": [(38, 23.4), (48, 21.2), (59, 15.1), (68, 10.4), (82, 12.0), (89, 9.6), (102, 8.3), (111, 8.6), (118, 4.8), (127, 5.5)],
     "tambourine": [(38, 24.9), (48, 19.9), (59, 14.9), (68, 13.2), (82, 13.6), (89, 13.9), (102, 14.3), (111, 13.3), (118, 12.2), (127, 10.7)],
-    # timpani / tuba / piccolo are deliberately ABSENT: their out-of-range
-    # mappings make them measure as silence (huge apparent gain) and a flat base
-    # gain would then make their audible notes far too loud. Fix the mappings
-    # (see SFZ.md item 8) before adding them.
+    "timpani": [(28, 17.7), (38, 24.4), (48, 23.3), (59, 20.3), (68, 18.1), (82, 16.2), (89, 13.1), (102, 11.2), (111, 9.0), (118, 7.5), (127, 5.2)],
     "trombone": [(38, 22.2), (48, 14.6), (59, 14.2), (68, 9.3), (82, 8.0), (89, 4.2), (102, 4.4), (111, 4.2), (118, 0.9), (127, 0.2)],
     "trumpet": [(38, 22.1), (48, 14.8), (59, 14.9), (68, 10.5), (82, 14.0), (89, 8.5), (102, 6.1), (111, 4.2), (118, 6.5), (127, 3.6)],
+    "tuba": [(28, 17.0), (38, 16.0), (48, 11.0), (59, 8.0), (68, 5.8), (82, 3.5), (89, 1.0), (102, -0.2), (111, -3.3), (118, -4.3), (127, -5.8)],
     "viola": [(38, 16.6), (48, 17.5), (59, 12.8), (68, 10.2), (82, 11.3), (89, 9.6), (102, 6.1), (111, 4.4), (118, -0.4), (127, -2.5)],
     "violin": [(38, 24.1), (48, 25.0), (59, 23.3), (68, 25.6), (82, 22.3), (89, 19.3), (102, 18.2), (111, 16.3), (118, 16.9), (127, 13.1)],
 }

@@ -299,12 +299,18 @@ Resolved:
     tracked: mp steady-state SUSTAIN spread (violin ~22 dB over the GM-piano once
     the piano decays; calibration-TOFU) goes to the ensemble A/B pass. Evidence:
     DEVIN-2026-09-21-sfz-ppp-residuals.md.
+  - timpani/tuba/piccolo LEVEL_GAIN absent -- RESOLVED 2026-09-21: rows added
+    for all three (fixed-pitch probes at in-range notes, PCM RMS vs the piano;
+    pp..fffff within +/-0.7 dB, ppp ~+1, pppp at the known structural floor).
+    The measurement trouble was that test-volume-levels plays their notes at
+    pitch 60-69, entirely out of the patches' ranges (piccolo d5..c#6, tuba
+    d1..d4, timpani c2..c4) -> silence, and ffmpeg astats mis-scales int16
+    (PCM-based estimate fixed it). Real-piece check: b/01 v1-1 timpani now
+    peaks ~-9 dBFS, no clipping. Remaining limit: notes above a patch's top
+    region (e.g. timpani D4+) still hit no region and stay silent. Evidence:
+    DEVIN-2026-09-21-sfz-tubatimpanipiccolo.md.
 
 Open:
-  - timpani/tuba/piccolo LEVEL_GAIN absent (deliberate) -- their out-of-range
-    note mappings measure as silence, so any gain would over-boost the audible
-    notes (comment in instruments.py). Fix the VPO mappings first, then
-    calibrate their LEVEL_GAIN rows.
   - A/B-listen the ensemble detune/pan choices across pieces after the full
     suite re-render (130 mixes + 130 sfz-mp4s) and tune the detune magnitude /
     pan spread to taste (currently +/-8 cent, +/-10 pan, deterministic).
