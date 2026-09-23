@@ -1539,6 +1539,12 @@ createglobalvar('default_intensity', 100, 0, type_is_number, True)   # Volume = 
 createglobalvar('default_reverb', 0, 0, type_is_number, True)        # No reverb.
 createglobalvar('default_velocity', 100, 0, type_is_number, True)    # Note attack.  (Was 120 - 2025-04-10)
 
+# Offset added to an internal note number (3c=39) to get its MIDI note
+# number (3c=60).  Since 39+21=60, the default offset is 21 (12+12-3).
+# Set 'note_to_midi_offset' in the .gcs (e.g. 'calc note_to_midi_offset = 0')
+# to make '(N)'/'middlec' use N as a raw MIDI note number instead.
+createglobalvar('note_to_midi_offset', 12 + 12 - 3, 0, type_is_number, True)
+
 # ----------------------------------------------------------------------------
 is_float_number = 0
 is_float_string = 1
@@ -6173,7 +6179,7 @@ def print_header() -> None:
             # Emit middlec if it differs from the staff default (39+12=51).
             if middle_c is not None and middle_c != (39 + 12):
                 # Convert middle_c number to a note name.
-                mc_midi = middle_c + 12 + 12 - 3      # Same formula as compute_middle_c
+                mc_midi = middle_c + int(float(getvar('note_to_midi_offset')))   # Same formula as compute_middle_c
                 if mc_midi in midi_value_to_note_flat_39:
                     header = header + f"middlec {midi_value_to_note_flat_39[mc_midi]}\n"
                 else:
@@ -10692,10 +10698,10 @@ def decode_gsw(t_args, original_line) -> None:
         print_error(f'decode note is not of type normal_note -- ({typenote})', original_line)
         return
     # fi
-    if thenote <= 12 + 12 - 3:
+    if thenote <= int(float(getvar('note_to_midi_offset'))):
         computeit = wargs[0] + '=' + '0'                       # rest = 0
     else:
-        computeit = wargs[0] + '=' + str(thenote) + '+3-12-12'  # Convert from midi note to musicomp value.
+        computeit = wargs[0] + '=' + str(thenote) + '-' + str(int(float(getvar('note_to_midi_offset'))))  # Convert from midi note to musicomp value.
     # fi
     value, type_error = is_float(computeit, is_float_number, False)
     if type_error is not None or value is None:
@@ -10775,6 +10781,9 @@ def decode_gsw(t_args, original_line) -> None:
 #   [ ]                     : start/end of chord (1, 0 if not)
 #   decode  note; {octave,notename,notenumber,sharp,flat,natural,tuplet,notelength,dot,duration},variable; [...]
 # -1 if not standard note. Defaults normally apply.
+#   notenumber is the MIDI note value of the note: 3c = 60 (middle C), 4c = 72, 5d = 86.
+#   To turn a notenumber back into a note string, use encode:  'encode A=;notenumber,num'
+#   (unlike the '(N)' note format in a score, which takes the internal 3c = 39 numbering).
 #   l, s, m, t, z, a, aa, g,gg @W, @X    1 if modifier present, 0 if not, or not a note.
 # If staff-line word (which sets till changed):
 #   arp, fermata, legato, marcato, staccato, tie, slur, lh, rh
@@ -11076,7 +11085,7 @@ def decode_ims(t_args, original_line) -> None:
                 # rof
             # fi
             np.duration = timeofnote      # : 0.25 if 1/4 note. -1 if not a note.
-            np.notenumber = midinote      # : IMS 48 = 4c, etc. Default 3c=60, as per cyber1 (1978) musicomp.
+            np.notenumber = midinote      # MIDI value: 3c = 60.  Reverse it with encode: 'encode A=;notenumber,num'.
             if timeofnote == 0:
                 q = 0
             else:
@@ -11799,7 +11808,7 @@ def do_cstopnow(t_args: str | None, original_line: str) -> None:
 #   diminuendo              : 1 = start of diminuendo, 0 if not.
 #   position                : 0 to 100% (probably here do 0 to 127) for numerical position (pan value).
 #   pan                     : 1 - start of pan, 0 if not. (Moving between two.) Like cresendo/glissando.
-#   notenumber              : IMS 48 = 4c, etc. Default 3c=60, as per cyber1 (1978 era) musicomp.
+#   notenumber              : MIDI value: 3c = 60.  Reverse it with encode: 'encode A=;notenumber,num'.
 #   duration                : 0.25 if 1/4 note. -1 if not a note.
 # Special: explict (no variable paired with it). Only for encode.
 
@@ -12072,7 +12081,7 @@ def get_defaults_for_note(t_args, voiceon, original_line):
     # fi
 
     note_duration = timeofnote      #               : 0.25 if 1/4 note. -1 if not a note.
-    note_notenumber = midinote      #               : IMS 48 = 4c, etc. Default 3c=60, as per cyber1 (1978) musicomp.
+    note_notenumber = midinote      # MIDI value: 3c = 60.  Reverse it with encode: 'encode A=;notenumber,num'.
     if timeofnote == 0:
         q = 0
     else:
@@ -13848,7 +13857,7 @@ def do_middle_c(t_args: str | None, original_line: str) -> None:
             return
         # fi
         note_to_decode = round(thenote)
-        note_to_decode = note_to_decode + 12 + 12 - 3     # 3c -> 39 must be 60 for midi.
+        note_to_decode = note_to_decode + int(float(getvar('note_to_midi_offset')))     # 3c -> 39 must be 60 for midi.
         if note_to_decode <= 0 or note_to_decode >= 127:
             print_error(f"middle_c - m:{measure_on} Note number '{thenote}' not in range", original_line)
             return
@@ -16513,8 +16522,9 @@ def compute_middle_c(f):
     else:
         middle_c = f
     # fi
-    f = f + 12 + 12 - 3             # 3c -> 39 must be 60 for midi.
-    f39 = 39 + 12 + 12 - 3         # 3c -> 39 must be 60 for midi.
+    _midi_offset = int(float(getvar('note_to_midi_offset')))
+    f = f + _midi_offset             # 3c -> 39 must be 60 for midi.
+    f39 = 39 + _midi_offset         # 3c -> 39 must be 60 for midi.
     note_to_midi_value = {}
     note_to_midi_value_39 = {}
     midi_value_to_note_sharp = {}
@@ -16680,8 +16690,12 @@ def getnote(note_to_decode, voiceon, update_defaults, do_errors, sub_mid_c, orig
                     if isinstance(thenote, int) or isinstance(thenote, float):
                         thenote = round(thenote)
                         if typenote == normal_note:
+                            # Note: '(N)' here is the internal note number (3c = 39), NOT the
+                            # MIDI value.  Combined with '(),x' or '(num,x)', a MIDI notenumber
+                            # (from 'decode ...;notenumber,num') must be reduced by 21 to sound
+                            # the same; convert it back to a note with 'encode A=;notenumber,num'.
                             if thenote != 0 and (args.midi1csv or args.fluidsynth or args.sfzpipecsv):
-                                thenote = thenote + 12 + 12 - 3     # 3c -> 39 must be 60 for midi.
+                                thenote = thenote + int(float(getvar('note_to_midi_offset')))     # 3c -> 39 must be 60 for midi.
                             # fi
                             if thenote != 0:
                                 thenote = thenote + get_staff_arr(voiceon, xpose, None, 'getnote1 ' + original_line)
