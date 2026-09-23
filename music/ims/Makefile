@@ -1,10 +1,9 @@
 #-----------------------------------------------------------------------------
-.DEFAULT_GOAL := help
-#-----------------------------------------------------------------------------
 SONGS  = A-Flat-Prelude-Chopin
 SONGS += clock_tower
 SONGS += test-volume-levels
 SONGS += test-voice-volume-levels
+SONGS += test-legato
 #-----------------------------------------------------------------------------
 TESTS  = A0
 TESTS += A1
@@ -243,7 +242,7 @@ help:
 	@echo "TESTS: ${TESTS}"
 #-----------------------------------------------------------------------------
 .PHONY: all songs ${SONGS}
-all songs ${SONGS}: ${SONGS_PS} ${SONGS_M_PS} ${SONGS_FS} ${SONGS_M_FS} ${SONGS_PDF} ${SONGS_M_PDF}
+all songs: ${SONGS_PS} ${SONGS_M_PS} ${SONGS_FS} ${SONGS_M_FS} ${SONGS_PDF} ${SONGS_M_PDF}
 #-----------------------------------------------------------------------------
 .PHONY: tests ${TESTS}
 tests ${TESTS}: ${TESTS_PS} ${TESTS_FS} ${TESTS_PDF}

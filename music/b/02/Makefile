@@ -1,6 +1,4 @@
 #-----------------------------------------------------------------------------
-.DEFAULT_GOAL := help
-#-----------------------------------------------------------------------------
 SONGS        = b2m1
 SONGS       += b2m2
 SONGS       += b2m3
@@ -92,33 +90,6 @@ MC_ARGS ?=
 	${GCS2YOUTUBE} $< || (rm -f $@ ; exit 1)
 %_2.mp4:	%_2.fs
 	${GCS2YOUTUBE} $< || (rm -f $@ ; exit 1)
-# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-# Extra #include dependencies for specific movements.
-b2m2.E: music-2-2.gcs
-b2m3.E: music-2-3.gcs
-#-----------------------------------------------------------------------------
-# SFZ (VPO sampler) pipeline: real orchestral samples via sfizz_render
-#   make sfz       - render SONGS to sfz-mix/*.wav
-#   make sfz-mp4   - encode to *-sfz.mp4 video
-#   make sfz-clean - remove sfz-csv/ and sfz-mix/
-# Instruments with no VPO mapping (e.g. default piano) are rendered through
-# fluidsynth + GeneralUser.sf2 (gcs2sfz --sf2) -- see music/sfz/gcs2sfz.
-#-----------------------------------------------------------------------------
-sfz-csv/%/.done: %.E ${IMSCOMP}
-	@mkdir -p $(dir $@)
-	@rm -f $(dir $@)*.csv
-	cd $(dir $@) && ${IMSCOMP} ${MC_ARGS} --sfzpipecsv $(CURDIR)/$*.E
-	@touch $@
-#-----------------------------------------------------------------------------
-sfz-mix/%-sfz-mix.wav: sfz-csv/%/.done $(CURDIR)/$(GCS2SFZ)
-	@mkdir -p $(dir $@)
-	"$(CURDIR)/$(GCS2SFZ)" "$(CURDIR)/$(SFZ_CSVDIR)/$*" \
-		--outdir "$(CURDIR)/$(SFZ_MIXDIR)" \
-		--sfzdir "$(CURDIR)/$(SFZ_LIBDIR)" \
-		--sf2 "$(SOUNDFONT)"
-#-----------------------------------------------------------------------------
-%-sfz.mp4: sfz-mix/%-sfz-mix.wav %_2.fs ${GCS2YOUTUBE} ${WAV2WAVEFORM} ${FS2ASS}
-	${GCS2YOUTUBE} -a "$<" -o "$@" "$*_2.fs" || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: help
 help::
@@ -144,6 +115,10 @@ check:
 #=============================================================================
 #-- .PHONY: all         #-- There is a bug in gmake. I don't understand.
 all: s1
+# . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+# Extra #include dependencies for specific movements.
+b2m2.E: music-2-2.gcs
+b2m3.E: music-2-3.gcs
 #-----------------------------------------------------------------------------
 fs: ${SONGS_FS} ${SONGS_2_FS}
 #-----------------------------------------------------------------------------
@@ -158,6 +133,29 @@ sfz: ${SONGS:%=${SFZ_MIXDIR}/%-sfz-mix.wav}
 #-----------------------------------------------------------------------------
 .PHONY: sfz-mp4
 sfz-mp4: ${SONGS:%=%-sfz.mp4}
+#-----------------------------------------------------------------------------
+# SFZ (VPO sampler) pipeline: real orchestral samples via sfizz_render
+#   make sfz       - render SONGS to sfz-mix/*.wav
+#   make sfz-mp4   - encode to *-sfz.mp4 video
+#   make sfz-clean - remove sfz-csv/ and sfz-mix/
+# Instruments with no VPO mapping (e.g. default piano) are rendered through
+# fluidsynth + GeneralUser.sf2 (gcs2sfz --sf2) -- see music/sfz/gcs2sfz.
+#-----------------------------------------------------------------------------
+sfz-csv/%/.done: %.E ${IMSCOMP}
+	@mkdir -p $(dir $@)
+	@rm -f $(dir $@)*.csv
+	cd $(dir $@) && ${IMSCOMP} ${MC_ARGS} --sfzpipecsv $(CURDIR)/$*.E
+	@touch $@
+#-----------------------------------------------------------------------------
+sfz-mix/%-sfz-mix.wav: sfz-csv/%/.done $(CURDIR)/$(GCS2SFZ)
+	@mkdir -p $(dir $@)
+	"$(CURDIR)/$(GCS2SFZ)" "$(CURDIR)/$(SFZ_CSVDIR)/$*" \
+		--outdir "$(CURDIR)/$(SFZ_MIXDIR)" \
+		--sfzdir "$(CURDIR)/$(SFZ_LIBDIR)" \
+		--sf2 "$(SOUNDFONT)"
+#-----------------------------------------------------------------------------
+%-sfz.mp4: sfz-mix/%-sfz-mix.wav %_2.fs ${GCS2YOUTUBE} ${WAV2WAVEFORM} ${FS2ASS}
+	${GCS2YOUTUBE} -a "$<" -o "$@" "$*_2.fs" || (rm -f $@ ; exit 1)
 #-----------------------------------------------------------------------------
 .PHONY: sfz-clean
 sfz-clean:
