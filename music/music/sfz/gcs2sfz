@@ -183,6 +183,134 @@ def read_csv_notes(csv_path: str) -> list[tuple[float, float, int, int, int, int
     return notes
 
 
+# Articulations that must never be pulled into a slur: a detached note is
+# re-struck by the player, so fusing it with the next note would swallow its
+# staccato/marcato character.
+_DETACHED_ARTICS = ('staccato', 'marcato')
+
+
+def _collapse_legato_groups(notes, base_bend, glide_ticks, max_semi, contig_tol,
+                            overlap_tol):
+    """Fuse slurred note runs into a single bent voice.
+
+    A sample player cannot re-pitch a sustaining voice, so a slur would
+    normally restart the sample on every note -- which is the re-attack that
+    makes a slur sound detached. Instead each run is played as ONE note-on at
+    the run's first pitch, and the later pitches are produced with channel
+    pitch bend gliding into each notated onset. The bend is restored to
+    ``base_bend`` when the run's note-off lands, so nothing else inherits it.
+
+    Applied only where it is safe:
+
+    - the run is contiguous (each note starts where the previous one ended);
+    - each continuation note is marked ``legato`` by imscomp (10th CSV column)
+      and its predecessor is not a detached articulation;
+    - consecutive intervals are within ``max_semi`` semitones, the reach of a
+      default +/-2 semitone bend (4096 bend units per semitone);
+    - the run is MONOPHONIC -- no other note of this instrument sounds at any
+      point during it. Pitch bend is channel-wide, so a simultaneous second
+      voice (a second staff, a chord) would be dragged along with the bend, so
+      such runs are left as ordinary notes.
+
+    Returns (notes, bend_timeline) where bend_timeline maps tick -> list of
+    absolute 14-bit bend values to emit at that tick.
+    """
+    n = len(notes)
+    if n < 2:
+        return notes, {}
+
+    used = [False] * n
+    out: list[tuple] = []
+    bends: dict[int, list[int]] = {}
+
+    def _add_bend(tick, value):
+        value = max(0, min(16383, int(value)))
+        bends.setdefault(tick, []).append(value)
+
+    i = 0
+    while i < n:
+        if used[i]:
+            i += 1
+            continue
+        run = [i]
+        j = i + 1
+        while j < n:
+            prev = notes[run[-1]]
+            cur = notes[j]
+            # The bend is measured from the run's FIRST note, so every member
+            # must stay within max_semi of notes[run[0]] -- not merely within
+            # max_semi of its immediate predecessor, or a stepwise chain like
+            # 66->65->63 would drift 3 semitones and bend out of range.
+            if (used[j] or cur[9] != 'legato' or prev[9] in _DETACHED_ARTICS
+                    or cur[10] != prev[10]
+                    or abs(cur[0] - prev[1]) > contig_tol
+                    or abs(cur[2] - notes[i][2]) > max_semi):
+                break
+            run.append(j)
+            j += 1
+
+        if len(run) == 1:
+            out.append(notes[i])
+            used[i] = True
+            i += 1
+            continue
+
+        first, last = notes[run[0]], notes[run[-1]]
+        g_on, g_off = first[0], last[1]
+
+        # Monophony guard: any other note sounding for a significant part of the
+        # run makes the channel-wide bend unsafe. A graze of a few ticks at the
+        # run's edge is tolerated -- the compiler's own legato timing leaves the
+        # following un-slurred note starting a hair before the slur's last note
+        # ends (~5ms), and bending it for that long is inaudible, whereas a
+        # real second voice overlaps for a whole note.
+        span = set(run)
+        if any(not (k in span) and min(nt[1], g_off) - max(nt[0], g_on) > overlap_tol
+               for k, nt in enumerate(notes)):
+            out.append(notes[i])
+            used[i] = True
+            i += 1
+            continue
+
+        for k in run:
+            used[k] = True
+
+        # One voice for the whole run: first note's pitch/velocity/attack,
+        # last note's end point for the expression and pan ramps.
+        out.append((g_on, g_off, first[2], first[3], first[4], first[5],
+                    first[6], last[7], last[8], 'legato', first[10]))
+
+        # Glide into each notated onset. The ramp is laid down just BEFORE the
+        # onset so the new pitch has arrived by the time the note "starts",
+        # which is what a slurred finger change sounds like.
+        cur_bend = base_bend
+        for k in run[1:]:
+            nt = notes[k]
+            target = max(0, min(16383, base_bend + (nt[2] - first[2]) * 4096))
+            start = max(g_on, nt[0] - glide_ticks)
+            span_ticks = max(1, nt[0] - start)
+            # One step per tick is already finer than the ear resolves; without
+            # the cap a wide interval emits hundreds of events onto the same few
+            # ticks (a 20ms glide is ~19 ticks at 960/s).
+            steps = max(1, min(span_ticks, abs(target - cur_bend) // 64))
+            for s in range(1, steps + 1):
+                t = start + (span_ticks * s) // steps
+                _add_bend(t, cur_bend + (target - cur_bend) * s // steps)
+            # The loop's last step always lands on nt[0] with value 'target'
+            # exactly ((span_ticks*steps)//steps == span_ticks), so there is no
+            # separate snap to emit here.
+            cur_bend = target
+
+        # Hand the channel back centred so following notes play unpitched.
+        if cur_bend != base_bend:
+            _add_bend(g_off, base_bend)
+
+        i = j
+
+    out.sort(key=lambda n: (n[0], n[1]))
+    return out, bends
+
+
 def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None,
                detune_cents=0.0, pan_off=0):
     """Write a single-track MIDI file from a CSV (absolute times in seconds).
@@ -244,7 +372,7 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
         # ranges consistently, so a piece's dynamics don't sit in a neighbor's
         # layer. Interpolated in vol, so cresc/dim glides between levels.
         vel = max(1, min(127, int(round(vel * instruments.velocity_mult(name, vol_s)))))
-        notes.append((on_tick, off_tick, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic))
+        notes.append((on_tick, off_tick, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic, staff))
 
     if not notes:
         # Empty instrument: still write a valid file so the caller can decide.
@@ -267,7 +395,7 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
     out: list[list] = []
     alive: list[bool] = []
     active: dict[int, int] = {}  # pitch -> index into out
-    for on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic in notes:
+    for on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic, staff in notes:
         j = active.get(pitch)
         if j is not None and out[j][1] >= on:
             if out[j][0] == on:
@@ -275,7 +403,7 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
                 off = max(off, out[j][1])
             else:
                 out[j][1] = on  # repeated note: cut previous at new on
-        out.append([on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic])
+        out.append([on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic, staff])
         alive.append(True)
         active[pitch] = len(out) - 1
     notes = [tuple(n) for i, n in enumerate(out) if alive[i]]
@@ -295,17 +423,39 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
         notes = [
             (on, off, pitch,
              max(1, min(127, int(round(vel * pow(vol_s / 127.0, _gm_expr))))),
-             pan, rev, vol_s, vol_e, pan_e, artic)
-            for on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic in notes
+             pan, rev, vol_s, vol_e, pan_e, artic, staff)
+            for on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic, staff in notes
         ]
         notes.sort(key=lambda n: (n[0], n[1]))
 
     tempo_ppqn_micros = int(60000000.0 / BPM)  # 500000 us/qn @ 120bpm
 
+    # Slur emulation: fuse legato-marked runs into one bent voice (see
+    # _collapse_legato_groups). base_bend is centre 8192 plus any whole-stream
+    # detune, so the run's bends compose with the ensemble offset instead of
+    # cancelling it. Only meaningful on the sfizz path: the GM fallback merges
+    # every voice of the instrument onto ONE channel, where a channel-wide
+    # bend would detune concurrent notes.
+    base_bend = 8192
+    if detune_cents:
+        base_bend = max(0, min(16383, int(round(8192 + detune_cents * 8192.0 / 200.0))))
+    bend_timeline: dict[int, list[int]] = {}
+    if pred_expr and os.environ.get("GCS2SFZ_LEGATO", "1") not in ("0", "false", "no", ""):
+        max_semi = int(os.environ.get("GCS2SFZ_LEGATO_MAX_SEMI", "2"))
+        glide_ms = float(os.environ.get("GCS2SFZ_LEGATO_GLIDE_MS", "20"))
+        overlap_ms = float(os.environ.get("GCS2SFZ_LEGATO_OVERLAP_MS", "20"))
+        notes, bend_timeline = _collapse_legato_groups(
+            notes, base_bend,
+            glide_ticks=max(0, int(round(glide_ms * TICKS_PER_SEC / 1000.0))),
+            max_semi=max_semi,
+            contig_tol=max(1, int(round(0.005 * TICKS_PER_SEC))),
+            overlap_tol=max(0, int(round(overlap_ms * TICKS_PER_SEC / 1000.0))),
+        )
+
     # Group note-ons/offs onto a timeline keyed by absolute tick.
     # (kind 0=note-on, 1=note-off; CC11 expression is derived from note-ons.)
     timeline: dict[int, list[tuple[int, int, int]]] = {}
-    for on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic in notes:
+    for on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic, staff in notes:
         timeline.setdefault(on, []).append((0, pitch, vel))
         timeline.setdefault(off, []).append((1, pitch, vel))
 
@@ -355,7 +505,7 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
             if t > on and 0 <= val <= 127:
                 cc_timeline.setdefault(t, []).append((cc, val))
 
-    for on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic in notes:
+    for on, off, pitch, vel, pan, rev, vol_s, vol_e, pan_e, artic, staff in notes:
         if pan != last_pan:
             cc_timeline.setdefault(on, []).append((10, pan))
             last_pan = pan
@@ -400,12 +550,20 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
         bend = max(0, min(16383, bend))
         events.append((0, b"\xe0" + bytes([bend & 0x7F, (bend >> 7) & 0x7F])))
     last_tick = 0
-    for tick in sorted(set(timeline) | set(cc_timeline)):
+    for tick in sorted(set(timeline) | set(cc_timeline) | set(bend_timeline)):
         delta = tick - last_tick
         last_tick = tick
         first = True
         for cc, value in sorted(cc_timeline.get(tick, [])):
             events.append((delta if first else 0, b"\xb0" + bytes([cc, value & 0x7F])))
+            first = False
+        # Pitch bend before the note events at this tick: a slur's glide must
+        # have arrived before its note-off/note-on pair, and a run that hands
+        # the channel back must do so before an unrelated note starts on the
+        # same tick.
+        for bend in bend_timeline.get(tick, []):
+            events.append((delta if first else 0,
+                           b"\xe0" + bytes([bend & 0x7F, (bend >> 7) & 0x7F])))
             first = False
         # Note-offs MUST precede note-ons at the same tick: a merged instrument
         # CSV (e.g. all violin voices in one part) has the previous voice's

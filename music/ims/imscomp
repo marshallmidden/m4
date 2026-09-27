@@ -1933,6 +1933,12 @@ def parse_args() -> None:
                         '-fluid', '-flui', '-flu', '-fl', '-f', '-fs',
                         action='store_true',
                         help='Output fluidsynth music format output.')
+    parser.add_argument('--priming', '--primin', '--prima', '--prim', '--pri',
+                        type=float, default=50.0,
+                        help='Silent lead-in in ms before everything, so the audio device is already'
+                             ' running before the first note. FluidSynth default output ring is'
+                             ' audio.period-size 64 * audio.periods 16 = 1024 frames = 23 ms @ 44100,'
+                             ' so 50 ms covers two dropped buffers. 0 disables.')
     parser.add_argument('--sfzpipecsv', '--sfzpipe', '--sfzpi', '--sfz',
                         action='store_true',
                         help='Output per-instrument SFZ pipe CSV for sfizz rendering.')
@@ -6829,7 +6835,10 @@ def print_out_midi1csv_notes() -> None:
                 # fi
 
                 # Compute per-note humanize offset for timing variation.
-                if not args.nohumanize and _humanize_max > 0:
+                # Legato (slur) notes snap to the grid: the previous note is held to
+                # exactly this tick, so the pair must land on the same time (zero gap
+                # and zero overlap), otherwise the "slur" would be gappy or fuzzy.
+                if not args.nohumanize and _humanize_max > 0 and 'l' not in last_suffixes:
                     note_time = max(0, lthworkingmeasures + random.randint(-_humanize_max, _humanize_max))
                 else:
                     note_time = lthworkingmeasures
@@ -6862,15 +6871,20 @@ def print_out_midi1csv_notes() -> None:
                 if 'u' in last_suffixes:                    # tenuto - 90%, no overlap, distinctive break.
                     note_playing = int(note_playing * last_tenuto)
                 # fi
-                if 'l' in last_suffixes:                    # legato - extend playing time.
-                    note_playing = int(note_playing * last_legato)
+                # legato ('l') = slur: the note is held exactly its written length
+                # (no 'last_legato' stretch) and the next note-on lands on its end
+                # (zero gap, zero overlap) - see the note_time snap above and the
+                # note_off at lthworkingmeasures in the normal-note path below.
                 # fi
                 # Volume ramp: smooth CC11/CC7 transitions when a note is
                 # still sounding (no rest before this note).  If the previous
                 # element was a rest, snap instantly (the listener cannot hear
                 # the jump).  Disable with --novolumeramp.
+                # Legato notes snap expression at the seam instead of ramping it
+                # across the still-sounding previous note's tail - a pre-note ramp
+                # would be a fake swell/dip inside the slurred note.
                 _do_vol_ramp = (not args.novolumeramp and last_note_on != ''
-                                and last_note_length > 0)
+                                and last_note_length > 0 and 'l' not in last_suffixes)
                 if last_cc11 != v_vl:
                     if _do_vol_ramp:
                         _ramp_ticks = min(int(MIDICLICKSPERQUARTER / 4),
@@ -7028,6 +7042,16 @@ def print_out_midi1csv_notes() -> None:
                     if not args.nohumanize and _humanize_vel > 0:
                         note_velocity = max(_velocity_min, min(127, note_velocity + random.randint(-_humanize_vel, _humanize_vel)))
                     # fi
+                    # Legato footswitch (CC68 = MIDI 0x44 LEGATO_SWITCH) has to be released
+                    # *before* the first un-slurred note-on, not after: if the OFF lands after
+                    # it, the synth reads that note as a legato continuation (no hammer
+                    # strike), and its own note-off a tick later then damps it at once, so
+                    # the note is inaudible.  Emitted here, ahead of the HERE16/HERE20
+                    # note-on inserts, so it sorts first at the same tick.
+                    if 'l' not in last_suffixes and legato_on:
+                        insert_sorted_tail([voice+1, note_time, f'Control_c, {chan}, 68, 0'], 'HERE23') # OFF
+                        legato_on = False
+                    # fi
                     if legato_on:                           # If on from previous note.
                         if l_instrument in instruments:
                             pass
@@ -7065,18 +7089,14 @@ def print_out_midi1csv_notes() -> None:
                     # fi
                 # fi
 
-                # If legato, turn it on, if not already on.
+                # Legato footswitch: one ON at the start of the slurred group, one OFF
+                # at its end - not a toggle on every slurred note.  The OFF is emitted
+                # before the note-on block above, since it has to precede the first
+                # un-slurred note-on at the same tick.
                 if 'l' in last_suffixes:                    # New note has legato.
-                    if legato_on:                           # Previous was legato, so turn off briefly before returning on.
-                        insert_sorted_tail([voice+1, note_time, f'Control_c, {chan}, 68, 0'], 'HERE21a') # OFF
-                    # fi
-                    # Emit CC68 at note start so synths apply legato to this note.
-                    insert_sorted_tail([voice+1, note_time + 1, f'Control_c, {chan}, 68, 127'], 'HERE22') # ON
-                    legato_on = True
-                else:
-                    if legato_on:
-                        insert_sorted_tail([voice+1, note_time + lastlegatolth, f'Control_c, {chan}, 68, 0'], 'HERE23') # OFF
-                        legato_on = False
+                    if not legato_on:
+                        insert_sorted_tail([voice+1, note_time + 1, f'Control_c, {chan}, 68, 127'], 'HERE22') # ON
+                        legato_on = True
                     # fi
                 # fi
 
@@ -7153,7 +7173,7 @@ def print_out_midi1csv_notes() -> None:
                     m = 'EOF-INTERNAL'
                 # fi
                 if args.fluidsynth or args.sfzpipecsv:
-                    insert_sorted_tail([voice+1, lthworkingmeasures, f'Text_t, "goto {m}"'], 'HERE27')
+                    insert_sorted_tail([voice+1, lthworkingmeasures + last_note_length, f'Text_t, "goto {m}"'], 'HERE27')
                 # fi
             else:
                 m_number = m_number + 1
@@ -7169,14 +7189,14 @@ def print_out_midi1csv_notes() -> None:
                     if premeasurecomment[m] != '':
                         t_data = premeasurecomment[m].splitlines()
                         for t_d in t_data:
-                            insert_sorted_tail([voice+1, lthworkingmeasures, f'Text_t, "{t_d}"'], 'HERE28')
+                            insert_sorted_tail([voice+1, lthworkingmeasures + last_note_length, f'Text_t, "{t_d}"'], 'HERE28')
                         # rof
                         premeasurecomment[m] = ''           # Only do it once.
                     # fi
                     if measurelinecomment[m] != '':
-                        insert_sorted_tail([voice+1, lthworkingmeasures, f'Text_t, "measure {m} - {measurelinecomment[m]}"'], 'HERE29')
+                        insert_sorted_tail([voice+1, lthworkingmeasures + last_note_length, f'Text_t, "measure {m} - {measurelinecomment[m]}"'], 'HERE29')
                     else:
-                        insert_sorted_tail([voice+1, lthworkingmeasures, f'Text_t, "measure {m}"'], 'HERE30')
+                        insert_sorted_tail([voice+1, lthworkingmeasures + last_note_length, f'Text_t, "measure {m}"'], 'HERE30')
                     # fi
                 # fi
             # fi
@@ -7706,9 +7726,11 @@ def print_out_fluidsynth() -> None:
         xxx = t[1] + ' ' + t[2] + ' ' + t[3]
         v_t_lines[t[0]].append(xxx)
     # rof
+    if args.priming > 0:
+        really_print_output(f'sleep {args.priming}')
+    # fi
     current_time = -1
     this_time = []
-    priming_added = False
     for v in range(0, voices+1):
         this_time.append(0)
     # rof
@@ -7744,14 +7766,6 @@ def print_out_fluidsynth() -> None:
     # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
         # Process cc commands first (setup)
         tempo_s, tempo_l = fs_check('cc ', 3, min_next, v_t_lines, tempo_s, tempo_l)
-        
-        # After setup at time=0, add priming BEFORE any notes play (only once)
-        if current_time == 0 and not priming_added:
-            priming_added = True
-            really_print_output('noteon 0 60 0')
-            really_print_output('sleep 2.0')
-            really_print_output('noteoff 0 60 0')
-        # fi
         
         # Now process note commands
         tempo_s, tempo_l = fs_check('noteoff ', 8, min_next, v_t_lines, tempo_s, tempo_l)
@@ -7834,6 +7848,10 @@ def print_out_sfzpipecsv() -> None:
     chan_pan = {}
     chan_rev = {}
     chan_vol = {}
+    # Per-(voiceon,chan) CC11 change history [(tick, value), ...] so a note's
+    # ending expression can be read from the value in effect during its body,
+    # not the value snapped AT its note-off tick (a legato-seam snap).
+    chan_vol_hist = {}
 
     # Track note-on events: pending_notes[(port, chan, pitch)] = list of
     #   (start_tick, velocity, seconds_per_tick_at_start, pan, reverb, vol, articulation)
@@ -7897,7 +7915,18 @@ def print_out_sfzpipecsv() -> None:
         start_sec = tick_to_sec(start_tick)
         dur_sec = tick_to_sec(tick) - start_sec
         ckey = (voiceon, key[1])
-        vol_end = chan_vol.get(ckey, vol)
+        # Expression (CC11) in effect during this note's body: the value of the
+        # last CC11 change STRICTLY before the note-off tick. A CC11 emitted at
+        # exactly the note-off tick is a legato-seam snap (the next slurred
+        # note's dynamic at the shared boundary), not an in-note swell, so it
+        # must not become this note's vol_end. Falls back to the note-start
+        # volume if the CC11 never changed during the body.
+        vol_end = vol
+        for h_t, h_v in chan_vol_hist.get(ckey, []):
+            if h_t < tick:
+                vol_end = h_v
+            else:
+                break
         pan_end = chan_pan.get(ckey, pan)
         notes.setdefault((voiceon, key[1]), []).append((start_sec, dur_sec, pitch, vel, pan, rev, vol, vol_end, pan_end, artic, voiceon))
 
@@ -7931,6 +7960,7 @@ def print_out_sfzpipecsv() -> None:
                 chan_rev[key] = value
             elif cc == 11:
                 chan_vol[key] = value
+                chan_vol_hist.setdefault(key, []).append((current_tick, value))
 
         elif event_str.startswith('Note_on_c, '):
             # Note_on_c, chan, pitch, velocity[, articulation]

@@ -21,7 +21,7 @@ Suffix convention: `foo.fs/.abc/.csv` = musicomp2abc output; `foo_2.fs/_2.abc/_2
 ## Commands
 
 - Per-piece dirs (`music/b/01`, `music/b/09`, `music/songs`, `music/t/e`, `music/ims`, ...): `make fs` / `make abc` / `make pdf` / `make mp4` / `make -B b9m2_2.fs` (force rebuild one imscomp output). Makefiles enumerate `SONGS`/`TESTS` names.
-- Top-level `music/`: `make all | mp4 | mp4_2 | clean` recurses into `musicomp2abc songs ims t b`.
+- Top-level `music/`: `make all | mp4 | mp4_2 | clean` recurses into `musicomp2abc songs ims t b`; `make mp4`/`mp4_2` recurse into `musicomp2abc songs t b` (so the musicomp2abc pieces get videos too).
 - `./create-mp4` — builds all 25 YouTube `.mp4`s in parallel.
 
 ## Tests (differential regression — the real test suite)
@@ -59,6 +59,7 @@ Second, higher-fidelity render path using the Virtual Playing Orchestra sample l
   - `music/DEVIN-2026-09-15-cc11-sfz-loudness.md` — CC11 predistortion (`GCS2SFZ_EXPR_EXP`) + GM-fallback stutter fix; gain sync (`GCS2SFZ_GM_GAIN`) and expression-in-velocity (`GCS2SFZ_GM_EXPR`) calibrated on `test-volume-levels`; make-clean re-render memo.
   - `music/DEVIN-2026-09-19-sfz-ensemble.md` — stage/ensemble simulation: 11th CSV `staff` column; per-desk detune (each desk internally in tune via channel-wide pitch-bend at tick 0 + re-zero, desks spread over ±4 cent via `GCS2SFZ_ENSEMBLE_DETUNE`, never two desks on the same tuning) + per-staff pan spread (`GCS2SFZ_ENSEMBLE_PAN`), each desk rendered as its own stream and amixed; `GCS2SFZ_ENSEMBLE=0` disables.
   - `music/DEVIN-2026-09-20-b9m2-horn-imbalance.md` — RESOLVED: b/09 b9m2 horns overwhelmed mm 51-58; m45 `vol(p)<` + late-placement `vol<` made horns/clarinet ramp to ~ff by ~m49 while orchestra stayed ~pp until m57 `ff`. Fixed in b9m2.gcs: two `vol(p)<`->`vol<`, `vol<` moved to line head, HorninBV16 + Timpani got lead-ins, redundant m46 `vol<` dropped.
+  - `music/DEVIN-2026-09-27-legato-slur.md` — legato/slur work: `l` semantics, CC68 footswitch ordering, `--priming`, SFZ slur-by-pitch-bend, and the two-note-shorthand open question. READ THIS before touching `'l'` handling in either compiler or `_collapse_legato_groups` in gcs2sfz. The short version: **`l` means "glide to the next note, no attack at its onset", so mark EVERY note of a slur with `l`, including the last** — the slurred group is the maximal run of consecutive `l` notes, and the first non-`l` note after it is struck fresh. Both compilers must stay mirrored on all of it.
   - `music/AAA.README.md` — differential-test suite HOWTO for `AAA.diff._2`/DOALL.
 
 ## YouTube uploads

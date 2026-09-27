@@ -118,6 +118,45 @@ gcs2sfz render behaviors
     sfizz render itself is deterministic per input.
 
 ===============================================================================
+Slur / legato emulation (pitch-bend fusion) -- implemented 2026-09-27
+===============================================================================
+
+Why: a sample player cannot re-pitch a sustaining voice, so a slur in this path
+would restart the sample on every note -- which is exactly the re-attack that
+makes a slur sound detached. See DEVIN-2026-09-27-legato-slur.md for the full
+write-up, including the `l` suffix semantics and the open musical questions.
+
+`gcs2sfz` `_collapse_legato_groups()` plays each slurred run as ONE note-on at
+the run's first pitch and produces the later pitches with channel pitch bend
+gliding into each notated onset, restoring centre at the run's note-off. A
+~20 ms ramp is laid down just BEFORE each onset, so the new pitch has arrived
+by the time the note "starts". Bends are emitted before the note events at a
+tick, so a glide always arrives before its note-off/note-on pair.
+
+The run is a maximal chain of CONSECUTIVE `legato` notes (CSV column 10), which
+is exactly the group imscomp's CC68 footswitch spans, so the two agree. All
+guards are conservative -- contiguous, same staff, predecessor not
+staccato/marcato, every member within MAX_SEMI of the run's FIRST pitch (the
+sample is loaded at that pitch, so the run must stay inside the sampler's bend
+range), and MONOPHONIC (pitch bend is channel-wide, so a second simultaneous
+voice would be dragged along with it).
+
+  - Env knobs:
+      * GCS2SFZ_LEGATO=0 disables the whole feature. Default ON.
+      * GCS2SFZ_LEGATO_MAX_SEMI (default 2): how far a run may stray from its
+        first pitch. 2 matches the sampler's default +/-2 semitone bend range.
+      * GCS2SFZ_LEGATO_GLIDE_MS (default 20): glide length per note change.
+      * GCS2SFZ_LEGATO_OVERLAP_MS (default 20): how much a second voice may
+        overlap a run before the run is rejected as polyphonic.
+  - Only runs on the sfizz path (`pred_expr=True`). The GM fallback merges every
+    voice of an instrument onto ONE channel, where a channel-wide bend would
+    detune concurrent notes.
+  - Measured payoff is currently small (~8% of legato notes on b/01) because
+    most slurs in the repertoire are written `X l, Y` -- `l` on the first note
+    only -- which is not a chain. See the note's "Open questions"; the range is
+    NOT the bottleneck (raising MAX_SEMI to 12 only reaches 15%).
+
+===============================================================================
 Stage / ensemble simulation (tuning, detune, pan) -- implemented 2026-09-19
 ===============================================================================
 
@@ -317,3 +356,9 @@ Open:
   - ARTIC_MAX=0 is not overridden by anything; switching the GM fallback to a
     sfizz-renderable GM soundfont (or a default VPO piano) would drop the
     last GM-dependent instruments.
+  - The two-note slur shorthand (`X l, Y` with `l` on the first note only) is
+    the dominant pattern in the repertoire but is not a chain, so it does not
+    fuse. Making it a real slur means either re-marking the scores or
+    extending the compiler's CC68 span across the note after a chain -- which
+    re-introduces the inaudible-note bug unless the note-off timing is
+    revisited. Needs a listening decision, not a mechanical one.

@@ -23,11 +23,11 @@ all:
 #-----------------------------------------------------------------------------
 .PHONY: mp4
 mp4:
-	@for d in songs t b; do echo "=== make mp4 in $$d ===" ; $(MAKE) -C $$d mp4 ; done
+	@for d in musicomp2abc songs t b; do echo "=== make mp4 in $$d ===" ; $(MAKE) -C $$d mp4 ; done
 #-----------------------------------------------------------------------------
 .PHONY: mp4_2
 mp4_2:
-	@for d in songs t b; do echo "=== make mp4_2 in $$d ===" ; $(MAKE) -C $$d mp4_2 ; done
+	@for d in musicomp2abc songs t b; do echo "=== make mp4_2 in $$d ===" ; $(MAKE) -C $$d mp4_2 ; done
 #-----------------------------------------------------------------------------
 .PHONY: sfz
 sfz:
