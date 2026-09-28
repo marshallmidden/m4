@@ -8,38 +8,70 @@ and the open questions.
 
 `imscomp` line 17279 states it: `suffix_legato = 16  # glide to next note - no
 note attack on start of next note.` So `l` on note N means **N glides into N+1
-with no re-attack at N+1's onset** — it is "slurred *from*".
-
-The practical convention that falls out, and the one the test piece uses, is
-**mark every note of the slur with `l`, including the last**:
+with no re-attack at N+1's onset** — it is "slurred *from*". The mark therefore
+goes on the notes that *slur*, and **not** on the last note of the run:
 
 ```
-v W: NT0 NT1 NT2 NT3   r4        NT0..NT2 carry ;l,1
+c4 e4l f4l g4
+      ^  ^
 ```
 
-That makes the slurred group = the maximal run of *consecutive* `l` notes, and
-the first non-`l` note after it is struck fresh. `ims/test-legato.gcs` is the
-canonical example: `NT0..NT2` are `l`, `NT3` is bare, and the `.fs` shows
-CC68 down across the three notes and released at `NT3`.
+`e` and `f` slur; `g` is slurred *into* by `f`'s `l`, and `c` is not slurred into
+at all (nothing before it has `l`). So the group is `e f g`, `c` and nothing
+else is struck fresh at the far end, and `g` is played with no attack.
 
-Note that much of `b/01/v1-1.gcs` uses the two-note shorthand
-(`5e2l, 5f8` — `l` on the first note only). Under the convention above that is
-*not* a two-note slur, it is a legato marking on `5e` with `5f` re-struck. See
-"Open questions".
+This is what the pre-2026-09 compilers already did, and it is the semantics to
+keep. An earlier draft of this note got it backwards and told you to mark every
+note including the last; that variant re-attacks the final note of every slur,
+and it also makes `gcs2sfz` fuse the wrong notes (see below).
+
+`ims/test-legato.gcs` is the canonical example: `NT0` and `NT1` carry `l`, so
+`NT0..NT2` is the three-note slur and `NT3` is struck fresh.
+
+Much of `b/01/v1-1.gcs` uses the two-note shorthand (`5e2l, 5f8` — `l` on the
+first note only), which under this convention *is* a correct two-note slur.
 
 ## Compiler changes (both compilers, kept in sync)
 
-### 1. CC68 footswitch ordering — the audible bug
+### 1. CC68 footswitch span — the audible bug
 
-Before: the release (CC68 = 0) was emitted at `note_time + lastlegatolth`, i.e.
-*after* the following un-slurred note-on. A synth with the pedal still down
-reads that note-on as a legato continuation (no hammer strike), and the
-note's own note-off lands a tick later and damps it at once — **the note is
-inaudible.**
+`imscomp` drives CC68 (MIDI 0x44 `LEGATO_SWITCH`) directly. fluidsynth treats
+CC68 as **monophonic** (`fluid_channel_is_playing_mono()`), which dictates the
+whole shape of the pedal trace:
 
-Now the release is emitted at `note_time`, ahead of the `HERE16`/`HERE20`
-note-on inserts so it sorts first at the same tick. It is also no longer a
-toggle: one CC68=127 at the start of a slurred group, one CC68=0 at its end.
+- The pedal must be **down at the onset** of every note that follows an `l`
+  note. That is the semantics. Releasing it *before* the note-on — as one
+  intermediate attempt did, on the theory that a late release leaves the note
+  inaudible — silently re-attacks the last note of every slur.
+- The pedal must be **re-armed a short way into that note**, not held across it.
+  Within one unbroken pedal-down span, fluidsynth routes note-ons to
+  `fluid_synth_noteon_monopoly_legato()`, so every note-on after the first
+  continues the same decaying voice rather than starting a new one, and the
+  notes die away one by one. Measured per-note RMS on a 3-note test:
+
+  | pedal behaviour                | note 1 | note 2 | note 3 |
+  |--------------------------------|--------|--------|--------|
+  | up (all struck)                | -26.5  | -25.9  | -24.6  |
+  | down at onset, up 2 ms in      | -26.6  | -26.1  | -24.9  |
+  | held to the note-off           | -26.5  | -29.2  | -50.2  |
+  | held across the whole run      | -41.3  | -41.8  | -58.1  |
+
+  So the trace is a short ON/OFF pair per slurred note, which is exactly what
+  the pre-2026-09 compiler emitted (its `ON / OFF / ON / OFF` toggle was noisy
+  but harmless, and each slurred note-on was the first of its span). The old
+  stretch-derived `lastlegatolth` release point is replaced by
+  `1 .. MIDICLICKSPERQUARTER/16` ticks (2–31 ms), capped at a quarter of the
+  note so it always rings.
+- The **previous note's note-off must land before the slurred note's onset.**
+  In monophonic mode a note-off for the old key that arrives even one tick
+  after the new note-on goes through `fluid_synth_noteoff_mono_LOCAL()` and
+  damps the note just started. This is not hypothetical: humanize jitters
+  note-ons by up to ±`humanize` ticks while note-offs were measured from the
+  un-jittered grid, so the ordering flipped at random — `NT2` came out at
+  -56.7 dB in measure 1 of the mini test and -34.0 dB in measure 2 of the
+  identical measure 2. Slur note-offs are now pinned to `note_time - 1`
+  (≈2 ms, an exact legato join) and measured from the jittered `note_time`
+  rather than the grid.
 
 ### 2. `l` is a slur, not a duration stretch
 
@@ -91,10 +123,15 @@ the note "starts".
 
 Guards, all conservative:
 
+- the run **starts** on a note marked `legato` by imscomp (CSV column 10) and
+  **extends to the note after it** — `l` is "no attack on the *next* note", so
+  the slurred-in target carries no marker. Requiring the target to be marked
+  instead runs the group backwards: it would absorb the note *before* the slur
+  and drop the slur's last note;
 - contiguous (`|cur.start - prev.end| <= 5 ticks`);
-- every continuation note marked `legato` by imscomp (CSV column 10);
-- predecessor is not `staccato`/`marcato` (a detached note is re-struck, so
-  fusing it would swallow its character);
+- the note the run extends from is not `staccato`/`marcato` (a detached note is
+  re-struck, so fusing it would swallow its character). A *slurred-in* target
+  may be staccato — `l` governs the attack, the staccato only its length;
 - same `staff` column (else it is a different desk, not a continuation);
 - every member within `GCS2SFZ_LEGATO_MAX_SEMI` (default 2) of the run's
   **first** pitch — the sample is loaded at that pitch, so the whole run must
@@ -113,31 +150,53 @@ one channel, where a channel-wide bend would detune concurrent notes.
 
 `b/01/v1-1.gcs`, all 12 instrument CSVs, 2766 legato notes:
 
-| `GCS2SFZ_LEGATO_MAX_SEMI` | re-strikes eliminated |
-|---|---|
-| 2 (default) | 226 (8%) |
-| 4 | 358 (13%) |
-| 7 | 371 (13%) |
-| 12 | 408 (15%) |
+`b/01/v1-1.gcs`, all 12 instrument CSVs — 17277 notes, 2766 of them marked
+`legato`:
 
-Raising the bend range barely helps, so the range is **not** the bottleneck —
-the bottleneck is the score's marking convention. Of the ~16660 run starts,
-most are a single `l` note followed by a non-`l` note (no chain to fuse), and
-`not-contiguous` / `staff-change` account for only ~1900 breaks between them.
-See "Open questions".
+| `GCS2SFZ_LEGATO_MAX_SEMI` | re-strikes eliminated | fused runs | mean run |
+|---|---|---|---|
+| 2 (default) | 505 (2.9%) | 391 | 2.29 notes |
+| 4 | 727 (4.2%) | 453 | 2.60 notes |
+| 7 | 830 (4.8%) | 481 | 2.73 notes |
+| 12 | 895 (5.2%) | 495 | 2.81 notes |
+
+The bottleneck **is** the bend range. Of the 2478 runs that never got past their
+first note, 1745 were refused for exceeding `max_semi`, against 571 for a staff
+change, 107 for polyphony and 55 for non-contiguity. Looking only at the 914
+pairs that clear contiguity/staff/monophony, the first slurred interval is
+
+| semitones | 1 | 2 | 3 | 4 | 5 | 6–9 | 10 | 12 | 13–14 |
+|---|---|---|---|---|---|---|---|---|---|
+| pairs | 373 | 262 | 58 | 110 | 32 | 12 | 11 | 50 | 6 |
+
+so 635 of them sit inside the default 2-semitone bend and the rest are mostly
+leaps of a fourth (110) and an octave (50). Bumping the default to 4 is the
+cheapest real gain (+44%), but the bend is plain resampling, so 4 vs 2 is a
+listening call rather than a correctness one — the default is left at 2.
 
 ## Verification done
 
 - `ims/DOALL`: **0 bare / 2 named**, the 2 being the known pre-existing
   `gershwin new-g3` failure that both compilers share. No regression.
 - `imscomp` and `musicomp2abc` diff is exactly the expected `--sfzpipecsv`
-  delta (756 lines, all SFZ-only); the legato edits are mirrored in both.
-- `ims/test-legato.fs` inspected directly: `sleep 50.0` first line (priming),
-  CC68 down across the slurred notes, `cc 0 68 0` immediately *before*
-  `noteon 0 77 79` (the un-slurred note) — the ordering fix, visible.
-- `gcs2sfz` on `ims/sfz-csv/test-legato/piano.csv`: emits `NOTEON pitch=72` once
-  for the run plus a 19-step bend ramp to +2.00 semitones, restores `8192` at
-  the run's note-off.
+  delta; the legato edits are mirrored in both, and the two compilers emit
+  byte-identical CC68/note traces for the same input.
+- Minimal repro (`/tmp/mini/m.gcs`, `4c4, 4e4l, 4f4l, 4g4` on acoustic grand):
+  per-note RMS -36.2/-35.5/-34.9/-34.0 dB in m1 and -34.9/-36.6/-34.9/-34.0 in
+  m2 — no silent notes, in either measure. Before the note-off fix the same
+  measure read -56.7 dB on its last note.
+- Pedal-trace shape, same piece, measure 1 (ticks):
+  `noteoff 76 @503.5` → `cc 68 127` + `noteon 77 @504` → `cc 68 0 @519` →
+  `noteoff 77 @741.5` → `cc 68 127` + `noteon 79 @742` → `cc 68 0 @757` →
+  `noteoff 79 @960`.
+- `ims/test-legato.fs` measure 6 inspected directly: `cc 2 68 127` immediately
+  before `noteon 2 74` and before `noteon 2 76` (the two slurred-in notes), and
+  **no** CC68 before `noteon 2 77` — `NT3` struck fresh, as it should be.
+- `gcs2sfz._collapse_legato_groups` unit-checked directly against
+  `c e4l f4l g4`, `a4l b4`, `c d4l e4`, gapped / wide-leap / polyphonic /
+  two-separate-slur cases, and fractional-second CSVs (which used to raise
+  `TypeError: 'float' object cannot be interpreted as an integer` in the bend
+  ramp). All as expected.
 - VPO render of `b/01` violin (7 desks, ensemble detune + pan spread):
   -16.1 LUFS / true peak -0.2 dBFS with fusion on, -16.0 / -0.2 with it off
   (`GCS2SFZ_LEGATO=0`) — the fusion does not change level, and sfizz accepts
@@ -146,17 +205,15 @@ See "Open questions".
 
 ## Open questions
 
-1. **The two-note shorthand.** `b/01` writes `5e2l, 5f8` where a listener
-   would hear a two-note slur. Under the convention settled on here that
-   re-strikes the `5f`. Either the scores should mark the last note of every
-   slur too, or the compilers should extend the pedal across the note
-   following a chain of `l` notes. The latter is a one-line change to the
-   release condition but it re-introduces exactly the inaudible-note bug
-   described in §1 unless the note-off timing is also revisited. **This is a
-   musical call, not a mechanical one — it needs the user's ear.**
-2. **Is 8% worth it?** The fusion is correct but currently a small effect on
-   real repertoire. Fixing (1) is what would make it large; that is why (1)
-   comes first.
+1. ~~**The two-note shorthand.**~~ **Resolved.** `5e2l, 5f8` *is* a two-note
+   slur under the real semantics, which is what both compilers have always done
+   and what the current pedal trace reproduces. Nothing in the scores needs
+   changing, and the note-off/pedal interaction that used to make it sound
+   broken is fixed (§1).
+2. **Is 2.9% worth it?** The fusion is correct but a small effect on this
+   repertoire, and the ceiling is set by the bend range rather than by the score.
+   `GCS2SFZ_LEGATO_MAX_SEMI=4` roughly doubles it if the samples hold up under a
+   4-semitone bend — worth an A/B listen on the `b/01` violin.
 3. ~~`test-legato.gcs` had a stray `cstop*`~~ — **fixed, see below.**
 
 ## `ims/test-legato.gcs`: the per-instrument audition was silently broken

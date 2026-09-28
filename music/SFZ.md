@@ -133,13 +133,15 @@ gliding into each notated onset, restoring centre at the run's note-off. A
 by the time the note "starts". Bends are emitted before the note events at a
 tick, so a glide always arrives before its note-off/note-on pair.
 
-The run is a maximal chain of CONSECUTIVE `legato` notes (CSV column 10), which
-is exactly the group imscomp's CC68 footswitch spans, so the two agree. All
-guards are conservative -- contiguous, same staff, predecessor not
-staccato/marcato, every member within MAX_SEMI of the run's FIRST pitch (the
-sample is loaded at that pitch, so the run must stay inside the sampler's bend
-range), and MONOPHONIC (pitch bend is channel-wide, so a second simultaneous
-voice would be dragged along with it).
+The run starts on a note marked `legato` (CSV column 10) and extends to the
+note AFTER it, because `'l'` means "no attack on the NEXT note" -- so the
+slurred-in target carries no marker of its own. In `c4 e4l f4l g4` the run is
+`e f g`. That is also exactly the group imscomp's CC68 footswitch spans, so the
+two agree. All guards are conservative -- contiguous, same staff, the note the
+run extends from not staccato/marcato, every member within MAX_SEMI of the
+run's FIRST pitch (the sample is loaded at that pitch, so the run must stay
+inside the sampler's bend range), and MONOPHONIC (pitch bend is channel-wide,
+so a second simultaneous voice would be dragged along with it).
 
   - Env knobs:
       * GCS2SFZ_LEGATO=0 disables the whole feature. Default ON.
@@ -151,10 +153,12 @@ voice would be dragged along with it).
   - Only runs on the sfizz path (`pred_expr=True`). The GM fallback merges every
     voice of an instrument onto ONE channel, where a channel-wide bend would
     detune concurrent notes.
-  - Measured payoff is currently small (~8% of legato notes on b/01) because
-    most slurs in the repertoire are written `X l, Y` -- `l` on the first note
-    only -- which is not a chain. See the note's "Open questions"; the range is
-    NOT the bottleneck (raising MAX_SEMI to 12 only reaches 15%).
+  - Measured on b/01 (17277 notes, 2766 of them `legato`): 505 re-strikes
+    eliminated (2.9%) across 391 runs at the default, rising to 895 (5.2%) at
+    MAX_SEMI=12. The bottleneck IS the bend range -- 1745 of the 2478 runs that
+    got no further than their first note were refused for exceeding MAX_SEMI,
+    against 571 for a staff change, 107 polyphony and 55 non-contiguity. Going
+    to MAX_SEMI=4 is the cheapest real gain (+44%).
 
 ===============================================================================
 Stage / ensemble simulation (tuning, detune, pan) -- implemented 2026-09-19
@@ -356,9 +360,7 @@ Open:
   - ARTIC_MAX=0 is not overridden by anything; switching the GM fallback to a
     sfizz-renderable GM soundfont (or a default VPO piano) would drop the
     last GM-dependent instruments.
-  - The two-note slur shorthand (`X l, Y` with `l` on the first note only) is
-    the dominant pattern in the repertoire but is not a chain, so it does not
-    fuse. Making it a real slur means either re-marking the scores or
-    extending the compiler's CC68 span across the note after a chain -- which
-    re-introduces the inaudible-note bug unless the note-off timing is
-    revisited. Needs a listening decision, not a mechanical one.
+  - The two-note slur shorthand (`X l, Y` with `l` on the first note only) IS a
+    real two-note slur under the correct semantics, and it fuses. The case that
+    does not fuse is a wide first interval (over MAX_SEMI) -- a fourth or an
+    octave.

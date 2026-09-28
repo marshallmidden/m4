@@ -185,7 +185,10 @@ def read_csv_notes(csv_path: str) -> list[tuple[float, float, int, int, int, int
 
 # Articulations that must never be pulled into a slur: a detached note is
 # re-struck by the player, so fusing it with the next note would swallow its
-# staccato/marcato character.
+# staccato/marcato character. imscomp strips 'l' from a note that also carries
+# 's' (see its legato-on-staccato warning), so a detached note never reaches here
+# with a legato token and this tuple is currently unreferenced -- kept as the
+# documented rule for anyone extending the guards.
 _DETACHED_ARTICS = ('staccato', 'marcato')
 
 
@@ -200,11 +203,20 @@ def _collapse_legato_groups(notes, base_bend, glide_ticks, max_semi, contig_tol,
     pitch bend gliding into each notated onset. The bend is restored to
     ``base_bend`` when the run's note-off lands, so nothing else inherits it.
 
+    A run is extended to ``j`` when the note it comes *from* is marked
+    ``legato``, because ``'l'`` means "glide to the next note - no note attack
+    on the start of the next note": the note that carries ``legato`` is the one
+    that slurs, and the note after it is the slurred-in target. So in
+    ``c4 e4l f4l g4`` the run is ``e f g`` -- ``e`` is struck, ``f`` and ``g``
+    are bent into -- and ``c`` is left alone. (Requiring the *target* to carry
+    ``legato`` instead would run the group backwards, absorbing the note
+    before the slur and dropping the last note of it.)
+
     Applied only where it is safe:
 
     - the run is contiguous (each note starts where the previous one ended);
-    - each continuation note is marked ``legato`` by imscomp (10th CSV column)
-      and its predecessor is not a detached articulation;
+    - the note the run extends from is marked ``legato`` by imscomp (10th CSV
+      column);
     - consecutive intervals are within ``max_semi`` semitones, the reach of a
       default +/-2 semitone bend (4096 bend units per semitone);
     - the run is MONOPHONIC -- no other note of this instrument sounds at any
@@ -237,11 +249,18 @@ def _collapse_legato_groups(notes, base_bend, glide_ticks, max_semi, contig_tol,
         while j < n:
             prev = notes[run[-1]]
             cur = notes[j]
-            # The bend is measured from the run's FIRST note, so every member
-            # must stay within max_semi of notes[run[0]] -- not merely within
-            # max_semi of its immediate predecessor, or a stepwise chain like
-            # 66->65->63 would drift 3 semitones and bend out of range.
-            if (used[j] or cur[9] != 'legato' or prev[9] in _DETACHED_ARTICS
+            # 'l' on a note means the NEXT note is slurred into, so the run
+            # extends while the note it comes from carries the legato token.
+            # A detached articulation on that source would have been overridden
+            # by imscomp (it strips 'l' from an 's' note), so no separate
+            # staccato/marcato test is needed here -- and none is wanted on the
+            # target either, since 'l' governs the attack and the staccato only
+            # the length. (The bend is measured from the run's first note, so
+            # every member must stay within max_semi of notes[run[0]] -- not
+            # merely within max_semi of its immediate predecessor, or a stepwise
+            # chain like 66->65->63 would drift 3 semitones and bend out of
+            # range.)
+            if (used[j] or prev[9] != 'legato'
                     or cur[10] != prev[10]
                     or abs(cur[0] - prev[1]) > contig_tol
                     or abs(cur[2] - notes[i][2]) > max_semi):
@@ -260,10 +279,9 @@ def _collapse_legato_groups(notes, base_bend, glide_ticks, max_semi, contig_tol,
 
         # Monophony guard: any other note sounding for a significant part of the
         # run makes the channel-wide bend unsafe. A graze of a few ticks at the
-        # run's edge is tolerated -- the compiler's own legato timing leaves the
-        # following un-slurred note starting a hair before the slur's last note
-        # ends (~5ms), and bending it for that long is inaudible, whereas a
-        # real second voice overlaps for a whole note.
+        # run's edge is tolerated -- humanize jitter moves note-ons by a few
+        # ticks, and a neighbouring note overlapping for a tick or two is
+        # inaudible, whereas a real second voice overlaps for a whole note.
         span = set(run)
         if any(not (k in span) and min(nt[1], g_off) - max(nt[0], g_on) > overlap_tol
                for k, nt in enumerate(notes)):
@@ -291,14 +309,22 @@ def _collapse_legato_groups(notes, base_bend, glide_ticks, max_semi, contig_tol,
             span_ticks = max(1, nt[0] - start)
             # One step per tick is already finer than the ear resolves; without
             # the cap a wide interval emits hundreds of events onto the same few
-            # ticks (a 20ms glide is ~19 ticks at 960/s).
-            steps = max(1, min(span_ticks, abs(target - cur_bend) // 64))
+            # ticks (a 20ms glide is ~19 ticks at 960/s). int() because the CSV
+            # carries fractional seconds, so min() can hand range() a float.
+            steps = max(1, int(min(span_ticks, abs(target - cur_bend) // 64)))
+            last_t = last_v = None
             for s in range(1, steps + 1):
                 t = start + (span_ticks * s) // steps
-                _add_bend(t, cur_bend + (target - cur_bend) * s // steps)
-            # The loop's last step always lands on nt[0] with value 'target'
-            # exactly ((span_ticks*steps)//steps == span_ticks), so there is no
-            # separate snap to emit here.
+                v = cur_bend + (target - cur_bend) * s // steps
+                _add_bend(t, v)
+                last_t, last_v = t, v
+            # The last step has to land exactly on nt[0] with value 'target', so
+            # the pitch has arrived by the time the note "starts". With integer
+            # ticks (span_ticks*steps)//steps == span_ticks already, but the CSV
+            # is in fractional seconds and // floors, so snap it explicitly --
+            # unless the ramp already finished exactly there.
+            if (last_t, last_v) != (nt[0], target):
+                _add_bend(nt[0], target)
             cur_bend = target
 
         # Hand the channel back centred so following notes play unpitched.

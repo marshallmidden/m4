@@ -6668,6 +6668,7 @@ def print_out_midi1csv_notes() -> None:
         _pedal_is_down = False
         last_note_length = 0                        # The length of the last note (4c4).
         last_suffixes = ''                          # No ties/legato/cresc/dimin/etc. to start with.
+        prev_note_slurred = False                   # Previous note had 'l' - next note-on is legato.
 
         # note_playing = note length (with staccato taken care of). i.e. how long it plays.
         note_playing = 0                            # There is no note length to '4c4s' rest (staccato/portamento).
@@ -7042,15 +7043,36 @@ def print_out_midi1csv_notes() -> None:
                     if not args.nohumanize and _humanize_vel > 0:
                         note_velocity = max(_velocity_min, min(127, note_velocity + random.randint(-_humanize_vel, _humanize_vel)))
                     # fi
-                    # Legato footswitch (CC68 = MIDI 0x44 LEGATO_SWITCH) has to be released
-                    # *before* the first un-slurred note-on, not after: if the OFF lands after
-                    # it, the synth reads that note as a legato continuation (no hammer
-                    # strike), and its own note-off a tick later then damps it at once, so
-                    # the note is inaudible.  Emitted here, ahead of the HERE16/HERE20
-                    # note-on inserts, so it sorts first at the same tick.
-                    if 'l' not in last_suffixes and legato_on:
-                        insert_sorted_tail([voice+1, note_time, f'Control_c, {chan}, 68, 0'], 'HERE23') # OFF
-                        legato_on = False
+                    # Legato footswitch (CC68 = MIDI 0x44 LEGATO_SWITCH).
+                    #
+                    # 'l' means "glide to the next note - no note attack on the
+                    # start of the next note" (suffix_legato).  So the pedal has
+                    # to be DOWN at the onset of every note that FOLLOWS a note
+                    # marked 'l', and UP again a short way into that note.
+                    #
+                    # The pedal is deliberately re-armed between notes rather
+                    # than held across the whole run.  fluidsynth treats CC68 as
+                    # monophonic (fluid_channel_is_playing_mono), so within one
+                    # unbroken pedal-down span every note-on after the first
+                    # continues the same decaying voice instead of starting a new
+                    # one, and the notes go progressively silent.  Measured on the
+                    # mini test piece (dB RMS per note):
+                    #   pedal up             -26.5 / -25.9 / -24.6   (all struck)
+                    #   down at onset, up 2ms later
+                    #                        -26.6 / -26.1 / -24.9   (legato, rings)
+                    #   held to the note-off -26.5 / -29.2 / -50.2   (2nd+ die)
+                    #   held across a 3-note run, released at the end of it:
+                    #                        -41.3 / -41.8 / -58.1   (last dies)
+                    # This is what the pre-2026-09 compiler did with its
+                    # per-note ON/OFF/OFF/ON toggle - noisy, but each slurred
+                    # note-on was the first of its span and so rang properly.
+                    # 1..MIDICLICKSPERQUARTER/16 ticks (2..31ms) is a short glide
+                    # into the note; capped at a quarter of the note so it always
+                    # rings.
+                    if prev_note_slurred:
+                        _rel = max(1, min(last_note_length // 4, MIDICLICKSPERQUARTER // 16))
+                        insert_sorted_tail([voice+1, note_time, f'Control_c, {chan}, 68, 127'], 'HERE23') # ON
+                        insert_sorted_tail([voice+1, note_time + _rel, f'Control_c, {chan}, 68, 0'], 'HERE24') # OFF
                     # fi
                     if legato_on:                           # If on from previous note.
                         if l_instrument in instruments:
@@ -7064,10 +7086,25 @@ def print_out_midi1csv_notes() -> None:
                         # fi
                     # fi
                     if last_note_on != '':          # If not coming from a rest, or last note is already off.
-                        tmp = lastlegatolth // 2
-                        insert_sorted_tail([voice+1, lthworkingmeasures + tmp, f'Note_off_c, {chan}, {last_note_on}, 0'], 'HERE18')
+                        # A slurred-in note is played with CC68 down, which puts
+                        # fluidsynth's channel into monophonic mode.  There a
+                        # note-off for the previous key that lands even one tick
+                        # AFTER the new note-on goes through
+                        # fluid_synth_noteoff_mono_LOCAL() and damps the note we
+                        # just started, so the slurred note comes out silent
+                        # (measured -56.7 dB against -34.9 dB when it lands
+                        # before).  Humanize jitter moves this note-off around,
+                        # so pin it a tick ahead of the slurred note's onset
+                        # instead of lastlegatolth//2 behind it.  A 1-tick gap
+                        # is ~2ms, i.e. an exact legato join.  Anchored to the
+                        # jittered note_time, not the un-jittered grid time
+                        # lthworkingmeasures: humanize moves the note-on by up to
+                        # +-humanize ticks, so a note-off measured from the grid
+                        # can still overtake it.
+                        _off_at = note_time - 1 if prev_note_slurred else lthworkingmeasures + lastlegatolth // 2
+                        insert_sorted_tail([voice+1, _off_at, f'Note_off_c, {chan}, {last_note_on}, 0'], 'HERE18')
                         if args.echoonoff:
-                            insert_sorted_tail([voice+1, lthworkingmeasures + tmp, f'Text_t, "Off:{chan:>3} {last_note_on:>3}"'], 'HERE19')
+                            insert_sorted_tail([voice+1, _off_at, f'Text_t, "Off:{chan:>3} {last_note_on:>3}"'], 'HERE19')
                         # fi
                     # fi
                     if not legato_on:
@@ -7089,16 +7126,11 @@ def print_out_midi1csv_notes() -> None:
                     # fi
                 # fi
 
-                # Legato footswitch: one ON at the start of the slurred group, one OFF
-                # at its end - not a toggle on every slurred note.  The OFF is emitted
-                # before the note-on block above, since it has to precede the first
-                # un-slurred note-on at the same tick.
-                if 'l' in last_suffixes:                    # New note has legato.
-                    if not legato_on:
-                        insert_sorted_tail([voice+1, note_time + 1, f'Control_c, {chan}, 68, 127'], 'HERE22') # ON
-                        legato_on = True
-                    # fi
-                # fi
+                # Remember whether this note slurred into the next one.  The CC68
+                # ON/OFF pair for the NEXT note's onset is emitted above, from
+                # prev_note_slurred, so that the pedal is always down at a
+                # slurred-in note's note-on and never across a note boundary.
+                prev_note_slurred = ('l' in last_suffixes)
 
                 # note_playing will eventually be when to turn note off.
                 if 's' in last_suffixes:
