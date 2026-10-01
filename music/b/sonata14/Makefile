@@ -169,6 +169,8 @@ clean: sfz-clean
 	rm -f ${V}_2.csv ${V}_2.mid ${V}.wav
 	rm -f ${V}_2.v ${V}_2.h
 	rm -f ${V}_2.fs
+	rm -f *.mp4
+	rm -f ZZZ.* AAA.[0-9][0-9] BBB.[0-9][0-9]
 	rm -rf ${SFZ_CSVDIR} ${SFZ_MIXDIR}
 	rm -f ${V}-sfz.mp4
 #-----------------------------------------------------------------------------

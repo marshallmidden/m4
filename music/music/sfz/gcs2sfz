@@ -60,6 +60,22 @@ onsets on a connected, sustained line:
                          fold the skipped per-note CC11 into velocity.  Higher
                          deepens the soft dynamics (toward the .fs render).
 
+    GCS2SFZ_LEGATO_STYLE slur emulation on the VPO/sfizz path, default "reattack".
+                         "reattack": every slurred-in note is a normal fresh
+                         attack (no bend; the GM fallback's behavior), made
+                         legato by overlapping the SLUR SOURCE ~30ms INTO the
+                         target's onset (GCS2SFZ_LEGATO_JOIN_MS, default 30) -
+                         the same note-off overlap imscomp/musicomp2abc apply
+                         on the .fs/GM path, and the only legato cue the GM
+                         fallback's merged one channel can carry.  "glide":
+                         fuse 'l'-marked runs into one voice pitch-bent into
+                         each slurred-in onset (the old default; audible
+                         portamento smear on sustained strings, see
+                         DEVIN-2026-09-28-legato-gm-mono.md).  The legacy
+                         GCS2SFZ_LEGATO env remains honored as an alias
+                         (1/true/yes -> glide, 0/false/no -> reattack) and is
+                         overridden by LEGATO_STYLE when both are set.
+
 Requirements: python3, ~/bin/sfizz_render, fluidsynth, ffmpeg, and the VPO
 library (plus GeneralUser.sf2 for GM fallback).
 """
@@ -337,6 +353,72 @@ def _collapse_legato_groups(notes, base_bend, glide_ticks, max_semi, contig_tol,
     return out, bends
 
 
+def _legato_style() -> str:
+    """Return "glide" or "reattack" for slur emulation on the sfizz path.
+
+    ``GCS2SFZ_LEGATO_STYLE`` is authoritative; the legacy ``GCS2SFZ_LEGATO``
+    boolean knob is honored as an alias so old invocations keep working.  The
+    default flipped in 2026-09-28: the pitch-bend fusion that used to be on by
+    default is now opt-in because it smears sustained strings (see
+    DEVIN-2026-09-28-legato-gm-mono.md).
+    """
+    style = os.environ.get("GCS2SFZ_LEGATO_STYLE")
+    if style is None:
+        legacy = os.environ.get("GCS2SFZ_LEGATO", "0").strip().lower()
+        return "glide" if legacy in ("1", "true", "yes") else "reattack"
+    if style in ("1", "true", "yes"):
+        return "glide"
+    if style in ("0", "false", "no", ""):
+        return "reattack"
+    return style if style in ("glide", "reattack") else "reattack"
+
+
+def _slur_target_marks(notes) -> set:
+    """Indices of slur-in notes: their nearest preceding same-staff note is a
+    contiguous 'legato' source on a different pitch ('l' semantics).  Only the
+    run's first note is struck fresh; every later note of the run (including
+    the chained ones that carry 'l' themselves) is swallowed under the source
+    tail.  Mirrors the compilers' slur_velocity/overlap and write_midi's
+    softening pass.
+    """
+    marks = set()
+    for i, nt in enumerate(notes):
+        jbest = None
+        for j, src in enumerate(notes):
+            if (j != i and src[10] == nt[10] and src[0] < nt[0]
+                    and nt[0] - src[1] <= 0.2 * TICKS_PER_SEC):
+                if jbest is None or src[0] > notes[jbest][0]:
+                    jbest = j
+        if jbest is not None and notes[jbest][9] == 'legato' and notes[jbest][2] != nt[2]:
+            marks.add(i)
+    return marks
+
+
+def _slur_slow_attack() -> float:
+    """Seconds of ampeg_attack for slur-in notes on the VPO sustain path; 0
+    disables the slow-attack split (every sustained note keeps the fast
+    GCS2SFZ_ATTACK onset).  A slurred-in note should SWELL under the source's
+    overlapping tail, not strike: 150 ms is a smooth onset that still threads
+    the note's body through.  GCS2SFZ_LEGATO_ATTACK_MS, default 150.
+    """
+    try:
+        return max(0.0, float(os.environ.get("GCS2SFZ_LEGATO_ATTACK_MS", "150")) / 1000.0)
+    except ValueError:
+        return 0.15
+
+
+def _slur_slow_gain_db() -> float:
+    """dB gain for the slow-attack slur-in stem.  Perceived level = attack +
+    intensity + volume, so taming the onset also lowers the note's body; this
+    small boost on the assimilated slur stem gives the sustained body back
+    without re-striking the onset.  GCS2SFZ_LEGATO_ATTACK_GAIN_DB, default 3.0.
+    """
+    try:
+        return float(os.environ.get("GCS2SFZ_LEGATO_ATTACK_GAIN_DB", "3.0"))
+    except ValueError:
+        return 3.0
+
+
 def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None,
                detune_cents=0.0, pan_off=0):
     """Write a single-track MIDI file from a CSV (absolute times in seconds).
@@ -454,6 +536,71 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
         ]
         notes.sort(key=lambda n: (n[0], n[1]))
 
+    # Re-attack slur join ('reattack' default): hold each 'legato' source a
+    # short way INTO its slurred-in target (see slur_join_ms below) so the
+    # target's fresh attack lands inside the source's ring-out instead of
+    # after a silence.  Without it a slur is just a gap-free sequence of
+    # re-attacks - audibly detached.  This mirrors the note-off overlap the
+    # two compilers apply on the .fs/GM path; on the GM fallback (pred_expr
+    # False) it is the only legato cue the merged one-channel render can
+    # carry.  Skipped in "glide" style, where _collapse_legato_groups has
+    # already fused the run into one voice.
+    if _legato_style() == "reattack":
+        _join = max(0, int(round(
+            float(os.environ.get("GCS2SFZ_LEGATO_JOIN_MS", "30")) / 1000.0 * TICKS_PER_SEC)))
+        if _join:
+            _out = []
+            for i, src in enumerate(notes):
+                _tgt = None
+                if src[9] == 'legato':
+                    for j, nt in enumerate(notes):
+                        if j != i and nt[10] == src[10] and nt[0] > src[0] and nt[2] != src[2]:
+                            if _tgt is None or nt[0] < _tgt[0]:
+                                _tgt = nt
+                    if _tgt is not None and _tgt[0] - src[1] <= 0.2 * TICKS_PER_SEC:
+                        _out.append((src[0], max(src[1], _tgt[0] + _join),
+                                     src[2], src[3], src[4], src[5], src[6], src[7], src[8], src[9], src[10]))
+                        continue
+                _out.append(src)
+            notes = _out
+            notes.sort(key=lambda n: (n[0], n[1]))
+
+        # Slur-in note SOFT attack: the 'l' semantics is "glide to the NEXT
+        # note - no note attack on its start", so a slurred-in note should
+        # be swallowed under the running tone instead of re-struck.  The two
+        # compilers already cut slur-in velocity on the GM path (slur_velocity
+        # var, default 55% -> the sfzpipecsv CSV here carries it too), and the
+        # VPO/sfizz path gets the slow-attack split below, so by default this
+        # knob is OFF (1.0).  Set GCS2SFZ_LEGATO_VEL_FACTOR below 1.0 to soften
+        # slur-in midi velocity further on top of the CSV's.
+        slur_vel = max(0.0, min(1.0, float(os.environ.get("GCS2SFZ_LEGATO_VEL_FACTOR", "1.0"))))
+        pedal_ms = max(0.0, float(os.environ.get("GCS2SFZ_LEGATO_PEDAL_MS", "60")))
+        pedal_ticks = max(0, int(round(pedal_ms * TICKS_PER_SEC / 1000.0)))
+        _pedal_seams = []
+        if slur_vel < 1.0 or (pedal_ticks and not pred_expr):
+            for i, nt in enumerate(notes):
+                jbest = None
+                for j, src in enumerate(notes):
+                    if (j != i and src[10] == nt[10] and src[0] < nt[0]
+                            and nt[0] - src[1] <= 0.2 * TICKS_PER_SEC):
+                        if jbest is None or src[0] > notes[jbest][0]:
+                            jbest = j
+                if jbest is not None and notes[jbest][9] == 'legato' and notes[jbest][2] != nt[2]:
+                    if slur_vel < 1.0:
+                        nt_list = list(nt)
+                        nt_list[3] = max(1, int(round(nt[3] * slur_vel)))
+                        nt = tuple(nt_list)
+                        notes[i] = nt
+                    if pedal_ticks and not pred_expr:
+                        # GM fallback only: sfizz honours CC64 as damper, so a
+                        # seam pedal there would drown everything in overlapping
+                        # sustain.  On the fluidsynth render the channel is
+                        # merged/monophonic-by-voice, and a pedal press across
+                        # the seam lets the source's tail ring UNDER the soft
+                        # slurred-in note instead of damping at its key-lift.
+                        _pedal_seams.append((max(0, nt[0] - pedal_ticks),
+                                             nt[0] + pedal_ticks))
+
     tempo_ppqn_micros = int(60000000.0 / BPM)  # 500000 us/qn @ 120bpm
 
     # Slur emulation: fuse legato-marked runs into one bent voice (see
@@ -466,7 +613,7 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
     if detune_cents:
         base_bend = max(0, min(16383, int(round(8192 + detune_cents * 8192.0 / 200.0))))
     bend_timeline: dict[int, list[int]] = {}
-    if pred_expr and os.environ.get("GCS2SFZ_LEGATO", "1") not in ("0", "false", "no", ""):
+    if pred_expr and _legato_style() == "glide":
         max_semi = int(os.environ.get("GCS2SFZ_LEGATO_MAX_SEMI", "2"))
         glide_ms = float(os.environ.get("GCS2SFZ_LEGATO_GLIDE_MS", "20"))
         overlap_ms = float(os.environ.get("GCS2SFZ_LEGATO_OVERLAP_MS", "20"))
@@ -563,6 +710,17 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
         # Pan sweeps apply on both paths.
         interp_ramp(on, off, pan, pan_e, 10)
         last_pan = pan_e
+
+    if not pred_expr and _pedal_seams:
+        # GM fallback: seam pedal (CC64) pressed just before each slur-in onset
+        # and released a pedal_ms after, so the source's tail rings UNDER the
+        # soft slurred-in note instead of damping at its key-lift.  Skipped on
+        # the sfizz path because sfizz honours CC64 as a damper (it would
+        # drown everything in overlapping sustain); see GCS2SFZ_LEGATO_PEDAL_MS
+        # and the identical .fs seam pedal the two compilers emit.
+        for _down, _up in _pedal_seams:
+            cc_timeline.setdefault(_down, []).append((64, 127))
+            cc_timeline.setdefault(_up, []).append((64, 0))
 
     name_b = name.encode("utf-8", "replace")
 
@@ -874,13 +1032,16 @@ def _amix(wavs, out_wav, samplerate):
 
 
 def _render_sfz(csv_path, sfz_path, out_wav, samplerate, name,
-                detune_cents=0.0, pan_off=0):
+                detune_cents=0.0, pan_off=0, gain_db=0.0):
     """Render one CSV with one SFZ patch (CC11-driven). Returns success bool.
 
     The stock VPO patches carry loudness via CC11 expression, not velocity, but
     have no amplitude_oncc11 opcode, so each render is wrapped in a
     same-directory wrapper (./libs sample paths still resolve) that adds
-    amplitude_oncc11=100 and #includes the real patch.
+    amplitude_oncc11=100 and #includes the real patch.  ``gain_db`` (a small
+    post-render ffmpeg volume) compensates loudness when an onset was tamed
+    (see GCS2SFZ_LEGATO_ATTACK_GAIN_DB); a too-quiet slur-in stem is a level
+    complaint, not an attack one.
     """
     sfz_dir = os.path.dirname(sfz_path)
     fd, wrapper = tempfile.mkstemp(dir=sfz_dir, prefix=".gcs2sfz-dyn-",
@@ -908,6 +1069,24 @@ def _render_sfz(csv_path, sfz_path, out_wav, samplerate, name,
             os.remove(wrapper)
         except OSError:
             pass
+    if gain_db:
+        # Post-render loudness compensation (perceived level = attack +
+        # intensity + volume): restore the body a tamed onset cost us.
+        gtmp = out_wav + ".gb.wav"
+        gr = subprocess.run([FFMPEG, "-y", "-i", out_wav,
+                             "-af", f"volume={gain_db:g}dB", gtmp],
+                            capture_output=True, text=True)
+        if gr.returncode == 0:
+            try:
+                os.replace(gtmp, out_wav)
+            except OSError:
+                pass
+        else:
+            print(f"  !! {name}: gain boost failed:\n{gr.stderr[-800:]}")
+            try:
+                os.remove(gtmp)
+            except OSError:
+                pass
     return True
 
 
@@ -1091,6 +1270,11 @@ def _render_instrument_csv(csv_path, out_wav, samplerate, name, sfz_use,
     # on the sustain patch. CSVs without the column fall back to the
     # GCS2SFZ_ARTIC_MAX duration split.
     has_artic = any(n[9] for n in notes)
+    # Slur-in slow attack: reattack styles pass the slur-marks split (below);
+    # "glide" is already one fused voice so there is nothing to soften.  The
+    # tamed onset costs the slur stem loudness, so gain it back a little.
+    slur_attack = _slur_slow_attack() if _legato_style() == "reattack" else 0.0
+    slur_gain = _slur_slow_gain_db() if slur_attack > 0 else 0.0
     rendered = False
     if stacc_path:
         if has_artic:
@@ -1111,6 +1295,42 @@ def _render_instrument_csv(csv_path, out_wav, samplerate, name, sfz_use,
                                    detune_cents=detune_cents, pan_off=pan_off)
                 ok_l = _render_sfz(lcsv, sfz_use, lwav, samplerate, name,
                                    detune_cents=detune_cents, pan_off=pan_off)
+                if ok_l and slur_attack > 0:
+                    # Slur-in slow attack: the slurred-in notes re-render on a
+                    # slow-onset copy of the sustain patch so they SWELL under
+                    # the source's overlapping tail instead of striking (see
+                    # GCS2SFZ_LEGATO_ATTACK_MS in SFZ.md).  The fast-attack
+                    # longs stay on sfz_use; the two are mixed.
+                    smarks = _slur_target_marks(longs)
+                    if smarks and len(smarks) < len(longs):
+                        slow = _edited_patch(sfz_use, slur_attack)
+                        slur_csv = os.path.join(td, "slur.csv")
+                        slur_wav = os.path.join(td, "slur.wav")
+                        _notes_to_csv([n for i, n in enumerate(longs)
+                                       if i in smarks], slur_csv)
+                        if slow and _render_sfz(slur_csv, slow, slur_wav,
+                                                 samplerate, name,
+                                                 detune_cents=detune_cents,
+                                                 pan_off=pan_off,
+                                                 gain_db=slur_gain):
+                            fast_wav = os.path.join(td, "long.fast.wav")
+                            shutil.copyfile(lwav, fast_wav)
+                            mix_wav = os.path.join(td, "long.mix.wav")
+                            if _amix([fast_wav, slur_wav], mix_wav, samplerate):
+                                shutil.copyfile(mix_wav, lwav)
+                                print(f"  {name}: {len(smarks)} slur-in(s) ->"
+                                      f" slow {slur_attack:.2f}s onset"
+                                      f" (+{slur_gain:g}dB)")
+                            else:
+                                try:
+                                    os.remove(slow)
+                                except OSError:
+                                    pass
+                        elif slow:
+                            try:
+                                os.remove(slow)
+                            except OSError:
+                                pass
                 if ok_s and ok_l:
                     if blend:
                         # Layer the sustain body under the short notes too,
@@ -1136,6 +1356,48 @@ def _render_instrument_csv(csv_path, out_wav, samplerate, name, sfz_use,
                 elif ok_l:
                     shutil.copyfile(lwav, out_wav)
                     rendered = True
+    if not rendered:
+        if slur_attack > 0:
+            # Same slur-in slow-attack split for the no-articulation pass: the
+            # whole CSV is one sustain render, so the slurred-in notes get a
+            # separate slow-onset render and the two are mixed here too.
+            smarks = _slur_target_marks(notes)
+            if smarks and len(smarks) < len(notes):
+                slow = _edited_patch(sfz_use, slur_attack)
+                if slow:
+                    with tempfile.TemporaryDirectory() as td:
+                        fast_csv = os.path.join(td, "fast.csv")
+                        slur_csv = os.path.join(td, "slur.csv")
+                        fast_wav = os.path.join(td, "fast.wav")
+                        slur_wav = os.path.join(td, "slur.wav")
+                        mix_wav = os.path.join(td, "mix.wav")
+                        _notes_to_csv([n for i, n in enumerate(notes)
+                                       if i not in smarks], fast_csv)
+                        _notes_to_csv([n for i, n in enumerate(notes)
+                                       if i in smarks], slur_csv)
+                        ok_f = _render_sfz(fast_csv, sfz_use, fast_wav,
+                                           samplerate, name,
+                                           detune_cents=detune_cents,
+                                           pan_off=pan_off)
+                        ok_s = _render_sfz(slur_csv, slow, slur_wav,
+                                           samplerate, name,
+                                           detune_cents=detune_cents,
+                                           pan_off=pan_off,
+                                           gain_db=slur_gain)
+                        if ok_f and ok_s:
+                            rendered = _amix([fast_wav, slur_wav], out_wav,
+                                             samplerate)
+                            if rendered:
+                                print(f"  {name}: {len(smarks)} slur-in(s) ->"
+                                      f" slow {slur_attack:.2f}s onset"
+                                      f" (+{slur_gain:g}dB)")
+                        elif ok_f:
+                            shutil.copyfile(fast_wav, out_wav)
+                            rendered = True
+                    try:
+                        os.remove(slow)
+                    except OSError:
+                        pass
     if not rendered:
         rendered = _render_sfz(csv_path, sfz_use, out_wav, samplerate, name,
                                detune_cents=detune_cents, pan_off=pan_off)

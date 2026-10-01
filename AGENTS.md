@@ -20,15 +20,43 @@ Suffix convention: `foo.fs/.abc/.csv` = musicomp2abc output; `foo_2.fs/_2.abc/_2
 
 ## Commands
 
+**`music/BUILD.md` is the build quick reference — read it before running a build.** The two commands that settle most questions are `make help` (works in `music/` and in every piece dir; lists targets and what each does) and `make setup` (read-only check of tools + sample libraries; currently `0 missing`). Do not go hunting through the tree to decide whether a tool or the VPO library is missing — `make setup` answers that.
+
 - Per-piece dirs (`music/b/01`, `music/b/09`, `music/songs`, `music/t/e`, `music/ims`, ...): `make fs` / `make abc` / `make pdf` / `make mp4` / `make -B b9m2_2.fs` (force rebuild one imscomp output). Makefiles enumerate `SONGS`/`TESTS` names.
-- Top-level `music/`: `make all | mp4 | mp4_2 | clean` recurses into `musicomp2abc songs ims t b`; `make mp4`/`mp4_2` recurse into `musicomp2abc songs t b` (so the musicomp2abc pieces get videos too).
+- Top-level `music/`: `make all | mp4 | mp4_2 | sfz | sfz-mp4 | sfz-clean | clean`. `all` recurses into `musicomp2abc songs ims ims/tc-testing/gershwin t b`; `mp4`/`mp4_2` into `musicomp2abc songs t b`; `sfz`/`sfz-mp4`/`sfz-clean` into `songs ims t b` (**not** `musicomp2abc`).
+- **`make all` does not do SFZ** — `sfz` is a separate target. For both, run `make all` *and* `make sfz`.
+- **Top-level `make all` exits non-zero by design**: the 2 known gershwin `new-g3` named ARGHs (`pete.E`, `new-g3.ps`). Not a regression. `abcm2ps` "Length incompatible with BASE" warnings on `e.abc` also recover. Don't grep logs for `error` without filtering `-Werror` out of the `gcc -E` lines first.
 - `./create-mp4` — builds all 25 YouTube `.mp4`s in parallel.
+- `make sfz` top-level is a long job (VPO, 7 desks per instrument) — background it to a log rather than blocking.
 
 ## Tests (differential regression — the real test suite)
 
 - `cd music/ims && ./DOALL` runs 5 suites in parallel (songs/, musicomp2abc/, b/, t/e/, tc-testing/gershwin/). Each `AAA.diff._2` compiles every listed `.gcs` with BOTH compilers across 5 formats (`--vert --hori --csv --fs --abc`) and diffs outputs.
-- **bare ARGH** = imscomp-vs-musicomp2abc output difference; **named ARGH** = execution failure. Baseline: 0 bare / 0 named. Any increase is a regression. (Pre-existing named failures, both compilers identical, not regressions: gershwin new-g3.)
+- **bare ARGH** = imscomp-vs-musicomp2abc output difference; **named ARGH** = execution failure. Baseline as of 2026-09-27: **0 bare / 2 named**. Any increase in either is a regression. The 2 named are the known pre-existing `gershwin new-g3.E` failures — both compilers fail identically, so they are not a compiler-mirror problem.
 - One suite: `cd music/b && ./AAA.diff._2`. Single compiler check: `cd music/ims && make tests`. (`ims/RUN-Tests` is older and references a stale `~/musicomp2abc/...` path — prefer DOALL.)
+
+### Diagnosing an audio bug (don't reason about the synth — measure it)
+
+DOALL only proves the two compilers agree. It says nothing about whether the output is *audible*, and both compilers can be identically wrong. For anything in the note/CC/pedal/legato paths, build a micro-benchmark and measure per-note RMS:
+
+```sh
+# ~4 notes, 2 bars, one voice, on acoustic grand -- 2 seconds of render
+cat m.gcs > ...; gcc -E -x c -nostdinc -C -CC -traditional-cpp m.gcs -o m.E
+./imscomp --fluidsynth m.E m.fs          # run from the dir holding calculate.py
+cat m.fs | fluidsynth -q -F /tmp/m.wav /Users/m4/src/GeneralUser/GeneralUser.sf2
+ffmpeg -ss <note_onset> -t <dur> -i /tmp/m.wav \
+  -af astats=metadata=1:reset=0,ametadata=print:key=lavfi.astats.Overall.RMS_level -f null -
+```
+
+A note that reads ~25 dB below its neighbours is silent; ~2 dB below is just a missing hammer strike. Always compare the *same* bar twice — bugs driven by `random.seed`-based humanize often hit one bar and not the next, which is what made the note-off-ordering bug look intermittent.
+
+Traps, each of which has silently produced a wrong "measurement":
+
+- **Never pipe fluidsynth's stdout into `head`.** The pipe closes early, fluidsynth dies of SIGPIPE mid-render, and you get a valid-looking 0.049 s WAV. Redirect to `/dev/null` instead.
+- **To compare against an older compiler**, copy it *and* `ims/calculate.py` into a scratch dir together; `import calculate` resolves against the script's own directory, so running an extracted `imscomp` from `/tmp` dies with `ModuleNotFoundError`.
+- **CSV times in `gcs2sfz` are fractional seconds, converted to integer ticks before the guards run.** Mixing units, or handing a float to `range()`, is easy and silent — see the bend-ramp `TypeError` fixed in cf435253.
+- **Never judge an SFZ/ensemble change by sample-domain diffing of the mixed WAV.** `GCS2SFZ_ENSEMBLE` renders each desk separately and `amix`es them, so any pitch change in any desk shifts the whole waveform's phase. Block-RMS of `A-B` then reports ~85% of blocks "differing" for *any* pair of renders, including two that sound identical — the metric is saturated and carries no information. Prove the change at the CSV/note-event level (how many attacks were removed, which notes were grouped), and use your ears for the rest. Same trap as the SIGPIPE one above: a plausible number that measures nothing.
+
 
 ## Audio/video pipeline (works on the macOS box)
 

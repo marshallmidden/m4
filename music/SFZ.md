@@ -133,32 +133,87 @@ gliding into each notated onset, restoring centre at the run's note-off. A
 by the time the note "starts". Bends are emitted before the note events at a
 tick, so a glide always arrives before its note-off/note-on pair.
 
+In "reattack" style (the default) there is no bend; a slur is made audible by
+note duration OVERLAP -- the two compilers now hold the source's note-off a
+short way INTO the slurred-in target's onset on the GM/.fs path (see
+DEVIN-2026-09-28-legato-gm-mono.md), and `write_midi` extends each `legato`
+source a further `GCS2SFZ_LEGATO_JOIN_MS` (default 30ms) into its target here,
+so a slur reads as a continuous ring. On top of the overlap, a slur-in note is
+NEVER struck at full force:
+
+- **GM/.fs path (compilers):** every note whose PREDECESSOR carries `l` is
+  emitted at `slur_velocity`% velocity (new var, default 45; only the run's
+  first note is full) and the seam is bridged by a CC64 pedal press/release
+  anchored to the slurred-in onset (press `pedal_overlap`=30 ticks before,
+  release `pedal_overlap + _ovp` after it — here 93.75ms) -- the source's tail
+  rings briefly UNDER the soft note instead of damping at its key-lift, and
+  the damper lifts soon after. Overlap itself is kept short
+  (`MIDICLICKSPERQUARTER//32`, half the old value) so the two notes don't
+  audibly blur. Drums are excluded (CC64 is meaningless there). This is what
+  makes a percussive patch (the piano) read as connected.
+- **VPO/sfizz path (gcs2sfz):** slurry sustain notes re-render on a SLOW
+  `ampeg_attack` copy of the sustain patch (`GCS2SFZ_LEGATO_ATTACK_MS`, default
+  150) and amix with the fast-attack rest, so they SWELL under the source tail
+  instead of striking on `GCS2SFZ_ATTACK=0.03`. `GCS2SFZ_LEGATO_VEL_FACTOR`
+  (default 1.0 = off) can harden slur-in midi velocity further on top of the
+  CSV's (leave it -- the compilers already softed the CSV; 0.55 x 0.55 double-
+  softening made the GM piano slur-ins silent).
+
 The run starts on a note marked `legato` (CSV column 10) and extends to the
 note AFTER it, because `'l'` means "no attack on the NEXT note" -- so the
 slurred-in target carries no marker of its own. In `c4 e4l f4l g4` the run is
-`e f g`. That is also exactly the group imscomp's CC68 footswitch spans, so the
-two agree. All guards are conservative -- contiguous, same staff, the note the
-run extends from not staccato/marcato, every member within MAX_SEMI of the
-run's FIRST pitch (the sample is loaded at that pitch, so the run must stay
-inside the sampler's bend range), and MONOPHONIC (pitch bend is channel-wide,
-so a second simultaneous voice would be dragged along with it).
+`e f g`, and the fresh strike after it is the note the run does NOT fuse/join.
+That is also exactly the group imscomp's CC68 footswitch used to span (CC68 is
+no longer emitted at all -- it is inert in fluidsynth poly mode, see the
+mono-mode investigation). All guards are conservative -- contiguous, same
+staff, the note the run extends from not staccato/marcato, every member within
+MAX_SEMI of the run's FIRST pitch (the sample is loaded at that pitch, so the
+run must stay inside the sampler's bend range), and MONOPHONIC (pitch bend is
+channel-wide, so a second simultaneous voice would be dragged along with it).
 
   - Env knobs:
-      * GCS2SFZ_LEGATO=0 disables the whole feature. Default ON.
+      * GCS2SFZ_LEGATO_STYLE (default "reattack"): "reattack" = every slurred-in
+        note is a normal fresh attack (no bend), made legato by the overlap
+        join above; "glide" = the pitch-bend fusion described below. The
+        default flipped 2026-09-28 -- the glide turned out to smear sustained
+        strings audibly (verified by listening on b/01 v1-1 violin, see
+        DEVIN-2026-09-28-legato-gm-mono.md), so it is now opt-in. The legacy
+        GCS2SFZ_LEGATO env (=0/1) is honored as an alias and overridden by
+        GCS2SFZ_LEGATO_STYLE when both are set.
+      * GCS2SFZ_LEGATO_JOIN_MS (default 30): reattack-style slur join -- how
+        far a `legato` source extends into its slurred-in target's onset.
+      * GCS2SFZ_LEGATO_ATTACK_MS (default 150): slow onset for slurred-in
+        sustain notes on the VPO path (they swell instead of striking).
+      * GCS2SFZ_LEGATO_ATTACK_GAIN_DB (default 3): small post-render gain on
+        the slow-attack slur stem. Perceived volume = attack + intensity +
+        volume, so taming the onset lowered the note body too; this gives the
+        sustained body back without re-striking the onset.
+      * GCS2SFZ_LEGATO_PEDAL_MS (default 60): CC64 seam pedal on the GM
+        fallback ONLY (`pred_expr=False`) -- press/release around each
+        slurred-in onset so the source's tail rings under the soft note.
+        Skipped on the sfizz path (sfizz treats CC64 as damper).
+      * GCS2SFZ_LEGATO_VEL_FACTOR (default 1.0 = off): extra slur-in midi
+        velocity hardening on top of the compilers' slur_velocity.
       * GCS2SFZ_LEGATO_MAX_SEMI (default 2): how far a run may stray from its
         first pitch. 2 matches the sampler's default +/-2 semitone bend range.
       * GCS2SFZ_LEGATO_GLIDE_MS (default 20): glide length per note change.
       * GCS2SFZ_LEGATO_OVERLAP_MS (default 20): how much a second voice may
         overlap a run before the run is rejected as polyphonic.
-  - Only runs on the sfizz path (`pred_expr=True`). The GM fallback merges every
-    voice of an instrument onto ONE channel, where a channel-wide bend would
-    detune concurrent notes.
+  - The pitch-bend fusion only runs on the sfizz path (`pred_expr=True`). The
+    GM fallback merges every voice of an instrument onto ONE channel, where a
+    channel-wide bend would detune concurrent notes -- but the reattack join
+    AND the CC64 seam pedal DO apply there (write_midi emits the pedal only on
+    the fallback), and the slur-in velocity is already soft in the CSV because
+    the compilers' slur_velocity flows into `--sfzpipecsv`; the piano's slur is
+    audible in the GM/sfz render because of the join + pedal + soft velocity.
   - Measured on b/01 (17277 notes, 2766 of them `legato`): 505 re-strikes
-    eliminated (2.9%) across 391 runs at the default, rising to 895 (5.2%) at
+    eliminated (2.9%) across 391 runs at MAX_SEMI=2, rising to 895 (5.2%) at
     MAX_SEMI=12. The bottleneck IS the bend range -- 1745 of the 2478 runs that
     got no further than their first note were refused for exceeding MAX_SEMI,
     against 571 for a staff change, 107 polyphony and 55 non-contiguity. Going
-    to MAX_SEMI=4 is the cheapest real gain (+44%).
+    to MAX_SEMI=4 is the cheapest real gain (+44%). These numbers were measured
+    with GCS2SFZ_LEGATO_STYLE=glide; with the default "reattack" none of the
+    elimination applies.
 
 ===============================================================================
 Stage / ensemble simulation (tuning, detune, pan) -- implemented 2026-09-19
@@ -364,3 +419,59 @@ Open:
     real two-note slur under the correct semantics, and it fuses. The case that
     does not fuse is a wide first interval (over MAX_SEMI) -- a fourth or an
     octave.
+
+===============================================================================
+Before changing the slur fusion -- read this first
+===============================================================================
+
+DEVIN-2026-09-27-legato-slur.md is the working note; its last two sections
+("Before changing any of this again" / "Still open") are the parts to read
+before editing `_collapse_legato_groups` or the CC68 path in the compilers.
+
+The one thing that is easy to get backwards: **`'l'` means "glide to the NEXT
+note - no note attack on the start of the next note"** (`suffix_legato`,
+`imscomp:17311`). The note carrying `l` is the one that slurs; the note after it
+is the slurred-in target and carries no marker. So CSV column 10 marks the
+*source* of the bend, and a run is `l`-note + the note after it. In
+`c4 e4l f4l g4` the run is `e f g`.
+
+Consequences specific to this path:
+
+  - `_collapse_legato_groups` must extend on `prev[9] == 'legato'`, not on
+    `cur[9] == 'legato'`. The latter groups backwards: it swallows the note
+    *before* the slur and drops the slur's last note. There is no error, just a
+    quietly wrong mix, so check the grouping in a unit test whenever you touch
+    the loop.
+  - `sfz_articulation_token` returns `'legato'` from `'l' in suffixes` and
+    `'staccato'` outranks it, but imscomp strips `l` from a note that also has
+    `s` (it warns), so a detached note never reaches here with a legato token.
+  - The bend ramp's step count must stay an int: CSV times are fractional
+    seconds, so `min(span_ticks, ...)` can hand `range()` a float. Fixed in
+    cf435253.
+  - Changing the pitch-bend range (`GCS2SFZ_LEGATO_MAX_SEMI`) is a listening
+    call, not a correctness one, and the payoff table is in the DEVIN note.
+  - The fusion HAS now been re-rendered against VPO (`b/01` v1-1 violin, 7
+    desks), in ~15 s per variant, at `MAX_SEMI` 2 / 4 / 12 and with
+    `GCS2SFZ_LEGATO=0`. All four render cleanly at 477 s. The listening verdict
+    landed 2026-09-28: **the glide sounds bad on sustained strings** and is no
+    longer the default (`GCS2SFZ_LEGATO_STYLE=reattack`). The `MAX_SEMI` sweep
+    is retained in DEVIN-2026-09-27-legato-slur.md; sample-domain diffing
+    cannot answer the listening question (see the DEVIN notes).
+
+### Do not conclude the sample library is missing
+
+`library/` is **gitignored** (695 MB of third-party VPO, "never commit into
+git"), so a fresh clone looks like it has no samples and it is easy to assume
+the library vanished. On this box it is present and complete at
+`music/music/sfz/library/VPO/Virtual-Playing-Orchestra3` — 302 `.sfz` files
+across Brass/Keys/Percussion/Strings/Vocals/Woodwinds.
+
+If you *do* get `gcs2sfz: VPO root not found:`, you passed the wrong
+`--sfzdir`, not a missing library. The default is
+`os.path.join(SFPIPE_DIR, "library", "VPO")` and `VPO_ROOT` is appended to it,
+so the correct value is **`.../music/music/sfz/library/VPO`**. Pointing
+`--sfzdir` one level too high, at `.../music/music/sfz/library`, produces the
+error naming `.../library/Virtual-Playing-Orchestra3` — the missing `VPO`
+component in that message is the tell. `b/01/Makefile` uses
+`SFZ_LIBDIR = ../../music/sfz/library/VPO`, i.e. it is already correct, so
+plain `make sfz` never hits this.

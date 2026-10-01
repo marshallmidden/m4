@@ -251,13 +251,131 @@ Verified after the fix:
   `11→71` clarinet, `12→70` bassoon, `13→69` english horn, `14→60` horn,
   `15→56` trumpet, `16→57` trombone, `17→58` tuba, `18→61` brass section,
   `19→47` timpani, drums → 127/14 as percussion).
-- violin, measure 6: `noteon 2 72` / `cc 2 68 127` / `noteon 2 74` /
-  `noteon 2 76` / `cc 2 68 0` / `noteon 2 77` — three-note slur, then a fresh
-  strike. Measure 5 (no `l`) has no CC68 at all.
-- `--sfzpipecsv` now writes **28** instrument CSVs (was 2), each with the same
-  4-sustain / 3-legato / 1-sustain shape.
+- violin, measure 6: `noteon 2 72` / `cc 2 68 127` + `noteon 2 74` /
+  `cc 2 68 0` / `cc 2 68 127` + `noteon 2 76` / `cc 2 68 0` / `noteon 2 77` —
+  the pedal is down at both slurred-in onsets and there is **no** CC68 before
+  `noteon 2 77`, so `NT3` is struck fresh. Measure 5 (no `l`) has no CC68 at
+  all.
+- `--sfzpipecsv` now writes **28** instrument CSVs (was 2), each with measure 5
+  as 4 sustain notes and measure 6 as `legato, legato, sustain, sustain` — the
+  two `l`-bearing notes followed by the slurred-in `NT2` and the struck `NT3`.
 - All six output formats still build: `--vert --hori --csv --fluidsynth --abc
   --sfzpipecsv`.
 - GM render: 169 s, exit 0, -36.2 LUFS (quiet, as expected for 28 single
   mf bars spread over three minutes).
 
+## Before changing any of this again
+
+Invariants a future change has to keep. They are all load-bearing, and the
+symptom when one is broken is a *silently* wrong render, not an error.
+
+1. **Take the semantics from the suffix table, never from prose.** `l` is
+   `suffix_legato` — "glide to next note - no note attack on start of next note"
+   (`imscomp:17311`). An earlier draft of this very note paraphrased that as
+   "mark every note including the last" and the code was then bent to match the
+   paraphrase. The comment next to the code being edited is not the
+   specification; the suffix table is.
+2. **CC68 down at the slurred-in onset, re-armed ~1–31 ms in.** fluidsynth routes
+   a pedal-down channel through its *monophonic* legato path, so a span covering
+   more than one note makes every note after the first continue a decaying
+   voice. Never hold CC68 across a run.
+3. **A slurred-in note's previous note-off lands before its onset** (pinned to
+   `note_time - 1`). A late note-off is handled by
+   `fluid_synth_noteoff_mono_LOCAL()`, which damps the note that just started.
+4. **Column 10 of the `--sfzpipecsv` CSV marks the note that slurs, not the
+   target.** `sfz_articulation_token` returns `'legato'` when `'l'` is in
+   *that* note's suffixes, and `_collapse_legato_groups` extends the run to the
+   note after it. If either half of that ever flips, the fusion silently groups
+   the wrong notes and fuses one fewer per slur.
+5. **Both compilers stay byte-identical for everything except `--sfzpipecsv`.**
+   DOALL's bare-diff count is the only thing enforcing this.
+
+## What was learned the hard way, as process
+
+- **DOALL cannot see audibility.** It proves the two compilers agree; two
+  compilers can be identically wrong, and this bug was. Every fix here needed a
+  rendered micro-benchmark and per-note RMS, not code reading.
+- **Reasoning from fluidsynth's source produced the wrong cure.** The previous
+  session's diagnosis (a late pedal release leaves the note inaudible) was
+  *mechanically true* and still led to a change that re-attacked the last note
+  of every slur. Four lines of hand-written `.fs` plus `astats` settled the
+  question in seconds; the recipe is now in `AGENTS.md` under "Diagnosing an
+  audio bug".
+- **Check the same bar twice.** `random.seed` humanize means a note-off/onset
+  ordering bug can hit one bar and spare the next identical one. The
+  −56.7 dB / −34.0 dB pair across two identical bars is what exposed it.
+- **The payoff number is a measurement, not an estimate.** "8%" in the first
+  draft of this note was measured against the *wrong* semantics. Re-measured
+  under the correct ones it is 2.9%, and the bottleneck turned out to be the
+  bend range rather than the scores' marking convention — the opposite
+  conclusion. Re-measure whenever the semantics change.
+
+## Build status @ 2026-09-27
+
+Environment is fine — `make setup` reports **0 missing** (gcc, make, python3,
+fluidsynth, ffmpeg, ffprobe, sfizz_render, csvmidi, abcm2ps, ps2pdf,
+GeneralUser.sf2, VPO library, 1812 one-shots). Only the YouTube OAuth
+`client_secrets.json` is absent, which affects uploads only.
+
+Done:
+- `DOALL` → **0 bare / 2 named** (the known gershwin `new-g3` pair), i.e. the
+  comment-only compiler edits changed no output.
+- `music/b/01` `sfz-csv/v1-1` regenerated; 12 instrument CSVs, 590 `legato`
+  rows in the violin.
+- All four legato A/B variants rendered through VPO (see "Still open" #2).
+- `musicomp2abc/LEGATO1*.E/_2.fs/_2.v` stray artifacts deleted (not gitignored).
+
+Not done / running:
+- Top-level `make all` was started after `make clean` and got killed partway
+  through `b/01` v1-2 when the shell was interrupted (`Terminated: 15`). No
+  real errors in that log apart from the 2 expected gershwin ones. Re-run it.
+- Top-level `make sfz` has not been run.
+
+## Still open
+
+1. **`GCS2SFZ_LEGATO_MAX_SEMI` default of 2.** Worth an A/B listen on the `b/01`
+   violin at 4 before changing it; the bend is plain resampling, so this is a
+   musical judgement, not a correctness one. Measured payoff: 2.9% at 2, 4.2%
+   at 4, 5.2% at 12. SUPERSEDED 2026-09-28: the listening test killed the whole
+   pitch-bend fusion as a default, not just its range — see `DEVIN-2026-09-28-
+   legato-gm-mono.md`. The glide is now opt-in (`GCS2SFZ_LEGATO_STYLE=glide`);
+   `MAX_SEMI` still matters only for that mode.
+2. **An ear on the fusion.** The library was never actually missing — see "Do
+   not conclude the sample library is missing" in `SFZ.md`; `library/` is
+   gitignored, which made it look absent. With the correct `--sfzdir` the
+   `b/01` v1-1 violin (7 desks) renders through VPO in ~15 s per variant. All
+   four are already made, 477 s each:
+
+   | file | setting |
+   |---|---|
+   | `/tmp/vioab/v1-1-sfz-mix.wav` | fusion on, `MAX_SEMI=2` (default) |
+   | `/tmp/vioab/semi4/v1-1-sfz-mix.wav` | fusion on, `MAX_SEMI=4` |
+   | `/tmp/vioab/semi12/v1-1-sfz-mix.wav` | fusion on, `MAX_SEMI=12` |
+   | `/tmp/vioab/off/v1-1-sfz-mix.wav` | `GCS2SFZ_LEGATO=0` |
+
+   They are 91 MB each and live in `/tmp`, so re-render after a reboot — the
+   command is in `b/01/Makefile` as `make sfz`, or call `gcs2sfz` directly on
+   `sfz-csv/v1-1/violin.csv` with `--sfzdir ../../music/sfz/library/VPO`.
+
+   **Do not try to settle this with sample-domain diffing.** It does not work
+   here, and it is worth recording why. Block-RMS of `A-B` over 125 ms blocks
+   reports ~84.5% of blocks "differing" for *every* pair of the four renders,
+   including `MAX_SEMI=4` vs `12` and even (near enough) `MAX_SEMI=4` vs
+   fusion-off. The metric is saturated: the 7-desk amix means any pitch change
+   in any desk shifts the whole waveform's phase, so a delta of ~500k is
+   reported whether or not the change is audible. An earlier draft of this
+   note quoted "59% of the timeline differs, peak sample delta 37333" as
+   evidence the fusion was live; that number is worthless for the same reason
+   and has been removed. The sound evidence for the fusion is the CSV-level
+   count (505 attacks eliminated at `MAX_SEMI=2`), not the waveform. The
+   `MAX_SEMI` choice genuinely needs ears.
+   is verified at CSV/unit level only. First job on a machine with
+   `Virtual-Playing-Orchestra3` present: render `b/01` violin with
+   `GCS2SFZ_LEGATO=1` and `=0` and listen for the re-attack.
+3. **`last_legato` is now dead.** The `legato` global (default 1.15) is still
+   live — `save_user_variables_now` persists it so it survives gotos — but the
+   per-note `last_legato` is unpacked at `imscomp:6792` and no longer read,
+   since 98fdf282 removed the `note_playing * last_legato` stretch. It is
+   harmless, but if the variable is ever revived it must not come back as a
+   length multiplier: the pedal, not the note length, is what sustains a slur
+   now.

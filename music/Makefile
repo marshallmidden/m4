@@ -1,6 +1,10 @@
 #-----------------------------------------------------------------------------
 DIRS  = musicomp2abc songs ims ims/tc-testing/gershwin t b
 #-----------------------------------------------------------------------------
+# Dirs with no build targets, only a clean target: music/sfz holds the scratch
+# benchmark dirs (dynprobe/) that the piece Makefiles cannot see.
+CLEAN_DIRS = ${DIRS} music/sfz
+#-----------------------------------------------------------------------------
 .PHONY: help
 help:
 	@echo 'Targets:'
@@ -11,7 +15,7 @@ help:
 	@echo '  sfz-mp4   - Encode SFZ mixes to MP4 video.'
 	@echo '  sfz-clean - Remove SFZ artifacts (sfz-csv/, sfz-mix/).'
 	@echo '  setup     - Check for missing tools/soundfonts (read-only).'
-	@echo '  clean     - Remove intermediate .csv,.mid,.abc,.ps,_m.ps,.fs, and .wav files.'
+	@echo '  clean     - Remove build artifacts (.E,.abc,.csv,.mid,.ps,.pdf,.fs,.wav,.mp4), ZZZ.*/AAA.NN diff leftovers, and sfz-csv/ sfz-mix/ render dirs.'
 #-----------------------------------------------------------------------------
 .PHONY: setup
 setup:
@@ -43,5 +47,5 @@ sfz-clean:
 #-----------------------------------------------------------------------------
 .PHONY: clean
 clean:
-	@for d in ${DIRS}; do echo "=== make clean in $$d ===" ; $(MAKE) -C $$d clean ; done
+	@for d in ${CLEAN_DIRS}; do echo "=== make clean in $$d ===" ; $(MAKE) -C $$d clean ; done
 #-----------------------------------------------------------------------------

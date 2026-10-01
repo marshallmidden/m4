@@ -387,7 +387,8 @@ clean: sfz-clean
 
 	rm -f ${SONGS_2PDF} ${SONGS_PDF}
 	rm -f *.v *.h *.abc *.ps *.mid *.wav *.fs *.E *.csv *.mp4
-	rm -f *.stderr
+	rm -f *.stderr *.stdout
+	rm -f ZZZ.* AAA.[0-9][0-9] BBB.[0-9][0-9]
 	rm -rf ${SFZ_CSVDIR} ${SFZ_MIXDIR}
 	rm -f ${SONGS:%=%-sfz.mp4}
 #-----------------------------------------------------------------------------

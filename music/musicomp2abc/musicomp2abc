@@ -1515,7 +1515,8 @@ createglobalvar('humanize', 5, 0, type_is_number, True)              # Max human
 createglobalvar('humanize_velocity', 3, 0, type_is_number, True)     # Max velocity jitter (0=off). Each note +-N velocity units.
 createglobalvar('humanize_volume', 2, 0, type_is_number, True)       # Max CC11 volume jitter (0=off). Each note +-N volume units.
 createglobalvar('sustain_pedal', 0, 0, type_is_number, True)         # Sustain pedal CC64: 0=off, -1=on. Set in .gcs for piano.
-createglobalvar('pedal_overlap', 60, 0, type_is_number, True)        # Ticks after note start for pedal down (legato pedaling).
+createglobalvar('pedal_overlap', 30, 0, type_is_number, True)        # Ticks after note start for pedal down (legato pedaling).
+createglobalvar('slur_velocity', 45.0, 0, type_is_number, True)      # % velocity for slur-in notes ('l' = no attack on its start).
 createglobalvar('velocity_min', 20, 0, type_is_number, True)         # Minimum MIDI velocity (0-127). Allows ppp/pp differentiation.
 createglobalvar('time', 0, 0, type_is_number, True)                  # The "time" in measure for current voice. (staff?)
 createglobalvar('in_chord', 0, 0, type_is_number, True)              # True (tutor style, -1) if inside a chord.
@@ -6623,6 +6624,7 @@ def print_out_midi1csv_notes() -> None:
         last_note_length = 0                        # The length of the last note (4c4).
         last_suffixes = ''                          # No ties/legato/cresc/dimin/etc. to start with.
         prev_note_slurred = False                   # Previous note had 'l' - next note-on is legato.
+        prev_was_slur_member = False                # Prev. note was in a slur (source or target) - snap next.
 
         # note_playing = note length (with staccato taken care of). i.e. how long it plays.
         note_playing = 0                            # There is no note length to '4c4s' rest (staccato/portamento).
@@ -6793,7 +6795,12 @@ def print_out_midi1csv_notes() -> None:
                 # Legato (slur) notes snap to the grid: the previous note is held to
                 # exactly this tick, so the pair must land on the same time (zero gap
                 # and zero overlap), otherwise the "slur" would be gappy or fuzzy.
-                if not args.nohumanize and _humanize_max > 0 and 'l' not in last_suffixes:
+                # The note that FOLLOWS a slur run (the fresh strike at the run's
+                # end) snaps too: with humanize it can drift up to +-humanize ticks
+                # late, leaving an audible gap of dead air after the run's last
+                # (grid-pinned) note and making the fresh note "cut off".
+                in_slur_member = prev_note_slurred or ('l' in last_suffixes)
+                if not args.nohumanize and _humanize_max > 0 and not in_slur_member and not prev_was_slur_member:
                     note_time = max(0, lthworkingmeasures + random.randint(-_humanize_max, _humanize_max))
                 else:
                     note_time = lthworkingmeasures
@@ -6997,37 +7004,46 @@ def print_out_midi1csv_notes() -> None:
                     if not args.nohumanize and _humanize_vel > 0:
                         note_velocity = max(_velocity_min, min(127, note_velocity + random.randint(-_humanize_vel, _humanize_vel)))
                     # fi
-                    # Legato footswitch (CC68 = MIDI 0x44 LEGATO_SWITCH).
-                    #
-                    # 'l' means "glide to the next note - no note attack on the
-                    # start of the next note" (suffix_legato).  So the pedal has
-                    # to be DOWN at the onset of every note that FOLLOWS a note
-                    # marked 'l', and UP again a short way into that note.
-                    #
-                    # The pedal is deliberately re-armed between notes rather
-                    # than held across the whole run.  fluidsynth treats CC68 as
-                    # monophonic (fluid_channel_is_playing_mono), so within one
-                    # unbroken pedal-down span every note-on after the first
-                    # continues the same decaying voice instead of starting a new
-                    # one, and the notes go progressively silent.  Measured on the
-                    # mini test piece (dB RMS per note):
-                    #   pedal up             -26.5 / -25.9 / -24.6   (all struck)
-                    #   down at onset, up 2ms later
-                    #                        -26.6 / -26.1 / -24.9   (legato, rings)
-                    #   held to the note-off -26.5 / -29.2 / -50.2   (2nd+ die)
-                    #   held across a 3-note run, released at the end of it:
-                    #                        -41.3 / -41.8 / -58.1   (last dies)
-                    # This is what the pre-2026-09 compiler did with its
-                    # per-note ON/OFF/OFF/ON toggle - noisy, but each slurred
-                    # note-on was the first of its span and so rang properly.
-                    # 1..MIDICLICKSPERQUARTER/16 ticks (2..31ms) is a short glide
-                    # into the note; capped at a quarter of the note so it always
-                    # rings.
+                    # Slur-in notes are NOT struck: the 'l' semantics is "glide
+                    # to the NEXT note - no note attack on its start".  A fresh
+                    # attack still has to exist (only mono mode could drop it
+                    # entirely, see the legato comment below), so make it SOFT:
+                    # a reduced velocity lands in a quieter dynamic layer and
+                    # reads as a slurred-in note under the overlapping source
+                    # tail instead of a full re-strike.  Applies to every note
+                    # whose PREDECESSOR carries 'l', including the chained ones
+                    # that carry 'l' themselves (only the run's first note is
+                    # struck fresh).  Tuned by the 'slur_velocity' variable
+                    # (% of the normal velocity).
                     if prev_note_slurred:
-                        _rel = max(1, min(last_note_length // 4, MIDICLICKSPERQUARTER // 16))
-                        insert_sorted_tail([voice+1, note_time, f'Control_c, {chan}, 68, 127'], 'HERE23') # ON
-                        insert_sorted_tail([voice+1, note_time + _rel, f'Control_c, {chan}, 68, 0'], 'HERE24') # OFF
+                        note_velocity = max(_velocity_min, int(round(note_velocity * float(getvar('slur_velocity')) / 100.0)))
                     # fi
+                    # Legato slur join ('l' = glide to the NEXT note - no note
+                    # attack on the start of the next note, suffix_legato).
+                    #
+                    # The slur is made AUDIBLE by overlap (_off_at below): the
+                    # slurred source's note-off is held a short way INTO the
+                    # target's onset (~2..31ms = MIDICLICKSPERQUARTER//32 ticks),
+                    # so the fresh attack of the slurred-in note lands inside
+                    # the still-ringing tail of the previous one instead of
+                    # after a silence.  That overlap is what reads as legato on
+                    # piano and on bowed strings; without it the source's tail
+                    # is cut short and the pair is audibly detached.
+                    #
+                    # No CC68 (legato footswitch, MIDI 0x44) is emitted for
+                    # slurs.  fluidsynth routes a channel with CC68 down into
+                    # monophonic playing (fluid_channel_is_playing_mono), where
+                    # a note-off that lands even one tick after a later note-on
+                    # goes through fluid_synth_noteoff_mono_LOCAL() and damps
+                    # the note that just started (measured -56.7 dB vs -34.9 dB
+                    # when it lands before).  The old re-armed ON/OFF pair per
+                    # slurred onset only patched around that at the cost of two
+                    # events per slur; with the pedal left up the overlap above
+                    # is safe because a poly-mode note-off damps only its own
+                    # key.  (Mono no-attack playing does work on GeneralUser
+                    # strings but re-attacks on its multi-zone piano - see
+                    # DEVIN-2026-09-28-legato-gm-mono.md - and is not
+                    # representable in MIDI, so it is not used here.)
                     if legato_on:                           # If on from previous note.
                         if l_instrument in instruments:
                             pass
@@ -7040,22 +7056,41 @@ def print_out_midi1csv_notes() -> None:
                         # fi
                     # fi
                     if last_note_on != '':          # If not coming from a rest, or last note is already off.
-                        # A slurred-in note is played with CC68 down, which puts
-                        # fluidsynth's channel into monophonic mode.  There a
-                        # note-off for the previous key that lands even one tick
-                        # AFTER the new note-on goes through
-                        # fluid_synth_noteoff_mono_LOCAL() and damps the note we
-                        # just started, so the slurred note comes out silent
-                        # (measured -56.7 dB against -34.9 dB when it lands
-                        # before).  Humanize jitter moves this note-off around,
-                        # so pin it a tick ahead of the slurred note's onset
-                        # instead of lastlegatolth//2 behind it.  A 1-tick gap
-                        # is ~2ms, i.e. an exact legato join.  Anchored to the
+                        # Slurred-note overlap: hold the source into the target.
+                        # With CC68 down a note-off AFTER a later note-on hits
+                        # noteoff_mono_LOCAL() and silences the note just started
+                        # (measured -56.7 dB vs -34.9 dB before), which is why
+                        # the old code pinned the note-off a tick ahead.  With
+                        # the pedal up a poly-mode note-off damps only its own
+                        # key, so overlap is safe.  Same-pitch repeats stay
+                        # pinned a tick ahead anyway: a late note-off on the same
+                        # key would cut the voice just started.  Anchored to the
                         # jittered note_time, not the un-jittered grid time
                         # lthworkingmeasures: humanize moves the note-on by up to
                         # +-humanize ticks, so a note-off measured from the grid
-                        # can still overtake it.
-                        _off_at = note_time - 1 if prev_note_slurred else lthworkingmeasures + lastlegatolth // 2
+                        # could still overtake it.
+                        if prev_note_slurred and str(last_note_on) != str(n):
+                            _ovp = max(1, min(MIDICLICKSPERQUARTER // 32, last_note_length // 4))
+                            _off_at = note_time + _ovp
+                            # Legato seam pedal (CC64): press just before the
+                            # slurred-in onset, release a full pedal_overlap
+                            # AFTER the source's late note-off, so the source's
+                            # tail is HELD across the seam instead of damping
+                            # at its key-lift.  This is what makes the pair read
+                            # as connected on a percussive patch like the piano
+                            # (legato pedaling; the source's resonance carries
+                            # into the soft slurred-in note).  Melodic channels
+                            # only (drums ignore/abuse CC64), and only at the
+                            # seam -- both commands are anchored to note_time so
+                            # they cannot outlast the run.
+                            if l_instrument in instruments:
+                                insert_sorted_tail([voice+1, max(0, note_time - _pedal_overlap_ticks), f'Control_c, {chan}, 64, 127'], 'HERE_PED_SLUR_ON')
+                                insert_sorted_tail([voice+1, note_time + _pedal_overlap_ticks + _ovp, f'Control_c, {chan}, 64, 0'], 'HERE_PED_SLUR_OFF')
+                            # fi
+                        elif prev_note_slurred:
+                            _off_at = note_time - 1
+                        else:
+                            _off_at = lthworkingmeasures + lastlegatolth // 2
                         insert_sorted_tail([voice+1, _off_at, f'Note_off_c, {chan}, {last_note_on}, 0'], 'HERE18')
                         if args.echoonoff:
                             insert_sorted_tail([voice+1, _off_at, f'Text_t, "Off:{chan:>3} {last_note_on:>3}"'], 'HERE19')
@@ -7080,11 +7115,11 @@ def print_out_midi1csv_notes() -> None:
                     # fi
                 # fi
 
-                # Remember whether this note slurred into the next one.  The CC68
-                # ON/OFF pair for the NEXT note's onset is emitted above, from
-                # prev_note_slurred, so that the pedal is always down at a
-                # slurred-in note's note-on and never across a note boundary.
+                # Remember whether this note slurred into the NEXT one; the
+                # overlap of the source into the next note's onset (_off_at
+                # above) is decided next iteration from prev_note_slurred.
                 prev_note_slurred = ('l' in last_suffixes)
+                prev_was_slur_member = in_slur_member
 
                 # note_playing will eventually be when to turn note off.
                 if 's' in last_suffixes:
@@ -10303,7 +10338,7 @@ def set_default_ims(t_args, original_line) -> None:
     # suffix_tenuto = 128           -- 90% of note
     # suffix_Emphasis = 64          -- Emphasis (aa)
     # suffix_emphasis = 32          -- emphasis
-    # suffix_legato = 16            -- glide to next (note 10% longer with sustain pedal active).
+    # suffix_legato = 16            -- glide to next note - no note attack on start of next note.
     # suffix_tied = 2               -- tied
     # suffix_staccato = 1           -- staccato 50% of note
     # suffix_dotted = -1
@@ -10452,7 +10487,7 @@ def decode_gsw(t_args, original_line) -> None:
     # suffix_tenuto = 128           -- 90% of note
     # suffix_Emphasis = 64          -- Emphasis (aa)
     # suffix_emphasis = 32          -- emphasis
-    # suffix_legato = 16            -- glide to next note.
+    # suffix_legato = 16            -- glide to next note - no note attack on start of next note.
     # suffix_tied = 2               -- tied
     # suffix_staccato = 1           -- staccato
     # suffix_dotted = -1
@@ -18505,7 +18540,7 @@ def do_a_note(temp1, rest, voiceon, prenote, postnote, w, tie_next, legato_next,
     # fi
     # suffix_Emphasis = 64        # Emphasis (aa)
     # suffix_emphasis = 32        # emphasis
-    # suffix_legato = 16            -- glide to next note.
+    # suffix_legato = 16            -- glide to next note - no note attack on start of next note.
     # suffix_tied = 2               -- tied
     # suffix_staccato = 1           -- staccato
     # suffix_dotted = 0

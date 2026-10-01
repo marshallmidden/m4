@@ -1,0 +1,439 @@
+#!/bin/bash
+# mid2mp4 -- Convert a MIDI file to a waveform-overlay .mp4 for listening/debug
+#
+# Usage:  mid2mp4 [OPTIONS] <file.mid | file.csv>
+#
+# Two input flavours are accepted:
+#   *.mid   a standard MIDI file (binary)
+#   *.csv   a MIDIcsv text file, i.e. what `imscomp --midi1csv` writes
+#            (converted with csvmidi before rendering; the CSV itself is used
+#            for the text events because it still distinguishes Title_t from
+#            Text_t -- the SMF format does not)
+#
+# Pipeline:
+#   .mid  -> .wav       fluidsynth renders the MIDI through GeneralUser.sf2
+#   .csv  -> .mid       csvmidi (only for .csv input)
+#   .wav  -> waveform   wav2waveform (scrolling waveform + cyan dB scale)
+#   text events -> .ass fs2ass, fed a synthetic sleep/echo .fs
+#   .wav + .ass + waveform -> .mp4   ffmpeg (H.264 + AAC, 1920x1080)
+#
+# "Echoes" are the MIDI text events.  `imscomp --midi1csv` writes one per
+# measure ("measure 12"), one per voice ("voice 1") and, with echo/diagnostic
+# builds, "On:"/"Off:" note-event lines -- they are exactly what fs2ass scrolls
+# for a .fs file, so a .mid and its .fs twin produce the same overlay.
+#
+# Reverb/echo that lives in the MIDI as CC 91 (and the SoundFont's own reverb)
+# is rendered by fluidsynth, so it is audible in the .mp4.
+#
+# Requirements: fluidsynth (~/bin), ffmpeg/ffprobe (~/bin), midicsv + csvmidi
+#               (~/bin), python3.  Optional: wav2waveform + numpy, fs2ass.
+# -----------------------------------------------------------------------------
+
+set -euo pipefail
+
+#-- Configurable paths --------------------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FLUIDSYNTH="${FLUIDSYNTH:-$HOME/bin/fluidsynth}"
+MIDICSV="${MIDICSV:-$HOME/bin/midicsv}"
+CSV2MID="${CSV2MID:-$HOME/bin/csvmidi}"
+FS2ASS="${FS2ASS:-${SCRIPT_DIR}/fs2ass}"
+WAV2WAVEFORM="${WAV2WAVEFORM:-${SCRIPT_DIR}/wav2waveform}"
+
+# OS-specific SoundFont path
+case "$(uname -s)" in
+    Darwin) SOUNDFONT="${SOUNDFONT:-$HOME/src/GeneralUser/GeneralUser.sf2}" ;;
+    *)      SOUNDFONT="${SOUNDFONT:-$HOME/src/GeneralUser_GS/GeneralUser.sf2}" ;;
+esac
+
+# Video settings -- same as gcs2youtube, so the two produce identical videos
+VIDEO_RES="1920x1080"
+VIDEO_FPS="15"
+BG_COLOR="black"
+FONT_COLOR="white"
+FONT_SIZE="48"
+WAVEFORM_WINDOW="10.0"  # seconds of audio visible in the waveform display
+# -----------------------------------------------------------------------------
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS] <file.mid|file.csv>
+
+Convert a MIDI file to a .mp4 with a scrolling waveform visualisation and the
+MIDI's own text events ("echoes") as a scrolling overlay.
+
+Options:
+  -o, --output FILE     Output .mp4 (default: <input dir>/<basename>.mp4)
+  -a, --audio FILE      Use FILE as the audio (skips the fluidsynth step)
+  -s, --soundfont FILE  Path to the .sf2 SoundFont
+  -f, --filter REGEX    Only scroll text events matching REGEX
+  -k, --keep            Keep the rendered .wav next to the .mp4
+  --no-waveform         Skip the waveform visualisation
+  --no-text             Skip the scrolling text overlay
+  --window SEC          Seconds of audio in the waveform window (default ${WAVEFORM_WINDOW})
+  -h, --help            Show this help
+
+Environment variables: FLUIDSYNTH MIDICSV CSV2MID FS2ASS WAV2WAVEFORM SOUNDFONT
+
+Examples:
+  $(basename "$0") legato-test.mid
+  $(basename "$0") b/09/b9m2.csv
+  $(basename "$0") -k --filter 'measure' legato-test.mid
+  $(basename "$0") -a sfz-mix/foo-sfz-mix.wav -o foo-sfz.mp4 foo.mid
+EOF
+    exit 0
+}
+
+die()  { echo "ERROR: $*" >&2; exit 1; }
+info() { echo "-- $*"; }
+warn() { echo "WARNING: $*" >&2; }
+
+# -----------------------------------------------------------------------------
+# Parse arguments
+# -----------------------------------------------------------------------------
+OUTPUT=""
+AUDIO_FILE=""
+KEEP_WAV=0
+NO_WAVEFORM=0
+NO_TEXT=0
+TEXT_FILTER=""
+
+INPUT_FILE=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -o|--output)     OUTPUT="$2";   shift 2 ;;
+        -a|--audio)      AUDIO_FILE="$2"; shift 2 ;;
+        -s|--soundfont)  SOUNDFONT="$2"; shift 2 ;;
+        -f|--filter)     TEXT_FILTER="$2"; shift 2 ;;
+        -k|--keep)       KEEP_WAV=1; shift ;;
+        --window)        WAVEFORM_WINDOW="$2"; shift 2 ;;
+        --no-waveform)   NO_WAVEFORM=1; shift ;;
+        --no-text)       NO_TEXT=1; shift ;;
+        -h|--help)       usage ;;
+        -*)              die "Unknown option: $1" ;;
+        *)               [[ -z "$INPUT_FILE" ]] || die "Only one input file, got: $INPUT_FILE and $1"
+                         INPUT_FILE="$1"; shift ;;
+    esac
+done
+
+[[ -n "$INPUT_FILE" ]] || die "Need exactly one input file. Use --help for usage."
+[[ -f "$INPUT_FILE" ]] || die "File not found: $INPUT_FILE"
+
+case "$INPUT_FILE" in
+    *.mid|*.MID) IS_CSV=0 ;;
+    *.csv|*.CSV) IS_CSV=1 ;;
+    *) die "Input must be a .mid or a MIDIcsv .csv file, got: $INPUT_FILE" ;;
+esac
+
+BASE="$(basename "${INPUT_FILE%.*}")"
+INPUT_DIR="$(cd "$(dirname "$INPUT_FILE")" && pwd)"
+INPUT_FULL="${INPUT_DIR}/$(basename "$INPUT_FILE")"
+[[ -n "$OUTPUT" ]] || OUTPUT="${INPUT_DIR}/${BASE}.mp4"
+
+command -v ffmpeg >/dev/null || die "ffmpeg not found on PATH."
+command -v ffprobe >/dev/null || die "ffprobe not found on PATH."
+# The Homebrew ffmpeg has no drawtext/ass filters; the ~/bin build has them.
+if [[ -x "$HOME/bin/ffmpeg" && "$(command -v ffmpeg)" != "$HOME/bin/ffmpeg" ]]; then
+    warn "ffmpeg resolves to $(command -v ffmpeg), not ~/bin/ffmpeg;" \
+         "the title/text overlays will fail if text rendering is missing."
+fi
+if [[ -z "$AUDIO_FILE" ]]; then
+    [[ -x "$FLUIDSYNTH" ]] || command -v "$FLUIDSYNTH" >/dev/null \
+        || die "fluidsynth not found at '$FLUIDSYNTH'. Set FLUIDSYNTH."
+    [[ -f "$SOUNDFONT" ]] || die "SoundFont not found: $SOUNDFONT"
+fi
+if [[ "$IS_CSV" -eq 1 ]]; then
+    [[ -x "$CSV2MID" ]] || command -v "$CSV2MID" >/dev/null \
+        || die "csvmidi not found at '$CSV2MID'. Set CSV2MID."
+fi
+
+TMPDIR="$(mktemp -d)"
+cleanup() {
+    if [[ "$KEEP_WAV" -eq 1 && -f "${TMPDIR}/${BASE}.wav" ]]; then
+        cp -f "${TMPDIR}/${BASE}.wav" "$(dirname "$OUTPUT")/" 2>/dev/null || true
+    fi
+    rm -rf "$TMPDIR"
+}
+trap cleanup EXIT
+
+# -----------------------------------------------------------------------------
+# STEP 0: MIDI file -- convert a MIDIcsv input with csvmidi
+# -----------------------------------------------------------------------------
+MID="${TMPDIR}/${BASE}.mid"
+if [[ "$IS_CSV" -eq 1 ]]; then
+    info "Step 0/4: Converting MIDIcsv $BASE.csv -> $BASE.mid  (csvmidi)"
+    "$CSV2MID" "$INPUT_FULL" "$MID" || die "csvmidi failed."
+    TEXT_SOURCE="$INPUT_FULL"
+else
+    cp -f "$INPUT_FULL" "$MID"
+    TEXT_SOURCE=""
+fi
+[[ -s "$MID" ]] || die "No MIDI data (empty $MID)."
+
+# -----------------------------------------------------------------------------
+# STEP 1/4: text events ("echoes") -> synthetic sleep/echo .fs for fs2ass
+#
+# tick -> seconds needs the division (Header line) and the tempo map.  For a
+# .mid the events come from midicsv; for a .csv we read the CSV directly so
+# Title_t events stay distinguishable from measure text.
+# -----------------------------------------------------------------------------
+ECHO_TSV="${TMPDIR}/echo.tsv"
+TITLE_TXT="${TMPDIR}/titles.txt"
+ECHO_FS=""
+: > "$ECHO_TSV"
+: > "$TITLE_TXT"
+
+if [[ "$NO_TEXT" -eq 0 ]]; then
+    [[ -x "$MIDICSV" ]] || command -v "$MIDICSV" >/dev/null \
+        || warn "midicsv not found; no text overlay."
+    info "Step 1/4: Extracting text events  (${MIDICSV##*/})"
+    MIDICSV_DUMP="${TMPDIR}/events.csv"
+    if [[ -x "$MIDICSV" ]]; then
+        "$MIDICSV" "$MID" > "$MIDICSV_DUMP" 2>/dev/null \
+            || warn "midicsv failed; continuing without text."
+    else
+        : > "$MIDICSV_DUMP"
+    fi
+
+    python3 - "$MIDICSV_DUMP" "$TEXT_SOURCE" "$ECHO_TSV" "$TITLE_TXT" <<'PY'
+import csv, re, sys
+
+midicsv_dump, orig_csv, echo_tsv, title_txt = sys.argv[1:5]
+
+# ---------------------------------------------------------------------------
+# Parse a MIDIcsv / midicsv stream: division, tempo map, text events.
+# ---------------------------------------------------------------------------
+def parse(path):
+    division, tempos, texts = 480, {0: 500000}, []
+    try:
+        fh = open(path, newline='', errors='replace')
+    except OSError:
+        return division, tempos, texts
+    with fh:
+        for row in csv.reader(fh):
+            if len(row) < 3:
+                continue
+            try:
+                track, when = int(row[0]), int(row[1])
+            except ValueError:
+                continue
+            event = row[2].strip()
+            rest = [c.strip() for c in row[3:]]
+            if event == 'Header' and rest:
+                try:
+                    div = int(rest[-1])
+                    if div > 0:
+                        division = div
+                except ValueError:
+                    pass
+            elif event == 'Tempo' and rest:
+                try:
+                    tempos.setdefault(when, int(rest[0]))
+                except ValueError:
+                    pass
+            elif event in ('Title_t', 'Text_t', 'Marker', 'Lyric', 'Cue_point'):
+                text = ' '.join(rest).strip()
+                if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
+                    text = text[1:-1]
+                text = text.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ').strip()
+                if text:
+                    texts.append((when, track, event, text))
+    return division, tempos, texts
+
+division, tempos, texts = parse(midicsv_dump)
+
+# A CSV input keeps Title_t apart from Text_t, and is immune to any midicsv
+# build that prints bar:beat instead of absolute ticks.  Prefer it.
+if orig_csv:
+    c_div, c_tempos, c_texts = parse(orig_csv)
+    if c_texts:
+        division, tempos, texts = c_div, c_tempos, c_texts
+
+# ---------------------------------------------------------------------------
+# ticks -> seconds through the tempo map
+# ---------------------------------------------------------------------------
+points = sorted(tempos.items())
+def to_sec(tick):
+    sec, prev_tick, prev_tempo = 0.0, 0, points[0][1]
+    for t, tempo in points:
+        if t >= tick:
+            break
+        sec += (t - prev_tick) * prev_tempo / division / 1e6
+        prev_tick, prev_tempo = t, tempo
+    return sec + (tick - prev_tick) * prev_tempo / division / 1e6
+
+echo_lines, title_lines = [], []
+for when, track, event, text in sorted(texts):
+    if '"' in text:                      # would break the fs2ass echo "..." syntax
+        text = text.replace('"', "'")
+    stamp = '%.3f' % to_sec(when)
+    if event == 'Title_t':
+        if text not in title_lines:
+            title_lines.append(text)
+    else:
+        echo_lines.append('%s\t%s' % (stamp, text))
+
+with open(echo_tsv, 'w') as fh:
+    fh.write('\n'.join(echo_lines) + ('\n' if echo_lines else ''))
+with open(title_txt, 'w') as fh:
+    fh.write('\n'.join(title_lines) + ('\n' if title_lines else ''))
+
+print('   %d text events, %d titles, %d ticks/quarter' %
+      (len(echo_lines), len(title_lines), division))
+PY
+
+    # fs2ass reads a .fs: cumulative "sleep <ms>" + 'echo "text"'.
+    if [[ -s "$ECHO_TSV" ]]; then
+        ECHO_FS="${TMPDIR}/${BASE}_echo.fs"
+        python3 - "$ECHO_TSV" "$ECHO_FS" <<'PY'
+import sys
+prev = 0.0
+with open(sys.argv[1]) as src, open(sys.argv[2], 'w') as dst:
+    for line in src:
+        line = line.rstrip('\n')
+        if not line:
+            continue
+        stamp, text = line.split('\t', 1)
+        now = float(stamp)
+        dst.write('sleep %.3f\n' % ((now - prev) * 1000.0))
+        dst.write('echo "%s"\n' % text)
+        prev = now
+PY
+        info "  Wrote $(grep -c '^echo' "$ECHO_FS" || true) echo lines -> ${BASE}_echo.fs"
+    else
+        warn "No text events found in the MIDI; skipping text overlay."
+    fi
+fi
+
+# -----------------------------------------------------------------------------
+# STEP 2/4: audio
+# -----------------------------------------------------------------------------
+if [[ -n "$AUDIO_FILE" ]]; then
+    [[ -f "$AUDIO_FILE" ]] || die "Audio file not found: $AUDIO_FILE"
+    info "Step 2/4: Using provided audio $AUDIO_FILE"
+    cp -f "$AUDIO_FILE" "${TMPDIR}/${BASE}.wav"
+else
+    info "Step 2/4: Rendering ${BASE}.mid -> ${BASE}.wav  (fluidsynth)"
+    "$FLUIDSYNTH" -q -n -K 256 -r96000 -F "${TMPDIR}/${BASE}.wav" "$SOUNDFONT" "$MID" \
+        > /dev/null || die "FluidSynth rendering failed."
+fi
+[[ -s "${TMPDIR}/${BASE}.wav" ]] || die "No usable audio (.wav) produced."
+
+DURATION="$(ffprobe -v error -show_entries format=duration \
+    -of default=noprint_wrappers=1:nokey=1 "${TMPDIR}/${BASE}.wav")"
+info "  Duration: ${DURATION}s"
+
+# -----------------------------------------------------------------------------
+# STEP 3/4: waveform visualisation (optional)
+# -----------------------------------------------------------------------------
+WAVEFORM_FILE="${TMPDIR}/${BASE}_waveform.mp4"
+USE_WAVEFORM=0
+
+run_waveform() {
+    local wav="$1" out="$2"
+    shift 2
+    if command -v uv &>/dev/null; then
+        uv run --script "$WAV2WAVEFORM" "$wav" "$out" "$@"
+    else
+        python3 "$WAV2WAVEFORM" "$wav" "$out" "$@"
+    fi
+}
+
+if [[ "$NO_WAVEFORM" -eq 0 ]] && [[ -f "$WAV2WAVEFORM" ]]; then
+    info "Step 3/4: Generating waveform visualisation  (wav2waveform)"
+    if run_waveform "${TMPDIR}/${BASE}.wav" "$WAVEFORM_FILE" \
+           --fps "$VIDEO_FPS" --window "$WAVEFORM_WINDOW"; then
+        USE_WAVEFORM=1
+    else
+        warn "wav2waveform failed; proceeding without waveform."
+    fi
+elif [[ "$NO_WAVEFORM" -eq 1 ]]; then
+    info "Step 3/4: Waveform disabled (--no-waveform)."
+else
+    info "Step 3/4: wav2waveform not found; skipping waveform."
+fi
+
+# -----------------------------------------------------------------------------
+# STEP 4/4: text overlay (optional) + ffmpeg mux
+#
+# Same layering as gcs2youtube:
+#   1. black 1920x1080 background
+#   2. scrolling echo text (ASS from fs2ass)  -- or static drawtext
+#   3. waveform visualisation, lower-right 960x540
+# -----------------------------------------------------------------------------
+ASS_FILE="${TMPDIR}/${BASE}.ass"
+USE_ASS=0
+
+if [[ "$NO_TEXT" -eq 0 && -n "$ECHO_FS" && -f "$ECHO_FS" ]] \
+   && { [[ -x "$FS2ASS" ]] || command -v "$FS2ASS" &>/dev/null; }; then
+    set --
+    [[ -s "$TITLE_TXT" ]] && set -- "$@" --title-file "$TITLE_TXT"
+    [[ -n "$TEXT_FILTER" ]] && set -- "$@" --filter "$TEXT_FILTER"
+
+    if python3 "$FS2ASS" "$ECHO_FS" "$ASS_FILE" "$@" 2>/dev/null; then
+        USE_ASS=1
+        info "  Scrolling text overlay ready"
+    else
+        warn "fs2ass failed; using static title card."
+    fi
+fi
+
+info "Step 4/4: Creating $BASE.mp4  (ffmpeg)"
+
+if [[ -s "$TITLE_TXT" ]]; then
+    TITLE="$(head -1 "$TITLE_TXT")"
+    SUBTITLE="$(sed -n '2,4p' "$TITLE_TXT" | tr '\n' ' ')"
+else
+    TITLE="$BASE"
+    SUBTITLE=""
+fi
+
+# 1 fps is enough for a pure title card, 15 fps when something moves.
+if [[ "$USE_ASS" -eq 1 || "$USE_WAVEFORM" -eq 1 ]]; then
+    FPS="$VIDEO_FPS"
+else
+    FPS=1
+fi
+
+if [[ "$USE_ASS" -eq 1 && "$USE_WAVEFORM" -eq 1 ]]; then
+    ffmpeg -y -loglevel error \
+        -f lavfi -i "color=c=${BG_COLOR}:s=${VIDEO_RES}:r=${FPS}:d=${DURATION}" \
+        -i "${TMPDIR}/${BASE}.wav" \
+        -i "$WAVEFORM_FILE" \
+        -filter_complex \
+            "[0:v]ass=${ASS_FILE}[bg]; [bg][2:v]overlay=960:540[out]" \
+        -map "[out]" -map "1:a" \
+        -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 192k \
+        -shortest -movflags +faststart "$OUTPUT" || die "ffmpeg failed."
+
+elif [[ "$USE_ASS" -eq 1 ]]; then
+    ffmpeg -y -loglevel error \
+        -f lavfi -i "color=c=${BG_COLOR}:s=${VIDEO_RES}:r=${FPS}:d=${DURATION}" \
+        -i "${TMPDIR}/${BASE}.wav" \
+        -vf "ass=${ASS_FILE}" \
+        -c:v libx264 -tune stillimage -pix_fmt yuv420p -c:a aac -b:a 192k \
+        -shortest -movflags +faststart "$OUTPUT" || die "ffmpeg failed."
+
+elif [[ "$USE_WAVEFORM" -eq 1 ]]; then
+    ffmpeg -y -loglevel error \
+        -f lavfi -i "color=c=${BG_COLOR}:s=${VIDEO_RES}:r=${FPS}:d=${DURATION}" \
+        -i "${TMPDIR}/${BASE}.wav" \
+        -i "$WAVEFORM_FILE" \
+        -filter_complex \
+            "[0:v]drawtext=text='${TITLE}':fontcolor=${FONT_COLOR}:fontsize=${FONT_SIZE}:x=(w-text_w)/2:y=(h-text_h)/2-40,drawtext=text='${SUBTITLE}':fontcolor=gray:fontsize=28:x=(w-text_w)/2:y=(h/2)+30[bg]; [bg][2:v]overlay=960:540[out]" \
+        -map "[out]" -map "1:a" \
+        -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 192k \
+        -shortest -movflags +faststart "$OUTPUT" || die "ffmpeg failed."
+
+else
+    ffmpeg -y -loglevel error \
+        -f lavfi -i "color=c=${BG_COLOR}:s=${VIDEO_RES}:r=${FPS}:d=${DURATION}" \
+        -i "${TMPDIR}/${BASE}.wav" \
+        -vf "drawtext=text='${TITLE}':fontcolor=${FONT_COLOR}:fontsize=${FONT_SIZE}:x=(w-text_w)/2:y=(h-text_h)/2-40" \
+        -c:v libx264 -tune stillimage -pix_fmt yuv420p -c:a aac -b:a 192k \
+        -shortest -movflags +faststart "$OUTPUT" || die "ffmpeg failed."
+fi
+
+info "Levels: $(ffmpeg -hide_banner -i "${TMPDIR}/${BASE}.wav" -af volumedetect -f null - 2>&1 \
+        | grep -E 'mean_volume|max_volume' | tr '\n' ' ')"
+info "Done: $OUTPUT"
+ls -lh "$OUTPUT"

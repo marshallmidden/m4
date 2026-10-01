@@ -144,7 +144,7 @@ clean:
 	rm -f ${SONGS_E}
 	rm -f *.stderr
 	rm -f *.h *.v *.csv *.mid *.E *.fs *.pdf *.ps *.abc *.wav *.mp4
-	rm -f AAA.[0-9][0-9] BBB.[0-9][0-9]
+	rm -f AAA.[0-9][0-9] BBB.[0-9][0-9] ZZZ.*
 #-----------------------------------------------------------------------------
 .PHONY: check
 check:

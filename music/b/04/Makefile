@@ -197,6 +197,8 @@ clean: sfz-clean
 	rm -f ${SONGS_E} ${SONGS_ABC} ${SONGS_2_ABC} ${SONGS_FS} ${SONGS_2_FS} ${SONGS_MP4} ${SONGS_2_MP4}
 	rm -f ${SONGS_PS} ${SONGS_2_PS} ${SONGS_PS} ${SONGS_2_PS} ${SONGS_PDF} ${SONGS_2_PDF}
 	rm -f *.wav *.csv *.h *.v *.E
+	rm -f *.mp4
+	rm -f ZZZ.* AAA.[0-9][0-9] BBB.[0-9][0-9]
 	rm -rf ${SFZ_CSVDIR} ${SFZ_MIXDIR}
 	rm -f ${SONGS:%=%-sfz.mp4}
 #-----------------------------------------------------------------------------

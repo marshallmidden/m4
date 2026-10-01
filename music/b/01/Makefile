@@ -180,6 +180,8 @@ clean: sfz-clean
 	rm -f ${V4}.csv ${V4}.mid ${V4}.fs ${V4}.pdf ${V4}.abc ${V4}.wav ${V4}.E ${V4}.h ${V4}.v ${V4}.mp4 ${V4}_2.mp4
 	rm -f ${V4}_2.csv ${V4}_2.mid ${V4}_2.fs ${V4}_2.pdf ${V4}_2.abc ${V4}_2.wav ${V4}_2.E ${V4}_2.h ${V4}_2.v
 	rm -f A.[012]* B.[012]*
+	rm -f *.mp4
+	rm -f ZZZ.* AAA.[0-9][0-9] BBB.[0-9][0-9]
 	rm -rf ${SFZ_CSVDIR} ${SFZ_MIXDIR}
 	rm -f ${V1:%=%-sfz.mp4} ${V2:%=%-sfz.mp4} ${V3:%=%-sfz.mp4} ${V4:%=%-sfz.mp4}
 #-----------------------------------------------------------------------------
