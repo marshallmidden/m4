@@ -1,5 +1,15 @@
 # Session state: legato work, 2026-09-29 (saved before macOS/reinstall reboot)
 
+> **SUPERSEDED IN PART by `DEVIN-2026-10-05-legato-piano-velocity.md` (2026-10-05).**
+> Steps 1 and 2 below are still uncoded and still correct in shape, but the
+> **target number is wrong**: this plan moves `slur_velocity` 45 -> **68**;
+> measurement says the piano slur-ins want **~85** (or 100), because the CC64
+> seam pedal this plan credits with carrying the attack-masking turns out to
+> contribute ~0 dB — the note-off overlap does the work. Also: the plan's step 1
+> assumption that `args` is in scope at `imscomp:7053-7066` is unverified, and
+> `slur_velocity` could not be overridden from a `.gcs` at all (unresolved — see
+> the 10-05 note). Read that file first; treat the `68` below as superseded.
+
 This file is a handoff for the NEXT session. Context: the two compilers and
 gcs2sfz work is mid-flight on making slurred (`l`) notes legato. Rounds 1+2 are
 done and measured; round 3 was designed but NOT coded when the machine went

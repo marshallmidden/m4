@@ -1516,7 +1516,9 @@ createglobalvar('humanize_velocity', 3, 0, type_is_number, True)     # Max veloc
 createglobalvar('humanize_volume', 2, 0, type_is_number, True)       # Max CC11 volume jitter (0=off). Each note +-N volume units.
 createglobalvar('sustain_pedal', 0, 0, type_is_number, True)         # Sustain pedal CC64: 0=off, -1=on. Set in .gcs for piano.
 createglobalvar('pedal_overlap', 30, 0, type_is_number, True)        # Ticks after note start for pedal down (legato pedaling).
-createglobalvar('slur_velocity', 45.0, 0, type_is_number, True)      # % velocity for slur-in notes ('l' = no attack on its start).
+createglobalvar('slur_velocity', 55.0, 0, type_is_number, True)      # % velocity for slur-in notes: a lower-velocity re-strike keeps ADSR timing but sits whole-body ~9-11dB under a fresh note on the GeneralUser grand, i.e. continuous with the previous note's decay. Measured sweep pp..ff (2026-10-10): offset stays ~8.4-11.7dB at every volume, so one % serves all dynamics. 100 = no cut.
+createglobalvar('slur_filter', 0.0, 0, type_is_number, True)         # NRPN FILTERFC timecents offset at slur-in onset (0=off - shipped default; velocity carries the soft onset now). Non-zero shaves the onset HF further: -1000..-2000 mild, -4000 removes the attack entirely (reads as 'old note sustains'). Reopen after slur_filter_hold ticks.
+createglobalvar('slur_filter_hold', 24.0, 0, type_is_number, True)   # Ticks to hold FILTERFC closed before reopening (24 ~= 50ms at quarter=480ticks).
 createglobalvar('velocity_min', 20, 0, type_is_number, True)         # Minimum MIDI velocity (0-127). Allows ppp/pp differentiation.
 createglobalvar('time', 0, 0, type_is_number, True)                  # The "time" in measure for current voice. (staff?)
 createglobalvar('in_chord', 0, 0, type_is_number, True)              # True (tutor style, -1) if inside a chord.
@@ -6611,6 +6613,8 @@ def print_out_midi1csv_notes() -> None:
     _sustain_pedal_on = (int(float(getvar('sustain_pedal'))) != 0)
     _pedal_overlap_ticks = int(float(getvar('pedal_overlap')))
     _velocity_min = int(float(getvar('velocity_min')))
+    _slur_filter_fc = int(float(getvar('slur_filter')))
+    _slur_filter_hold = max(1, int(float(getvar('slur_filter_hold'))))
 
     channel = 0                                     # Next midi instrument channel to use.
     chan = 0                                        # The midi channel using now (allows for repeated use).
@@ -7122,13 +7126,20 @@ def print_out_midi1csv_notes() -> None:
                             # slurred-in onset, release a full pedal_overlap
                             # AFTER the source's late note-off, so the source's
                             # tail is HELD across the seam instead of damping
-                            # at its key-lift.  This is what makes the pair read
-                            # as connected on a percussive patch like the piano
-                            # (legato pedaling; the source's resonance carries
-                            # into the soft slurred-in note).  Melodic channels
-                            # only (drums ignore/abuse CC64), and only at the
-                            # seam -- both commands are anchored to note_time so
-                            # they cannot outlast the run.
+                            # at its key-lift.  Melodic channels only (drums
+                            # ignore/abuse CC64), and only at the seam -- both
+                            # commands are anchored to note_time so they
+                            # cannot outlast the run.
+                            #
+                            # NOTE (2026-10-05, measured): this pedal is NOT
+                            # what makes a piano slur read as connected -- the
+                            # note-off overlap above (_off_at) is.  A/B on the
+                            # GeneralUser grand piano over a 4-note slur came
+                            # out within 0.3 dB of each other with and without
+                            # it.  Kept because it is cheap and harmless, not
+                            # because it is load-bearing; do not credit it with
+                            # the legato.  See music/sfz/legato-probe/ and
+                            # DEVIN-2026-10-05-legato-piano-velocity.md.
                             if l_instrument in instruments:
                                 insert_sorted_tail([voice+1, max(0, note_time - _pedal_overlap_ticks), f'Control_c, {chan}, 64, 127'], 'HERE_PED_SLUR_ON')
                                 insert_sorted_tail([voice+1, note_time + _pedal_overlap_ticks + _ovp, f'Control_c, {chan}, 64, 0'], 'HERE_PED_SLUR_OFF')
@@ -7140,6 +7151,43 @@ def print_out_midi1csv_notes() -> None:
                         insert_sorted_tail([voice+1, _off_at, f'Note_off_c, {chan}, {last_note_on}, 0'], 'HERE18')
                         if args.echoonoff:
                             insert_sorted_tail([voice+1, _off_at, f'Text_t, "Off:{chan:>3} {last_note_on:>3}"'], 'HERE19')
+                        # fi
+                    # fi
+                    # Slur-in soft onset is carried by slur_velocity (default
+                    # 55): a lower-velocity re-strike keeps normal ADSR timing
+                    # and lands the whole note ~9-11dB under a fresh one across
+                    # pp..ff -- "the new note continues where the old one was",
+                    # not a re-strike and not a spectral-only change.  The NRPN
+                    # FILTERFC below is an OPTIONAL extra (slur_filter, default
+                    # 0 = off) for cases that still read as re-struck: close
+                    # the low-pass at the onset, reopen after slur_filter_hold
+                    # ticks.  Velocity (whole envelope) and filter (onset
+                    # spectrum only) are independent levers; too deep a filter
+                    # (-4000) removes the attack event entirely and reads as
+                    # 'the old note just keeps sustaining' (2026-10-10).
+                    #
+                    # NRPN data is the 7-bit MSB only (data = msb<<7, LSB kept
+                    # 0): fluidsynth resets chan->nrpn_select to 0 after the
+                    # FIRST DATA_ENTRY, so the CC6+CC38 pair of the MIDI spec
+                    # makes CC38 re-trigger set_gen against gen 0
+                    # (STARTADDROFS) and corrupts the sample start.  One
+                    # data-entry byte per message, re-selecting the gen each
+                    # time, is the only reliable form.  offset(timecents) =
+                    # (data - 8192) * nrpn_scale(2)  =>  msb = 64 + off/256.
+                    # FluidSynth applies channel gens retroactively to voices
+                    # still sounding, so the source's release tail is covered
+                    # too; count on the reopen to leave the next fresh note
+                    # untouched.  Melodic channels only (drums have no filter).
+                    if prev_note_slurred and l_instrument in instruments and _slur_filter_fc != 0:
+                        _fc_data = 64 + round(float(_slur_filter_fc) / 256.0)
+                        _fc_data = max(17, min(127, _fc_data))
+                        if _fc_data != 64:
+                            insert_sorted_tail([voice+1, note_time, f'Control_c, {chan}, 99, 120'], 'HERE_FILT_NRPNMSB')
+                            insert_sorted_tail([voice+1, note_time, f'Control_c, {chan}, 98, 8'], 'HERE_FILT_NRPNLSB')
+                            insert_sorted_tail([voice+1, note_time, f'Control_c, {chan}, 6, {_fc_data}'], 'HERE_FILT_FC')
+                            insert_sorted_tail([voice+1, note_time + _slur_filter_hold, f'Control_c, {chan}, 99, 120'], 'HERE_FILT_NRPNMSB2')
+                            insert_sorted_tail([voice+1, note_time + _slur_filter_hold, f'Control_c, {chan}, 98, 8'], 'HERE_FILT_NRPNLSB2')
+                            insert_sorted_tail([voice+1, note_time + _slur_filter_hold, f'Control_c, {chan}, 6, 64'], 'HERE_FILT_FC2')
                         # fi
                     # fi
                     if not legato_on:
@@ -8868,6 +8916,17 @@ def pass2() -> None:
     elif args.lilypond:
         print_out_lilypond()
     elif args.midi1csv or args.fluidsynth or args.sfzpipecsv:
+        # The GM/fluidsynth slur fix (no velocity cut + NRPN FILTERFC onset
+        # close) must NOT leak into the SFZ pipe: gcs2sfz's VPO path relies on
+        # the old slur-in velocity cut riding in the CSV, and it has its own
+        # legato handling (slow-attack split + pitch-bend glide).  Pin the
+        # --sfzpipecsv CSV to the pre-2026-10-09 behavior (velocity cut 45,
+        # no FILTERFC).  The shared note loop is otherwise byte-identical to
+        # musicomp2abc, which has no SFZ path.
+        if args.sfzpipecsv:
+            setvar('slur_velocity', 45.0, type_is_number)
+            setvar('slur_filter', 0.0, type_is_number)
+        # fi
         print_out_midi1csv_notes()
         if tm != []:
             for l in tm:

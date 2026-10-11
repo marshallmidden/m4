@@ -127,7 +127,10 @@ GCS variables and command-line flags.
 | Timing humanization | ±5 ticks | `humanize` | `--nohumanize` | Random jitter on Note_on and CC emissions. Deterministic via `random.seed(42)`. Note_off and measure boundaries stay exact. |
 | Arpeggio | 1/32 note (60 ticks) | `arp` | `--noarpeggio` | Chord notes staggered across voices on same staff. Voice position within staff determines delay: `arp_ticks * position`. |
 | Sustain pedal | off (0) | `sustain_pedal` | — | CC 64 legato pedaling. Set `sustain_pedal -1` in .gcs to enable. Pedal up at note_time + overlap/2, down at note_time + overlap. Not applied during staccato. |
-| Pedal overlap | 60 ticks | `pedal_overlap` | — | Controls sustain pedal timing (ticks after note start). |
+| Pedal overlap | 30 ticks | `pedal_overlap` | — | Controls sustain pedal timing (ticks after note start). |
+| Slur-in velocity | 100 (no cut) | `slur_velocity` | — | % velocity for `l`-slurred-in notes. **GM/fluidsynth path uses 100 (no cut) since 2026-10-09; the `--sfzpipecsv` pipe pins it to 45 unconditionally in imscomp's SFZ dispatch.** A GM-only knob in practice. |
+| Slur-in filter | -1500 tc | `slur_filter` | — | `l`-slurred-in soft onset on GM/fluidsynth: NRPN FILTERFC closed at the onset, reopened after `slur_filter_hold` ticks. 0 disables. `-1000..-2000` measured sweet spot. (New 2026-10-09.) |
+| Slur-in filter hold | 24 ticks | `slur_filter_hold` | — | Ticks to keep FILTERFC closed at a slurred-in onset (~50ms at quarter=480). (New 2026-10-09.) |
 
 **Key implementation details**:
 - `note_time` variable holds humanized time offset; used for Note_on and CC emissions
@@ -816,3 +819,57 @@ Top functions by tottime on b-6.gcs (1.3s total, 3.2M calls):
 - `find_terminator_in_string` (18K calls, 0.05s) — string scanning; potential for optimization
 - `separate_args` (11K calls, 0.03s) — argument parsing
 - `len()` still called 575K times — some could be cached in hot loops
+
+---
+
+## GM slur soft onset via NRPN FILTERFC (2026-10-09) — IMPLEMENTED
+
+Fourth entry in the legato series (after `DEVIN-2026-09-27-legato-slur.md`,
+`DEVIN-2026-09-28-legato-gm-mono.md`, `DEVIN-2026-10-05-legato-piano-velocity.md`).
+Full detail + measurements: `DEVIN-2026-10-05-legato-piano-velocity.md` (addendum).
+
+### What was shipped (both compilers, mirrored)
+
+- `createglobalvar('slur_velocity', 100.0, ...)` (was 45) — `imscomp:1519`. **No GM velocity cut anymore.**
+- `createglobalvar('slur_filter', -1500.0, ...)` — `imscomp:1520`. FILTERFC timecent offset at a slurred-in onset (0=off).
+- `createglobalvar('slur_filter_hold', 24.0, ...)` — `imscomp:1521`. Ticks to hold it closed (~50ms at quarter=480).
+- Emission in `print_out_midi1csv_notes()`, after the note-off/overlap block (~`imscomp:7156-7193`): for a `prev_note_slurred` target on a non-drum channel with `_slur_filter_fc != 0`, emits `Control_c CC99=120, CC98=8, CC6=data_msb` at `note_time` and the reopen (`CC6=64`) at `note_time + _slur_filter_hold`.
+- Cache: `_slur_filter_fc` / `_slur_filter_hold` read next to `_pedal_overlap_ticks` (~`imscomp:6616-6617`).
+
+### The NRPN gotcha (why CC6-only, never CC6+CC38)
+
+FluidSynth resets `chan->nrpn_select` to 0 after the FIRST DATA_ENTRY
+(`fluid_synth.c:1865`). The MIDI-spec CC6+CC38 pair therefore makes CC38
+re-trigger `set_gen` against **gen 0** (STARTADDROFS) and corrupt the sample
+start. Only **one data-entry byte per NRPN message, re-selecting the gen each
+time** (`CC99=120, CC98=8, CC6=msb`, LSB left at 0) is reliable. Units:
+`offset(tc) = (msb*128 - 8192) * 2`  =>  `msb = 64 + offset/256`. The previous
+session's hand-written filter sweep was subtly contaminated by exactly this.
+
+### SFZ is pinned to the old behavior (do not touch)
+
+`--sfzpipecsv` shares `print_out_midi1csv_notes()`. To stop the new defaults
+leaking into gcs2sfz's VPO CSVs, the SFZ dispatch branch (imscomp-only, in the
+SFZ-feature divergence zone) pins `setvar('slur_velocity', 45.0)` and
+`setvar('slur_filter', 0.0)` before the note loop (~`imscomp:8917-8930`).
+Verified: the `test-legato` `acoustic_grand_piano.csv` is byte-identical to the
+pre-change compiler. GM `.fs/.csv` carries the fix; **SFZ output untouched**.
+
+### Measured (GM general-user grand, `slur_filter=0` vs `-1500`)
+
+| band | slur-in | fresh notes |
+|---|---|---|
+| >2kHz 0-12ms | -44.8 -> **-52.1 dB** (-7.3) | identical |
+| body 100-300ms | unchanged (~0.3 dB) | identical |
+
+No pre-onset gap (<-48 dB). `DOALL` baseline held: **0 bare / 2 named**
+(gershwin `new-g3`). Harness: `ims/zz-legato-bench/hfband.py`.
+
+### Notes for who works here next
+
+- `musicomp2abc` is source-identical everywhere except the SFZ feature; the
+  slur filter block exists in BOTH compilers unchanged (no `args.sfzpipecsv`
+  text in it — that flag is imscomp-only).
+- Open next step: **listen** to `test-legato.mp4` on piano and tune
+  `slur_filter` (-1000 mild ... -2000 strong). The SFZ/string side is out of
+  scope until this piano sound is accepted.
