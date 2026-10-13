@@ -71,10 +71,26 @@ onsets on a connected, sustained line:
                          fuse 'l'-marked runs into one voice pitch-bent into
                          each slurred-in onset (the old default; audible
                          portamento smear on sustained strings, see
-                         DEVIN-2026-09-28-legato-gm-mono.md).  The legacy
-                         GCS2SFZ_LEGATO env remains honored as an alias
-                         (1/true/yes -> glide, 0/false/no -> reattack) and is
-                         overridden by LEGATO_STYLE when both are set.
+DEVIN-2026-09-28-legato-gm-mono.md).  The legacy
+                          GCS2SFZ_LEGATO env remains honored as an alias
+                          (1/true/yes -> glide, 0/false/no -> reattack) and is
+                          overridden by LEGATO_STYLE when both are set.
+    GCS2SFZ_LEGATO_VEL_DECAY  Adaptive slur-in velocity on the GM fallback
+                          (default 0.65).  A piano decays while its source is
+                          held, so the slur-in that continues it must be
+                          quieter the longer the source sounded.  Each
+                          GM-fallback slur-in is multiplied by
+                          decay ** max(0, src_secs/0.5 - 1), where src_secs is
+                          the source note's real sounded duration (its onset
+                          to the target's, straight from the CSV absolute
+                          seconds).  This mirrors the compilers'
+                          slur_velocity_decay/0.65 (DEVIN-2026-10-05), so the
+                          SFZ piano reaches the same seam level the approved
+                          .fs render does.  The CSV's own slur_velocity cut
+                          stays pinned at 45 in imscomp's --sfzpipecsv; the
+                          decay is applied here, GM fallback only (the VPO
+                          path has its own slow-attack slur handling).  1.0
+                          disables.
 
 Requirements: python3, ~/bin/sfizz_render, fluidsynth, ffmpeg, and the VPO
 library (plus GeneralUser.sf2 for GM fallback).
@@ -574,6 +590,7 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
         # knob is OFF (1.0).  Set GCS2SFZ_LEGATO_VEL_FACTOR below 1.0 to soften
         # slur-in midi velocity further on top of the CSV's.
         slur_vel = max(0.0, min(1.0, float(os.environ.get("GCS2SFZ_LEGATO_VEL_FACTOR", "1.0"))))
+        _vel_decay = max(0.0, min(1.0, float(os.environ.get("GCS2SFZ_LEGATO_VEL_DECAY", "0.65"))))
         pedal_ms = max(0.0, float(os.environ.get("GCS2SFZ_LEGATO_PEDAL_MS", "60")))
         pedal_ticks = max(0, int(round(pedal_ms * TICKS_PER_SEC / 1000.0)))
         _pedal_seams = []
@@ -586,6 +603,22 @@ def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None
                         if jbest is None or src[0] > notes[jbest][0]:
                             jbest = j
                 if jbest is not None and notes[jbest][9] == 'legato' and notes[jbest][2] != nt[2]:
+                    if not pred_expr and _vel_decay < 1.0:
+                        # Adaptive slur-in velocity (mirror of the compilers'
+                        # slur_velocity_decay, DEVIN-2026-10-05): the source
+                        # decayed while it sounded, so the slur-in that
+                        # continues it must be quieter the longer it held.
+                        # The .fs path derives the sounded duration from score
+                        # length + per-measure tempo; here the CSV's absolute
+                        # onset seconds give it directly.  Floor at the
+                        # compilers' velocity_min (20) so the note never
+                        # disappears.
+                        _src_secs = (nt[0] - notes[jbest][0]) / float(TICKS_PER_SEC)
+                        _extra_halves = max(0.0, _src_secs / 0.5 - 1.0)
+                        nt_list = list(nt)
+                        nt_list[3] = max(20, int(round(nt[3] * (_vel_decay ** _extra_halves))))
+                        nt = tuple(nt_list)
+                        notes[i] = nt
                     if slur_vel < 1.0:
                         nt_list = list(nt)
                         nt_list[3] = max(1, int(round(nt[3] * slur_vel)))
