@@ -1520,6 +1520,8 @@ createglobalvar('slur_velocity', 55.0, 0, type_is_number, True)      # % velocit
 createglobalvar('slur_filter', 0.0, 0, type_is_number, True)         # NRPN FILTERFC timecents offset at slur-in onset (0=off - shipped default; velocity carries the soft onset now). Non-zero shaves the onset HF further: -1000..-2000 mild, -4000 removes the attack entirely (reads as 'old note sustains'). Reopen after slur_filter_hold ticks.
 createglobalvar('slur_filter_hold', 24.0, 0, type_is_number, True)   # Ticks to hold FILTERFC closed before reopening (24 ~= 50ms at quarter=480ticks).
 createglobalvar('slur_velocity_decay', 0.65, 0, type_is_number, True) # Adaptive slur_velocity: multiply the slur-in velocity by this for each extra 0.5s the SOURCE note SOUNDED beyond 0.5s (real time, tempo-aware).  A piano decays while the source is held, so the slur-in that continues it must be quieter the longer the source sounded; the flat slur_velocity (55) is only right for a 0.5s source (the length the 2026-10-10 sweep used).  1.0 = off (flat cut at every length).  0.65 (shipped) puts the slur-in body at the source's decayed seam level (measured per-note, mp..pp); tune 0.8 mild .. 0.55 aggressive.
+createglobalvar('sustained_slur_velocity', 100.0, 0, type_is_number, True)  # slur_velocity for instruments that HOLD their level while sounding (bowed strings, winds, brass): a bow/breath continues, so a slur-in should not be dipped at all -- 100 = same velocity as a fresh note (the piano-tuned 55% sat the violin slur-in -14..-16dB under fresh, which read as 'way too quiet'; measured/approved on the violin probe, DEVIN-2026-10-12).  Default (piano) stays 55.
+createglobalvar('sustained_slur_decay', 1.0, 0, type_is_number, True)  # Adaptive decay mult for sustained instruments.  1.0 = flat continuation at any source length (a held bow does not decay); < 1.0 would taper the slur-in with a long source.
 createglobalvar('velocity_min', 20, 0, type_is_number, True)         # Minimum MIDI velocity (0-127). Allows ppp/pp differentiation.
 createglobalvar('time', 0, 0, type_is_number, True)                  # The "time" in measure for current voice. (staff?)
 createglobalvar('in_chord', 0, 0, type_is_number, True)              # True (tutor style, -1) if inside a chord.
@@ -2793,6 +2795,31 @@ instruments = {
     'Orchestral'.lower() : [48, 128],
     'SFX'.lower() : [56, 128],
 }
+
+# Instrument names (lowercase, matching the 'instruments' dict keys) whose slur-in
+# velocity uses the sustained profile: they HOLD their level while sounding, so a
+# slur-in must CONTINUE the line at (or just under) full level rather than land on
+# a half-decayed seam like a struck/plucked note.  Seen by the slur block as
+# l_instrument.  DEVIN-2026-10-12.
+sustained_slur_instruments = frozenset((
+    # Bowed strings
+    'violin', 'viola', 'cello', 'contrabass', 'double bass',
+    'tremolo strings', 'stero strings trem',
+    'string ensemble 1', 'stereo strings fast', 'string ensemble 2', 'stereo strings slow',
+    'synth strings 1', 'synth strings 2',
+    # Voices
+    'choir aahs', 'concert choir', 'voice oohs', 'synth voice',
+    # Winds
+    'piccolo', 'flute', 'recorder', 'pan flute', 'blown bottle', 'bottle blow',
+    'shakuhachi', 'whistle', 'irish tin whistle', 'ocarina',
+    'soprano sax', 'alto sax', 'tenor sax', 'baritone sax',
+    'oboe', 'english horn', 'bassoon', 'clarinet',
+    'bag pipe', 'bagpipes', 'shanai', 'shenai',
+    # Brass
+    'trumpet', 'trombone', 'tuba', 'muted trumpet', 'french horn', 'french horns',
+    'brass section', 'synth brass 1', 'synth brass 2',
+    'trumpet 2', 'trombone 2', 'muted trumpet 2', 'solo french horn',
+))
 
 # ------------------------------------------------------------------------------
 global drum_sounds
@@ -6572,6 +6599,8 @@ def print_out_midi1csv_notes() -> None:
     _slur_filter_hold = max(1, int(float(getvar('slur_filter_hold'))))
     _slur_velocity = float(getvar('slur_velocity'))
     _slur_velocity_decay = float(getvar('slur_velocity_decay'))
+    _sustained_slur_velocity = float(getvar('sustained_slur_velocity'))
+    _sustained_slur_decay = float(getvar('sustained_slur_decay'))
 
     channel = 0                                     # Next midi instrument channel to use.
     chan = 0                                        # The midi channel using now (allows for repeated use).
@@ -7026,17 +7055,29 @@ def print_out_midi1csv_notes() -> None:
                     # (% of the normal velocity).
                     if prev_note_slurred:
                         _sv = _slur_velocity
+                        _sd = _slur_velocity_decay
+                        # Per-instrument slur profile: an instrument that HOLDS
+                        # its level while sounding (bowed strings, winds, brass)
+                        # carries the line through the slur, so its slur-in must
+                        # continue at (or just under) full level instead of
+                        # landing on a half-decayed seam like a struck/plucked
+                        # note.  The piano-tuned 55% flattened the violin slur-in
+                        # ~14dB under fresh (measured sweep, DEVIN-2026-10-12).
+                        if l_instrument in sustained_slur_instruments:
+                            _sv = _sustained_slur_velocity
+                            _sd = _sustained_slur_decay
+                        # fi
                         # Adaptive: the longer the SOURCE note has SOUNDED, the more
                         # the piano has decayed by the seam, so the slur-in that
                         # continues it must be proportionally quieter.  The flat
                         # slur_velocity is only right for a 0.5s source (the length
                         # the 2026-10-10 sweep used).  Length is real time, not score
                         # ticks: a slow tempo makes the same written note decay more.
-                        if _slur_velocity_decay != 1.0 and lt != '' and ll != '':
+                        if _sd != 1.0 and lt != '' and ll != '':
                             _spq = 15.0 / (float(lt) * float(ll))   # seconds per score quarter (ll is a whole-note fraction)
                             _src_secs = (prev_note_length / MIDICLICKSPERQUARTER) * _spq
                             _extra_halves = max(0.0, _src_secs / 0.5 - 1.0)
-                            _sv = _sv * (_slur_velocity_decay ** _extra_halves)
+                            _sv = _sv * (_sd ** _extra_halves)
                         # fi
                         note_velocity = max(_velocity_min, int(round(note_velocity * _sv / 100.0)))
                     # fi
