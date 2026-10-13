@@ -435,6 +435,70 @@ def _slur_slow_gain_db() -> float:
         return 3.0
 
 
+# Instruments that HOLD their level while sounding (bowed strings, winds, brass,
+# voices) -- a mirror of the compilers' sustained_slur_instruments frozenset
+# (imscomp/musicomp2abc).  A bow or breath CONTINUES through a slur, so its
+# slur-in must keep the SOURCE note's level, not land on a decayed seam like a
+# struck/plucked note.  The .fs path does this with sustained_slur_velocity=100;
+# here the shared CSV is pinned to the piano's ~45% cut, so gcs2sfz re-raises the
+# slur-in velocity to the source's for these instruments (DEVIN-2026-10-12).
+# Lowercase GM names as gcs2sfz receives them (the CSV basename).
+_SUSTAINED_SLUR_INSTRUMENTS = frozenset((
+    # Bowed strings
+    'violin', 'viola', 'cello', 'contrabass', 'double bass', 'fiddle',
+    'tremolo strings', 'stero strings trem', 'mono strings trem',
+    'string ensemble 1', 'stereo strings fast', 'mono strings fast',
+    'string ensemble 2', 'stereo strings slow', 'mono strings slow',
+    'synth strings 1', 'synth strings 2', 'synth strings 3', 'orchestra pad',
+    # Voices
+    'choir aahs', 'concert choir', 'concert choir mono', 'voice oohs', 'synth voice',
+    # Winds
+    'piccolo', 'flute', 'recorder', 'pan flute', 'blown bottle', 'bottle blow',
+    'shakuhachi', 'whistle', 'irish tin whistle', 'ocarina',
+    'soprano sax', 'alto sax', 'tenor sax', 'baritone sax',
+    'oboe', 'english horn', 'bassoon', 'clarinet',
+    'bag pipe', 'bagpipes', 'shanai', 'shenai',
+    # Brass
+    'trumpet', 'trombone', 'tuba', 'muted trumpet', 'french horn', 'french horns',
+    'brass section', 'synth brass 1', 'synth brass 2', 'synth brass 3', 'synth brass 4',
+    'trumpet 2', 'trombone 2', 'muted trumpet 2', 'solo french horn', 'brass section mono',
+))
+
+
+def _is_sustained_slur(name) -> bool:
+    """True if this instrument's slur-in should continue at the source's level
+    (bowed strings / winds / brass / voices) rather than take the pinned cut."""
+    return bool(name) and name in _SUSTAINED_SLUR_INSTRUMENTS
+
+
+def _sustained_slur_levels(notes):
+    """Raise every slur-in note's velocity to its SOURCE note's, for a sustained
+    instrument (bowed strings / winds / brass / voices).
+
+    A bow or breath continues through the slur, so the slur-in must sit at the
+    source's level, not the shared CSV's pinned piano cut (~45%).  The .fs path
+    already does this (sustained_slur_velocity=100); gcs2sfz re-raises it here
+    because the slur-in note is rendered ONLY on the slow-attack stem (the fast
+    stem excludes slur-in marks), so the pinned cut would otherwise leave the
+    whole slur-in ~9-10 dB under a fresh note (measured on the violin probe,
+    DEVIN-2026-10-12).  Uses the same 'nearest preceding same-staff legato
+    source' relation as _slur_target_marks.
+    """
+    out = list(notes)
+    for i, nt in enumerate(out):
+        jbest = None
+        for j, src in enumerate(out):
+            if (j != i and src[10] == nt[10] and src[0] < nt[0]
+                    and nt[0] - src[1] <= 0.2 * TICKS_PER_SEC):
+                if jbest is None or src[0] > out[jbest][0]:
+                    jbest = j
+        if jbest is not None and out[jbest][9] == 'legato' and out[jbest][2] != nt[2]:
+            nl = list(out[i])
+            nl[3] = max(1, min(127, out[jbest][3]))
+            out[i] = tuple(nl)
+    return out
+
+
 def write_midi(csv_path: str, midi_path: str, track=0, pred_expr=True, name=None,
                detune_cents=0.0, pan_off=0):
     """Write a single-track MIDI file from a CSV (absolute times in seconds).
@@ -1297,6 +1361,12 @@ def _render_instrument_csv(csv_path, out_wav, samplerate, name, sfz_use,
     Returns True if out_wav was produced.
     """
     notes = read_csv_notes(csv_path)
+    # Sustained (bowed strings / winds / brass / voices): a slur-in continues at
+    # the SOURCE note's level instead of the shared CSV's pinned piano cut
+    # (DEVIN-2026-10-12).  Done here, on the full same-staff note list, because
+    # the slur-in note is rendered only on the slow-attack stem below.
+    if _is_sustained_slur(name):
+        notes = _sustained_slur_levels(notes)
     # Per-note articulation (10th CSV column, from imscomp's --sfzpipecsv)
     # supersedes the duration heuristic: staccato/marcato marks use the
     # staccato patch, everything else (tenuto/accent/legato/tied/sustain) stays
@@ -1308,6 +1378,13 @@ def _render_instrument_csv(csv_path, out_wav, samplerate, name, sfz_use,
     # tamed onset costs the slur stem loudness, so gain it back a little.
     slur_attack = _slur_slow_attack() if _legato_style() == "reattack" else 0.0
     slur_gain = _slur_slow_gain_db() if slur_attack > 0 else 0.0
+    if _is_sustained_slur(name):
+        # The +3dB slow-stem gain exists to give back the body a tamed onset
+        # cost the PIANO (whose slur-in is deliberately soft).  A sustained
+        # instrument's slur-in already carries the source's full velocity
+        # (_sustained_slur_levels), so the extra gain would overshoot it ~3dB
+        # ABOVE a fresh note (measured).  DEVIN-2026-10-12.
+        slur_gain = 0.0
     rendered = False
     if stacc_path:
         if has_artic:

@@ -56,13 +56,35 @@ slur-in is a **continuation**, not a seam — dipping it ~15 dB is wrong.
   `new-g3.E`, both compilers) — baseline, no regression.
 - `make test-legato.mp4` (GM) rebuilt for listening.
 
+## SFZ/VPO side (gcs2sfz) -- implemented 2026-10-12
+
+Before: the SFZ violin slur-in sat **−8.7..−9.6 dB** under a fresh note
+(per-note RMS, body window +0.25..0.75 s).  Cause: the slur-in note is rendered
+ONLY on the slow-attack stem -- the fast stem *excludes* slur-in marks -- and the
+shared CSV carries the pinned piano cut (~45%).  So there was no fast attack to
+carry the level, only a 150 ms swell at 45% velocity.
+
+Fix (gcs2sfz, two spots):
+
+- `_SUSTAINED_SLUR_INSTRUMENTS` frozenset + `_is_sustained_slur(name)`, mirroring
+  the compilers' set (the lowercase GM names gcs2sfz receives).
+- `_sustained_slur_levels(notes)` raises each slur-in note's velocity to its
+  SOURCE note's (same 'nearest preceding same-staff legato source' relation as
+  `_slur_target_marks`).  Called in `_render_instrument_csv` on the full
+  same-staff note list (the slur stem alone has no source), before the
+  fast/slow split.
+- For sustained instruments the slow-stem `+3 dB` gain
+  (`GCS2SFZ_LEGATO_ATTACK_GAIN_DB`, a piano body-compensation) is set to 0 --
+  with the source's full velocity it overshot a fresh note by ~3 dB.
+
+Result (measured, same probe): **+0.1 / −0.25 dB** vs fresh -- matches the
+approved GM default.  Piano (`acoustic grand piano`, not in the set) takes the
+old path byte-for-byte.  `make test-legato-sfz.mp4` rebuilt for listening.
+
 ## Open / next
 
-- **SFZ/VPO path** still renders the violin slur-in ~10.5..12.5 dB under fresh
-  (VPO slow-attack swell, `GCS2SFZ_LEGATO_ATTACK_MS=150` + slow stem amix).  Next
-  job: a per-instrument slur-in velocity boost on the slow slur stem in
-  `gcs2sfz` (sustained ≈1.55-1.6 → 45%→~70%), calibrated to ~−5 dB, keeping the
-  +3 dB slow-stem gain and the pinned 45% CSV.  The GM fix above must land first
-  (this note).
 - Winds/brass share the sustained profile but have only been validated on the
-  violin — split them out if they sound wrong.
+  violin -- split them out if they sound wrong.
+- The slow 150 ms onset is kept for sustained slur-ins (it is the legato cue);
+  only the level was fixed.  Revisit if a bowed slur-in should instead be a
+  full-velocity fresh attack (the GM path's behaviour).
