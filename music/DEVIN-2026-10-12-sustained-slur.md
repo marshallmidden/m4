@@ -81,10 +81,16 @@ Result (measured, same probe): **+0.1 / −0.25 dB** vs fresh -- matches the
 approved GM default.  Piano (`acoustic grand piano`, not in the set) takes the
 old path byte-for-byte.  `make test-legato-sfz.mp4` rebuilt for listening.
 
-## Open / next
+## Open / next (deferred to a later session)
 
-- Winds/brass share the sustained profile but have only been validated on the
-  violin -- split them out if they sound wrong.
+- **Other sustained instruments -- to ear-test another session.**  The profile
+  covers the whole `sustained_slur_instruments` set (strings + winds + brass +
+  voices) and the set is deliberately kept full (it mirrors the compilers'
+  frozenset), but only the **violin** has been measured/validated on both paths.
+  Winds, brass and voices have NOT been listened to.  Listen to a piece using
+  each family (ides `b/01` strings, `t/e` winds/brass, a choral `songs` piece)
+  and, if any family sounds wrong, flag it then -- narrowing per family (or
+  splitting the velocity profile) is the fallback.
 - The slow 150 ms onset is kept for sustained slur-ins (it is the legato cue);
   only the level was fixed.  Revisit if a bowed slur-in should instead be a
   full-velocity fresh attack (the GM path's behaviour).
